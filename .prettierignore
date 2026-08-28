@@ -1,0 +1,5 @@
+node_modules
+dist
+coverage
+KYNVIORA_PROJECT_SPEC
+package-lock.json

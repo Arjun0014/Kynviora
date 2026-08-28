@@ -1,0 +1,14 @@
+/**
+ * `@kynviora/domain` - stable entities, controlled vocabularies, value objects and ports.
+ *
+ * This package has **zero runtime dependencies** and performs no I/O (DEC-002). Everything here
+ * must be usable identically by the API, the workers and the mobile client, so that a safety
+ * vocabulary can never drift between surfaces.
+ */
+
+export * from './vocabulary.js';
+export * from './ids.js';
+export * from './ports.js';
+export * from './result.js';
+export * from './untrusted.js';
+export * from './provenance.js';
