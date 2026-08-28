@@ -42,6 +42,67 @@ export const JURISDICTIONS = ['IN', 'EU', 'GB', 'NI', 'US', 'JP'] as const;
 export type Jurisdiction = Member<typeof JURISDICTIONS>;
 export const isJurisdiction = makeGuard(JURISDICTIONS);
 
+/**
+ * The market a package was sold into: an ISO 3166-1 alpha-2 country code.
+ *
+ * Deliberately **not** the same type as {@link Jurisdiction}. A market is where a physical
+ * package was bought; a jurisdiction is a regulatory context Kynviora monitors. They overlap but
+ * are not interchangeable - `EU` is a jurisdiction and not a market, while a package bought in a
+ * country Kynviora does not yet monitor has a perfectly valid market and no jurisdiction at all.
+ *
+ * Conflating them would let an unmonitored market silently masquerade as a monitored
+ * jurisdiction, which is exactly how a "no matched rule" result could be presented as though a
+ * regulator had been consulted (`23` D-014).
+ */
+declare const marketBrand: unique symbol;
+export type MarketCode = string & { readonly [marketBrand]: 'MarketCode' };
+
+const MARKET_CODE_PATTERN = /^[A-Z]{2}$/;
+
+export function marketCode(value: string): MarketCode {
+  if (!MARKET_CODE_PATTERN.test(value)) {
+    throw new TypeError(`Invalid market code (expected ISO 3166-1 alpha-2): ${value}`);
+  }
+  return value as MarketCode;
+}
+
+export function isMarketCode(value: unknown): value is MarketCode {
+  return typeof value === 'string' && MARKET_CODE_PATTERN.test(value);
+}
+
+/**
+ * The jurisdictions whose rules apply to a package sold in a given market.
+ *
+ * A market may map to more than one jurisdiction, and to none. Returning a list rather than a
+ * single value keeps the GB/NI distinction representable and makes "not monitored" an explicit
+ * empty result instead of a silent default.
+ */
+export function jurisdictionsForMarket(market: MarketCode): readonly Jurisdiction[] {
+  switch (market) {
+    case 'IN':
+      return ['IN'];
+    case 'US':
+      return ['US'];
+    case 'JP':
+      return ['JP'];
+    // Northern Ireland has no ISO 3166-1 alpha-2 code of its own; packages sold there carry GB.
+    // Resolving GB to both jurisdictions is what surfaces the Windsor Framework divergence
+    // instead of hiding it behind a single "UK" answer (`23` D-013).
+    case 'GB':
+      return ['GB', 'NI'];
+    default:
+      // EU member states. Listed explicitly rather than inferred, so adding a market is a
+      // deliberate, reviewable change.
+      return EU_MEMBER_MARKETS.has(market) ? ['EU'] : [];
+  }
+}
+
+/** EU member state market codes, for jurisdiction resolution. */
+const EU_MEMBER_MARKETS: ReadonlySet<string> = new Set([
+  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE',
+  'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE',
+]);
+
 /** Human-readable jurisdiction names. Never paired with a "strict"/"weak" ranking (`09`). */
 export const JURISDICTION_NAMES: Readonly<Record<Jurisdiction, string>> = Object.freeze({
   IN: 'India',

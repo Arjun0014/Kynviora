@@ -21,6 +21,9 @@ import {
   isJurisdiction,
   isRegulatoryStatus,
   isEvidenceLevel,
+  isMarketCode,
+  marketCode,
+  jurisdictionsForMarket,
 } from './vocabulary.js';
 
 describe('jurisdictions (DEC-008, spec 23 D-013)', () => {
@@ -279,3 +282,44 @@ describe('type guards', () => {
 function isMatchConfidenceLike(v: string): boolean {
   return (MATCH_CONFIDENCES as readonly string[]).includes(v);
 }
+
+describe('market codes are distinct from jurisdictions (spec 23 D-013/D-014)', () => {
+  it('accepts ISO 3166-1 alpha-2 codes', () => {
+    expect(isMarketCode('IN')).toBe(true);
+    expect(isMarketCode('FR')).toBe(true);
+    expect(marketCode('GB')).toBe('GB');
+  });
+
+  it('rejects malformed codes', () => {
+    expect(isMarketCode('in')).toBe(false);
+    expect(isMarketCode('IND')).toBe(false);
+    expect(isMarketCode('')).toBe(false);
+    expect(() => marketCode('india')).toThrow(TypeError);
+  });
+
+  it('resolves a GB market to BOTH the GB and NI jurisdictions', () => {
+    // Northern Ireland has no ISO alpha-2 code of its own, so a package bought there carries GB.
+    // Returning both is what surfaces the Windsor Framework divergence rather than hiding it
+    // behind a single "UK" answer.
+    expect([...jurisdictionsForMarket(marketCode('GB'))]).toEqual(['GB', 'NI']);
+  });
+
+  it('resolves an EU member state to the EU jurisdiction', () => {
+    expect([...jurisdictionsForMarket(marketCode('FR'))]).toEqual(['EU']);
+    expect([...jurisdictionsForMarket(marketCode('DE'))]).toEqual(['EU']);
+  });
+
+  it('resolves single-jurisdiction markets directly', () => {
+    expect([...jurisdictionsForMarket(marketCode('IN'))]).toEqual(['IN']);
+    expect([...jurisdictionsForMarket(marketCode('US'))]).toEqual(['US']);
+    expect([...jurisdictionsForMarket(marketCode('JP'))]).toEqual(['JP']);
+  });
+
+  it('returns an empty list for an unmonitored market rather than guessing', () => {
+    // A package bought in a market Kynviora does not monitor has no jurisdiction. Returning
+    // empty makes "not monitored" explicit; defaulting to any jurisdiction would let an
+    // unchecked market masquerade as a consulted regulator (spec 23 D-014).
+    expect(jurisdictionsForMarket(marketCode('BR'))).toEqual([]);
+    expect(jurisdictionsForMarket(marketCode('AU'))).toEqual([]);
+  });
+});
