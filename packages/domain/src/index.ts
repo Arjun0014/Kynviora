@@ -12,3 +12,4 @@ export * from './ports.js';
 export * from './result.js';
 export * from './untrusted.js';
 export * from './provenance.js';
+export * from './sync.js';
