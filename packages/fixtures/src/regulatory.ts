@@ -383,7 +383,7 @@ export const ACTION_IN_SYNTHETIC_RECALL: ProductRegulatoryAction = {
   authority: 'CDSCO (SYNTHETIC FIXTURE - not a real action)',
   productIdentityId: null,
   formulationId: null,
-  gtin: '08901234567892',
+  gtin: '8901234567890',
   batchCodes: ['SYN-BATCH-A24X91', 'SYN-BATCH-A24X92'],
   manufacturerName: 'Synthetic Test Labs Pvt Ltd',
   summary:

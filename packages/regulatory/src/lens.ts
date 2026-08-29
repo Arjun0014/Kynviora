@@ -66,6 +66,14 @@ export interface JurisdictionLensEntry {
 
   readonly conditions: RegulatoryConditions | null;
 
+  /**
+   * Which specific conditions could not be evaluated from package evidence.
+   *
+   * Empty unless `applicability` is `CONDITION_UNKNOWN`. Exposed so a screen can prompt for the
+   * exact missing datum rather than asking the user to re-photograph everything.
+   */
+  readonly unresolvedConditions: readonly UnresolvedCondition[];
+
   readonly authority: string | null;
   readonly legalInstrument: string | null;
   readonly legalReference: string | null;
@@ -128,35 +136,62 @@ export interface LensInput {
 }
 
 /**
+ * Which specific condition a rule turns on could not be evaluated from package evidence.
+ *
+ * Reported so the limitation copy can name the *actual* missing datum. Without this, a rule with
+ * both a concentration limit and an age condition would report "the package does not disclose
+ * the concentration" even when the concentration is printed and the intended age is what is
+ * unknown - inaccurate copy on exactly the screen `09` requires to be precise.
+ */
+export const UNRESOLVED_CONDITIONS = [
+  'CONCENTRATION',
+  'PRODUCT_USE',
+  'INTENDED_AGE',
+  'ROUTE',
+] as const;
+export type UnresolvedCondition = (typeof UNRESOLVED_CONDITIONS)[number];
+
+export interface ApplicabilityResult {
+  readonly applicability: RegulatoryApplicability;
+  /** Every condition that could not be evaluated, so the copy can name them all. */
+  readonly unresolved: readonly UnresolvedCondition[];
+}
+
+/**
  * Determine whether a rule's conditions can be evaluated against what the package discloses.
  *
- * This is the heart of DEC-007 and of the `03` demo scenario. The three outcomes:
+ * The heart of DEC-007 and of the `03` demo scenario. Three outcomes:
  *
  *  - `DOES_NOT_APPLY` - the rule is scoped to something this product is not.
- *  - `CONDITION_UNKNOWN` - the rule turns on a value the package does not disclose. This is the
- *    normal outcome for any concentration limit, because INCI declarations list order, not
- *    percentages.
- *  - `APPLIES` - the conditions are satisfied by disclosed data.
+ *  - `CONDITION_UNKNOWN` - at least one condition turns on a value the package does not
+ *    disclose. The normal outcome for any concentration limit, because INCI declarations list
+ *    order, not percentages.
+ *  - `APPLIES` - every condition could be evaluated from disclosed data.
  *
  * There is deliberately no `EXCEEDS_LIMIT` or `COMPLIANT` outcome. Determining whether a
  * marketed product complies with law is a regulator's finding, not an app's.
+ *
+ * Conditions are evaluated exhaustively rather than short-circuiting, so every unresolved
+ * condition is reported rather than only the first one encountered.
  */
-export function determineApplicability(
+export function determineApplicabilityDetailed(
   conditions: RegulatoryConditions,
   context: ProductContext,
-): RegulatoryApplicability {
+): ApplicabilityResult {
   if (!context.substancePresent) {
-    return 'DOES_NOT_APPLY';
+    return { applicability: 'DOES_NOT_APPLY', unresolved: [] };
   }
+
+  const unresolved: UnresolvedCondition[] = [];
+  let scopedOut = false;
 
   // Product-use scoping. If the rule names use types and the package's use type is known and not
   // among them, the rule genuinely does not apply.
   if (conditions.productUseTypes && conditions.productUseTypes.length > 0) {
     if (context.productUseType === 'UNKNOWN') {
-      return 'CONDITION_UNKNOWN';
-    }
-    if (!conditions.productUseTypes.includes(context.productUseType)) {
-      return 'DOES_NOT_APPLY';
+      unresolved.push('PRODUCT_USE');
+    } else if (!conditions.productUseTypes.includes(context.productUseType)) {
+      scopedOut = true;
     }
   }
 
@@ -164,12 +199,10 @@ export function determineApplicability(
   // that group - but if we do not know the intended age, we cannot say.
   if (conditions.minimumAgeYears !== undefined) {
     if (context.intendedForAgeYears === null) {
-      return 'CONDITION_UNKNOWN';
+      unresolved.push('INTENDED_AGE');
+    } else if (context.intendedForAgeYears >= conditions.minimumAgeYears) {
+      scopedOut = true;
     }
-    if (context.intendedForAgeYears >= conditions.minimumAgeYears) {
-      return 'DOES_NOT_APPLY';
-    }
-    return 'APPLIES';
   }
 
   // Concentration limits. The package almost never discloses a percentage, so this is the
@@ -179,29 +212,40 @@ export function determineApplicability(
     conditions.minConcentrationPercent !== undefined
   ) {
     if (context.disclosedConcentrationPercent === null) {
-      return 'CONDITION_UNKNOWN';
+      unresolved.push('CONCENTRATION');
     }
     // A disclosed concentration lets us say the rule is engaged. It does NOT let us declare a
     // violation: the declared figure may be nominal, the rule may have exemptions, and
     // enforcement is a regulator's role.
-    return 'APPLIES';
   }
 
   // Prohibited routes are a property of the product's intended use, which the package may not
   // state explicitly.
   if (conditions.prohibitedRoutes && conditions.prohibitedRoutes.length > 0) {
     if (context.productUseType === 'UNKNOWN') {
-      return 'CONDITION_UNKNOWN';
+      unresolved.push('ROUTE');
     }
-    const oralProhibited = conditions.prohibitedRoutes.some((r) => r.toLowerCase() === 'oral');
-    if (oralProhibited && context.productUseType === 'ORAL') {
-      return 'APPLIES';
-    }
-    return 'DOES_NOT_APPLY';
   }
 
-  // An unconditional rule (a flat prohibition) applies whenever the substance is present.
-  return 'APPLIES';
+  // An unresolved condition dominates: we cannot claim the rule does not apply when we were
+  // unable to evaluate part of it. Failing towards "we cannot tell" is the honest direction.
+  if (unresolved.length > 0) {
+    return { applicability: 'CONDITION_UNKNOWN', unresolved };
+  }
+
+  if (scopedOut) {
+    return { applicability: 'DOES_NOT_APPLY', unresolved: [] };
+  }
+
+  return { applicability: 'APPLIES', unresolved: [] };
+}
+
+/** Applicability only, for callers that do not need the unresolved detail. */
+export function determineApplicability(
+  conditions: RegulatoryConditions,
+  context: ProductContext,
+): RegulatoryApplicability {
+  return determineApplicabilityDetailed(conditions, context).applicability;
 }
 
 /**
@@ -215,6 +259,7 @@ export function limitationsFor(
   applicability: RegulatoryApplicability,
   jurisdiction: Jurisdiction,
   conditions: RegulatoryConditions | null,
+  unresolved: readonly UnresolvedCondition[] = [],
 ): readonly string[] {
   const limitations: string[] = [];
 
@@ -240,11 +285,36 @@ export function limitationsFor(
   if (applicability === 'CONDITION_UNKNOWN') {
     // The exact case the 03 demo scenario requires: report that a restriction exists AND that
     // compliance cannot be determined, rather than claiming a violation.
-    if (conditions?.maxConcentrationPercent !== undefined) {
+    //
+    // The copy names the specific missing datum. Saying "does not disclose the concentration"
+    // when the concentration is printed and the intended age is what is unknown would be a
+    // factually wrong statement about the user's own package.
+    if (unresolved.includes('CONCENTRATION') && conditions?.maxConcentrationPercent !== undefined) {
       limitations.push(
         `A restriction applies under specified conditions, including a maximum concentration of ${conditions.maxConcentrationPercent}%. This package does not disclose the concentration, so Kynviora cannot determine whether that limit is exceeded.`,
       );
-    } else {
+    }
+
+    if (unresolved.includes('INTENDED_AGE') && conditions?.minimumAgeYears !== undefined) {
+      limitations.push(
+        `A condition applies to products for children under ${conditions.minimumAgeYears} years of age. Kynviora cannot tell from this package who it is intended for, so it cannot determine whether that condition applies.`,
+      );
+    }
+
+    if (unresolved.includes('PRODUCT_USE')) {
+      limitations.push(
+        'This restriction depends on the type of product. Kynviora could not determine the product type from the available evidence.',
+      );
+    }
+
+    if (unresolved.includes('ROUTE')) {
+      limitations.push(
+        'This restriction depends on how the product is used or applied, which Kynviora could not determine from the available evidence.',
+      );
+    }
+
+    // Fallback so a CONDITION_UNKNOWN result is never left without an explanation.
+    if (unresolved.length === 0) {
       limitations.push(
         'A restriction applies under specified conditions. This package does not disclose the information those conditions depend on, so Kynviora cannot determine whether they are met.',
       );
@@ -379,20 +449,26 @@ export function projectLens(input: LensInput): RegulatoryLensSnapshot {
 
     // Applicability is the *least* determined outcome across applicable rules: if any rule
     // depends on undisclosed data, the honest overall answer is CONDITION_UNKNOWN.
-    const applicabilities = jurisdictionRules.map((r) =>
-      determineApplicability(r.conditions, context),
+    const results = jurisdictionRules.map((r) =>
+      determineApplicabilityDetailed(r.conditions, context),
     );
+    const applicabilities = results.map((r) => r.applicability);
     const applicability: RegulatoryApplicability = applicabilities.includes('CONDITION_UNKNOWN')
       ? 'CONDITION_UNKNOWN'
       : applicabilities.includes('APPLIES')
         ? 'APPLIES'
         : 'DOES_NOT_APPLY';
 
+    // Union of every unresolved condition across the applicable rules, so the copy can name all
+    // of them rather than only those from the primary rule.
+    const unresolved = [...new Set(results.flatMap((r) => r.unresolved))];
+
     entries.push(
       buildEntry({
         jurisdiction,
         statuses: [...allStatuses],
         applicability,
+        unresolved,
         conditions: primaryRule.conditions,
         rule: primaryRule,
         source: sources.get(primaryRule.sourceRegistryEntryId) ?? freshestSource,
@@ -415,6 +491,7 @@ function buildEntry(args: {
   jurisdiction: Jurisdiction;
   statuses: readonly RegulatoryStatus[];
   applicability: RegulatoryApplicability;
+  unresolved?: readonly UnresolvedCondition[];
   conditions: RegulatoryConditions | null;
   rule: RegulatoryRuleVersion | null;
   source: SourceRegistryEntry | null;
@@ -426,6 +503,7 @@ function buildEntry(args: {
     jurisdiction: args.jurisdiction,
     statuses: args.statuses,
     applicability: args.applicability,
+    unresolvedConditions: args.unresolved ?? [],
     conditions: args.conditions,
     authority: args.source?.organization ?? null,
     legalInstrument: args.rule?.legalInstrument ?? null,
@@ -439,6 +517,7 @@ function buildEntry(args: {
       args.applicability,
       args.jurisdiction,
       args.conditions,
+      args.unresolved ?? [],
     ),
     scientificOpinions: args.opinions.map((o) => ({
       committee: o.committee,

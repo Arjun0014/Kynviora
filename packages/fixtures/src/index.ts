@@ -9,3 +9,4 @@
  */
 
 export * from './regulatory.js';
+export * from './catalog.js';

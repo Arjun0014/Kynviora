@@ -44,7 +44,7 @@ function item(overrides: Partial<OwnedItemSnapshot> = {}): OwnedItemSnapshot {
     formulationVersion: 'fv-1',
     batchId: 'batch-1',
     lotCode: 'A24X91',
-    gtin: '08901234567892',
+    gtin: '8901234567890',
     expiresOn: null,
     identityVerification: 'CONFIRMED',
     formulationVerification: 'CONFIRMED',
@@ -59,7 +59,7 @@ function signal(overrides: Partial<ActionSignal> = {}): ActionSignal {
   return {
     id: 'signal-1',
     version: 'sv-1',
-    gtin: '08901234567892',
+    gtin: '8901234567890',
     formulationId: null,
     batchCodes: ['A24X91', 'A24X92'],
     summary: 'SYNTHETIC batch recall fixture.',
