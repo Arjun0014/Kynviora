@@ -1,0 +1,38 @@
+{"ts": "2026-08-29T04:20:00Z", "type": "phase_started", "stage": 0, "phase": "0.1", "detail": "repository reconnaissance"}
+{"ts": "2026-08-29T04:25:00Z", "type": "commit_created", "ref": "db8b68a", "detail": "baseline: spec-only, tagged baseline-spec-only"}
+{"ts": "2026-08-29T04:30:00Z", "type": "research_completed", "id": "R-001", "detail": "Expo SDK 57 / RN 0.86 confirmed current; spec baseline adopted unchanged"}
+{"ts": "2026-08-29T04:31:00Z", "type": "research_completed", "id": "R-002", "detail": "expo-sqlite first-party SQLCipher selected over op-sqlite"}
+{"ts": "2026-08-29T04:33:00Z", "type": "research_completed", "id": "R-003", "detail": "PGlite runs real PostgreSQL 18.3 with RLS; superuser bypass confirmed empirically"}
+{"ts": "2026-08-29T04:34:00Z", "type": "decision_created", "id": "DEC-004", "detail": "PGlite as migration and RLS harness"}
+{"ts": "2026-08-29T04:34:30Z", "type": "decision_created", "id": "DEC-005", "detail": "authorization tests must run as non-superuser role, enforced by harness guard"}
+{"ts": "2026-08-29T04:40:00Z", "type": "research_completed", "id": "R-004", "detail": "EU salicylic acid Annex III entry 98; needs primary verification"}
+{"ts": "2026-08-29T04:41:00Z", "type": "research_completed", "id": "R-005", "detail": "US FDA prohibited/restricted list; spec 26 FDA URL returned HTTP 404"}
+{"ts": "2026-08-29T04:42:00Z", "type": "blocker_created", "id": "BLK-004", "cls": "DATA_AVAILABILITY", "detail": "regulatory fixtures not verified against retrieved official documents"}
+{"ts": "2026-08-29T04:55:00Z", "type": "phase_completed", "stage": 0, "phase": "0.2", "detail": "controlled vocabularies as closed unions"}
+{"ts": "2026-08-29T04:56:00Z", "type": "phase_completed", "stage": 0, "phase": "0.4", "detail": "domain contracts and provenance model"}
+{"ts": "2026-08-29T04:57:00Z", "type": "commit_created", "ref": "7ae1f8e", "detail": "Stage 0 foundation; 88 tests"}
+{"ts": "2026-08-29T05:05:00Z", "type": "migration_created", "version": "0001_foundation", "detail": "roles, request context, audit log"}
+{"ts": "2026-08-29T05:06:00Z", "type": "migration_created", "version": "0002_identity", "detail": "users, households, profiles, grants, consent"}
+{"ts": "2026-08-29T05:10:00Z", "type": "test_failed", "detail": "4 append-only tests: GRANT layer denied before trigger fired"}
+{"ts": "2026-08-29T05:12:00Z", "type": "test_fixed", "detail": "assert both enforcement layers; trigger isolated by running as table owner"}
+{"ts": "2026-08-29T05:14:00Z", "type": "commit_created", "detail": "identity schema with deny-by-default RLS; 31 db tests incl. threats A1 and A2"}
+{"ts": "2026-08-29T05:20:00Z", "type": "migration_created", "version": "0003_catalog", "detail": "Living Catalog, eight separate layers"}
+{"ts": "2026-08-29T05:35:00Z", "type": "test_failed", "detail": "comma-decimal concentration split as list separator"}
+{"ts": "2026-08-29T05:37:00Z", "type": "test_fixed", "detail": "digit-comma-digit treated as decimal separator"}
+{"ts": "2026-08-29T05:45:00Z", "type": "test_failed", "detail": "fingerprint match short-circuited reuse without scalar cross-check"}
+{"ts": "2026-08-29T05:47:00Z", "type": "test_fixed", "detail": "scalar cross-check made load-bearing; prevents degraded-fingerprint false merge"}
+{"ts": "2026-08-29T05:50:00Z", "type": "deviation_created", "id": "DEV-002", "detail": "MarketCode introduced as distinct from Jurisdiction"}
+{"ts": "2026-08-29T05:52:00Z", "type": "phase_completed", "stage": 3, "phase": "3.5", "detail": "catalog candidate creation and corroboration"}
+{"ts": "2026-08-29T05:52:30Z", "type": "phase_completed", "stage": 3, "phase": "3.6", "detail": "formulation conflict and change detection"}
+{"ts": "2026-08-29T05:53:00Z", "type": "phase_completed", "stage": 5, "phase": "5.3", "detail": "formulation fingerprints and version history"}
+{"ts": "2026-08-29T05:54:00Z", "type": "commit_created", "detail": "Living Catalog engine; 238 tests"}
+{"ts": "2026-08-29T06:05:00Z", "type": "decision_created", "id": "DEC-016", "detail": "regulatory fixtures ship gate-rejected"}
+{"ts": "2026-08-29T06:10:00Z", "type": "phase_completed", "stage": 6, "phase": "6.1", "detail": "source registry and authority hierarchy"}
+{"ts": "2026-08-29T06:11:00Z", "type": "phase_completed", "stage": 6, "phase": "6.4", "detail": "Global Regulatory Registry and Lens projection"}
+{"ts": "2026-08-29T06:12:00Z", "type": "commit_created", "detail": "regulatory registry, Citation Gate, Lens; 310 tests"}
+{"ts": "2026-08-29T06:25:00Z", "type": "phase_completed", "stage": 6, "phase": "6.5", "detail": "deterministic rule engine with replay"}
+{"ts": "2026-08-29T06:26:00Z", "type": "blocker_created", "id": "BLK-006", "cls": "CLINICAL_REVIEW", "detail": "no qualified clinical or regulatory reviewer available"}
+{"ts": "2026-08-29T06:27:00Z", "type": "commit_created", "detail": "safety rule engine; 352 tests"}
+{"ts": "2026-08-29T06:40:00Z", "type": "test_failed", "detail": "vertical slice scenario 5: limitation copy named the wrong unresolved condition"}
+{"ts": "2026-08-29T06:43:00Z", "type": "test_fixed", "detail": "applicability now reports which specific conditions are unresolved"}
+{"ts": "2026-08-29T06:45:00Z", "type": "commit_created", "detail": "vertical slice, all 7 required scenarios; 388 tests"}
