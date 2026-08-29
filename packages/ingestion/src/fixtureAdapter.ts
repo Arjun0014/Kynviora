@@ -116,16 +116,25 @@ export interface ActionCandidate {
   readonly verifiedAgainstOfficialSource: false;
 }
 
-/** Shape a fixture document must have. Validated before any field is trusted. */
-interface FixtureDocument {
-  readonly actions?: readonly {
-    readonly kind?: unknown;
-    readonly authority?: unknown;
-    readonly gtin?: unknown;
-    readonly batchCodes?: unknown;
-    readonly summary?: unknown;
-    readonly publicationDate?: unknown;
-  }[];
+/**
+ * A parsed source document, typed as `unknown` throughout.
+ *
+ * Deliberately not given an optimistic interface. This is untrusted external input, and any
+ * declared shape would be a claim about a document a hostile or merely changed source is under
+ * no obligation to honour. Every field is narrowed explicitly below before use.
+ */
+type FixtureDocument = Readonly<Record<string, unknown>>;
+
+/** Read a property from an unknown object without asserting anything about its type. */
+function field(source: FixtureDocument, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(source, key) ? source[key] : undefined;
+}
+
+/** Narrow to a trimmed non-empty string, or null. */
+function stringField(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 const ACTION_KINDS = ['RECALL', 'WITHDRAWAL', 'MARKETING_PROHIBITION', 'QUALITY_ALERT', 'WARNING'];
@@ -175,7 +184,9 @@ export function createFixtureActionAdapter(options: {
       }
 
       const document = parsed as FixtureDocument;
-      if (document.actions === undefined) {
+      const actions = field(document, 'actions');
+
+      if (actions === undefined) {
         // An empty document is valid and yields no candidates; a *missing* actions key means the
         // structure changed, which needs a human rather than a silent zero-result run.
         return failure('VALIDATION_FAILED', 'Source document has no actions field.', {
@@ -184,7 +195,7 @@ export function createFixtureActionAdapter(options: {
         });
       }
 
-      if (!Array.isArray(document.actions)) {
+      if (!Array.isArray(actions)) {
         return failure('VALIDATION_FAILED', 'Actions field is not an array.', {
           reason_code: 'schema_drift',
         });
@@ -192,49 +203,53 @@ export function createFixtureActionAdapter(options: {
 
       const candidates: ActionCandidate[] = [];
 
-      for (const entry of document.actions) {
-        if (typeof entry !== 'object' || entry === null) {
+      for (const rawEntry of actions as readonly unknown[]) {
+        if (typeof rawEntry !== 'object' || rawEntry === null || Array.isArray(rawEntry)) {
           return failure('VALIDATION_FAILED', 'Action entry is not an object.', {
             reason_code: 'malformed_entry',
           });
         }
 
-        const kind = typeof entry.kind === 'string' ? entry.kind.toUpperCase() : null;
+        const entry = rawEntry as FixtureDocument;
+
+        const rawKind = stringField(field(entry, 'kind'));
+        const kind = rawKind === null ? null : rawKind.toUpperCase();
         if (kind === null || !ACTION_KINDS.includes(kind)) {
           return failure('VALIDATION_FAILED', 'Action entry has an unrecognised kind.', {
             reason_code: 'unknown_action_kind',
           });
         }
 
-        const summary = typeof entry.summary === 'string' ? entry.summary.trim() : '';
-        if (summary.length === 0) {
+        const summary = stringField(field(entry, 'summary'));
+        if (summary === null) {
           return failure('VALIDATION_FAILED', 'Action entry has no summary.', {
             reason_code: 'missing_summary',
           });
         }
 
-        const authority = typeof entry.authority === 'string' ? entry.authority.trim() : '';
-        if (authority.length === 0) {
+        const authority = stringField(field(entry, 'authority'));
+        if (authority === null) {
           return failure('VALIDATION_FAILED', 'Action entry has no authority.', {
             reason_code: 'missing_authority',
           });
         }
 
-        const batchCodes =
-          Array.isArray(entry.batchCodes) &&
-          entry.batchCodes.every((c: unknown) => typeof c === 'string')
-            ? (entry.batchCodes as string[])
+        // Malformed values are dropped rather than coerced. A coerced batch code could match the
+        // wrong pack; a coerced date could place an action in the wrong period.
+        const rawBatchCodes = field(entry, 'batchCodes');
+        const batchCodes: string[] =
+          Array.isArray(rawBatchCodes) &&
+          (rawBatchCodes as readonly unknown[]).every((c) => typeof c === 'string')
+            ? (rawBatchCodes as string[])
             : [];
 
-        const gtin = typeof entry.gtin === 'string' && /^\d{8,14}$/.test(entry.gtin)
-          ? entry.gtin
-          : null;
+        const rawGtin = field(entry, 'gtin');
+        const gtin =
+          typeof rawGtin === 'string' && /^\d{8,14}$/.test(rawGtin) ? rawGtin : null;
 
+        const rawDate = field(entry, 'publicationDate');
         const publicationDate =
-          typeof entry.publicationDate === 'string' &&
-          /^\d{4}-\d{2}-\d{2}$/.test(entry.publicationDate)
-            ? entry.publicationDate
-            : null;
+          typeof rawDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : null;
 
         candidates.push({
           jurisdiction: options.jurisdiction,
