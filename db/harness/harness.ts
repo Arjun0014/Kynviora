@@ -75,10 +75,18 @@ export async function createTestDb(dir: string = MIGRATIONS_DIR): Promise<TestDb
     try {
       await db.exec(migration.sql);
     } catch (cause) {
-      throw new Error(
-        `Migration ${migration.version} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-        { cause },
+      // Report position and a short excerpt rather than letting the driver serialize the whole
+      // migration into the failure output, which buries the actual error.
+      const message = cause instanceof Error ? cause.message : String(cause);
+      const position = Number(
+        (cause as { position?: string } | undefined)?.position ?? Number.NaN,
       );
+      let excerpt = '';
+      if (Number.isFinite(position) && position > 0) {
+        const start = Math.max(0, position - 160);
+        excerpt = `\n  near: ...${migration.sql.slice(start, position + 80).replace(/\s+/g, ' ')}...`;
+      }
+      throw new Error(`Migration ${migration.version} failed: ${message}${excerpt}`);
     }
     await db.query(
       'INSERT INTO schema_migration (version, checksum) VALUES ($1, $2) ON CONFLICT DO NOTHING',
