@@ -1,0 +1,22 @@
+{
+  "name": "@kynviora/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@kynviora/catalog": "*",
+    "@kynviora/domain": "*",
+    "@kynviora/regulatory": "*",
+    "@kynviora/safety": "*",
+    "fastify": "^5.12.0",
+    "zod": "^4.5.0"
+  },
+  "devDependencies": {
+    "@kynviora/fixtures": "*"
+  }
+}
