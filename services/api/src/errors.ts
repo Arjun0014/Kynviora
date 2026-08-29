@@ -80,6 +80,14 @@ const STATUS_BY_CODE: Readonly<Record<DomainErrorCode, number>> = Object.freeze(
   PERMISSION_DENIED: 404,
   STEP_UP_REQUIRED: 403,
 
+  // Caregiver invitation. 410 for an expired invitation because the resource genuinely existed
+  // and is now permanently gone, which is exactly what Gone means and what lets a client offer
+  // to request a fresh link without retrying the old one.
+  INVITATION_INVALID: 404,
+  INVITATION_EXPIRED: 410,
+  INVITATION_ALREADY_RESOLVED: 409,
+  CAPABILITY_ESCALATION: 403,
+
   // Concurrency and sync
   VERSION_CONFLICT: 409,
   IDEMPOTENCY_REPLAY: 200,
@@ -110,6 +118,12 @@ const MESSAGE_BY_CODE: Partial<Record<DomainErrorCode, string>> = Object.freeze(
   PERMISSION_DENIED: 'Not found.',
   NOT_FOUND: 'Not found.',
   STEP_UP_REQUIRED: 'This action requires you to confirm your identity again.',
+  // Deliberately identical for an unknown token and for a token presented by the wrong account,
+  // so a link that reached the wrong person does not confirm whose address it was sent to.
+  INVITATION_INVALID: 'This invitation link is not valid.',
+  INVITATION_EXPIRED: 'This invitation has expired. Ask for a new one.',
+  INVITATION_ALREADY_RESOLVED: 'This invitation has already been used.',
+  CAPABILITY_ESCALATION: 'You cannot grant permissions you do not hold yourself.',
   RATE_LIMITED: 'Too many requests. Try again shortly.',
   BUDGET_EXCEEDED: 'This request exceeds the current processing budget. Try again later.',
   INTERNAL: 'Something went wrong.',

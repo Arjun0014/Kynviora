@@ -25,6 +25,7 @@ import {
   isErr,
   type DomainError,
   type Instant,
+  type InviteTokenService,
   type Logger,
   type UserId,
 } from '@kynviora/domain';
@@ -32,6 +33,7 @@ import { projectLens, type SourceRegistryEntry } from '@kynviora/regulatory';
 import type { DatabasePool, Principal, RequestContext } from './context.js';
 import { createRequestContext, hasFreshStepUp } from './context.js';
 import { toErrorResponse, statusForCode } from './errors.js';
+import { nodeInviteTokenService, registerCaregiverRoutes } from './caregiver.js';
 
 /** Maximum request body. `13` requires body-size limits; 1MB is ample for JSON payloads. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
@@ -50,6 +52,11 @@ export interface ServerOptions {
   readonly bodyLimitBytes?: number;
   /** Registered regulatory sources, for the Lens projection. */
   loadSources(): Promise<ReadonlyMap<string, SourceRegistryEntry>>;
+  /**
+   * Invite token issuance and hashing. Injected so a test can pin the token and assert the
+   * hashed-only storage property; production uses the Node crypto implementation.
+   */
+  readonly tokens?: InviteTokenService;
 }
 
 // ---------------------------------------------------------------------------
@@ -566,6 +573,19 @@ export function createServer(options: ServerOptions): FastifyInstance {
     }
 
     return reply.status(202).send({ status: 'accepted', serverTime: ctx.now });
+  });
+
+  // -------------------------------------------------------------------------
+  // Caregiver invitation, grant and audit routes (spec 04 Phase 8.1)
+  // -------------------------------------------------------------------------
+  // Registered from a separate module because the flow carries its own authorization discipline:
+  // reads under RLS, writes through the service role, and an explicit authority check in between.
+  // Keeping it beside the shelf and lens handlers would blur that boundary.
+
+  registerCaregiverRoutes(app, {
+    contextFor,
+    fail,
+    tokens: options.tokens ?? nodeInviteTokenService(),
   });
 
   // -------------------------------------------------------------------------

@@ -11,8 +11,27 @@
  * genuine programmer errors (invariant violations), not for expected outcomes.
  */
 
-export type Result<T, E = DomainError> =
-  { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E };
+export interface Ok<T> {
+  readonly ok: true;
+  readonly value: T;
+}
+
+export interface Err<E> {
+  readonly ok: false;
+  readonly error: E;
+}
+
+/**
+ * The two arms are **named** interfaces rather than inline object literals, and the guards below
+ * are declared in terms of those names.
+ *
+ * That is not cosmetic. A type predicate narrows the *false* branch only when the predicate type
+ * is a subtype of a union member, and an inline literal in the predicate is not related closely
+ * enough for TypeScript to subtract it. With anonymous arms, `if (isErr(r)) return;` left `r`
+ * un-narrowed afterwards and `r.value` failed to compile, so every call site had to re-check
+ * `r.ok` by hand - which is exactly the kind of check someone eventually forgets.
+ */
+export type Result<T, E = DomainError> = Ok<T> | Err<E>;
 
 export function ok<T>(value: T): Result<T, never> {
   return { ok: true, value };
@@ -22,11 +41,11 @@ export function err<E>(error: E): Result<never, E> {
   return { ok: false, error };
 }
 
-export function isOk<T, E>(r: Result<T, E>): r is { ok: true; value: T } {
+export function isOk<T, E>(r: Result<T, E>): r is Ok<T> {
   return r.ok;
 }
 
-export function isErr<T, E>(r: Result<T, E>): r is { ok: false; error: E } {
+export function isErr<T, E>(r: Result<T, E>): r is Err<E> {
   return !r.ok;
 }
 
@@ -108,6 +127,14 @@ export const DOMAIN_ERROR_CODES = [
   'AUTHORIZATION_LOST',
   'PERMISSION_DENIED',
   'STEP_UP_REQUIRED',
+
+  // Caregiver invitation (spec 04 Phase 8.1). Distinct codes rather than a shared 404 because
+  // 12 requires the client to distinguish these outcomes: an expired invitation offers to ask
+  // for a new one, an already-used one does not, and an escalation refusal is a bug report.
+  'INVITATION_INVALID',
+  'INVITATION_EXPIRED',
+  'INVITATION_ALREADY_RESOLVED',
+  'CAPABILITY_ESCALATION',
 
   // Concurrency and sync
   'VERSION_CONFLICT',

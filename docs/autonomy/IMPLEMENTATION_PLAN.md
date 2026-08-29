@@ -183,15 +183,26 @@ restart, which needs a device (`BLK-002`).
 
 | Phase | Title                               | Status        |
 | ----- | ----------------------------------- | ------------- |
-| 8.1   | Caregiver invitation and grants     | `IN_PROGRESS` |
+| 8.1   | Caregiver invitation and grants     | `COMPLETE`    |
 | 8.2   | Caregiver alert delivery            | `NOT_STARTED` |
 | 8.3   | Household Review Inbox              | `NOT_STARTED` |
 | 8.4   | Visit Pack                          | `NOT_STARTED` |
 | 8.5   | Medicine Reconciliation workflow v1 | `NOT_STARTED` |
 
-**8.1**: the grant model, capability scoping, expiry and revocation semantics are complete and
-tested, including that revocation takes effect on the next access and that a caregiver cannot
-escalate their own grant. Invite/accept flow and re-authentication are outstanding.
+**8.1**: complete. Migration `0007` adds `caregiver_invitation` with hash-only token storage
+(DEC-018), a column-level `GRANT` that keeps the hash unreadable by the app role (DEC-021), and a
+partial unique index making two active grants for one pair unrepresentable (DEC-019). The domain
+module decides acceptance, decline, delegation and revocation as pure functions; the API exposes
+create / accept / decline / revoke-invitation / list-grants / revoke-grant / audit-history, with
+step-up on every action that changes access and idempotency keys on create and accept.
+
+Both exit criteria are asserted directly: revocation takes effect on the caregiver next
+authenticated request with no sync or token refresh, and a caregiver granted access to one profile
+sees an empty page - not a 403 - for another. 149 tests across the domain, database, API and
+presentation suites.
+
+Outstanding: the mobile screens are built and typecheck but are not wired to a repository
+(`DEV-007`), and the invitation lifetime defaults await product sign-off (`DEV-006`).
 
 ---
 
@@ -217,13 +228,11 @@ escalate their own grant. Invite/accept flow and re-authentication are outstandi
 
 ## Immediate next work
 
-1. **Sync protocol** (`13`): pending-operation journal with client operation IDs, cursor-based
-   pull, and the per-entity conflict policy the spec enumerates - dose events merge by event ID,
-   caregiver grants and safety assessments are server-wins, product confirmation creates a new
-   assertion rather than overwriting, and a catalog formulation conflict preserves both histories.
-2. **Caregiver invite/accept/revoke service** (Phase 8.1) with step-up on sensitive grant changes,
-   and **Visit Pack generation** (Phase 8.4) with explicit content selection and an audit event
-   that records the export without duplicating its contents into logs.
+1. **Household Review Inbox** (Phase 8.3), which the caregiver grant surface now has the
+   authorization model to support.
+2. **Visit Pack generation** (Phase 8.4) with explicit content selection, a review screen showing
+   exactly what will be shared, step-up before generation, and an audit event that records the
+   export without duplicating its contents into logs.
 3. **Reviewer console publication workflow** (Phase 6.6): two-person approval where policy
    requires it, emergency withdrawal, and immutable audit.
 4. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
@@ -233,7 +242,7 @@ escalate their own grant. Invite/accept flow and re-authentication are outstandi
 
 ## What "complete" means here, and what it does not
 
-Fifteen phases are marked `COMPLETE` above. In every case that means the logic is implemented,
+Sixteen phases are marked `COMPLETE` above. In every case that means the logic is implemented,
 tested, documented and committed - and in most cases the tests execute against a real PostgreSQL
 engine or the real Expo toolchain rather than a mock.
 

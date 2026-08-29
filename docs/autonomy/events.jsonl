@@ -36,3 +36,13 @@
 {"ts": "2026-08-29T06:40:00Z", "type": "test_failed", "detail": "vertical slice scenario 5: limitation copy named the wrong unresolved condition"}
 {"ts": "2026-08-29T06:43:00Z", "type": "test_fixed", "detail": "applicability now reports which specific conditions are unresolved"}
 {"ts": "2026-08-29T06:45:00Z", "type": "commit_created", "detail": "vertical slice, all 7 required scenarios; 388 tests"}
+{"ts": "2026-08-29T18:10:00Z", "type": "session_resumed", "detail": "baseline re-verified: 1116 tests, 22 files, verify exit 0"}
+{"ts": "2026-08-29T18:20:00Z", "type": "decision_recorded", "detail": "DEC-018 invitation tokens stored only as SHA-256"}
+{"ts": "2026-08-29T18:22:00Z", "type": "migration_added", "detail": "0007_caregiver_invitations: invitation table, column-level grant, active-grant unique index"}
+{"ts": "2026-08-29T18:26:00Z", "type": "defect_found", "detail": "isErr did not narrow its false branch; Result union arms were inline literals"}
+{"ts": "2026-08-29T18:27:00Z", "type": "defect_fixed", "detail": "named Ok/Err arms so guards narrow both branches (DEV-008); suite unchanged"}
+{"ts": "2026-08-29T18:31:00Z", "type": "test_failed", "detail": "API test fixture DELETE on audit_event refused by append-only trigger, as DEC-013 requires"}
+{"ts": "2026-08-29T18:32:00Z", "type": "test_fixed", "detail": "audit assertions scoped by target instead of clearing the table"}
+{"ts": "2026-08-29T18:33:00Z", "type": "test_failed", "detail": "shelf assertion wrong, not the policy: VIEW_SHELF does not grant medicine access"}
+{"ts": "2026-08-29T18:34:00Z", "type": "test_added", "detail": "capability separation between shelf and medicines asserted directly (spec 03 group H)"}
+{"ts": "2026-08-29T18:38:00Z", "type": "phase_complete", "detail": "Phase 8.1 caregiver invitation and grants; 1265 tests across 26 files, verify exit 0"}

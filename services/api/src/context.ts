@@ -91,6 +91,10 @@ export const PRIVILEGED_REASONS = [
   'RULE_PUBLICATION',
   'ASSESSMENT_PUBLICATION',
   'AUDIT_WRITE',
+  // Reading the audit log is privileged for the same reason writing it is: the app role holds no
+  // grant on audit_event at all. A route using this must establish the caller authority over the
+  // subject itself, because a service connection has no row-level security to fall back on.
+  'AUDIT_READ',
   'EXPORT_GENERATION',
   'ACCOUNT_DELETION',
   'PROVIDER_CREDENTIAL_USE',

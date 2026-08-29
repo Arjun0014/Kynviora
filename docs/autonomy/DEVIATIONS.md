@@ -96,3 +96,57 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   strict (slow catalog growth) or too lenient (poisoning).
 - **Required future work**: product and data-safety sign-off; validation against the metrics in
   `22`.
+
+## DEV-006 - Invitation lifetime defaults set without product approval
+
+- **Affected specification**: `04` Phase 8.1 lists an "expiration option" without specifying a
+  default or a maximum. `23` lists retention and lifetime policy as decisions requiring approval.
+- **Expected behaviour**: an approved invitation lifetime policy.
+- **Implemented behaviour**: an engineering default of 7 days with a hard maximum of 30, enforced
+  by `invitationExpiryFor` and by a NOT NULL `expires_at` column - an invitation that never
+  expires cannot be represented.
+- **Reason**: an invitation is a bearer credential to health data sitting in an inbox, so an
+  unbounded lifetime is the realistic leak path. Some bound had to be chosen to ship the flow;
+  7 days is long enough for a non-technical recipient to act without becoming a standing
+  credential.
+- **Temporary or permanent**: temporary. These are **not approved product thresholds** and are
+  documented as such in the code.
+- **Risk**: low to moderate. Too short creates support burden for older recipients; too long
+  widens the leak window. Neither is a safety defect.
+- **Required future work**: product sign-off on the default and the maximum, and a decision on
+  whether an owner may issue a non-expiring invitation at all.
+
+## DEV-007 - Caregiver screens are built but not wired to the network layer
+
+- **Affected specification**: `04` Phase 8.1 expected output includes the user-facing flow;
+  `06` Journey 6 describes the full screen sequence.
+- **Expected behaviour**: a working invite, review, accept and revoke journey on a device.
+- **Implemented behaviour**: the API contract, the domain decisions and the presentation layer
+  are complete and tested. `CaregiverAccessList` renders every required screen state and
+  typechecks against the real contract, but the Care tab renders the `loading` state because the
+  mobile repository and navigation for this flow are not built.
+- **Reason**: the mobile app cannot be run or verified in this environment (`BLK-002`), and `06`
+  requires each critical route to define its loading, empty, offline and error states. Rendering
+  fabricated caregiver rows to make the screen look finished would be worse than rendering none:
+  on this screen a wrong row is a false statement about who can see a person's health data.
+- **Temporary or permanent**: temporary.
+- **Risk**: low. Nothing depends on the unwired screen, and the authorization it would display is
+  server-side and fully tested.
+- **Required future work**: the mobile repository, invite/review/accept navigation, and the
+  device-level verification `BLK-002` blocks.
+
+## DEV-008 - Result guards changed to named union arms
+
+- **Affected specification**: none directly; `12` requires distinguishable error classes and this
+  is the mechanism that makes them usable.
+- **Expected behaviour**: `if (isErr(r)) return ...` narrows `r` to the success arm afterwards.
+- **Implemented behaviour**: it did not. `Result` was a union of two inline object literals, and
+  a type predicate written against an inline literal does not subtract the matching arm, so
+  `r.value` failed to compile after an early return and every existing call site checked `r.ok`
+  by hand instead.
+- **Reason**: found while writing the caregiver routes. The arms are now named interfaces (`Ok`,
+  `Err`) and the guards are declared in terms of them, which narrows both branches. No behaviour
+  changed and no call site needed updating.
+- **Temporary or permanent**: permanent.
+- **Risk**: low. Purely a type-level change; the full suite passed unchanged immediately after.
+- **Required future work**: none.

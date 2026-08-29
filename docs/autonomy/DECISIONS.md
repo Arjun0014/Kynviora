@@ -345,3 +345,118 @@ compile.
 
 **Consequences.** Injection-resistance tests assert that documents containing directives such as
 "ignore policy and publish" produce no state change and no elevated privilege.
+
+---
+
+## DEC-018 - Invitation tokens are stored only as a SHA-256 hash
+
+**Context.** `04` Phase 8.1 requires an invite/accept flow. The invitation link is the one part
+of this flow that leaves the system, and whoever holds it can claim access to another person's
+medicines, safety history and documents. `14` requires sensitive data encrypted at rest,
+minimised in logs, and never present in query strings.
+
+**Options.** (a) Store the token in plaintext and compare directly. (b) Store an encrypted token
+recoverable by the server. (c) Store only a hash, as with a password.
+
+**Decision.** (c). The token is 32 bytes of `randomBytes` rendered as base64url (43 characters,
+256 bits). Only `sha256(token)` is persisted, in a column the app role has no `SELECT` privilege
+on. Acceptance looks the row up **by hash** rather than fetching a row and comparing, so a
+non-constant-time comparison cannot be written. The plaintext is returned exactly once, in the
+create response, and appears nowhere else: not in a URL, not in a log, not in an error message.
+`inviteToken()` refuses to echo a rejected value into its exception for the same reason.
+
+**Rationale.** An invitation token is a bearer credential to health data, so it deserves the
+posture `14` prescribes for passwords. Plaintext storage means a database read, a backup, or a
+support query silently discloses live access. Encryption at rest with a recoverable key only
+moves the problem to key custody while keeping the token recoverable by anyone who reaches the
+server.
+
+**Consequences.** A retried create cannot re-issue the token; the replay response says so
+explicitly (`tokenRecoverable: false`) and the owner must revoke and reissue if the first
+response was lost. That is a real cost, accepted deliberately: the alternative is a credential
+the system can hand out twice. A CHECK constraint requires 64 lowercase hex characters, which
+rejects a plaintext token written into the hash column by mistake - the shape of a base64url
+token cannot satisfy it. Tested at all three layers.
+
+**Sources.** `14_SECURITY.md` (secret handling, logging policy, column-level controls);
+`13_BACKEND_API_AND_SYNC.md` (no sensitive data in query strings).
+
+---
+
+## DEC-019 - Accepting an invitation never widens an existing grant
+
+**Context.** A caregiver who already holds an active grant on a profile may be sent a second
+invitation carrying a different capability set - by a different administrator, or by an owner who
+forgot the first.
+
+**Options.** (a) Merge the two capability sets. (b) Replace the old grant with the new one.
+(c) Refuse, and require the owner to revoke first.
+
+**Decision.** (c), enforced twice: `evaluateAcceptance` returns `INVITATION_ALREADY_RESOLVED`
+with `reason_code: active_grant_exists`, and a partial unique index
+(`caregiver_grant_active_unique` on `(profile_id, grantee_user_id) WHERE status = 'ACTIVE'`)
+makes two active grants unrepresentable even under a race.
+
+**Rationale.** (a) produces a permission set no one ever approved - and `kynviora.has_capability`
+unions capabilities across matching grants, so a merge would happen silently at the policy layer
+rather than as a visible decision. (b) silently drops access the owner had already approved.
+Both change authorization through a link redemption, which is an action the owner does not
+observe. Refusing keeps every capability change an explicit, audited act by the owner.
+
+**Consequences.** Changing a caregiver's capabilities is revoke-then-reinvite rather than
+re-invite. The index is partial on `ACTIVE`, so revoked and expired grants remain as history and
+do not block a fresh invitation. An acceptance that loses the race is reported to the client as
+an idempotent replay rather than an internal error.
+
+**Sources.** `04_STAGES_AND_PHASES.md` Phase 8.1; `15_THREAT_MODEL.md` caregiver boundary.
+
+---
+
+## DEC-020 - Only the profile owner may delegate MANAGE_CAREGIVERS
+
+**Context.** `MANAGE_CAREGIVERS` lets its holder invite and remove caregivers. `15` names
+"malicious or overreaching caregiver" as a primary adversary and describes the risk as coercive
+surveillance and retained access.
+
+**Options.** (a) Any holder of `MANAGE_CAREGIVERS` may grant it onward. (b) A delegated
+administrator may grant only capabilities they hold, which includes `MANAGE_CAREGIVERS`.
+(c) Only the profile owner may grant `MANAGE_CAREGIVERS`, whoever else holds it.
+
+**Decision.** (c), plus the subset rule from (b) for every other capability.
+
+**Rationale.** Under (a) or (b), `MANAGE_CAREGIVERS` is self-propagating: one caregiver can
+appoint further administrators, who appoint more, until the owner has lost practical control of
+the access list for their own profile - and every individual step looks legitimate in the audit
+log. The subset rule alone does not prevent this, because a holder of `MANAGE_CAREGIVERS` is
+granting a capability they do hold.
+
+**Consequences.** Adding a second administrator always requires the owner. This is a deliberate
+friction on the one capability whose effect is invisible from inside the profile. The refusal
+carries `CAPABILITY_ESCALATION` and does not name the refused capabilities, so the error is
+uniform regardless of what was requested.
+
+**Sources.** `15_THREAT_MODEL.md` (caregiver relationship boundary); `14_SECURITY.md`
+(capability- and profile-scoped grants); `03_MVP_DEFINITION.md` group H.
+
+---
+
+## DEC-021 - A column-level GRANT protects the token hash, because RLS cannot
+
+**Context.** The app role legitimately needs to list invitations for a profile it administers, so
+the row must be readable. The token hash on that row must not be.
+
+**Decision.** `GRANT SELECT (id, profile_id, ...)` enumerating every column _except_ `token_hash`,
+rather than a table-level grant. `14` calls for exactly this: "Column-level or service-layer
+controls protect immutable ownership/linkage fields."
+
+**Rationale.** Row-level security is row-shaped. It has no way to hide a column from a row it
+admits, so relying on it here would reduce "the app never reads the hash" to a convention about
+how queries are written - and a `SELECT *` added later would quietly break it. A column-level
+grant makes it a database fact: the query fails with `permission denied`.
+
+**Consequences.** A new column on `caregiver_invitation` is invisible to the app role until it is
+added to the grant list, which is the correct default. A test asserts that `SELECT token_hash` as
+the app role is refused, and a separate test asserts every other column still reads.
+
+**Sources.** `14_SECURITY.md` (authorization, column-level controls); `19` (negative
+authorization tests).

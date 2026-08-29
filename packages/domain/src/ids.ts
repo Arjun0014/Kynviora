@@ -25,6 +25,7 @@ export type UserId = Branded<'UserId'>;
 export type HouseholdId = Branded<'HouseholdId'>;
 export type ProfileId = Branded<'ProfileId'>;
 export type CaregiverGrantId = Branded<'CaregiverGrantId'>;
+export type CaregiverInvitationId = Branded<'CaregiverInvitationId'>;
 export type ConsentReceiptId = Branded<'ConsentReceiptId'>;
 export type AuditEventId = Branded<'AuditEventId'>;
 export type SessionId = Branded<'SessionId'>;

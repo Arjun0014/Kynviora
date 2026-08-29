@@ -215,3 +215,101 @@ Git history is not rewritten, so the discrepancy is recorded here instead.
 1073 tests passing, typecheck clean, lint clean, format clean. 16 commits plus the baseline tag.
 Fifteen spec phases marked `COMPLETE`; nine marked blocked on a device, a credential, a dataset,
 or a qualified reviewer.
+
+---
+
+## Session 2
+
+Resumed from `STATUS.md` at 1116 tests, 22 files, `npm run verify` clean. Baseline re-run before
+touching anything and confirmed at exit 0.
+
+### Phase 8.1 - caregiver invitation and grants
+
+The grant model already existed and was tested. What was missing was everything around it: how an
+invitation comes into being, how it is redeemed, and what stops it being redeemed by the wrong
+person or twice.
+
+**An invitation had to be its own entity.** `caregiver_grant.grantee_user_id` is `NOT NULL`, so a
+grant cannot represent "an invitation to a person who has not signed up yet" - which is precisely
+the window an invitation occupies. That constraint decided the schema rather than a preference:
+migration `0007` adds `caregiver_invitation`, and it is the only one of the two records that
+carries a secret.
+
+**The token is the interesting part.** It is the one artefact in this flow that leaves the system,
+and it is a bearer credential to another person's medicines and documents. Four things follow
+(DEC-018, DEC-021):
+
+- 32 bytes of `randomBytes`, base64url, stored only as `sha256`. The plaintext is returned exactly
+  once and is unrecoverable afterwards - including on an idempotent retry, where the response says
+  so explicitly rather than silently returning `null`.
+- Acceptance looks the row up **by hash**. There is no code path that fetches a row and compares a
+  presented token to a stored one, so a non-constant-time comparison cannot be written.
+- The app role has a **column-level** `GRANT` that omits `token_hash`. Row-level security is
+  row-shaped and cannot hide a column; without the column grant, "the app never reads the hash"
+  would be a convention about query style that a later `SELECT *` would quietly break.
+- A CHECK requires 64 lowercase hex. A base64url token is 43 characters with non-hex letters, so
+  the most plausible storage mistake - writing the plaintext into the hash column - cannot commit.
+
+**Two active grants had to be unrepresentable.** `kynviora.has_capability` unions capabilities
+across matching grants, so two active grants for one pair would silently produce a permission set
+nobody approved, at the policy layer, where no one would see it happen. A partial unique index on
+`(profile_id, grantee_user_id) WHERE status = 'ACTIVE'` refuses it, and the domain refuses the
+acceptance that would create it (DEC-019). Redeeming a second invitation therefore neither widens
+nor narrows an existing grant - it is refused, and the owner revokes first, which keeps every
+capability change an explicit audited act.
+
+**`MANAGE_CAREGIVERS` is owner-only to delegate** (DEC-020). The obvious rule - a delegated
+administrator may grant only what they hold - does not stop the interesting attack, because a
+holder of `MANAGE_CAREGIVERS` _does_ hold it. Left there, the capability is self-propagating: one
+caregiver appoints more administrators, who appoint more, and every individual step looks
+legitimate in the audit log while the owner loses practical control of their own access list.
+
+**Disclosure posture, decided per case.** Reaching the acceptance decision means the caller
+already holds the token, so telling them "this invitation expired" discloses nothing and is much
+better than a blank refusal. The exception is the email binding: a link that reached the wrong
+person must not confirm whose address it was for, so a recipient mismatch returns the same code
+and the same body as an unknown token. Tests assert the two responses are byte-identical apart
+from the correlation ID, and that the address appears nowhere in either.
+
+**Step-up is asymmetric, deliberately.** Creating, revoking an invitation, and revoking a grant
+all require fresh re-authentication (`14`). Accepting and declining do not: the invitee is acting
+on their own account and exposes none of their own data, and adding a second factor there would
+put friction on the one step performed by the least technical participant. Revocation is included
+even though it only reduces access, because an attacker with a hijacked session silencing a
+caregiver is a real abuse of this feature rather than a safe direction.
+
+### Things the tests caught
+
+- **The append-only trigger refused my test fixture.** `beforeEach` tried to `DELETE FROM
+audit_event`; `forbid_mutation` blocked it, which is DEC-013 working exactly as intended. The
+  fix was to stop clearing the table and scope the audit assertions by target instead - the audit
+  route already joins back to live invitation and grant rows, so events whose target was removed
+  drop out on their own.
+- **A failing shelf assertion was correct behaviour.** A caregiver granted `VIEW_SHELF` saw zero
+  items for a profile whose only item is a medicine, because `owned_item_select` requires
+  `VIEW_MEDICINES` for medicines. My assertion was wrong, not the policy. The test now asserts the
+  separation directly, which is a property `03` group H requires and nothing had been covering: an
+  invitation to the shelf is not an invitation to the medicines on it.
+- **`isErr` never narrowed its false branch.** `if (isErr(r)) return;` left `r` un-narrowed, so
+  `r.value` would not compile - the union arms were inline object literals, and a type predicate
+  written against an inline literal does not subtract the matching arm. Every existing call site
+  had worked around it by only using the positive branch. Naming the arms (`Ok`, `Err`) and
+  declaring the guards against those names fixed it; nothing else changed and the suite passed
+  unchanged (DEV-008).
+
+### What is not done
+
+The mobile screens are built, typecheck against the real contract and render every required
+screen state, but the Care tab shows `loading` because the repository and navigation are not
+wired (`DEV-007`). No caregiver rows are fabricated to make the screen look finished: on this
+screen a wrong row is a false statement about who can see a person's health data. Device
+verification remains blocked by `BLK-002`.
+
+The 7-day invitation lifetime and 30-day maximum are engineering defaults, not approved product
+thresholds (`DEV-006`).
+
+### State at end of Phase 8.1
+
+1265 tests passing across 26 files, up from 1116 across 22. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`. 149 new tests: 45 domain, 30 database, 49 API, 25
+presentation.

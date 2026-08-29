@@ -9,18 +9,18 @@ Last updated: 2026-08-29
 
 ## Current position
 
-|                    |                                                                       |
-| ------------------ | --------------------------------------------------------------------- |
-| **Current stage**  | Stage 8 (family collaboration) / Stage 13 (sync)                      |
-| **Current phase**  | Sync protocol; caregiver service; Visit Pack                          |
-| **Last completed** | Sync protocol; Trust Passport; capture pipeline; schedule             |
-| **Branch**         | `master`                                                              |
-| **Latest commit**  | `feat(domain): offline sync protocol with per-entity conflict policy` |
-| **Baseline tag**   | `baseline-spec-only`                                                  |
+|                    |                                                                    |
+| ------------------ | ------------------------------------------------------------------ |
+| **Current stage**  | Stage 8 (family collaboration)                                     |
+| **Current phase**  | Visit Pack (8.4); Review Inbox (8.3)                               |
+| **Last completed** | Phase 8.1 caregiver invitation and grants                          |
+| **Branch**         | `master`                                                           |
+| **Latest commit**  | `feat(care): caregiver invitation, acceptance and revocation flow` |
+| **Baseline tag**   | `baseline-spec-only`                                               |
 
 ## Verification state
 
-- **1116 tests passing**, 0 failing, across 23 files.
+- **1265 tests passing**, 0 failing, across 26 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -33,19 +33,26 @@ npm run verify
 
 ## What is genuinely built and tested
 
-| Area                                                       | State                                     |
-| ---------------------------------------------------------- | ----------------------------------------- |
-| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                        |
-| Database schema, 6 migrations, full RLS                    | Complete, 96 tests incl. threats A1/A2/A3 |
-| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                       |
-| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                        |
-| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                        |
-| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                        |
-| Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                       |
-| API boundary (Fastify), RLS-scoped context                 | Complete, 36 tests                        |
-| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                        |
-| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**       |
-| CI pipeline                                                | Written; not yet run on a real runner     |
+| Area                                                       | State                                      |
+| ---------------------------------------------------------- | ------------------------------------------ |
+| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                         |
+| Database schema, 7 migrations, full RLS                    | Complete, 126 tests incl. threats A1/A2/A3 |
+| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                        |
+| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                         |
+| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                         |
+| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                         |
+| Presentation layer, accessibility tokens, safety copy      | Complete, 461 tests                        |
+| API boundary (Fastify), RLS-scoped context                 | Complete, 85 tests                         |
+| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                         |
+| Caregiver invitation, acceptance, revocation, audit        | Complete, 149 tests                        |
+| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                         |
+| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**        |
+| Caregiver screens                                          | Typecheck; **not wired** (`DEV-007`)       |
+| CI pipeline                                                | Written; not yet run on a real runner      |
+
+Rows are areas, not a partition. The caregiver row counts the same 149 tests that also appear in
+the database, API, presentation and domain rows, because the feature spans all four layers.
+Per-file counts are reproducible with `npx vitest run --reporter=json`.
 
 ## Known failing tests
 
@@ -69,20 +76,22 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Caregiver invite/accept/revoke service** (Phase 8.1). The grant model, capability scoping,
-expiry and revocation semantics are already complete and tested at the database layer, including
-that a caregiver cannot escalate their own grant. What is missing is the invite/accept flow, the
-step-up requirement on sensitive grant changes, and the audit events those changes must produce.
+**Visit Pack generation** (Phase 8.4). Explicit content selection, a review screen showing exactly
+what will be shared before it is generated, step-up before generation (`14` lists exports
+alongside caregiver administration), and an audit event that records that an export happened
+without duplicating its contents into the log. `EXPORT_SUMMARY` already exists as a caregiver
+capability, and the presentation layer already describes it as a capability that _changes_
+something rather than one that only views, so the authorization side is in place.
 
 ## Next three planned tasks
 
-1. Visit Pack generation (Phase 8.4): explicit content selection, a review screen showing exactly
-   what will be shared, step-up before generation, and an audit event that records the export
-   without duplicating its contents into logs.
+1. Household Review Inbox (Phase 8.3): non-urgent quality and care tasks, displayed without
+   safety-alert styling, using the caregiver authorization model Phase 8.1 established.
 2. Reviewer console publication workflow (Phase 6.6): two-person approval where policy requires
    it, emergency withdrawal, and immutable audit.
-3. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
-   Shelf, Trust Passport and Regulatory Lens surfaces the presentation package already supports.
+3. Wire the Expo screens to the API contract, replacing the placeholder states with the Shelf,
+   Trust Passport, Regulatory Lens and caregiver surfaces the presentation package supports
+   (`DEV-007`).
 
 ## Recent decisions worth knowing
 
@@ -98,6 +107,12 @@ step-up requirement on sensitive grant changes, and the audit events those chang
   rule-evaluation code path.
 - The Citation Gate now exists at two layers: a pure function for explainable decisions, and
   CHECK constraints so a direct database write cannot bypass it.
+- **DEC-018** - an invitation token is stored **only** as a SHA-256 hash and is unrecoverable
+  after the create response. An idempotent retry therefore cannot re-issue it, and says so.
+- **DEC-019/020** - acceptance never widens an existing grant, and only the profile owner may
+  delegate `MANAGE_CAREGIVERS`. Both prevent an authorization change the owner would not observe.
+- **DEC-021** - `token_hash` is protected by a column-level `GRANT`, not by RLS. Row-level
+  security is row-shaped and cannot hide a column.
 
 ## Traps to avoid on resume
 
@@ -116,3 +131,11 @@ step-up requirement on sensitive grant changes, and the audit events those chang
    corrupted source files in this environment. Use `\uXXXX` escapes in source.
 8. `Array.isArray` widens a `readonly T[]` to `any[]`. For untrusted input, type it as
    `Readonly<Record<string, unknown>>` and narrow each field explicitly.
+9. Do not clear `audit_event` in a test fixture. The append-only trigger refuses the DELETE, which
+   is correct. Scope audit assertions by target instead.
+10. Do not merge two caregiver grants for the same pair. `has_capability` unions capabilities
+    across grants, so a merge silently creates a permission set nobody approved. A partial unique
+    index refuses it; do not drop that index to make a test pass.
+11. The invitation token is a live credential. It belongs in a POST body only - never a URL, a log
+    line, or an exception message. `inviteToken()` deliberately does not echo the value it
+    rejected.
