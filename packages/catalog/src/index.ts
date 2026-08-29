@@ -14,3 +14,4 @@ export * from './ingredients.js';
 export * from './fingerprint.js';
 export * from './conflict.js';
 export * from './corroboration.js';
+export * from './capture.js';
