@@ -9,18 +9,18 @@ Last updated: 2026-08-29
 
 ## Current position
 
-|                    |                                                                 |
-| ------------------ | --------------------------------------------------------------- |
-| **Current stage**  | Stage 8 (family collaboration) / Stage 13 (sync)                |
-| **Current phase**  | Sync protocol; caregiver service; Visit Pack                    |
-| **Last completed** | Trust Passport; capture pipeline; schedule engine; mobile shell |
-| **Branch**         | `master`                                                        |
-| **Latest commit**  | `feat(catalog): Product Trust Passport with no aggregate score` |
-| **Baseline tag**   | `baseline-spec-only`                                            |
+|                    |                                                                       |
+| ------------------ | --------------------------------------------------------------------- |
+| **Current stage**  | Stage 8 (family collaboration) / Stage 13 (sync)                      |
+| **Current phase**  | Sync protocol; caregiver service; Visit Pack                          |
+| **Last completed** | Sync protocol; Trust Passport; capture pipeline; schedule             |
+| **Branch**         | `master`                                                              |
+| **Latest commit**  | `feat(domain): offline sync protocol with per-entity conflict policy` |
+| **Baseline tag**   | `baseline-spec-only`                                                  |
 
 ## Verification state
 
-- **1073 tests passing**, 0 failing, across 22 files.
+- **1116 tests passing**, 0 failing, across 23 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -69,19 +69,18 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Sync protocol** (`13`). The pending-operation journal, cursor-based pull, and the per-entity
-conflict policy the spec enumerates: dose events merge by event ID, caregiver grants and safety
-assessments are server-wins, product confirmation creates a new assertion rather than
-overwriting, and a catalog formulation conflict preserves both histories. The idempotency half
-already exists and is tested at both the database and API layers; the journal and cursor are the
-missing pieces.
+**Caregiver invite/accept/revoke service** (Phase 8.1). The grant model, capability scoping,
+expiry and revocation semantics are already complete and tested at the database layer, including
+that a caregiver cannot escalate their own grant. What is missing is the invite/accept flow, the
+step-up requirement on sensitive grant changes, and the audit events those changes must produce.
 
 ## Next three planned tasks
 
-1. Caregiver invite/accept/revoke service (Phase 8.1) with step-up on sensitive grant changes,
-   plus Visit Pack generation (Phase 8.4).
-2. Reviewer console publication workflow (Phase 6.6): two-person approval, emergency withdrawal,
-   immutable audit.
+1. Visit Pack generation (Phase 8.4): explicit content selection, a review screen showing exactly
+   what will be shared, step-up before generation, and an audit event that records the export
+   without duplicating its contents into logs.
+2. Reviewer console publication workflow (Phase 6.6): two-person approval where policy requires
+   it, emergency withdrawal, and immutable audit.
 3. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
    Shelf, Trust Passport and Regulatory Lens surfaces the presentation package already supports.
 
