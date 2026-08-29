@@ -11,7 +11,8 @@
   "workspaces": [
     "packages/*",
     "services/*",
-    "db"
+    "db",
+    "apps/*"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -21,7 +22,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
-    "verify": "npm run typecheck && npm run lint && npm run format:check && npm test"
+    "verify": "npm run typecheck && npm run typecheck:mobile && npm run lint && npm run format:check && npm test",
+    "typecheck:mobile": "npm --prefix apps/mobile run typecheck"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

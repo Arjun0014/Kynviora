@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Kynviora",
+    "slug": "kynviora",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "kynviora",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.kynviora.app",
+      "edgeToEdgeEnabled": true,
+      "permissions": ["android.permission.CAMERA", "android.permission.POST_NOTIFICATIONS"],
+      "blockedPermissions": [
+        "android.permission.READ_CONTACTS",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ],
+      "allowBackup": false
+    },
+    "ios": {
+      "bundleIdentifier": "com.kynviora.app",
+      "supportsTablet": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "_comment": "Only non-secret values. Spec 14 forbids any secret in mobile configuration."
+    }
+  }
+}

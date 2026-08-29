@@ -44,6 +44,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # The mobile app has its own compiler settings (JSX, React Native lib), so it is excluded
+      # from the root tsconfig and checked separately.
+      - name: Typecheck mobile app
+        run: npm run typecheck:mobile
+
       - name: Lint
         run: npm run lint
 
