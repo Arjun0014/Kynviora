@@ -38,6 +38,8 @@
       "@kynviora/safety/*": ["packages/safety/src/*"],
       "@kynviora/ingestion": ["packages/ingestion/src/index.ts"],
       "@kynviora/ingestion/*": ["packages/ingestion/src/*"],
+      "@kynviora/presentation": ["packages/presentation/src/index.ts"],
+      "@kynviora/presentation/*": ["packages/presentation/src/*"],
       "@kynviora/fixtures": ["packages/fixtures/src/index.ts"],
       "@kynviora/fixtures/*": ["packages/fixtures/src/*"],
       "@kynviora/db": ["db/src/index.ts"],
