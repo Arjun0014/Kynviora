@@ -303,7 +303,13 @@ function evaluateBatchAction(
   signals: readonly ActionSignal[],
 ): Assessment {
   if (!item.gtin && !item.formulationId) {
-    return { ...base, matched: false, matchConfidence: 'NOT_MATCHED', reasons: ['MISSING_REQUIRED_IDENTIFIERS'], urgency: 'INFORMATIONAL' };
+    return {
+      ...base,
+      matched: false,
+      matchConfidence: 'NOT_MATCHED',
+      reasons: ['MISSING_REQUIRED_IDENTIFIERS'],
+      urgency: 'INFORMATIONAL',
+    };
   }
 
   for (const signal of signals) {
@@ -491,9 +497,7 @@ function evaluateIngredientSensitivity(
   );
 
   if (eligible.length === 0) {
-    const anyRelevant = profileFacts.some(
-      (f) => f.kind === 'ALLERGY' || f.kind === 'SENSITIVITY',
-    );
+    const anyRelevant = profileFacts.some((f) => f.kind === 'ALLERGY' || f.kind === 'SENSITIVITY');
     return {
       ...base,
       matched: false,

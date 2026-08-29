@@ -106,7 +106,8 @@ export const SOURCE_GB_LEGISLATION: SourceRegistryEntry = {
 export const SOURCE_NI_GUIDANCE: SourceRegistryEntry = {
   id: 'src-ni-guidance',
   organization: 'United Kingdom (Northern Ireland guidance) / EU',
-  sourceName: 'EU Cosmetics Regulation as applicable in Northern Ireland under the Windsor Framework',
+  sourceName:
+    'EU Cosmetics Regulation as applicable in Northern Ireland under the Windsor Framework',
   sourceClass: 'PRIMARY_LEGAL',
   jurisdiction: 'NI',
   allowedInfluence: ['REGULATORY_STATUS'],

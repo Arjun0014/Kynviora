@@ -182,7 +182,8 @@ export interface RegulatoryRuleVersion {
 export interface ProductRegulatoryAction {
   readonly id: string;
   readonly jurisdiction: Jurisdiction;
-  readonly actionKind: 'RECALL' | 'WITHDRAWAL' | 'MARKETING_PROHIBITION' | 'QUALITY_ALERT' | 'WARNING';
+  readonly actionKind:
+    'RECALL' | 'WITHDRAWAL' | 'MARKETING_PROHIBITION' | 'QUALITY_ALERT' | 'WARNING';
   readonly authority: string;
 
   /** Scope. At least one must be present, or the action cannot be matched to anything. */

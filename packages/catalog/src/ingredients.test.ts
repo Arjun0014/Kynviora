@@ -31,12 +31,7 @@ describe('ingredientLookupKey', () => {
 describe('parseIngredientDeclaration', () => {
   it('parses a comma-separated declaration preserving order', () => {
     const tokens = parse('Aqua, Glycerin, Salicylic Acid, Parfum');
-    expect(tokens.map((t) => t.rawTerm)).toEqual([
-      'Aqua',
-      'Glycerin',
-      'Salicylic Acid',
-      'Parfum',
-    ]);
+    expect(tokens.map((t) => t.rawTerm)).toEqual(['Aqua', 'Glycerin', 'Salicylic Acid', 'Parfum']);
     expect(tokens.map((t) => t.position)).toEqual([0, 1, 2, 3]);
   });
 
@@ -160,11 +155,7 @@ describe('normalizeIngredients', () => {
 
   it('preserves declaration order through normalization', () => {
     const normalized = parseAndNormalize('Aqua, Glycerin, Salicylic Acid', resolver);
-    expect(normalized.map((i) => i.canonicalKey)).toEqual([
-      'WATER',
-      'GLYCERIN',
-      'SALICYLIC_ACID',
-    ]);
+    expect(normalized.map((i) => i.canonicalKey)).toEqual(['WATER', 'GLYCERIN', 'SALICYLIC_ACID']);
     expect(normalized.map((i) => i.position)).toEqual([0, 1, 2]);
   });
 

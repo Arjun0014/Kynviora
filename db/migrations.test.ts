@@ -54,9 +54,17 @@ beforeAll(async () => {
       `INSERT INTO profile (id, household_id, owner_user_id, display_name, age_band)
        VALUES ($1, $2, $3, $4, $5), ($6, $2, $3, $7, $5), ($8, $9, $10, $11, $5)`,
       [
-        PROFILE_A1, HOUSEHOLD_A, OWNER_A, 'Parent A', 'OLDER_ADULT_65_PLUS',
-        PROFILE_A2, 'Child A',
-        PROFILE_B1, HOUSEHOLD_B, OWNER_B, 'Parent B',
+        PROFILE_A1,
+        HOUSEHOLD_A,
+        OWNER_A,
+        'Parent A',
+        'OLDER_ADULT_65_PLUS',
+        PROFILE_A2,
+        'Child A',
+        PROFILE_B1,
+        HOUSEHOLD_B,
+        OWNER_B,
+        'Parent B',
       ],
     );
   });
@@ -113,17 +121,13 @@ describe('harness guards (DEC-005)', () => {
     // Proves the guard itself works. Without it, a forgotten SET ROLE would make every
     // authorization test below pass vacuously - the trap confirmed empirically in R-003.
     const superuserCheck = await t.asOwner((db) =>
-      db.query<{ rolsuper: boolean }>(
-        `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`,
-      ),
+      db.query<{ rolsuper: boolean }>(`SELECT rolsuper FROM pg_roles WHERE rolname = current_user`),
     );
     expect(superuserCheck.rows[0]?.rolsuper).toBe(true);
 
     // ...and the app role, which the tests actually use, is not one.
     const appIsNotSuper = await t.asUser(OWNER_A, (db) =>
-      db.query<{ rolsuper: boolean }>(
-        `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`,
-      ),
+      db.query<{ rolsuper: boolean }>(`SELECT rolsuper FROM pg_roles WHERE rolname = current_user`),
     );
     expect(appIsNotSuper.rows[0]?.rolsuper).toBe(false);
   });
@@ -138,9 +142,7 @@ describe('A1 - cross-household data access (spec 15, critical)', () => {
   });
 
   it('hides another household entirely from an unrelated owner', async () => {
-    const res = await t.asUser(OWNER_B, (db) =>
-      db.query<{ id: string }>('SELECT id FROM profile'),
-    );
+    const res = await t.asUser(OWNER_B, (db) => db.query<{ id: string }>('SELECT id FROM profile'));
     expect(res.rows.map((r) => r.id)).toEqual([PROFILE_B1]);
   });
 
@@ -268,10 +270,9 @@ describe('A2 - caregiver grant lifecycle (spec 15, high)', () => {
     expect(before.rows).toHaveLength(1);
 
     await t.asService((db) =>
-      db.query(
-        `UPDATE caregiver_grant SET status = 'REVOKED', revoked_at = now() WHERE id = $1`,
-        [id],
-      ),
+      db.query(`UPDATE caregiver_grant SET status = 'REVOKED', revoked_at = now() WHERE id = $1`, [
+        id,
+      ]),
     );
 
     // Spec 15 A2: revocation must take effect on the next authenticated access. It is evaluated
@@ -474,9 +475,7 @@ describe('append-only enforcement (DEC-013)', () => {
     );
 
     const updateMessage = await expectDenied(() =>
-      t.asOwner((db) =>
-        db.query('UPDATE consent_receipt SET granted = false WHERE id = $1', [id]),
-      ),
+      t.asOwner((db) => db.query('UPDATE consent_receipt SET granted = false WHERE id = $1', [id])),
     );
     expect(updateMessage).toMatch(/append-only/i);
 

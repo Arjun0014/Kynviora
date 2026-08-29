@@ -31,10 +31,10 @@ beforeAll(async () => {
        VALUES ($1, $2, 'user@example.test', now())`,
       [USER, `auth|${USER}`],
     );
-    await db.query(
-      `INSERT INTO household (id, owner_user_id, display_name) VALUES ($1, $2, 'H')`,
-      [HOUSEHOLD, USER],
-    );
+    await db.query(`INSERT INTO household (id, owner_user_id, display_name) VALUES ($1, $2, 'H')`, [
+      HOUSEHOLD,
+      USER,
+    ]);
     await db.query(
       `INSERT INTO profile (id, household_id, owner_user_id, display_name)
        VALUES ($1, $2, $3, 'Parent (synthetic)')`,
@@ -407,7 +407,9 @@ describe('source change detection', () => {
 
   it('keeps source documents append-only', async () => {
     const message = await expectDenied(() =>
-      t.asOwner((db) => db.query(`UPDATE source_document SET content_sha256 = $1`, ['c'.repeat(64)])),
+      t.asOwner((db) =>
+        db.query(`UPDATE source_document SET content_sha256 = $1`, ['c'.repeat(64)]),
+      ),
     );
     expect(message).toMatch(/append-only/i);
   });
@@ -629,9 +631,7 @@ describe('safety publication boundary (threat A3)', () => {
     );
 
     const before = await t.asUser(USER, (db) =>
-      db.query('SELECT id FROM alert_publication WHERE dedupe_key = $1', [
-        'dedupe-withdraw-test',
-      ]),
+      db.query('SELECT id FROM alert_publication WHERE dedupe_key = $1', ['dedupe-withdraw-test']),
     );
     expect(before.rows).toHaveLength(1);
 
@@ -645,9 +645,7 @@ describe('safety publication boundary (threat A3)', () => {
     );
 
     const after = await t.asUser(USER, (db) =>
-      db.query('SELECT id FROM alert_publication WHERE dedupe_key = $1', [
-        'dedupe-withdraw-test',
-      ]),
+      db.query('SELECT id FROM alert_publication WHERE dedupe_key = $1', ['dedupe-withdraw-test']),
     );
     expect(after.rows).toEqual([]);
   });
@@ -673,9 +671,7 @@ describe('safety publication boundary (threat A3)', () => {
 
     const message = await expectDenied(() =>
       t.asService((db) =>
-        db.query(`UPDATE alert_publication SET state = 'WITHDRAWN' WHERE id = $1`, [
-          publicationId,
-        ]),
+        db.query(`UPDATE alert_publication SET state = 'WITHDRAWN' WHERE id = $1`, [publicationId]),
       ),
     );
     expect(message).toMatch(/withdrawn_has_reason/i);
@@ -730,9 +726,7 @@ describe('safety receipt vocabulary (spec 09 medication safety language)', () =>
     // records having done so. The vocabulary contains no such outcome.
     const message = await expectDenied(() =>
       t.asService(async (db) => {
-        const a = await db.query<{ id: string }>(
-          `SELECT id FROM profile_assessment LIMIT 1`,
-        );
+        const a = await db.query<{ id: string }>(`SELECT id FROM profile_assessment LIMIT 1`);
         const p = await db.query<{ id: string }>(
           `SELECT id FROM alert_publication WHERE state = 'PUBLISHED' LIMIT 1`,
         );

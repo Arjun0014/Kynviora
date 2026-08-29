@@ -73,7 +73,7 @@ verification** and is not permitted through the Citation Gate into published reg
   - Verified positive isolation: with `app.uid='alice'` the app role saw only Alice's row; with
     `app.uid='bob'` only Bob's row.
   - Verified negative case: `INSERT` with no `FOR INSERT` policy was rejected with
-    *"new row violates row-level security policy"*.
+    _"new row violates row-level security policy"_.
   - **Critical caveat confirmed empirically**: querying as the default `postgres` role returned
     all rows even with `FORCE ROW LEVEL SECURITY`, because superusers bypass RLS entirely. This
     is the classic false-confidence trap described in the RLS literature
@@ -90,7 +90,7 @@ verification** and is not permitted through the Citation Gate into published reg
 ## R-004 - EU cosmetics regulatory structure and a verifiable Lens fixture
 
 - **Question**: The Global Regulatory Lens needs at least one genuinely different, correctly
-  *conditional* cross-jurisdiction case that is not simplifiable to "banned"
+  _conditional_ cross-jurisdiction case that is not simplifiable to "banned"
   (`03_MVP_DEFINITION.md` demo step 9; `19` fixture requirements).
 - **Date**: 2026-08-29
 - **Findings**:
@@ -221,10 +221,10 @@ verification** and is not permitted through the Citation Gate into published reg
 
 ## Open research questions (deferred, not blocking current work)
 
-| ID | Question | Blocks | Why deferred |
-| --- | --- | --- | --- |
-| RQ-01 | Exact CDSCO alert/NSQ page structure and update cadence | live IN adapter | Needs sustained observation of a live source; framework is source-agnostic |
-| RQ-02 | Whether EUR-Lex permits snapshot retention vs derived-fields-only | source preservation policy | Legal review, not a technical question (`BLK-005`) |
-| RQ-03 | Licensable Indian medicine normalization vocabulary | medicine canonicalization depth | Commercial agreement required (`BLK-003`) |
-| RQ-04 | OCR/multimodal provider selection and per-field accuracy | capture provider choice | Port defined; measurable only against a labelled dataset that does not yet exist |
-| RQ-05 | Numeric release thresholds (`22`) | Stage 9 release gates | Explicitly a product/safety leadership decision, not an engineering one |
+| ID    | Question                                                          | Blocks                          | Why deferred                                                                     |
+| ----- | ----------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------- |
+| RQ-01 | Exact CDSCO alert/NSQ page structure and update cadence           | live IN adapter                 | Needs sustained observation of a live source; framework is source-agnostic       |
+| RQ-02 | Whether EUR-Lex permits snapshot retention vs derived-fields-only | source preservation policy      | Legal review, not a technical question (`BLK-005`)                               |
+| RQ-03 | Licensable Indian medicine normalization vocabulary               | medicine canonicalization depth | Commercial agreement required (`BLK-003`)                                        |
+| RQ-04 | OCR/multimodal provider selection and per-field accuracy          | capture provider choice         | Port defined; measurable only against a labelled dataset that does not yet exist |
+| RQ-05 | Numeric release thresholds (`22`)                                 | Stage 9 release gates           | Explicitly a product/safety leadership decision, not an engineering one          |

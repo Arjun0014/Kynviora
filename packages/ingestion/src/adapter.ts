@@ -73,7 +73,9 @@ export interface SourceTransport {
   get(
     uri: string,
     limits: RetrievalLimits,
-  ): Promise<Result<{ body: string; contentType: string; versionLabel: string | null }, DomainError>>;
+  ): Promise<
+    Result<{ body: string; contentType: string; versionLabel: string | null }, DomainError>
+  >;
 }
 
 /**

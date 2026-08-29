@@ -133,7 +133,7 @@ implemented, the exact configuration required is documented, and independent wor
   requires labelled real-world packages. `21` forbids real health data outside production, and no
   ethically-sourced labelled dataset exists here.
 - **Workaround in place**: synthetic fixtures exercise every code path, and the fingerprint
-  false-merge/false-split *logic* is tested exhaustively. What cannot be produced is a
+  false-merge/false-split _logic_ is tested exhaustively. What cannot be produced is a
   **measured rate** against real packages.
 - **To resolve**: assemble a labelled dataset under an approved study design, then run the
   evaluation harness. Note `22` also requires product/safety leadership to assign the numeric

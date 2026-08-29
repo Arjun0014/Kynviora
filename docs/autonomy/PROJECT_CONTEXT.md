@@ -74,15 +74,15 @@ Health Connect/HealthKit; **universal safe/unsafe scoring**.
 
 ## 4. Major product systems
 
-| System | Responsibility | Must NOT do |
-| --- | --- | --- |
-| Capture pipeline | Turn packaging into structured, provenance-bearing field assertions | Guess a missing field |
-| Living Catalog | Shared product/formulation knowledge + corroboration | Establish medical safety by consensus |
-| Normalization | Canonical substance/medicine IDs | Create safety conclusions |
-| Global Regulatory Registry | Jurisdiction-specific legal facts with official source evidence | Be written by a model or a user |
-| Global Regulatory Lens | Read projection comparing jurisdictions | Rank countries; imply approval |
-| Safety Watch | Reviewed, reproducible personal assessments | Diagnose, prescribe, or set severity via AI |
-| Reviewer console | Human governance of publication | Be bypassed by any automated path |
+| System                     | Responsibility                                                      | Must NOT do                                 |
+| -------------------------- | ------------------------------------------------------------------- | ------------------------------------------- |
+| Capture pipeline           | Turn packaging into structured, provenance-bearing field assertions | Guess a missing field                       |
+| Living Catalog             | Shared product/formulation knowledge + corroboration                | Establish medical safety by consensus       |
+| Normalization              | Canonical substance/medicine IDs                                    | Create safety conclusions                   |
+| Global Regulatory Registry | Jurisdiction-specific legal facts with official source evidence     | Be written by a model or a user             |
+| Global Regulatory Lens     | Read projection comparing jurisdictions                             | Rank countries; imply approval              |
+| Safety Watch               | Reviewed, reproducible personal assessments                         | Diagnose, prescribe, or set severity via AI |
+| Reviewer console           | Human governance of publication                                     | Be bypassed by any automated path           |
 
 ## 5. Living Catalog concept
 
@@ -104,7 +104,7 @@ Eight layers must remain separate (`08`):
 **A match at one layer never proves all lower layers.**
 
 Lifecycle: `CANDIDATE -> USER_CONFIRMED -> CORROBORATED -> EXTERNALLY_VERIFIED`, plus
-`CONFLICTING` and `RETIRED`. Corroboration establishes *package/formulation evidence quality*,
+`CONFLICTING` and `RETIRED`. Corroboration establishes _package/formulation evidence quality_,
 never medical safety. Same barcode + materially different formula => **new candidate/conflict,
 never overwrite**.
 
@@ -147,12 +147,12 @@ discovery sources (locate official material only).
 
 ## 8. Safety Watch
 
-Distinct from the Lens. Answers: *is there a reviewed, relevant concern for this exact
-product/formulation/batch/person, and what is the safest bounded next step?*
+Distinct from the Lens. Answers: _is there a reviewed, relevant concern for this exact
+product/formulation/batch/person, and what is the safest bounded next step?_
 
 - **Evidence levels** A (official action), B (established guidance/label/monograph), C (strong
   reviewed evidence), D (limited evidence), E (emerging signal - internal in MVP), U (unknown).
-- **Action urgency** CRITICAL, HIGH, MEDIUM, LOW, INFORMATIONAL - *separate dimension*.
+- **Action urgency** CRITICAL, HIGH, MEDIUM, LOW, INFORMATIONAL - _separate dimension_.
 - **Match confidence** EXACT, PROBABLE, UNCONFIRMED, NOT_MATCHED, plus `CONDITION_UNKNOWN` for
   regulatory applicability when required concentration/use data is absent.
 - **Product states** No current matched alert / Information / Review / Action required /
@@ -233,19 +233,19 @@ ingredient", unsanctioned "stop taking this medicine now".
 
 ## 13. Implementation stages (`04`)
 
-| Stage | Title | MVP |
-| --- | --- | --- |
-| 0 | Reset, product contract, engineering foundation | yes |
-| 1 | Identity, profiles, consent, session boundary | yes |
-| 2 | Unified Health Shelf and item lifecycle | yes |
-| 3 | Guided capture, extraction, Living Catalog bootstrap | yes |
-| 4 | Medicine care workflows | yes |
-| 5 | Personal-care formulation intelligence | yes |
-| 6 | Global sources, regulatory registry, evidence, safety engine | yes |
-| 7 | Safety Watch and Global Regulatory Lens experience | yes |
-| 8 | Family collaboration, review inbox, Visit Pack | yes |
-| 9 | Production hardening, validation, MVP beta | yes |
-| 10-14 | Post-MVP expansion | no |
+| Stage | Title                                                        | MVP |
+| ----- | ------------------------------------------------------------ | --- |
+| 0     | Reset, product contract, engineering foundation              | yes |
+| 1     | Identity, profiles, consent, session boundary                | yes |
+| 2     | Unified Health Shelf and item lifecycle                      | yes |
+| 3     | Guided capture, extraction, Living Catalog bootstrap         | yes |
+| 4     | Medicine care workflows                                      | yes |
+| 5     | Personal-care formulation intelligence                       | yes |
+| 6     | Global sources, regulatory registry, evidence, safety engine | yes |
+| 7     | Safety Watch and Global Regulatory Lens experience           | yes |
+| 8     | Family collaboration, review inbox, Visit Pack               | yes |
+| 9     | Production hardening, validation, MVP beta                   | yes |
+| 10-14 | Post-MVP expansion                                           | no  |
 
 **MVP is complete at the end of Stage 9.**
 

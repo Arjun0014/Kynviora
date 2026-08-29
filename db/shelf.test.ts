@@ -191,9 +191,7 @@ describe('health context requires the medicines capability', () => {
   });
 
   it('is NOT visible to a safety-only caregiver', async () => {
-    const res = await t.asUser(SAFETY_CAREGIVER, (db) =>
-      db.query('SELECT id FROM allergy_record'),
-    );
+    const res = await t.asUser(SAFETY_CAREGIVER, (db) => db.query('SELECT id FROM allergy_record'));
     expect(res.rows).toEqual([]);
   });
 

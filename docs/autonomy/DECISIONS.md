@@ -2,7 +2,7 @@
 
 Format per task brief: Context / Options / Decision / Rationale / Consequences / Sources.
 Spec decisions `D-001`..`D-015` in `23_DECISIONS_RISKS_AND_OPEN_QUESTIONS.md` are inherited as
-binding and are not re-litigated here; entries below are *implementation* decisions.
+binding and are not re-litigated here; entries below are _implementation_ decisions.
 
 ---
 
@@ -118,7 +118,7 @@ another or into a universal score. `24` makes conflating them release-blocking.
 urgency anywhere in the codebase.
 
 **Rationale.** Constraint 1 and 2 (no universal score; evidence separate from urgency) are best
-enforced by making the collapse *unrepresentable*. There is no `toSeverity()` to misuse because
+enforced by making the collapse _unrepresentable_. There is no `toSeverity()` to misuse because
 none exists. Adding a status member breaks compilation at every switch that must handle it.
 
 **Consequences.** Rendering must map each dimension independently. A dedicated test asserts no
@@ -140,7 +140,7 @@ independent axis.
 `CONDITION_UNKNOWN`, `IDENTITY_UNCERTAIN`.
 
 **Rationale.** They answer different questions and have different sources. Status comes from the
-regulation; applicability comes from what the *package evidence* does and does not disclose.
+regulation; applicability comes from what the _package evidence_ does and does not disclose.
 Folding them into one enum forces a lossy choice - exactly the "restricted rendered as banned"
 failure mode in `A12`. A salicylic-acid restriction is `RESTRICTED` + `CONCENTRATION_LIMIT`
 regardless of the package; whether the 2.0% limit is exceeded is `CONDITION_UNKNOWN` because
@@ -277,7 +277,7 @@ from a provider whose scope does not permit asserting it. `discovery_only` provi
 all search/LLM research) can never contribute a stored field value - only a candidate reference
 that must be independently retrieved.
 
-**Rationale.** `25`'s hierarchy is a *runtime* constraint, not documentation. Encoding it in the
+**Rationale.** `25`'s hierarchy is a _runtime_ constraint, not documentation. Encoding it in the
 port means "PubChem said this ingredient is banned in the EU" is rejected structurally rather
 than depending on a developer remembering the rule.
 
@@ -340,7 +340,7 @@ are never concatenated into a system-instruction position. AI ports accept only 
 for external content and expose **no** write/publish tool.
 
 **Rationale.** Prompt-injection defence that relies on prompt wording is not a control. Making
-untrusted text a distinct *type* means passing raw OCR output into an instruction slot fails to
+untrusted text a distinct _type_ means passing raw OCR output into an instruction slot fails to
 compile.
 
 **Consequences.** Injection-resistance tests assert that documents containing directives such as

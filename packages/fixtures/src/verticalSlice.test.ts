@@ -290,7 +290,10 @@ describe('Scenario 3: a reformulation creates a new version and never overwrites
 // ===========================================================================
 
 describe('Scenario 4: the Lens shows genuinely different jurisdictional treatment', () => {
-  function lensFor(ingredients: readonly NormalizedIngredient[], useType: 'LEAVE_ON' | 'RINSE_OFF'): LensInput {
+  function lensFor(
+    ingredients: readonly NormalizedIngredient[],
+    useType: 'LEAVE_ON' | 'RINSE_OFF',
+  ): LensInput {
     const salicylic = ingredients.find(
       (i) => i.canonicalKey === SUBSTANCES.SALICYLIC_ACID.canonicalKey,
     );
@@ -535,10 +538,7 @@ describe('Scenario 7: a correction recomputes assessments and history stays audi
     enabled: true,
   };
 
-  function itemOnFormulation(
-    declaration: string,
-    formulationVersion: string,
-  ): OwnedItemSnapshot {
+  function itemOnFormulation(declaration: string, formulationVersion: string): OwnedItemSnapshot {
     const ingredients = parseAndNormalize(declaration, FIXTURE_ALIAS_RESOLVER);
     return {
       ownedItemId: 'owned-serum',

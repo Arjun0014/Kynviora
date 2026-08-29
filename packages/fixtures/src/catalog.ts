@@ -115,8 +115,7 @@ export const DECLARATION_SERUM_V1 =
  *
  * Same barcode, materially different formula - the spec 31 reformulation scenario.
  */
-export const DECLARATION_SERUM_V2 =
-  'Ingredients: Aqua, Niacinamide, Glycerin, Citric Acid, Parfum';
+export const DECLARATION_SERUM_V2 = 'Ingredients: Aqua, Niacinamide, Glycerin, Citric Acid, Parfum';
 
 /** A declaration that DOES disclose a concentration, to exercise the APPLIES path. */
 export const DECLARATION_SERUM_WITH_CONCENTRATION =

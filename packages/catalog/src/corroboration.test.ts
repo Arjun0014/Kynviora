@@ -104,9 +104,21 @@ describe('A11 - catalog poisoning resistance (spec 15)', () => {
   it('rejects perceptually identical re-uploads even when the bytes differ', () => {
     // Recompressing or lightly editing an image changes its SHA-256 but not its perceptual hash.
     const result = assessCorroboration([
-      observation({ assetSha256: 'file-a', assetPerceptualHash: 'same-image', contributionGroupHash: 'g1' }),
-      observation({ assetSha256: 'file-b', assetPerceptualHash: 'same-image', contributionGroupHash: 'g2' }),
-      observation({ assetSha256: 'file-c', assetPerceptualHash: 'same-image', contributionGroupHash: 'g3' }),
+      observation({
+        assetSha256: 'file-a',
+        assetPerceptualHash: 'same-image',
+        contributionGroupHash: 'g1',
+      }),
+      observation({
+        assetSha256: 'file-b',
+        assetPerceptualHash: 'same-image',
+        contributionGroupHash: 'g2',
+      }),
+      observation({
+        assetSha256: 'file-c',
+        assetPerceptualHash: 'same-image',
+        contributionGroupHash: 'g3',
+      }),
     ]);
     expect(result.rejectedDuplicateCount).toBe(2);
     expect(result.state).not.toBe('CORROBORATED');

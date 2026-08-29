@@ -154,7 +154,9 @@ export function canonicalizeForFingerprint(input: FingerprintInput): {
 } {
   const market = escapeField(normalizeKey(input.market));
   const manufacturer =
-    input.manufacturerKey === null ? 'm:none' : `m:${escapeField(normalizeKey(input.manufacturerKey))}`;
+    input.manufacturerKey === null
+      ? 'm:none'
+      : `m:${escapeField(normalizeKey(input.manufacturerKey))}`;
 
   if (input.kind === 'PERSONAL_CARE') {
     // Order preserved: position is material for INCI declarations.
@@ -177,7 +179,8 @@ export function canonicalizeForFingerprint(input: FingerprintInput): {
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     .join('|');
 
-  const form = input.dosageForm === null ? 'f:none' : `f:${escapeField(normalizeKey(input.dosageForm))}`;
+  const form =
+    input.dosageForm === null ? 'f:none' : `f:${escapeField(normalizeKey(input.dosageForm))}`;
 
   // Spec 08: missing strength or form means this is not an exact medicine match.
   const degraded =

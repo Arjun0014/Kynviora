@@ -372,12 +372,13 @@ describe('resolveFormulationObservation', () => {
 
     it('never returns an action that implies overwriting', () => {
       // There is deliberately no OVERWRITE or REPLACE action in the vocabulary.
-      const decision = resolveFormulationObservation(
-        [existing('Aqua')],
-        candidate('Aqua, Parfum'),
-      );
-      expect(['REUSE_EXISTING', 'CREATE_FIRST_CANDIDATE', 'CREATE_CONFLICT', 'REQUIRE_REVERIFICATION'])
-        .toContain(decision.action);
+      const decision = resolveFormulationObservation([existing('Aqua')], candidate('Aqua, Parfum'));
+      expect([
+        'REUSE_EXISTING',
+        'CREATE_FIRST_CANDIDATE',
+        'CREATE_CONFLICT',
+        'REQUIRE_REVERIFICATION',
+      ]).toContain(decision.action);
     });
   });
 });

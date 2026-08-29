@@ -21,11 +21,7 @@
 
 import type { Instant } from '@kynviora/domain';
 import { LEGAL_STATUS_SOURCE_CLASSES, DISCOVERY_ONLY_SOURCE_CLASSES } from '@kynviora/domain';
-import type {
-  RegulatoryRuleVersion,
-  SourceDocument,
-  SourceRegistryEntry,
-} from './records.js';
+import type { RegulatoryRuleVersion, SourceDocument, SourceRegistryEntry } from './records.js';
 
 /** Outcome of evaluating a candidate against the gate. */
 export const GATE_DECISIONS = ['PASSED', 'REJECTED', 'REQUIRES_HUMAN_REVIEW'] as const;
@@ -147,7 +143,10 @@ export function evaluateCitationGate(input: CitationGateInput): CitationGateResu
       satisfied.push('source_class_can_establish_legal_status');
     }
 
-    if (source.licenseReviewState === 'NOT_REVIEWED' || source.licenseReviewState === 'PROHIBITED') {
+    if (
+      source.licenseReviewState === 'NOT_REVIEWED' ||
+      source.licenseReviewState === 'PROHIBITED'
+    ) {
       failures.push('SOURCE_LICENSE_NOT_REVIEWED');
     } else {
       satisfied.push('source_license_reviewed');
@@ -281,6 +280,7 @@ export const GATE_FAILURE_EXPLANATIONS: Readonly<Record<GateFailureCode, string>
   NOT_VERIFIED_AGAINST_OFFICIAL_SOURCE:
     'The candidate has not been verified against a retrieved official document.',
   REVIEW_NOT_COMPLETED: 'Required review has not been completed.',
-  REVIEWER_NOT_RECORDED: 'The record is marked approved but no reviewer or approval time is recorded.',
+  REVIEWER_NOT_RECORDED:
+    'The record is marked approved but no reviewer or approval time is recorded.',
   SUPERSEDED: 'This rule version has been superseded or withdrawn.',
 });

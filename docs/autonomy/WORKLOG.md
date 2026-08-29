@@ -55,7 +55,7 @@ Recorded in `RESEARCH.md`. Four findings changed the implementation:
   privileged tables.
 - PGlite harness with a guard that fails any test not running as the expected non-superuser role.
 - **Finding while testing**: four tests failed because the GRANT layer denied UPDATE/DELETE
-  *before* the append-only trigger fired. This was better than expected - append-only is enforced
+  _before_ the append-only trigger fired. This was better than expected - append-only is enforced
   at two independent layers. Rewrote the tests to assert both, running the trigger check as the
   table owner to bypass the grant layer and isolate it.
 - **Finding**: a consent-withdrawal test was non-deterministic because both rows shared the same
@@ -71,11 +71,11 @@ Recorded in `RESEARCH.md`. Four findings changed the implementation:
 - GTIN validation, ingredient parsing and normalization, order-sensitive fingerprinting, conflict
   resolution, corroboration policy.
 - **Bug found by test**: a comma-decimal concentration such as "1,5%" (common on European and
-  Indian labels) was split on the comma as a list separator, producing a phantom ingredient *and*
+  Indian labels) was split on the comma as a list separator, producing a phantom ingredient _and_
   losing the concentration - the exact datum a concentration-limited rule needs. Fixed with a
   deterministic rule: a comma directly between two digits is a decimal separator.
 - **Design gap found by test**: three conflict tests failed because a fingerprint match
-  short-circuited to `REUSE_EXISTING` without checking scalar fields. For a *degraded* medicine
+  short-circuited to `REUSE_EXISTING` without checking scalar fields. For a _degraded_ medicine
   fingerprint (no structured strength extracted), two packs of different strengths can share a
   hash. Made the scalar cross-check load-bearing before reuse.
 - **Modelling smell surfaced by lint**: `Jurisdiction | string` for market. Introduced
@@ -112,7 +112,7 @@ Recorded in `RESEARCH.md`. Four findings changed the implementation:
   scenarios.
 - **Bug found by scenario 5**: `limitationsFor` emitted "this package does not disclose the
   concentration" whenever applicability was CONDITION_UNKNOWN and a concentration limit existed -
-  including when the concentration *was* printed and the intended age was the actually-unknown
+  including when the concentration _was_ printed and the intended age was the actually-unknown
   condition. A factually wrong statement about the user's own package, on the screen spec `09`
   requires to be most precise.
   Fixed by making `determineApplicabilityDetailed` evaluate conditions exhaustively instead of

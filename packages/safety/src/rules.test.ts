@@ -277,7 +277,10 @@ describe('ingredient sensitivity (spec 06 Journey 4, threat A5)', () => {
       inputs({
         rule: sensitivityRule,
         item: item({ substanceKeys: ['SALICYLIC_ACID'] }),
-        profileFacts: [fact({ version: 'pf-7' }), fact({ id: 'f2', substanceCanonicalKey: 'X', version: 'pf-8' })],
+        profileFacts: [
+          fact({ version: 'pf-7' }),
+          fact({ id: 'f2', substanceCanonicalKey: 'X', version: 'pf-8' }),
+        ],
       }),
     );
     expect(result.inputVersions.profileFactVersions).toEqual(['pf-7']);

@@ -271,7 +271,9 @@ describe('condition-unknown reporting (spec 03 demo step 9)', () => {
   });
 
   it('never claims a violation, an exceedance or non-compliance', () => {
-    const snapshot = projectLens(lensInput({ context: context({ disclosedConcentrationPercent: 5 }) }));
+    const snapshot = projectLens(
+      lensInput({ context: context({ disclosedConcentrationPercent: 5 }) }),
+    );
     for (const entry of snapshot.entries) {
       const text = entry.limitations.join(' ').toLowerCase();
       expect(text).not.toMatch(/violat|non-compliant|breach|illegal|exceeds the limit/);
@@ -348,7 +350,13 @@ describe('foreign status is informational (spec 09, threat A12)', () => {
     const snapshot = projectLens(lensInput());
     for (const entry of snapshot.entries) {
       const keys = Object.keys(entry);
-      for (const forbidden of ['urgency', 'severity', 'evidenceLevel', 'riskScore', 'safetyState']) {
+      for (const forbidden of [
+        'urgency',
+        'severity',
+        'evidenceLevel',
+        'riskScore',
+        'safetyState',
+      ]) {
         expect(keys).not.toContain(forbidden);
       }
     }

@@ -16,11 +16,13 @@ import { instantFrom } from '@kynviora/domain';
 const NOW = instantFrom('2026-08-29T12:00:00.000Z');
 
 /** A candidate that satisfies every gate condition, as the baseline to mutate from. */
-function passingInput(overrides: {
-  candidate?: Partial<RegulatoryRuleVersion>;
-  source?: Partial<SourceRegistryEntry> | null;
-  document?: Partial<SourceDocument> | null;
-} = {}) {
+function passingInput(
+  overrides: {
+    candidate?: Partial<RegulatoryRuleVersion>;
+    source?: Partial<SourceRegistryEntry> | null;
+    document?: Partial<SourceDocument> | null;
+  } = {},
+) {
   const candidate: RegulatoryRuleVersion = {
     ...asPublishedForTest(RULE_EU_SALICYLIC_ACID),
     ...overrides.candidate,

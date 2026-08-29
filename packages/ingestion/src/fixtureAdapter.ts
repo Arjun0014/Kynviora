@@ -66,12 +66,10 @@ export function stubTransport(responses: ReadonlyMap<string, StubResponse>): Sou
       }
 
       if (response.failWith) {
-        return Promise.resolve(
-          { ok: false, error: response.failWith } as Result<
-            { body: string; contentType: string; versionLabel: string | null },
-            DomainError
-          >,
-        );
+        return Promise.resolve({ ok: false, error: response.failWith } as Result<
+          { body: string; contentType: string; versionLabel: string | null },
+          DomainError
+        >);
       }
 
       const size = response.reportedByteSize ?? Buffer.byteLength(response.body, 'utf8');
@@ -244,8 +242,7 @@ export function createFixtureActionAdapter(options: {
             : [];
 
         const rawGtin = field(entry, 'gtin');
-        const gtin =
-          typeof rawGtin === 'string' && /^\d{8,14}$/.test(rawGtin) ? rawGtin : null;
+        const gtin = typeof rawGtin === 'string' && /^\d{8,14}$/.test(rawGtin) ? rawGtin : null;
 
         const rawDate = field(entry, 'publicationDate');
         const publicationDate =

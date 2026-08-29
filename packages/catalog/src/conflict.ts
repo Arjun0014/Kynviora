@@ -128,9 +128,7 @@ export function diffIngredients(
       });
     }
 
-    if (
-      prevItem.disclosedConcentrationPercent !== nextItem.disclosedConcentrationPercent
-    ) {
+    if (prevItem.disclosedConcentrationPercent !== nextItem.disclosedConcentrationPercent) {
       entries.push({
         changeKind: 'CONCENTRATION_CHANGED',
         term: nextItem.rawTerm,
@@ -255,9 +253,10 @@ export function resolveFormulationObservation(
         conflictKinds: [],
         ingredientDiff: null,
         affectedFields: [],
-        reasonCode: match.fingerprint.degraded || candidate.fingerprint.degraded
-          ? 'fingerprint_match_degraded_scalars_agree'
-          : 'fingerprint_match',
+        reasonCode:
+          match.fingerprint.degraded || candidate.fingerprint.degraded
+            ? 'fingerprint_match_degraded_scalars_agree'
+            : 'fingerprint_match',
         advancesLastObserved: true,
       };
     }

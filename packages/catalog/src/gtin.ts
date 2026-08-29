@@ -71,11 +71,10 @@ export function parseGtin(raw: string): Result<GtinInfo, DomainError> {
   }
 
   if (!(GTIN_LENGTHS as readonly number[]).includes(cleaned.length)) {
-    return failure(
-      'INVALID_BARCODE',
-      'Barcode length is not a supported GTIN-8/12/13/14 length.',
-      { reason_code: 'unsupported_length', length: cleaned.length },
-    );
+    return failure('INVALID_BARCODE', 'Barcode length is not a supported GTIN-8/12/13/14 length.', {
+      reason_code: 'unsupported_length',
+      length: cleaned.length,
+    });
   }
 
   const length = cleaned.length as GtinLength;

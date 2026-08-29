@@ -60,18 +60,14 @@ describe('evidence level and action urgency are separate dimensions (23 D-005)',
   });
 
   it('defines the five urgency levels from spec 09', () => {
-    expect([...ACTION_URGENCIES]).toEqual([
-      'CRITICAL',
-      'HIGH',
-      'MEDIUM',
-      'LOW',
-      'INFORMATIONAL',
-    ]);
+    expect([...ACTION_URGENCIES]).toEqual(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFORMATIONAL']);
   });
 
   it('shares no member between the two vocabularies', () => {
     // If a value were valid in both, code could conflate them without a type error.
-    const overlap = EVIDENCE_LEVELS.filter((e) => (ACTION_URGENCIES as readonly string[]).includes(e));
+    const overlap = EVIDENCE_LEVELS.filter((e) =>
+      (ACTION_URGENCIES as readonly string[]).includes(e),
+    );
     expect(overlap).toEqual([]);
   });
 
@@ -174,10 +170,7 @@ describe('regulatory applicability is a second axis (DEC-007)', () => {
 
 describe('source authority hierarchy (spec 25)', () => {
   it('permits only primary law and official action registries to set legal status', () => {
-    expect([...LEGAL_STATUS_SOURCE_CLASSES]).toEqual([
-      'PRIMARY_LEGAL',
-      'OFFICIAL_ACTION_REGISTRY',
-    ]);
+    expect([...LEGAL_STATUS_SOURCE_CLASSES]).toEqual(['PRIMARY_LEGAL', 'OFFICIAL_ACTION_REGISTRY']);
   });
 
   it('excludes identity/normalization databases from establishing legal status', () => {

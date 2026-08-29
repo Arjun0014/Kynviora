@@ -57,11 +57,7 @@ export function calendarDate(value: string): CalendarDate {
   const [y, m, d] = value.split('-').map(Number) as [number, number, number];
   // Reject impossible dates such as 2026-02-30 that match the pattern but are not real.
   const probe = new Date(Date.UTC(y, m - 1, d));
-  if (
-    probe.getUTCFullYear() !== y ||
-    probe.getUTCMonth() !== m - 1 ||
-    probe.getUTCDate() !== d
-  ) {
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) {
     throw new TypeError(`Invalid calendar date (not a real date): ${value}`);
   }
   return value as CalendarDate;

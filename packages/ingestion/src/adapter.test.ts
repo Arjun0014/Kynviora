@@ -65,9 +65,9 @@ describe('origin allow-list (spec 14, 15 external source boundary)', () => {
 
   it('rejects a lookalike host that merely shares a prefix', () => {
     // The attack a naive startsWith check misses entirely: this is a different host.
-    expect(
-      isAllowedOrigin('https://alerts.example.test.evil.test/actions/x.json', [ORIGIN]),
-    ).toBe(false);
+    expect(isAllowedOrigin('https://alerts.example.test.evil.test/actions/x.json', [ORIGIN])).toBe(
+      false,
+    );
   });
 
   it('rejects a different host', () => {
@@ -120,9 +120,7 @@ describe('retrieval limits (spec 13)', () => {
     const result = await retrieveSource(
       URI,
       { allowedOrigins: [ORIGIN] },
-      stubTransport(
-        new Map([[URI, { body: '{}', contentType: 'application/octet-stream' }]]),
-      ),
+      stubTransport(new Map([[URI, { body: '{}', contentType: 'application/octet-stream' }]])),
       NOW,
     );
     expect(isErr(result)).toBe(true);
@@ -134,9 +132,7 @@ describe('retrieval limits (spec 13)', () => {
       URI,
       { allowedOrigins: [ORIGIN] },
       stubTransport(
-        new Map([
-          [URI, { body: '{}', reportedByteSize: DEFAULT_RETRIEVAL_LIMITS.maxBytes + 1 }],
-        ]),
+        new Map([[URI, { body: '{}', reportedByteSize: DEFAULT_RETRIEVAL_LIMITS.maxBytes + 1 }]]),
       ),
       NOW,
     );
@@ -295,7 +291,12 @@ describe('runIngestion', () => {
             URI,
             {
               body: '',
-              failWith: domainError('PROVIDER_UNAVAILABLE', 'timeout', { reason_code: 'timeout' }, true),
+              failWith: domainError(
+                'PROVIDER_UNAVAILABLE',
+                'timeout',
+                { reason_code: 'timeout' },
+                true,
+              ),
             },
           ],
         ]),
@@ -437,7 +438,13 @@ describe('hostile source content (threat A13)', () => {
     // this package exporting no publish path at all.
     const module = await import('./index.js');
     const names = Object.keys(module);
-    for (const forbidden of ['publish', 'publishRule', 'publishAction', 'approve', 'setPublished']) {
+    for (const forbidden of [
+      'publish',
+      'publishRule',
+      'publishAction',
+      'approve',
+      'setPublished',
+    ]) {
       expect(names).not.toContain(forbidden);
     }
   });

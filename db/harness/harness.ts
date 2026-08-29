@@ -78,9 +78,7 @@ export async function createTestDb(dir: string = MIGRATIONS_DIR): Promise<TestDb
       // Report position and a short excerpt rather than letting the driver serialize the whole
       // migration into the failure output, which buries the actual error.
       const message = cause instanceof Error ? cause.message : String(cause);
-      const position = Number(
-        (cause as { position?: string } | undefined)?.position ?? Number.NaN,
-      );
+      const position = Number((cause as { position?: string } | undefined)?.position ?? Number.NaN);
       let excerpt = '';
       if (Number.isFinite(position) && position > 0) {
         const start = Math.max(0, position - 160);

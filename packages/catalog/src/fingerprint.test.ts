@@ -165,10 +165,14 @@ describe('false-merge safeguards (spec 19)', () => {
 
   it('distinguishes medicine strengths', () => {
     const low = computeFingerprint(
-      medicine({ activeIngredients: [{ key: 'paracetamol', strengthValue: 500, strengthUnit: 'mg' }] }),
+      medicine({
+        activeIngredients: [{ key: 'paracetamol', strengthValue: 500, strengthUnit: 'mg' }],
+      }),
     );
     const high = computeFingerprint(
-      medicine({ activeIngredients: [{ key: 'paracetamol', strengthValue: 650, strengthUnit: 'mg' }] }),
+      medicine({
+        activeIngredients: [{ key: 'paracetamol', strengthValue: 650, strengthUnit: 'mg' }],
+      }),
     );
     expect(low.hash).not.toBe(high.hash);
   });
@@ -251,9 +255,7 @@ describe('fingerprint is not an identity claim (spec 08, DEC-015)', () => {
     // hash is a 64-char hex digest, structurally distinct from a UUID.
     const fp = computeFingerprint(personalCare('Aqua'));
     expect(fp.hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(fp.hash).not.toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-    );
+    expect(fp.hash).not.toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 
   it('is named to signal that a match is a candidate, not proof', () => {

@@ -153,7 +153,10 @@ describe('currentAssertion supersession (DEC-013: append-only, never mutated)', 
 
   it('follows a multi-step correction chain to the final head', () => {
     const chain = [
-      assertion({ id: unsafeId<FieldAssertionId>('a1'), assertedAt: t('2026-08-01T00:00:00.000Z') }),
+      assertion({
+        id: unsafeId<FieldAssertionId>('a1'),
+        assertedAt: t('2026-08-01T00:00:00.000Z'),
+      }),
       assertion({
         id: unsafeId<FieldAssertionId>('a2'),
         supersedesId: unsafeId<FieldAssertionId>('a1'),
@@ -220,7 +223,11 @@ describe('currentAssertion supersession (DEC-013: append-only, never mutated)', 
 describe('currentAssertionsByField', () => {
   it('resolves each field path independently', () => {
     const assertions: FieldAssertion[] = [
-      assertion({ id: unsafeId<FieldAssertionId>('i1'), fieldPath: 'identity.brand', normalizedValue: 'BrandA' }),
+      assertion({
+        id: unsafeId<FieldAssertionId>('i1'),
+        fieldPath: 'identity.brand',
+        normalizedValue: 'BrandA',
+      }),
       assertion({
         id: unsafeId<FieldAssertionId>('i2'),
         fieldPath: 'identity.brand',
@@ -228,7 +235,11 @@ describe('currentAssertionsByField', () => {
         supersedesId: unsafeId<FieldAssertionId>('i1'),
         assertedAt: t('2026-08-09T00:00:00.000Z'),
       }),
-      assertion({ id: unsafeId<FieldAssertionId>('b1'), fieldPath: 'batch.lot', normalizedValue: 'LOT9' }),
+      assertion({
+        id: unsafeId<FieldAssertionId>('b1'),
+        fieldPath: 'batch.lot',
+        normalizedValue: 'LOT9',
+      }),
     ];
 
     const heads = currentAssertionsByField(assertions);

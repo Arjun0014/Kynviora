@@ -330,8 +330,9 @@ export function limitationsFor(
   const isRestrictionNotProhibition =
     !statuses.includes('PROHIBITED') &&
     statuses.some((s) =>
-      (['RESTRICTED', 'CONCENTRATION_LIMIT', 'USE_CONDITION', 'AGE_OR_ROUTE_CONDITION'] as const)
-        .includes(s as never),
+      (
+        ['RESTRICTED', 'CONCENTRATION_LIMIT', 'USE_CONDITION', 'AGE_OR_ROUTE_CONDITION'] as const
+      ).includes(s as never),
     );
 
   if (isRestrictionNotProhibition) {
@@ -413,9 +414,10 @@ export function projectLens(input: LensInput): RegulatoryLensSnapshot {
 
     if (jurisdictionRules.length === 0) {
       // Checked, nothing matched. This is emphatically not approval.
-      const statuses: RegulatoryStatus[] = jurisdictionOpinions.length > 0
-        ? ['NO_MATCHED_RULE_WITHIN_COVERAGE', 'SCIENTIFIC_OPINION']
-        : ['NO_MATCHED_RULE_WITHIN_COVERAGE'];
+      const statuses: RegulatoryStatus[] =
+        jurisdictionOpinions.length > 0
+          ? ['NO_MATCHED_RULE_WITHIN_COVERAGE', 'SCIENTIFIC_OPINION']
+          : ['NO_MATCHED_RULE_WITHIN_COVERAGE'];
 
       entries.push(
         buildEntry({

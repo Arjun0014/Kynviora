@@ -22,8 +22,7 @@ function makeGuard<const T extends readonly string[]>(
   values: T,
 ): (value: unknown) => value is Member<T> {
   const set: ReadonlySet<string> = new Set(values);
-  return (value: unknown): value is Member<T> =>
-    typeof value === 'string' && set.has(value);
+  return (value: unknown): value is Member<T> => typeof value === 'string' && set.has(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -99,8 +98,33 @@ export function jurisdictionsForMarket(market: MarketCode): readonly Jurisdictio
 
 /** EU member state market codes, for jurisdiction resolution. */
 const EU_MEMBER_MARKETS: ReadonlySet<string> = new Set([
-  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE',
-  'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE',
+  'AT',
+  'BE',
+  'BG',
+  'HR',
+  'CY',
+  'CZ',
+  'DK',
+  'EE',
+  'FI',
+  'FR',
+  'DE',
+  'GR',
+  'HU',
+  'IE',
+  'IT',
+  'LV',
+  'LT',
+  'LU',
+  'MT',
+  'NL',
+  'PL',
+  'PT',
+  'RO',
+  'SK',
+  'SI',
+  'ES',
+  'SE',
 ]);
 
 /** Human-readable jurisdiction names. Never paired with a "strict"/"weak" ranking (`09`). */
@@ -165,13 +189,7 @@ export const MVP_USER_VISIBLE_EVIDENCE_LEVELS: readonly EvidenceLevel[] = Object
  * CRITICAL, while a foreign ingredient restriction backed by primary law (also strong evidence)
  * defaults to INFORMATIONAL because it is not a personal medical conclusion (`09`).
  */
-export const ACTION_URGENCIES = [
-  'CRITICAL',
-  'HIGH',
-  'MEDIUM',
-  'LOW',
-  'INFORMATIONAL',
-] as const;
+export const ACTION_URGENCIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFORMATIONAL'] as const;
 export type ActionUrgency = Member<typeof ACTION_URGENCIES>;
 export const isActionUrgency = makeGuard(ACTION_URGENCIES);
 
