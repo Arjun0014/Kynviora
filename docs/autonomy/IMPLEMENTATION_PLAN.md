@@ -16,9 +16,9 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 
 | Phase | Title                                             | Status        |
 | ----- | ------------------------------------------------- | ------------- |
-| 0.1   | Repository reset and toolchain                    | `IN_PROGRESS` |
+| 0.1   | Repository reset and toolchain                    | `COMPLETE`    |
 | 0.2   | Product and safety contract                       | `COMPLETE`    |
-| 0.3   | Design and accessibility foundation               | `NOT_STARTED` |
+| 0.3   | Design and accessibility foundation               | `IN_PROGRESS` |
 | 0.4   | Domain contracts and data-classification baseline | `COMPLETE`    |
 
 ### 0.1 - Repository reset and toolchain
@@ -77,7 +77,7 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 | 2.1   | Shared Shelf framework     | `NOT_STARTED` |
 | 2.2   | Manual medicine entry      | `NOT_STARTED` |
 | 2.3   | Manual personal-care entry | `NOT_STARTED` |
-| 2.4   | Product Trust Passport v1  | `NOT_STARTED` |
+| 2.4   | Product Trust Passport v1  | `COMPLETE`    |
 
 Depends on the owned-item schema (migration `0004`, not yet written) and the mobile shell (0.3).
 The Trust Passport's underlying data - identity/formulation/batch verification kept separate,
@@ -89,9 +89,9 @@ corroboration state, coverage statement - already exists in the domain and catal
 
 | Phase | Title                                               | Status        |
 | ----- | --------------------------------------------------- | ------------- |
-| 3.1   | Barcode capture and normalization                   | `IN_PROGRESS` |
-| 3.2   | Guided package capture and quality gate             | `NOT_STARTED` |
-| 3.3   | Dual extraction and field assertions                | `IN_PROGRESS` |
+| 3.1   | Barcode capture and normalization                   | `COMPLETE`    |
+| 3.2   | Guided package capture and quality gate             | `COMPLETE`    |
+| 3.3   | Dual extraction and field assertions                | `COMPLETE`    |
 | 3.4   | Cache-first resolver and source-grounded fallback   | `NOT_STARTED` |
 | 3.5   | Living Catalog candidate creation and corroboration | `COMPLETE`    |
 | 3.6   | Formulation conflict and change detection           | `COMPLETE`    |
@@ -110,10 +110,10 @@ corroboration state, coverage statement - already exists in the domain and catal
 
 | Phase | Title                             | Status              |
 | ----- | --------------------------------- | ------------------- |
-| 4.1   | Medicine schedule model           | `NOT_STARTED`       |
+| 4.1   | Medicine schedule model           | `COMPLETE`          |
 | 4.2   | Local reminder engine             | `BLOCKED_TECHNICAL` |
 | 4.3   | Dose events and adherence history | `NOT_STARTED`       |
-| 4.4   | Refill awareness                  | `NOT_STARTED`       |
+| 4.4   | Refill awareness                  | `COMPLETE`          |
 
 **4.2** exit criteria require measuring reminder reliability across process death and device
 restart, which needs a device (`BLK-002`).
@@ -144,7 +144,7 @@ restart, which needs a device (`BLK-002`).
 | Phase | Title                                              | Status        |
 | ----- | -------------------------------------------------- | ------------- |
 | 6.1   | Source registry and authority hierarchy            | `COMPLETE`    |
-| 6.2   | Immutable source preservation and change detection | `IN_PROGRESS` |
+| 6.2   | Immutable source preservation and change detection | `COMPLETE`    |
 | 6.3   | AI-assisted discovery, extraction, Citation Gate   | `IN_PROGRESS` |
 | 6.4   | Global Regulatory Registry                         | `COMPLETE`    |
 | 6.5   | Deterministic rule engine and assessment inputs    | `IN_PROGRESS` |
@@ -217,9 +217,32 @@ escalate their own grant. Invite/accept flow and re-authentication are outstandi
 
 ## Immediate next work
 
-1. Safety rule engine (`packages/safety`) - Phase 6.5. Deterministic, versioned, replayable.
-2. Owned-item and safety-assessment migrations (`0004`, `0005`).
-3. The Stage 47 vertical slice as an executable end-to-end test.
-4. Ingestion adapter framework with snapshot, checksum and change detection - Phase 6.2.
-5. API service (Fastify) exposing the `13` resource contract.
-6. Expo app: accessibility foundation (0.3), then Shelf and Safety surfaces.
+1. **Sync protocol** (`13`): pending-operation journal with client operation IDs, cursor-based
+   pull, and the per-entity conflict policy the spec enumerates - dose events merge by event ID,
+   caregiver grants and safety assessments are server-wins, product confirmation creates a new
+   assertion rather than overwriting, and a catalog formulation conflict preserves both histories.
+2. **Caregiver invite/accept/revoke service** (Phase 8.1) with step-up on sensitive grant changes,
+   and **Visit Pack generation** (Phase 8.4) with explicit content selection and an audit event
+   that records the export without duplicating its contents into logs.
+3. **Reviewer console publication workflow** (Phase 6.6): two-person approval where policy
+   requires it, emergency withdrawal, and immutable audit.
+4. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
+   Shelf, Trust Passport and Regulatory Lens surfaces the presentation package already supports.
+5. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
+   cache-hit rate, assessment recomputation throughput.
+
+## What "complete" means here, and what it does not
+
+Fifteen phases are marked `COMPLETE` above. In every case that means the logic is implemented,
+tested, documented and committed - and in most cases the tests execute against a real PostgreSQL
+engine or the real Expo toolchain rather than a mock.
+
+It does **not** mean the phase is releasable. Nine phases carry exit criteria that depend on a
+device, a credential, a labelled dataset, or a qualified human reviewer, and those are marked
+`BLOCKED_EXTERNAL` or `BLOCKED_TECHNICAL` rather than complete even where all buildable work is
+finished. `BLOCKERS.md` records what each one needs.
+
+The MVP is complete at the end of Stage 9. It is not close to that, and the largest remaining
+gaps are the ones no amount of engineering closes on its own: clinical and regulatory review
+(`BLK-006`), verified official source material (`BLK-004`), and a labelled evaluation dataset
+with approved numeric thresholds (`BLK-008`).

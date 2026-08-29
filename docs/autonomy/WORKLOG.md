@@ -128,3 +128,90 @@ Recorded in `RESEARCH.md`. Four findings changed the implementation:
 
 **Next**: migrations `0004`-`0006` (owned items, source/regulatory persistence, assessments) with
 RLS tests, then the ingestion adapter framework, then the API service, then the Expo app.
+
+---
+
+## 2026-08-29 - Session 1, continued
+
+### Persistence completed
+
+Migrations `0004` (shelf, health context, medicine care), `0005` (source registry, regulatory
+registry) and `0006` (assessments, alerts, receipts), with 65 new authorization tests.
+
+- **SQL error found on first run**: a CHECK constraint containing a subquery. Postgres does not
+  permit that; replaced with a pure regex expression over the joined array. Also improved the
+  harness so a migration failure reports the position and a short excerpt rather than letting the
+  driver serialize an entire migration into the output.
+- **Design decision recorded in the schema**: the Citation Gate now exists at two layers. The
+  pure function makes decisions testable and explainable; CHECK constraints make the same
+  requirements hold for a direct database write - an operator session, a mistaken migration, or a
+  future service bug.
+- Three test failures on the regulatory suite, all my own test-authoring errors. The most
+  interesting: my `DELETE FROM regulatory_rule_version` was correctly blocked by the append-only
+  trigger. The fix was to work with the invariant (scope queries by a unique substance key)
+  rather than around it, and to add a test asserting the deletion is refused.
+
+### Ingestion pipeline
+
+Source retrieval with an origin allow-list, size and content-type limits, checksum-based change
+detection, and a replayable fixture adapter.
+
+- The origin check compares scheme, host and path-segment boundary. A `startsWith` check would
+  accept `alerts.example.test.evil.test`, which is a different host entirely - covered by a test.
+- **34 lint errors reached a commit** because my verification command piped eslint through
+  `tail`, which discards the exit code. Fixed the root cause: `npm run verify` now chains every
+  gate with `&&`, and the CI workflow comments call the hazard out explicitly. The lint errors
+  themselves came from `Array.isArray` widening a `readonly T[]` to `any[]`; the fix was to type
+  the untrusted document as `Readonly<Record<string, unknown>>` and narrow each field explicitly,
+  which is the more honest model anyway.
+
+### API boundary
+
+Fastify with Zod, tested against the real database through PGlite with RLS in force.
+
+The design property worth recording: `GET /v1/items` passes a client-supplied `profileId`
+straight into the query. That is safe by construction - the ID narrows the result set, RLS
+decides access - and a test asserts a foreign profile returns a response byte-identical to an
+empty one, so the API never confirms a profile exists to someone not permitted to see it.
+
+### Presentation layer
+
+Design tokens, status presentation and safety copy, with 436 tests.
+
+- **Two bugs found by tests.** The forbidden-claim detector flagged "This does not mean the
+  product is safe", which spec 09 and 18 explicitly _require_ - a negation window fixed it, since
+  the negation sits several words before the phrase. Separately, the danger rule missed "this
+  product is not dangerous", which is itself the universal safety verdict spec 23 D-005 forbids;
+  the pattern now catches both forms, which is why that rule is deliberately _not_
+  negation-sensitive. The asymmetry is documented in the code.
+
+### Mobile app
+
+Expo SDK 57 shell. Versions verified rather than assumed: expo 57.0.18, react-native 0.86.2,
+react 19.2.8. Typechecks against the real toolchain; nothing has run on a device (`BLK-002`).
+
+An initial install failed because I pinned react 19.2.0 while RN 0.86.2 requires `^19.2.3` -
+corrected to the version the SDK actually requires.
+
+### Schedule, capture and Trust Passport
+
+- Schedule computation stores local wall-clock times plus an IANA zone rather than UTC instants,
+  because storing UTC silently shifts a dose by an hour twice a year. Tested across a
+  spring-forward transition; the hand-computed UTC instants matched.
+- Capture pipeline enforces the rule end to end: a machine-built assertion is UNCONFIRMED with
+  OCR provenance, so even when both engines agree _and_ the validator passes,
+  `isTrustedForSafetyUse` still returns false.
+- Trust Passport has no aggregate field, and a test asserts none exists.
+
+### Record correction
+
+Two commit messages state test counts slightly higher than the actual run: one says 1010 where
+the suite reported 1008, and one says 1060 where it reported 1047. I composed those messages
+before running the suite. The counts in `STATUS.md` and in this log are taken from actual runs.
+Git history is not rewritten, so the discrepancy is recorded here instead.
+
+### State at end of session 1
+
+1073 tests passing, typecheck clean, lint clean, format clean. 16 commits plus the baseline tag.
+Fifteen spec phases marked `COMPLETE`; nine marked blocked on a device, a credential, a dataset,
+or a qualified reviewer.
