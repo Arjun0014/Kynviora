@@ -6,3 +6,4 @@
  */
 
 export * from './rules.js';
+export * from './schedule.js';
