@@ -349,10 +349,17 @@ export function registerCaregiverRoutes(app: FastifyInstance, deps: CaregiverRou
     try {
       const created = await ctx.privileged('CAREGIVER_GRANT_FINALISATION', async (db) => {
         const inserted = await db.query<{ id: string }>(
+          // `created_at` is written explicitly rather than left to its `DEFAULT now()`, because
+          // `expires_at` is derived from the injected clock and the two are compared by
+          // `caregiver_invitation_expiry_after_creation`. Letting the column default would put
+          // the database wall clock on one side of that CHECK and the domain clock on the other,
+          // so a short lifetime anchored at a fixed clock becomes unsatisfiable once real time
+          // passes it - a row the domain considers valid, refused by the schema. Same clock on
+          // both sides, for the same reason production code may not call `new Date()`.
           `INSERT INTO caregiver_invitation
              (profile_id, invited_by_user_id, invited_email_normalized, capabilities, token_hash,
-              expires_at, grant_expires_at, client_operation_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+              created_at, expires_at, grant_expires_at, client_operation_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            RETURNING id`,
           [
             body.profileId,
@@ -360,6 +367,7 @@ export function registerCaregiverRoutes(app: FastifyInstance, deps: CaregiverRou
             invitedEmail,
             delegable.value,
             hash,
+            ctx.now,
             expiry.value,
             body.grantExpiresAt ?? null,
             ctx.operationId,

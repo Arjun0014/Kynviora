@@ -3,24 +3,24 @@
 **Resume checkpoint.** Read this first on any autonomous restart, then `git log`, then the tail
 of `WORKLOG.md`, then `BLOCKERS.md`.
 
-Last updated: 2026-08-29
+Last updated: 2026-08-31
 
 ---
 
 ## Current position
 
-|                    |                                                                    |
-| ------------------ | ------------------------------------------------------------------ |
-| **Current stage**  | Stage 8 (family collaboration)                                     |
-| **Current phase**  | Visit Pack (8.4); Review Inbox (8.3)                               |
-| **Last completed** | Phase 8.1 caregiver invitation and grants                          |
-| **Branch**         | `master`                                                           |
-| **Latest commit**  | `feat(care): caregiver invitation, acceptance and revocation flow` |
-| **Baseline tag**   | `baseline-spec-only`                                               |
+|                    |                                                       |
+| ------------------ | ----------------------------------------------------- |
+| **Current stage**  | Stage 8 (family collaboration)                        |
+| **Current phase**  | Caregiver alert delivery (8.2); Review Inbox (8.3)    |
+| **Last completed** | Phase 8.4 Visit Pack                                  |
+| **Branch**         | `master`                                              |
+| **Latest commit**  | `feat(export): Visit Pack with reviewed-content gate` |
+| **Baseline tag**   | `baseline-spec-only`                                  |
 
 ## Verification state
 
-- **1265 tests passing**, 0 failing, across 26 files.
+- **1366 tests passing**, 0 failing, across 30 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -44,15 +44,16 @@ npm run verify
 | Presentation layer, accessibility tokens, safety copy      | Complete, 461 tests                        |
 | API boundary (Fastify), RLS-scoped context                 | Complete, 85 tests                         |
 | Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                         |
-| Caregiver invitation, acceptance, revocation, audit        | Complete, 149 tests                        |
+| Caregiver invitation, acceptance, revocation, audit        | Complete, 150 tests                        |
+| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                        |
 | End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                         |
 | Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**        |
-| Caregiver screens                                          | Typecheck; **not wired** (`DEV-007`)       |
+| Caregiver and Visit Pack screens                           | Typecheck; **not wired** (`DEV-007`)       |
 | CI pipeline                                                | Written; not yet run on a real runner      |
 
-Rows are areas, not a partition. The caregiver row counts the same 149 tests that also appear in
-the database, API, presentation and domain rows, because the feature spans all four layers.
-Per-file counts are reproducible with `npx vitest run --reporter=json`.
+Rows are areas, not a partition. The caregiver and Visit Pack rows count the same tests that also
+appear in the database, API, presentation and domain rows, because each feature spans all four
+layers. Per-file counts are reproducible with `npx vitest run --reporter=json`.
 
 ## Known failing tests
 
@@ -76,12 +77,13 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Visit Pack generation** (Phase 8.4). Explicit content selection, a review screen showing exactly
-what will be shared before it is generated, step-up before generation (`14` lists exports
-alongside caregiver administration), and an audit event that records that an export happened
-without duplicating its contents into the log. `EXPORT_SUMMARY` already exists as a caregiver
-capability, and the presentation layer already describes it as a capability that _changes_
-something rather than one that only views, so the authorization side is in place.
+**Caregiver alert delivery** (Phase 8.2). Deliver safety information to a caregiver only to the
+extent the profile owner permitted, with generic notification content by default (`03` group H),
+reusing the capability model Phase 8.1 established - `VIEW_SAFETY` and `RECEIVE_MISSED_DOSE` both
+already exist as capabilities and are enforced by `has_capability`. Note that delivery is
+implementable without `BLK-006` being resolved: the routing, permission filtering and
+notification-content rules are testable over synthetic alerts, and nothing here publishes a
+safety rule.
 
 ## Next three planned tasks
 
@@ -90,8 +92,8 @@ something rather than one that only views, so the authorization side is in place
 2. Reviewer console publication workflow (Phase 6.6): two-person approval where policy requires
    it, emergency withdrawal, and immutable audit.
 3. Wire the Expo screens to the API contract, replacing the placeholder states with the Shelf,
-   Trust Passport, Regulatory Lens and caregiver surfaces the presentation package supports
-   (`DEV-007`).
+   Trust Passport, Regulatory Lens, caregiver and Visit Pack surfaces the presentation package
+   supports (`DEV-007`).
 
 ## Recent decisions worth knowing
 
@@ -113,6 +115,18 @@ something rather than one that only views, so the authorization side is in place
   delegate `MANAGE_CAREGIVERS`. Both prevent an authorization change the owner would not observe.
 - **DEC-021** - `token_hash` is protected by a column-level `GRANT`, not by RLS. Row-level
   security is row-shaped and cannot hide a column.
+- **DEC-022** - a Visit Pack stores a _manifest_ (which records, at which version) and a content
+  digest, never a copy of the content. A stored copy would outlive the record it came from and
+  would have to be enumerated in the deletion workflow. Retrieval re-renders from live records and
+  reports `matchesGeneratedContent` when they have moved on.
+- **DEC-023** - generation quotes the digest of the content the user reviewed, and is refused with
+  `EXPORT_CONTENT_CHANGED` if recomputing it from live data differs. This is what makes "a user
+  can review exactly what will be shared" a property of the system rather than a claim about the
+  client.
+- **DEC-024** - an **authorization** predicate uses the real clock (`has_capability` keeps
+  `expires_at > now()`), because an injectable clock must never resurrect an expired grant.
+  **Written domain data** uses the injected clock, so rows stay replayable. Never put both inside
+  one comparison - see trap 12.
 
 ## Traps to avoid on resume
 
@@ -139,3 +153,12 @@ something rather than one that only views, so the authorization side is in place
 11. The invitation token is a live credential. It belongs in a POST body only - never a URL, a log
     line, or an exception message. `inviteToken()` deliberately does not echo the value it
     rejected.
+12. A CHECK constraint may only compare timestamps written from the **same** clock, so a column
+    appearing in one must be written explicitly rather than left to `DEFAULT now()`. This already
+    bit once: `caregiver_invitation` compared an injected-clock `expires_at` against a wall-clock
+    `created_at`, and the shortest permitted lifetime became unsatisfiable the day after the test
+    was written. If a time-related test starts failing on a date nobody changed anything on, look
+    here first (DEC-024).
+13. Heredocs in this environment collapse `\\` to `\`, so a `\uXXXX` escape written that way lands
+    as a real control character - the corruption trap 7 warns about, arriving by a second route.
+    Build such escapes with `String.fromCharCode(92)` instead, and re-scan afterwards.

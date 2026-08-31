@@ -377,6 +377,26 @@ describe('creating an invitation', () => {
     });
     expect(response.statusCode).toBe(400);
   });
+
+  it('anchors created_at to the injected clock, not the database wall clock', async () => {
+    // Both sides of `caregiver_invitation_expiry_after_creation` must come from the same clock.
+    // When `created_at` was left to its `DEFAULT now()`, an expiry derived from a fixed injected
+    // clock was compared against real time, so the shortest permitted lifetime became
+    // unsatisfiable the moment the wall clock passed it - the row was refused by the schema and
+    // surfaced as a 500. Reading the column back proves which clock actually wrote it.
+    const { invitationId } = await createInvitation({ invitationTtlDays: 1 });
+
+    const stored = await t.asService((db) =>
+      db.query<{ created_at: Date; expires_at: Date }>(
+        'SELECT created_at, expires_at FROM caregiver_invitation WHERE id = $1',
+        [invitationId],
+      ),
+    );
+    const row = stored.rows[0];
+    expect(row).toBeDefined();
+    expect(row?.created_at.toISOString()).toBe(NOW);
+    expect(row?.expires_at.toISOString()).toBe('2026-08-30T12:00:00.000Z');
+  });
 });
 
 describe('accepting an invitation', () => {

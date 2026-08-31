@@ -313,3 +313,106 @@ thresholds (`DEV-006`).
 1265 tests passing across 26 files, up from 1116 across 22. Typecheck, mobile typecheck, lint and
 format all clean via `npm run verify`. 149 new tests: 45 domain, 30 database, 49 API, 25
 presentation.
+
+### Phase 8.4 - Visit Pack
+
+Two exit criteria, and both are about a _sequence_ rather than about any single handler: export
+never happens automatically, and a user can review exactly what will be shared. A single
+"export this profile" endpoint could not satisfy either, so the flow is four steps - propose,
+choose, review, confirm - and the guarantees are encoded rather than asserted in a comment.
+
+**Export never happens automatically.** There is no code path from a profile ID to a pack. The
+request carries an explicit list of selected entity IDs; an empty one is refused, an ID that is
+not on offer is refused, and no "include everything" flag exists to omit. The database agrees:
+`visit_pack_not_empty` refuses a row with neither a manifest entry nor a note. Step-up is checked
+before body parsing, so an export attempt with no re-authentication is refused identically
+whatever else is wrong with it.
+
+**A user can review exactly what will be shared** became the more interesting problem. The
+honest version of that guarantee is not "we showed a screen" - it is "the bytes that get shared
+are the bytes that were read". So the candidates response carries a digest of the proposal, the
+generate request quotes the digest of whatever subset the user actually reviewed, and generation
+recomputes it from live data and refuses on a mismatch (DEC-023). The failure this catches is not
+an attacker - the user is exporting their own data - but a caregiver editing a medicine between
+the review screen and the Generate button. Without the check, a line nobody read would end up in
+a document handed to a clinician.
+
+The digest covers the caveat as well as the content, so an item that became _verified_ since
+review also counts as a change. That looked like over-strictness until I wrote the test: the
+printed page genuinely differs, and "checked against the package" versus "entered by hand and not
+checked" is exactly the distinction the page exists to carry.
+
+**What is stored was the other real decision** (DEC-022). Rendering the pack once and storing the
+result is the obvious implementation and the wrong one: it creates a second store of the most
+sensitive data in the system, longer-lived than the original, surviving the user correcting or
+deleting the record it came from, and adding a cached-export category to the deletion workflow
+`16` requires be enumerated. So the row holds a manifest - section, entity kind, ID, version -
+plus the digest, and retrieval re-renders from the live records under the same row-level
+security as any other read. A deletion is then actually a deletion.
+
+The cost is drift, and the design makes it visible instead of silent: `matchesGeneratedContent`
+goes false when the live entries no longer hash to the stored digest, and `removedSinceGeneration`
+counts records that have gone. A reader is told the pack no longer matches, rather than shown
+different data under an old date. A test asserts that no medicine name, ingredient term or
+directions text appears anywhere in the `visit_pack` table.
+
+**Provenance is on the page, not in a footnote.** Every entry carries a required caveat, derived
+from its verification state or provenance kind. `factCaveat` lists every provenance kind
+explicitly - the lint rule demanded it, and the rule was right: a `default` branch would let a
+newly added machine-extraction kind silently inherit "reported by the person", which for an OCR
+result would be false on a page a clinician reads. Directions text is reproduced verbatim, never
+paraphrased.
+
+**Exports are a separate permission, and the tests prove it.** `visit_pack_select` admits the
+owner, the creator, and a caregiver holding `EXPORT_SUMMARY` - deliberately not one holding
+`VIEW_MEDICINES`. A caregiver who can read the medicines cannot see what was shared with a
+clinician. `03` group H requires that separation; a test asserts it at the database and again
+through the API.
+
+### Things worth recording
+
+- The placeholder `POST /v1/visit-packs` from the API phase returned 202 to anything with a fresh
+  step-up. Replacing it broke three tests, correctly. Two now assert the step-up gate as before;
+  the third asserted a 202 that no longer means anything, so it was rewritten to assert what is
+  actually true - that once step-up passes, an empty request fails on its merits - plus a new
+  case asserting the gate fires before body parsing.
+- Writing U+001F and U+001E as literal characters in the source corrupted the file, exactly as
+  trap 7 in `STATUS.md` warns. Fixed by escaping at the byte level and never re-introducing them.
+
+### Resume verification, and a defect it found
+
+The session ended at the weekly limit part-way through this log entry, so the phase was re-verified
+from the repository state rather than trusted. Everything above was present and the code was
+complete, but `npm run verify` no longer passed: `services/api/src/caregiver.test.ts > refuses an
+expired invitation` failed, with invitation _creation_ returning 500.
+
+The cause was a genuine defect in Phase 8.1, not a flaky test. `caregiver_invitation` derives
+`expires_at` from the **injected** clock but let `created_at` fall through to its
+`DEFAULT now()` - the **database wall** clock. The CHECK `expires_at > created_at` therefore
+compared two different clocks. With the suite's clock frozen at 2026-08-29 and a one-day
+lifetime, the row stayed insertable only while real time was behind 2026-08-30. It passed on the
+day it was written and started failing the next day. Resuming on 2026-08-31 is what surfaced it.
+
+The fix is to write `created_at` from `ctx.now`, so both sides of the constraint come from one
+clock - the same reason production code may not call `new Date()`. `visit_pack` already passed
+`generated_at` explicitly and was never affected; a comment on its constraint now says why, so the
+next table does not rediscover this.
+
+The distinction that makes this coherent is recorded as DEC-024: an **authorization** predicate
+uses the real clock deliberately, because an injectable clock must never be able to resurrect an
+expired grant, while **written domain data** uses the injected clock so it stays replayable.
+`has_capability` is on the correct side of that line and was left alone. A test now names the
+invariant directly by reading `created_at` back and asserting which clock wrote it, rather than
+relying on the expired-invitation test to catch it as a side effect.
+
+### State at end of Phase 8.4
+
+1366 tests passing across 30 files, up from 1265 across 26. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`. 100 new tests for the phase: 34 domain, 18 database, 31 API
+(including the two rewritten step-up cases), 17 presentation - plus the one regression test for
+the clock defect above.
+
+The mobile review screen is built and typechecks against the real contract - it derives every
+count and section name from the same selection that will be sent, so it cannot describe an export
+it is not about to make - but like the caregiver screens it is not wired to a repository
+(`DEV-007`).

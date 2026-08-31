@@ -88,6 +88,11 @@ const STATUS_BY_CODE: Readonly<Record<DomainErrorCode, number>> = Object.freeze(
   INVITATION_ALREADY_RESOLVED: 409,
   CAPABILITY_ESCALATION: 403,
 
+  // Export. 409 because the request conflicts with the current state and the resolution is to
+  // re-read and retry; 410 because an expired pack existed and is now permanently gone.
+  EXPORT_CONTENT_CHANGED: 409,
+  EXPORT_EXPIRED: 410,
+
   // Concurrency and sync
   VERSION_CONFLICT: 409,
   IDEMPOTENCY_REPLAY: 200,
@@ -124,6 +129,9 @@ const MESSAGE_BY_CODE: Partial<Record<DomainErrorCode, string>> = Object.freeze(
   INVITATION_EXPIRED: 'This invitation has expired. Ask for a new one.',
   INVITATION_ALREADY_RESOLVED: 'This invitation has already been used.',
   CAPABILITY_ESCALATION: 'You cannot grant permissions you do not hold yourself.',
+  EXPORT_CONTENT_CHANGED:
+    'This information changed since you reviewed it. Check it again before sharing.',
+  EXPORT_EXPIRED: 'This Visit Pack has expired. Create a new one to share it again.',
   RATE_LIMITED: 'Too many requests. Try again shortly.',
   BUDGET_EXCEEDED: 'This request exceeds the current processing budget. Try again later.',
   INTERNAL: 'Something went wrong.',

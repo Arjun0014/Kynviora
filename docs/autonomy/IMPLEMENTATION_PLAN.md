@@ -186,7 +186,7 @@ restart, which needs a device (`BLK-002`).
 | 8.1   | Caregiver invitation and grants     | `COMPLETE`    |
 | 8.2   | Caregiver alert delivery            | `NOT_STARTED` |
 | 8.3   | Household Review Inbox              | `NOT_STARTED` |
-| 8.4   | Visit Pack                          | `NOT_STARTED` |
+| 8.4   | Visit Pack                          | `COMPLETE`    |
 | 8.5   | Medicine Reconciliation workflow v1 | `NOT_STARTED` |
 
 **8.1**: complete. Migration `0007` adds `caregiver_invitation` with hash-only token storage
@@ -203,6 +203,24 @@ presentation suites.
 
 Outstanding: the mobile screens are built and typecheck but are not wired to a repository
 (`DEV-007`), and the invitation lifetime defaults await product sign-off (`DEV-006`).
+
+**8.4**: complete. Migration `0008` adds `visit_pack`, which stores a selection-and-version
+manifest and a content digest rather than a copy of the exported content (DEC-022), expires by a
+NOT NULL `expires_at` evaluated against the clock on every retrieval, and is visible only to the
+owner, the creator, or a caregiver holding `EXPORT_SUMMARY` - never one holding merely
+`VIEW_MEDICINES`, which is the separate-permission requirement in `03` group H.
+
+Both exit criteria are encoded rather than asserted. _Export never happens automatically_: there
+is no path from a profile ID to a pack, the selection is an explicit ID list with no
+include-everything flag, an empty pack is refused by the domain and by a CHECK constraint, and
+step-up is checked before body parsing. _A user can review exactly what will be shared_: the
+generate request quotes the digest of the reviewed content, and generation recomputes it from live
+data and refuses on any difference, including a changed caveat or a note added after the review
+(DEC-023).
+
+100 tests across the domain, database, API and presentation suites. Outstanding: the mobile review
+screen typechecks but is not wired (`DEV-007`); the 72-hour retention and the 90-day recent-changes
+window are engineering defaults (`DEV-009`, `DEV-010`).
 
 ---
 
@@ -228,11 +246,10 @@ Outstanding: the mobile screens are built and typecheck but are not wired to a r
 
 ## Immediate next work
 
-1. **Household Review Inbox** (Phase 8.3), which the caregiver grant surface now has the
-   authorization model to support.
-2. **Visit Pack generation** (Phase 8.4) with explicit content selection, a review screen showing
-   exactly what will be shared, step-up before generation, and an audit event that records the
-   export without duplicating its contents into logs.
+1. **Caregiver alert delivery** (Phase 8.2): share only the safety information the profile
+   owner permitted, with generic notification content by default (`03` group H).
+2. **Household Review Inbox** (Phase 8.3): non-urgent quality and care tasks displayed without
+   safety-alert styling, using the caregiver authorization model Phase 8.1 established.
 3. **Reviewer console publication workflow** (Phase 6.6): two-person approval where policy
    requires it, emergency withdrawal, and immutable audit.
 4. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
@@ -242,7 +259,7 @@ Outstanding: the mobile screens are built and typecheck but are not wired to a r
 
 ## What "complete" means here, and what it does not
 
-Sixteen phases are marked `COMPLETE` above. In every case that means the logic is implemented,
+Seventeen phases are marked `COMPLETE` above. In every case that means the logic is implemented,
 tested, documented and committed - and in most cases the tests execute against a real PostgreSQL
 engine or the real Expo toolchain rather than a mock.
 

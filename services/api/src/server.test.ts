@@ -393,15 +393,30 @@ describe('POST /v1/visit-packs - step-up authentication (spec 14)', () => {
     expect(response.statusCode).toBe(403);
   });
 
-  it('accepts with a fresh step-up', async () => {
+  it('passes the step-up gate and then rejects an empty request on its merits', async () => {
+    // Once step-up is satisfied the request is judged as a request: an empty body names no
+    // profile and selects nothing, so it fails validation rather than being accepted. The full
+    // generation flow is covered in `visitPack.test.ts`.
     const fresh = new Date(Date.parse(NOW) - 60_000).toISOString();
     const response = await request(principalFor(OWNER, fresh), {
       method: 'POST',
       url: '/v1/visit-packs',
+      headers: { 'idempotency-key': '00000000-0000-4000-8000-0000000009f1' },
       payload: {},
     });
-    expect(response.statusCode).toBe(202);
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: 'VALIDATION_FAILED' } });
   });
+
+  it('refuses before parsing the body, so the gate does not depend on a well-formed request', () =>
+    request(principalFor(OWNER), {
+      method: 'POST',
+      url: '/v1/visit-packs',
+      payload: { profileId: 'not-a-uuid', selectedEntityIds: [] },
+    }).then((response) => {
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({ error: { code: 'STEP_UP_REQUIRED' } });
+    }));
 });
 
 describe('GET /v1/regulatory-lens', () => {

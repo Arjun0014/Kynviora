@@ -150,3 +150,35 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Temporary or permanent**: permanent.
 - **Risk**: low. Purely a type-level change; the full suite passed unchanged immediately after.
 - **Required future work**: none.
+
+## DEV-009 - Visit Pack retention set without an approved retention policy
+
+- **Affected specification**: `16` requires temporary export objects to expire and requires a
+  retention matrix to be defined before production, without naming a value. `23` lists retention
+  policy as a decision requiring approval.
+- **Expected behaviour**: an approved retention period for generated exports.
+- **Implemented behaviour**: an engineering default of 72 hours with a maximum of 14 days,
+  enforced by `visitPackExpiryFor` and by a NOT NULL `expires_at` with a CHECK that it follows
+  generation - a pack that never expires cannot be represented.
+- **Reason**: 72 hours covers "generated the night before an appointment" without leaving a
+  shareable view of someone's medicines alive indefinitely. A value was needed to ship the flow.
+- **Temporary or permanent**: temporary. Documented in the code as an engineering default, not an
+  approved retention policy.
+- **Risk**: low. Expiry is evaluated against the clock on every retrieval, so changing the value
+  needs no migration and no sweep.
+- **Required future work**: the retention matrix `16` requires, and a decision on whether a pack
+  should be retained (revoked but readable) or removed at expiry.
+
+## DEV-010 - Recent-item-changes section is time-windowed by an unapproved threshold
+
+- **Affected specification**: `03` group I and `04` Phase 8.4 list "recent item changes" and
+  "recent medication changes/events if selected" without defining recent.
+- **Expected behaviour**: a product-defined window.
+- **Implemented behaviour**: 90 days, applied to stopped items, as `RECENT_CHANGE_WINDOW_DAYS`.
+- **Reason**: a stopped medicine is often the single most useful line on a handoff page, and an
+  unbounded window would eventually make the section unreadable. 90 days spans a typical review
+  interval.
+- **Temporary or permanent**: temporary.
+- **Risk**: low. The section is never included unless the user selects it, and the window only
+  affects what is offered.
+- **Required future work**: product sign-off, ideally informed by what clinicians say is useful.

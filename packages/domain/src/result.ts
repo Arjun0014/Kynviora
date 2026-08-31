@@ -136,6 +136,11 @@ export const DOMAIN_ERROR_CODES = [
   'INVITATION_ALREADY_RESOLVED',
   'CAPABILITY_ESCALATION',
 
+  // Export (spec 04 Phase 8.4, 16 Export). Separate from the sync codes because the client
+  // response is different: a changed export is re-reviewed by a person, not merged by a policy.
+  'EXPORT_CONTENT_CHANGED',
+  'EXPORT_EXPIRED',
+
   // Concurrency and sync
   'VERSION_CONFLICT',
   'IDEMPOTENCY_REPLAY',

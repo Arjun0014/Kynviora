@@ -31,9 +31,10 @@ import {
 } from '@kynviora/domain';
 import { projectLens, type SourceRegistryEntry } from '@kynviora/regulatory';
 import type { DatabasePool, Principal, RequestContext } from './context.js';
-import { createRequestContext, hasFreshStepUp } from './context.js';
+import { createRequestContext } from './context.js';
 import { toErrorResponse, statusForCode } from './errors.js';
 import { nodeInviteTokenService, registerCaregiverRoutes } from './caregiver.js';
+import { registerVisitPackRoutes, sha256ContentDigest } from './visitPack.js';
 
 /** Maximum request body. `13` requires body-size limits; 1MB is ample for JSON payloads. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
@@ -556,26 +557,6 @@ export function createServer(options: ServerOptions): FastifyInstance {
   });
 
   // -------------------------------------------------------------------------
-  // POST /v1/visit-packs  (step-up required)
-  // -------------------------------------------------------------------------
-
-  app.post('/v1/visit-packs', async (request, reply) => {
-    const ctx = await contextFor(request, reply);
-    if (!ctx) return;
-
-    // `14`: step-up authentication for exports. A valid session is explicitly not sufficient.
-    if (!hasFreshStepUp(ctx)) {
-      return fail(
-        reply,
-        domainError('STEP_UP_REQUIRED', 'Confirm your identity to create an export.'),
-        ctx.correlationId,
-      );
-    }
-
-    return reply.status(202).send({ status: 'accepted', serverTime: ctx.now });
-  });
-
-  // -------------------------------------------------------------------------
   // Caregiver invitation, grant and audit routes (spec 04 Phase 8.1)
   // -------------------------------------------------------------------------
   // Registered from a separate module because the flow carries its own authorization discipline:
@@ -587,6 +568,16 @@ export function createServer(options: ServerOptions): FastifyInstance {
     fail,
     tokens: options.tokens ?? nodeInviteTokenService(),
   });
+
+  // -------------------------------------------------------------------------
+  // Visit Pack routes (spec 04 Phase 8.4)
+  // -------------------------------------------------------------------------
+  // These replace the placeholder POST /v1/visit-packs that this file used to serve, so the
+  // export flow has a single implementation. Their authorization is the same shape as the
+  // caregiver routes: reads under RLS, generation through the service role, step-up in the
+  // domain.
+
+  registerVisitPackRoutes(app, { contextFor, fail, digest: sha256ContentDigest() });
 
   // -------------------------------------------------------------------------
   // Fallbacks

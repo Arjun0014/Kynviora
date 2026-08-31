@@ -460,3 +460,109 @@ the app role is refused, and a separate test asserts every other column still re
 
 **Sources.** `14_SECURITY.md` (authorization, column-level controls); `19` (negative
 authorization tests).
+
+---
+
+## DEC-022 - A Visit Pack stores a manifest, not a copy of its content
+
+**Context.** `07` calls a VisitPack a "generated selection/version snapshot". `16` requires
+exports to expire, to be enumerable in the deletion workflow, and not to duplicate sensitive
+content into logs. The obvious implementation is to render the pack once and store the result.
+
+**Options.** (a) Store the rendered content. (b) Store a reference and re-render on retrieval.
+(c) Store a manifest of selected record IDs and versions, plus a digest of the reviewed content,
+and re-render from the live records.
+
+**Decision.** (c). The `visit_pack` row holds `manifest` (section, entity kind, entity ID and
+version per entry), `content_digest`, the user-written notes, `generated_at` and `expires_at`.
+Retrieval rebuilds the entries from the live records through the RLS-scoped connection, then
+recomputes the digest and reports `matchesGeneratedContent`.
+
+**Rationale.** A stored copy would be a second store of exactly the data `16` classifies as most
+sensitive - longer-lived than the original, reachable by a different path, and surviving the user
+correcting or deleting the record it came from. It would also add a cached-export category to the
+deletion workflow that `16` requires be enumerated. Re-rendering means a deletion is a deletion.
+
+The notes are the deliberate exception: the user wrote them expressly to be shared, and they exist
+nowhere else, so there is nothing to re-render them from.
+
+**Consequences.** The underlying records can move on after generation. That is made visible
+rather than silent: `matchesGeneratedContent` is false when the live entries no longer hash to
+the stored digest, and `removedSinceGeneration` counts records that have gone. A reader is told
+the pack no longer matches what was generated instead of being shown different data under an old
+date. A test asserts no medicine name, ingredient term or direction text appears anywhere in the
+`visit_pack` table.
+
+**Sources.** `07_DOMAIN_MODEL.md` (VisitPack); `16_PRIVACY_CONSENT_AND_COMPLIANCE.md` (Export,
+Deletion, retention matrix); `03_MVP_DEFINITION.md` group I.
+
+---
+
+## DEC-023 - Generation quotes the digest of what was reviewed, and is refused if it changed
+
+**Context.** `04` Phase 8.4 exit criteria: "Export never happens automatically" and "A user can
+review exactly what will be shared." Both are properties of a _sequence_ - propose, choose,
+review, confirm - and a handler that only receives a final request cannot observe either one.
+
+**Options.** (a) Trust the client to have shown a review screen. (b) Server-side session state
+holding what was rendered. (c) Have the client quote a digest of the reviewed content, and
+recompute it server-side at generation.
+
+**Decision.** (c). `GET /v1/visit-packs/candidates` returns the proposal and a digest.
+`POST /v1/visit-packs` carries `reviewedDigest`; `evaluateGeneration` rebuilds the selection from
+live data, recomputes the digest, and returns `EXPORT_CONTENT_CHANGED` if it differs. Notes are
+part of the digested content, so adding a question after the review is also a change. The
+canonical form is a deterministic serialization over section, entity kind, entity ID, version,
+every rendered line and the caveat, joined with U+001F and U+001E - control characters that
+cannot survive the untrusted-input sanitiser, so content cannot forge a field boundary.
+
+**Rationale.** (a) makes the exit criterion a claim about the client. (b) needs server state with
+its own lifetime and expiry, for a guarantee a hash gives directly. The real failure this catches
+is not an adversary - the user is exporting their own data - but _drift_: a caregiver editing a
+medicine between the review screen and the Generate button would otherwise put a line into a
+shared document that nobody read.
+
+**Consequences.** Concurrent edits cause an export to fail rather than to silently differ, and
+the user re-reviews. The digest includes the caveat, so an item that became verified since review
+also counts as a change - correct, because the printed page differs. Step-up is checked before
+everything else, including body parsing, so an un-authenticated export attempt is refused
+identically whatever else is wrong with it.
+
+**Sources.** `04_STAGES_AND_PHASES.md` Phase 8.4; `06` Journey 8; `14_SECURITY.md` (step-up for
+exports); `16` (show what data will be included).
+
+---
+
+## DEC-024 - Authorization predicates use the real clock; written domain data uses the injected one
+
+**Context.** Found while re-verifying Phase 8.4 on resume. `caregiver_invitation` wrote
+`expires_at` from the injected clock but let `created_at` default to the database's `now()`, and
+the two are compared by `caregiver_invitation_expiry_after_creation`. Once real time passed a
+short lifetime anchored at the suite's frozen clock, the constraint became unsatisfiable and
+creation returned 500. The test passed the day it was written and failed the next.
+
+**Options.** (a) Move the frozen test clock forward periodically. (b) Drop the CHECK. (c) Give
+every timestamp the injected clock. (d) Decide per column, by what the column is for.
+
+**Decision.** (d), with an explicit rule. A timestamp that is **written domain data** comes from
+the injected clock, so a row is reproducible and two values compared by a constraint are
+commensurable. A timestamp used in an **authorization predicate** comes from the real clock,
+because a clock the caller can influence must never be able to make an expired grant look live.
+
+Concretely: `caregiver_invitation.created_at` and `visit_pack.generated_at` are supplied by the
+writer from `ctx.now`. `kynviora.has_capability` keeps `g.expires_at > now()` and is deliberately
+not converted.
+
+**Rationale.** (a) is a maintenance trap that re-arms itself. (b) removes a real constraint to
+hide a clock bug. (c) is wrong in the dangerous direction: routing an RLS expiry check through an
+injectable clock would make revocation-by-expiry depend on a value the request supplies, which is
+precisely the escalation `15` A2 exists to prevent. The bug was never that two clocks exist - it
+is that both ended up inside a single comparison.
+
+**Consequences.** A CHECK may only compare timestamps written from the same clock, and a column
+participating in one may not rely on `DEFAULT now()`. The constraint in `0008` carries a comment
+saying so. A test reads `created_at` back and asserts the injected clock wrote it, so the
+invariant is named rather than caught incidentally by an expiry test.
+
+**Sources.** `14_SECURITY.md`; `15` A2 (revocation takes effect immediately); DEC-010 and the
+lint rule forbidding `new Date()` in production code.

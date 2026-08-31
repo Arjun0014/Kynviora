@@ -46,3 +46,17 @@
 {"ts": "2026-08-29T18:33:00Z", "type": "test_failed", "detail": "shelf assertion wrong, not the policy: VIEW_SHELF does not grant medicine access"}
 {"ts": "2026-08-29T18:34:00Z", "type": "test_added", "detail": "capability separation between shelf and medicines asserted directly (spec 03 group H)"}
 {"ts": "2026-08-29T18:38:00Z", "type": "phase_complete", "detail": "Phase 8.1 caregiver invitation and grants; 1265 tests across 26 files, verify exit 0"}
+{"ts": "2026-08-29T18:45:00Z", "type": "decision_recorded", "detail": "DEC-022 Visit Pack stores a manifest, not a copy of its content"}
+{"ts": "2026-08-29T18:46:00Z", "type": "decision_recorded", "detail": "DEC-023 generation quotes the digest of the reviewed content and is refused if it changed"}
+{"ts": "2026-08-29T18:47:00Z", "type": "migration_added", "detail": "0008_visit_pack: manifest, digest, expiry, EXPORT_SUMMARY-scoped RLS"}
+{"ts": "2026-08-29T18:52:00Z", "type": "defect_found", "detail": "literal U+001F/U+001E written into source, the corruption STATUS.md trap 7 warns about"}
+{"ts": "2026-08-29T18:53:00Z", "type": "defect_fixed", "detail": "escaped at byte level; separators now written as \u001F / \u001E"}
+{"ts": "2026-08-29T18:54:00Z", "type": "test_replaced", "detail": "placeholder visit-pack 202 test replaced; step-up gate now asserted to fire before body parsing"}
+{"ts": "2026-08-29T18:59:00Z", "type": "phase_complete", "detail": "Phase 8.4 Visit Pack; 1365 tests across 30 files, verify exit 0"}
+{"ts": "2026-08-31T16:12:00Z", "type": "session_resumed", "detail": "reconciled repository state after weekly-limit cutoff; Phase 8.4 code present, STATUS.md not yet updated"}
+{"ts": "2026-08-31T16:14:00Z", "type": "defect_found", "detail": "caregiver_invitation mixed clocks: expires_at from injected clock vs created_at DEFAULT now(), CHECK unsatisfiable once wall clock passed a short TTL"}
+{"ts": "2026-08-31T16:16:00Z", "type": "defect_fixed", "detail": "created_at written from ctx.now; visit_pack already explicit, constraint comment added"}
+{"ts": "2026-08-31T16:17:00Z", "type": "decision_recorded", "detail": "DEC-024 authorization predicates use the real clock, written domain data uses the injected clock"}
+{"ts": "2026-08-31T16:18:00Z", "type": "test_added", "detail": "regression test asserts created_at is anchored to the injected clock"}
+{"ts": "2026-08-31T16:19:00Z", "type": "defect_fixed", "detail": "literal U+001F/U+001E removed from packages/domain/src/visitPack.test.ts; repo-wide scan clean (trap 7)"}
+{"ts": "2026-08-31T16:22:00Z", "type": "phase_verified", "detail": "Phase 8.4 Visit Pack; 1366 tests across 30 files, verify exit 0"}
