@@ -763,3 +763,92 @@ question (`DEV-017`).
 
 1812 tests passing across 45 files, up from 1696 across 42. Typecheck, mobile typecheck, lint and
 format all clean via `npm run verify`, exit 0. 116 new tests: 43 domain, 44 database, 29 API.
+
+### Phase 6.7 - Shadow mode and replay
+
+Two exit criteria, and the first one is the kind that a boolean satisfies on paper and loses in
+practice.
+
+**"New high-impact rules can be evaluated without user notification."** The tempting
+implementation is a flag: run the rule, then check `shadowOnly` before dispatching. That holds
+until the day somebody adds a second notification path, which is how every "we did not mean to
+send that" incident happens. So a shadow run produces a value **nothing can notify from**:
+`ShadowRun` carries counts, a per-reason breakdown and a bounded sample; `ShadowSample` is a
+projection of an assessment with the profile removed; and the profile identities are counted and
+discarded inside the same expression, so at no point does the run hold a list of people (DEC-034).
+
+Underneath, the results are written to `shadow_run`, which is not `profile_assessment` - and
+`alert_publication` requires a `profile_assessment`. The tables do not connect. A test queries
+`information_schema` for `alert_publication`'s foreign keys and asserts neither shadow table is
+among them, so the guarantee is checked against the real schema rather than against a diagram.
+
+**The thing that nearly made the feature useless.** `evaluateRule` refuses an unapproved or
+disabled rule, correctly - an unapproved rule producing a match is threat A3's unauthorized
+publication path. But the rule a shadow run exists to measure is precisely one nobody has approved:
+6.7 is what a reviewer looks at _before_ approving. The first working version reported zero matches
+for every candidate, which is not a small bug - a blast radius of zero reads as "this rule affects
+nobody", the same failure mode this codebase refuses elsewhere.
+
+The fix is a projection local to `runShadow`, which satisfies the approval gate for that evaluation
+only. It is defensible because it is unreachable except through a function that has already
+refused a non-shadow rule, because nothing it produces can become user-visible, and because the
+stand-in reviewer ID is the literal string `SHADOW_RUN_NOT_A_REVIEWER`. `enabled: true` is
+included for a less obvious reason: a rule an operator has just killed under `10`'s emergency
+controls is exactly the one somebody needs to measure while working out what it did (DEC-035).
+
+**"Regulatory data corrections can recompute dependent product views and assessments
+reproducibly."** `replayAll` re-evaluates recorded assessments against re-supplied inputs and
+reports, per assessment, whether it reproduced and which fields moved. The API route pairs the
+recorded `profile_assessment` rows with the _current_ state of everything they were computed from,
+which is what a correction actually is. Two tests carry the criterion: replay with the world
+unchanged reproduces everything, and withdrawing the recall notice produces a diff naming both
+affected items and the field that moved. A replay writes nothing back - `profile_assessment` is
+append-only and a test asserts the rows are untouched. It is a diff somebody reads, not an apply.
+
+The replay passes each assessment's own `evaluatedAt` back as the evaluation instant. Without
+that, every expiry assessment would "change" on replay and a correction diff would be unreadable.
+
+**What a historical run refuses to measure.** The historical dataset is assembled from the shelf,
+and that join does not carry the confirmed ingredient declaration. So `INGREDIENT_SENSITIVITY` and
+`DUPLICATE_ACTIVE_INGREDIENT` are refused rather than run: reporting fewer matches than the rule
+would really produce is worse than reporting nothing, because a reviewer confirming
+`EXPECTED_MATCH_VOLUME` against an under-count would be confirming something false (`DEV-018`).
+Both kinds run normally against a synthetic dataset, where the caller supplies the substance keys
+and nothing is being inferred from data the server does not have.
+
+**Closing the loop with the reviewer console.** `DEV-017` recorded that Phase 6.6's checklist had
+a reviewer confirm expected matched-user volume with nothing producing the number. Migration `0013`
+adds `publication_request.shadow_run_id` and a trigger requiring it for any two-person safety-rule
+publication - and requiring the run to be a run of _that_ rule, because attaching somebody else's
+is the obvious way to satisfy such a requirement without meeting it (DEC-036). Publishing a
+high-impact rule is now shadow run, then request, then two approvals.
+
+**No verdict, anywhere.** There is deliberately no `recommendPublication`, no threshold and no
+score. `22` requires release thresholds to be set by leadership against a labelled dataset and
+`BLK-008` records that none exists; a function returning "safe to publish" would invent the
+threshold that document says nobody has set, and a reviewer would read it as an answer. Tests
+assert the absence over the run's own keys and over the API response body.
+
+### Things worth recording
+
+- `shadow_run_sample.match_confidence` first carried the `ItemVerification` vocabulary instead of
+  `MatchConfidence`. Both contain `PROBABLE`, which is exactly why the fixture passed and the
+  mistake survived to a second reading. It would have refused every real sample. There is now a
+  test that inserts `CONFIRMED` - valid in the other vocabulary - and requires the constraint to
+  refuse it.
+- Postgres refuses a statement given more bind parameters than it references, so the four
+  differently-shaped target writes in the reviewer console could not share one parameter list.
+  Each builds its own.
+- The catalog columns are `product_identity.gtin` and `batch_or_lot.lot_code_normalized`; there is
+  no `primary_gtin` and no `verification` on either. Worth checking the migration rather than
+  guessing from the domain type names.
+
+### State at end of Phase 6.7
+
+1881 tests passing across 48 files, up from 1812 across 45. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 69 new tests: 28 safety domain, 24 database,
+17 API.
+
+Stage 6 is now complete apart from 6.3 and 6.5, both of which are `IN_PROGRESS` on external
+dependencies. Outstanding on this phase: a historical run cannot measure substance-matching rules
+(`DEV-018`), and there is still no staff interface for any of it (`DEV-016`).

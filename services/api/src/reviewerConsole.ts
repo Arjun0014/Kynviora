@@ -77,6 +77,11 @@ const createBodySchema = z.object({
   maxUrgency: z.enum(ACTION_URGENCIES).optional(),
   evidenceLevel: z.enum(EVIDENCE_LEVELS).optional(),
   withdrawalReason: z.string().max(1000).optional(),
+  // Spec 10 lists "shadow-mode result where required" among what a rule needs. Migration 0013
+  // makes it required for a safety rule that takes two approvals, and checks that the run named
+  // is a run of *that* rule - attaching somebody else's is the obvious way to satisfy a
+  // requirement like this without meeting it.
+  shadowRunId: z.string().uuid().optional(),
   note: z.string().max(2000).optional(),
 });
 
@@ -114,6 +119,7 @@ interface RequestRow {
   readonly requested_by_user_id: string;
   readonly requested_at: Date;
   readonly withdrawal_reason: string | null;
+  readonly shadow_run_id: string | null;
   readonly decided_at: Date | null;
   readonly decided_by_user_id: string | null;
 }
@@ -255,6 +261,30 @@ const TARGET_WRITES: Readonly<
 });
 
 // ---------------------------------------------------------------------------
+// Authorization
+// ---------------------------------------------------------------------------
+
+/**
+ * The caller's active reviewer roles.
+ *
+ * Empty means not a reviewer, and every staff route treats that as `NOT_FOUND` rather than
+ * `403`, so the console is not an oracle for whether a given queue item exists. Exported because
+ * the shadow-mode routes are the same trust boundary and must not re-derive it.
+ */
+export async function activeReviewerRoles(ctx: RequestContext): Promise<readonly ReviewerRole[]> {
+  return ctx.privileged('REVIEWER_CONSOLE', async (db) => {
+    const res = await db.query<{ role: string }>(
+      `SELECT role FROM reviewer WHERE user_id = $1 AND status = 'ACTIVE' ORDER BY role`,
+      [ctx.principal.userId],
+    );
+    return res.rows.map((row) => row.role as ReviewerRole);
+  });
+}
+
+/** What a caller who holds no reviewer role is told. Deliberately a bare not-found. */
+export const NOT_A_REVIEWER = domainError('PERMISSION_DENIED', 'Not found.');
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
@@ -280,23 +310,7 @@ export function registerReviewerConsoleRoutes(
     );
   }
 
-  /**
-   * The caller's active reviewer roles.
-   *
-   * Empty means not a reviewer, and every route treats that as `NOT_FOUND` rather than `403`, so
-   * the console is not an oracle for whether a given queue item exists.
-   */
-  async function activeRoles(ctx: RequestContext): Promise<readonly ReviewerRole[]> {
-    return ctx.privileged('REVIEWER_CONSOLE', async (db) => {
-      const res = await db.query<{ role: string }>(
-        `SELECT role FROM reviewer WHERE user_id = $1 AND status = 'ACTIVE' ORDER BY role`,
-        [ctx.principal.userId],
-      );
-      return res.rows.map((row) => row.role as ReviewerRole);
-    });
-  }
-
-  const notAReviewer = domainError('PERMISSION_DENIED', 'Not found.');
+  const notAReviewer = NOT_A_REVIEWER;
 
   async function writeAudit(
     db: DatabaseConnection,
@@ -326,7 +340,7 @@ export function registerReviewerConsoleRoutes(
       const res = await db.query<RequestRow>(
         `SELECT id, subject_kind, subject_id, action, jurisdictions, max_urgency, evidence_level,
                 required_approvals, state, requested_by_user_id, requested_at, withdrawal_reason,
-                decided_at, decided_by_user_id
+                shadow_run_id, decided_at, decided_by_user_id
            FROM publication_request WHERE id = $1`,
         [id],
       );
@@ -353,7 +367,7 @@ export function registerReviewerConsoleRoutes(
     const ctx = await contextFor(request, reply);
     if (!ctx) return;
 
-    const roles = await activeRoles(ctx);
+    const roles = await activeReviewerRoles(ctx);
     if (roles.length === 0) return fail(reply, notAReviewer, ctx.correlationId);
 
     const body = createBodySchema.safeParse(request.body);
@@ -385,8 +399,8 @@ export function registerReviewerConsoleRoutes(
         `INSERT INTO publication_request
            (subject_kind, subject_id, action, jurisdictions, max_urgency, evidence_level,
             required_approvals, requested_by_user_id, requested_at, requested_note,
-            withdrawal_reason, client_operation_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            withdrawal_reason, client_operation_id, shadow_run_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING id`,
         [
           body.data.subjectKind,
@@ -401,6 +415,7 @@ export function registerReviewerConsoleRoutes(
           body.data.note ?? null,
           body.data.withdrawalReason ?? null,
           ctx.operationId ?? null,
+          body.data.shadowRunId ?? null,
         ],
       );
       const id = res.rows[0]?.id ?? null;
@@ -444,14 +459,14 @@ export function registerReviewerConsoleRoutes(
     const ctx = await contextFor(request, reply);
     if (!ctx) return;
 
-    const roles = await activeRoles(ctx);
+    const roles = await activeReviewerRoles(ctx);
     if (roles.length === 0) return fail(reply, notAReviewer, ctx.correlationId);
 
     const rows = await ctx.privileged('REVIEWER_CONSOLE', async (db) => {
       const res = await db.query<RequestRow>(
         `SELECT id, subject_kind, subject_id, action, jurisdictions, max_urgency, evidence_level,
                 required_approvals, state, requested_by_user_id, requested_at, withdrawal_reason,
-                decided_at, decided_by_user_id
+                shadow_run_id, decided_at, decided_by_user_id
            FROM publication_request WHERE state = 'OPEN' ORDER BY requested_at, id`,
       );
       return res.rows;
@@ -492,7 +507,7 @@ export function registerReviewerConsoleRoutes(
     const ctx = await contextFor(request, reply);
     if (!ctx) return;
 
-    const roles = await activeRoles(ctx);
+    const roles = await activeReviewerRoles(ctx);
     if (roles.length === 0) return fail(reply, notAReviewer, ctx.correlationId);
 
     const params = idParamsSchema.safeParse(request.params);
@@ -518,6 +533,7 @@ export function registerReviewerConsoleRoutes(
       requestedByUserId: row.requested_by_user_id,
       requestedAt: row.requested_at.toISOString(),
       withdrawalReason: row.withdrawal_reason,
+      shadowRunId: row.shadow_run_id,
       decidedAt: row.decided_at === null ? null : row.decided_at.toISOString(),
       // Who reviewed what, in full. `10`'s governance audit artifacts, and the reason the
       // approval table is append-only.
@@ -543,7 +559,7 @@ export function registerReviewerConsoleRoutes(
     const ctx = await contextFor(request, reply);
     if (!ctx) return;
 
-    const roles = await activeRoles(ctx);
+    const roles = await activeReviewerRoles(ctx);
     if (roles.length === 0) return fail(reply, notAReviewer, ctx.correlationId);
 
     const params = idParamsSchema.safeParse(request.params);
@@ -661,7 +677,7 @@ export function registerReviewerConsoleRoutes(
     const ctx = await contextFor(request, reply);
     if (!ctx) return;
 
-    const roles = await activeRoles(ctx);
+    const roles = await activeReviewerRoles(ctx);
     if (roles.length === 0) return fail(reply, notAReviewer, ctx.correlationId);
 
     // `13` and `14`: step-up for high-impact publish/withdraw. Checked before anything is read,
@@ -764,7 +780,7 @@ export function registerReviewerConsoleRoutes(
     const ctx = await contextFor(request, reply);
     if (!ctx) return;
 
-    const roles = await activeRoles(ctx);
+    const roles = await activeReviewerRoles(ctx);
     if (roles.length === 0) return fail(reply, notAReviewer, ctx.correlationId);
 
     if (!hasFreshStepUp(ctx)) {

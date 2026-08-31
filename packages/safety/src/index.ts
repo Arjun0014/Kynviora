@@ -7,3 +7,4 @@
 
 export * from './rules.js';
 export * from './schedule.js';
+export * from './shadow.js';

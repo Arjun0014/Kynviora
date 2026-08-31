@@ -101,3 +101,12 @@
 {"ts": "2026-09-01T02:13:00Z", "type": "decision_recorded", "detail": "DEC-031 withdrawal is cheaper than publication; DEC-032 approval right is a stored role and clinical is not regulatory; DEC-033 the 404 rule is about standing, not pairing"}
 {"ts": "2026-09-01T02:14:00Z", "type": "deviation_recorded", "detail": "DEV-016 console backend without an interface; DEV-017 rule preview deferred to Phase 6.7"}
 {"ts": "2026-09-01T02:15:00Z", "type": "phase_complete", "detail": "Phase 6.6 reviewer console; 1812 tests across 45 files, verify exit 0; BLK-006 unchanged"}
+{"ts": "2026-09-01T02:20:00Z", "type": "phase_started", "detail": "Phase 6.7 shadow mode and replay"}
+{"ts": "2026-09-01T02:22:00Z", "type": "code_added", "detail": "packages/safety/src/shadow.ts - runShadow, compareShadowRuns, replayAll; counts and de-identified samples, no recipients"}
+{"ts": "2026-09-01T02:24:00Z", "type": "migration_added", "detail": "0013 shadow_run, shadow_run_sample, replay_run; publication_request.shadow_run_id with a pairing trigger"}
+{"ts": "2026-09-01T02:27:00Z", "type": "bug_found", "detail": "shadow_run_sample.match_confidence carried the ItemVerification vocabulary instead of MatchConfidence; both contain PROBABLE, so the fixture passed"}
+{"ts": "2026-09-01T02:33:00Z", "type": "bug_found", "detail": "a shadow run of a candidate rule reported zero matches because evaluateRule refuses an unapproved rule; fixed with a local projection (DEC-035)"}
+{"ts": "2026-09-01T02:35:00Z", "type": "test_updated", "detail": "Phase 6.6 API tests grew a shadow-run fixture now that a two-person rule publication must name one"}
+{"ts": "2026-09-01T02:38:00Z", "type": "decision_recorded", "detail": "DEC-034 a shadow run has no recipients; DEC-035 the approval gate is satisfied locally and why that is not a bypass; DEC-036 a high-impact rule publication names a run of that rule"}
+{"ts": "2026-09-01T02:39:00Z", "type": "deviation_recorded", "detail": "DEV-018 a historical run refuses substance-matching rules rather than under-measuring them; DEV-017 closed by this phase"}
+{"ts": "2026-09-01T02:40:00Z", "type": "phase_complete", "detail": "Phase 6.7 shadow mode and replay; 1881 tests across 48 files, verify exit 0"}

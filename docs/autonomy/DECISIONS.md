@@ -885,3 +885,102 @@ still holds everywhere else, and the two error classes now mean different things
 of them meaning both.
 
 **Sources.** `13`; `14`; trap 14; `04` Phase 6.6.
+
+---
+
+## DEC-034 - A shadow run has no recipients, so it cannot notify
+
+**Context.** `04` Phase 6.7's first exit criterion is that a new high-impact rule can be evaluated
+without user notification. The obvious implementation is a boolean: run the rule, then check
+`shadowOnly` before dispatching.
+
+**Options.** (a) A flag on the assessment, checked before every notification. (b) A separate
+result type carrying counts and de-identified samples, with no recipients in it at all. (c) Both.
+
+**Decision.** (b), and the flag survives as belt and braces. `ShadowRun` holds counts, per-reason
+breakdowns and a bounded sample; `ShadowSample` is a projection of an assessment with the profile
+removed. The results are written to `shadow_run`, which is not `profile_assessment` -
+and `alert_publication` requires a `profile_assessment`, so the tables do not connect.
+
+**Rationale.** A flag checked before notifying holds until the day somebody adds a second
+notification path, which is how every "we did not mean to send that" incident happens. A value
+with no recipients in it does not have that failure mode: code that wanted to notify from a shadow
+run has nothing to read. The profile identities are counted and discarded inside `runShadow`, so
+there is no point at which the run holds a list of people.
+
+**Consequences.** A reviewer investigating a suspected false positive gets the item, the reasons,
+the confidence and the rule version, which is what `10`'s procedure needs - and not the person.
+Tests assert the absence over the sample's own keys and over the real table's columns, because the
+guarantee has to survive somebody adding a field for a good reason.
+
+**Sources.** `04` Phase 6.7; `09`; `10` (false-positive investigation); `15`; `16`.
+
+---
+
+## DEC-035 - A shadow run satisfies the approval gate locally, and that is not a bypass
+
+**Context.** `evaluateRule` refuses an unapproved or disabled rule - correctly, because an
+unapproved rule producing a match is threat A3's unauthorized publication path. But the rule a
+shadow run exists to measure is precisely one nobody has approved: `04` Phase 6.7 is what a
+reviewer looks at _before_ approving. Run under the live gates, every candidate reported zero
+matches.
+
+**Options.** (a) Require a rule to be approved before it can be shadow-run. (b) Add a
+`reviewGate: 'ENFORCED' | 'SHADOW'` parameter to `evaluateRule`. (c) Build a local projection
+inside `runShadow` that satisfies the gate for that evaluation only.
+
+**Decision.** (c). `runShadow` evaluates `{ ...rule, reviewState: 'APPROVED',
+approvedByReviewerId: SHADOW_EVALUATION_MARKER, enabled: true }`. The projection is local, the
+caller's rule is unchanged, and the marker is `SHADOW_RUN_NOT_A_REVIEWER` - not a user ID and not
+resembling one.
+
+**Rationale.** (a) makes the feature useless: a candidate reporting zero matches reads as "this
+rule affects nobody", which is the most dangerous wrong answer a blast-radius number can give, and
+it is the same failure this codebase refuses elsewhere. (b) adds a way to disable the gate from
+anywhere in the codebase, which is exactly what the gate is protecting against. (c) is
+unreachable except through a function that has already refused a non-shadow rule, and nothing it
+produces can become user-visible.
+
+`enabled: true` is included for a less obvious reason: a rule an operator has just killed under
+`10`'s emergency controls is exactly the one somebody needs to measure while working out what it
+did, and refusing would remove the investigation tool at the moment it is needed.
+
+**Consequences.** The safety of this rests entirely on three things holding together - the
+shadow-mode refusal, the separate table, and the absent recipients - so all three are tested, and
+the module header says so. A test asserts the caller's rule is not mutated, and another that
+`evaluateRule` itself still refuses an unapproved rule.
+
+**Sources.** `04` Phase 6.7; `10` (emergency controls); `15` A3; `09`.
+
+---
+
+## DEC-036 - A high-impact rule publication must name a shadow run of that rule
+
+**Context.** Phase 6.6 shipped `10`'s high-severity checklist, in which a reviewer confirms the
+expected matched-user volume and the rule matching behaviour. Until Phase 6.7 those confirmations
+rested on a judgement: nothing produced the numbers, and `DEV-017` recorded the gap.
+
+**Options.** (a) Leave the checklist item as a judgement and rely on the reviewer. (b) Record an
+optional link to a shadow run. (c) Require the link for any safety-rule publication that needs two
+approvals, and require the run to be a run of that rule.
+
+**Decision.** (c). Migration `0013` adds `publication_request.shadow_run_id` and a trigger that
+refuses a two-person `assessment_rule_version` publication without one, and refuses one naming a
+run of a different rule.
+
+**Rationale.** (b) would have been decoration - an optional field on a governance record is a
+field that is empty when it matters. The pairing check is the part that does the work: attaching
+somebody else's run is the obvious way to satisfy a requirement like this without meeting it, so
+the trigger checks the pairing rather than the presence, exactly as the approval trigger checks
+distinct reviewers rather than approval rows.
+
+The threshold is deliberately the same one that requires two people, so "high-impact" keeps
+meaning one thing across the console.
+
+**Consequences.** Publishing a high-impact safety rule is now a three-step workflow - shadow run,
+request, two approvals - and the Phase 6.6 API tests had to grow a shadow-run fixture. That churn
+is the point: the console now demands the evidence its checklist claims was reviewed. `DEV-017` is
+closed by this and by the run itself.
+
+**Sources.** `04` Phase 6.6 and 6.7; `10` (rule authoring: shadow-mode result where required;
+high-severity publication checklist); `22`.

@@ -179,6 +179,26 @@ async function ungatedRegulatoryRecord(id: string) {
   );
 }
 
+/**
+ * A shadow run of a rule, so a two-person publication request can name its evidence.
+ *
+ * Migration 0013 requires it, and requires the run to be a run of that rule.
+ */
+async function shadowRunFor(ruleId: string): Promise<string> {
+  const res = await t.asService((db) =>
+    db.query<{ id: string }>(
+      `INSERT INTO shadow_run
+         (rule_version_id, dataset_kind, dataset_label, dataset_size, matched_items,
+          affected_products, affected_formulations, potential_user_matches,
+          evaluation_instant, normalization_version, run_by_user_id, run_at)
+       VALUES ($1, 'SYNTHETIC', 'synthetic fixture', 10, 2, 1, 1, 2, now(), 'norm-1', $2, now())
+       RETURNING id`,
+      [ruleId, AUTHOR],
+    ),
+  );
+  return res.rows[0]?.id ?? '';
+}
+
 interface CreatedBody {
   readonly requestId: string;
   readonly requiredApprovals: number;
@@ -214,7 +234,11 @@ async function execute(as: Principal, requestId: string) {
   return request(as, { method: 'POST', url: `/v1/reviewer/requests/${requestId}/execute` });
 }
 
-function publishRulePayload(subjectId: string, jurisdictions: string[] = ['GB']) {
+function publishRulePayload(
+  subjectId: string,
+  jurisdictions: string[] = ['GB'],
+  shadowRunId?: string,
+) {
   return {
     subjectKind: 'assessment_rule_version',
     subjectId,
@@ -222,7 +246,15 @@ function publishRulePayload(subjectId: string, jurisdictions: string[] = ['GB'])
     jurisdictions,
     maxUrgency: 'HIGH',
     evidenceLevel: 'A',
+    ...(shadowRunId === undefined ? {} : { shadowRunId }),
   };
+}
+
+/** A candidate rule plus the shadow run a two-person publication of it must name. */
+async function ruleWithEvidence(): Promise<{ subjectId: string; shadowRunId: string }> {
+  const subjectId = nextSubject();
+  await candidateRule(subjectId);
+  return { subjectId, shadowRunId: await shadowRunFor(subjectId) };
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +288,11 @@ describe('opening a request', () => {
   });
 
   it('needs two approvals for high-urgency content', async () => {
-    const created = await openRequest(stale(AUTHOR), publishRulePayload(nextSubject()));
+    const { subjectId, shadowRunId } = await ruleWithEvidence();
+    const created = await openRequest(
+      stale(AUTHOR),
+      publishRulePayload(subjectId, ['GB'], shadowRunId),
+    );
     expect(created.status).toBe(201);
     expect(created.body.requiredApprovals).toBe(2);
   });
@@ -306,9 +342,11 @@ describe('recording a decision', () => {
     await grantRole(CLINICAL_ONE, 'CLINICAL_SAFETY_LEAD');
     await grantRole(CLINICAL_TWO, 'MEDICATION_SAFETY_REVIEWER');
     await grantRole(LEGAL_ONE, 'REGULATORY_LEGAL_REVIEWER');
-    subjectId = nextSubject();
-    await candidateRule(subjectId);
-    requestId = (await openRequest(stale(AUTHOR), publishRulePayload(subjectId))).body.requestId;
+    const fixture = await ruleWithEvidence();
+    subjectId = fixture.subjectId;
+    requestId = (
+      await openRequest(stale(AUTHOR), publishRulePayload(subjectId, ['GB'], fixture.shadowRunId))
+    ).body.requestId;
   });
 
   it('refuses a role the caller does not hold', async () => {
@@ -405,9 +443,11 @@ describe('executing a publication', () => {
     await grantRole(AUTHOR, 'CLINICAL_SAFETY_LEAD');
     await grantRole(CLINICAL_ONE, 'CLINICAL_SAFETY_LEAD');
     await grantRole(CLINICAL_TWO, 'MEDICATION_SAFETY_REVIEWER');
-    subjectId = nextSubject();
-    await candidateRule(subjectId);
-    requestId = (await openRequest(stale(AUTHOR), publishRulePayload(subjectId))).body.requestId;
+    const fixture = await ruleWithEvidence();
+    subjectId = fixture.subjectId;
+    requestId = (
+      await openRequest(stale(AUTHOR), publishRulePayload(subjectId, ['GB'], fixture.shadowRunId))
+    ).body.requestId;
   });
 
   it('requires step-up', async () => {
@@ -463,10 +503,14 @@ describe('executing a publication', () => {
   });
 
   it('does not publish for a jurisdiction nobody reviewed', async () => {
-    const wideSubject = nextSubject();
-    await candidateRule(wideSubject);
-    const wide = (await openRequest(stale(AUTHOR), publishRulePayload(wideSubject, ['GB', 'NI'])))
-      .body.requestId;
+    const wideFixture = await ruleWithEvidence();
+    const wideSubject = wideFixture.subjectId;
+    const wide = (
+      await openRequest(
+        stale(AUTHOR),
+        publishRulePayload(wideSubject, ['GB', 'NI'], wideFixture.shadowRunId),
+      )
+    ).body.requestId;
 
     await decide(stale(CLINICAL_ONE), wide, {
       decision: 'APPROVE',
@@ -708,10 +752,9 @@ describe('the queue', () => {
     await grantRole(AUTHOR, 'CLINICAL_SAFETY_LEAD');
     await grantRole(CLINICAL_ONE, 'CLINICAL_SAFETY_LEAD');
 
-    const subjectId = nextSubject();
-    await candidateRule(subjectId);
+    const { subjectId, shadowRunId } = await ruleWithEvidence();
     const requestId = (
-      await openRequest(stale(AUTHOR), publishRulePayload(subjectId, ['GB', 'NI']))
+      await openRequest(stale(AUTHOR), publishRulePayload(subjectId, ['GB', 'NI'], shadowRunId))
     ).body.requestId;
     await decide(stale(CLINICAL_ONE), requestId, {
       decision: 'APPROVE',
@@ -733,10 +776,10 @@ describe('the queue', () => {
 
   it('tells the requester they may not approve their own publication', async () => {
     await grantRole(AUTHOR, 'CLINICAL_SAFETY_LEAD');
-    const subjectId = nextSubject();
-    await candidateRule(subjectId);
-    const requestId = (await openRequest(stale(AUTHOR), publishRulePayload(subjectId))).body
-      .requestId;
+    const { subjectId, shadowRunId } = await ruleWithEvidence();
+    const requestId = (
+      await openRequest(stale(AUTHOR), publishRulePayload(subjectId, ['GB'], shadowRunId))
+    ).body.requestId;
 
     const queue = await request(stale(AUTHOR), { method: 'GET', url: '/v1/reviewer/queue' });
     const item = queue
@@ -753,7 +796,11 @@ describe("spec 10's publication checklist", () => {
   });
 
   it('tells the requester up front whether the checks will be needed', async () => {
-    const high = await openRequest(stale(AUTHOR), publishRulePayload(nextSubject()));
+    const { subjectId, shadowRunId } = await ruleWithEvidence();
+    const high = await openRequest(
+      stale(AUTHOR),
+      publishRulePayload(subjectId, ['GB'], shadowRunId),
+    );
     expect(high.body).toMatchObject({ checklistRequired: true });
 
     const low = await openRequest(stale(AUTHOR), {
@@ -764,10 +811,10 @@ describe("spec 10's publication checklist", () => {
   });
 
   it('refuses a high-severity approval that skipped a check', async () => {
-    const subjectId = nextSubject();
-    await candidateRule(subjectId);
-    const requestId = (await openRequest(stale(AUTHOR), publishRulePayload(subjectId))).body
-      .requestId;
+    const { subjectId, shadowRunId } = await ruleWithEvidence();
+    const requestId = (
+      await openRequest(stale(AUTHOR), publishRulePayload(subjectId, ['GB'], shadowRunId))
+    ).body.requestId;
 
     const response = await decide(stale(CLINICAL_ONE), requestId, {
       decision: 'APPROVE',
@@ -783,10 +830,10 @@ describe("spec 10's publication checklist", () => {
   it('records what each reviewer confirmed, separately', async () => {
     // Per approval, not per request: the point of a second reviewer is that they check
     // independently.
-    const subjectId = nextSubject();
-    await candidateRule(subjectId);
-    const requestId = (await openRequest(stale(AUTHOR), publishRulePayload(subjectId))).body
-      .requestId;
+    const { subjectId, shadowRunId } = await ruleWithEvidence();
+    const requestId = (
+      await openRequest(stale(AUTHOR), publishRulePayload(subjectId, ['GB'], shadowRunId))
+    ).body.requestId;
     await decide(stale(CLINICAL_ONE), requestId, {
       decision: 'APPROVE',
       role: 'CLINICAL_SAFETY_LEAD',

@@ -149,7 +149,7 @@ restart, which needs a device (`BLK-002`).
 | 6.4   | Global Regulatory Registry                         | `COMPLETE`    |
 | 6.5   | Deterministic rule engine and assessment inputs    | `IN_PROGRESS` |
 | 6.6   | Reviewer queue and publication controls            | `COMPLETE`    |
-| 6.7   | Shadow mode and replay                             | `NOT_STARTED` |
+| 6.7   | Shadow mode and replay                             | `COMPLETE`    |
 
 - **6.1**: source classes, per-source `allowedInfluence`, licence review state and coverage
   statements; GB and NI modelled separately. Tested.
@@ -186,6 +186,37 @@ anyway.
 Outstanding: this does **not** clear `BLK-006` - it builds the workflow a qualified reviewer would
 use, and none exists. There is no console interface and deliberately no mobile screen (`DEV-016`),
 and rule preview is deferred to Phase 6.7 (`DEV-017`).
+
+**6.7**: complete. Migration `0013` adds `shadow_run`, `shadow_run_sample` and `replay_run`, and
+`packages/safety/src/shadow.ts` provides the run, the before/after comparison and the replay.
+
+_New high-impact rules can be evaluated without user notification_ is a shape, not a flag: a
+`ShadowRun` carries counts and a de-identified sample, the profile identities are counted and
+discarded inside the run, and the results are written to `shadow_run` rather than
+`profile_assessment` - which `alert_publication` requires, so the tables do not connect (DEC-034).
+A test reads `alert_publication`'s foreign keys from `information_schema` and asserts neither
+shadow table is among them.
+
+The gate that nearly made the feature useless is recorded as DEC-035: `evaluateRule` refuses an
+unapproved rule, and the rule a shadow run exists to measure is exactly one nobody has approved, so
+every candidate reported zero matches - which reads as "this rule affects nobody". `runShadow` now
+evaluates a local projection whose stand-in reviewer is the literal string
+`SHADOW_RUN_NOT_A_REVIEWER`, safe because the function has already refused a non-shadow rule and
+nothing it produces can become user-visible.
+
+_Regulatory data corrections can recompute dependent product views and assessments reproducibly_ is
+`replayAll` plus the replay route, which pairs recorded assessments with the current state of
+everything they were computed from and reports per assessment which fields moved. A replay writes
+nothing back; `profile_assessment` is append-only and a test asserts the rows are untouched.
+
+This also closes `DEV-017`: `publication_request.shadow_run_id` is required for a two-person
+safety-rule publication, and a trigger checks the run is a run of _that_ rule (DEC-036). Publishing
+a high-impact rule is now shadow run, then request, then two approvals.
+
+69 tests across the safety (28), database (24) and API (17) suites. Outstanding: a historical run
+refuses `INGREDIENT_SENSITIVITY` and `DUPLICATE_ACTIVE_INGREDIENT` because the shelf join does not
+carry the ingredient declaration, and under-measuring would be worse than refusing (`DEV-018`);
+there is still no staff interface (`DEV-016`).
 
 ---
 

@@ -39,6 +39,7 @@ import { registerAlertDeliveryRoutes } from './alertDelivery.js';
 import { registerReviewInboxRoutes } from './reviewInbox.js';
 import { registerReconciliationRoutes } from './reconciliation.js';
 import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
+import { registerShadowModeRoutes } from './shadowMode.js';
 
 /** Maximum request body. `13` requires body-size limits; 1MB is ample for JSON payloads. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
@@ -618,6 +619,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
   // stored reviewer role rather than a claim in the request (spec 14).
 
   registerReviewerConsoleRoutes(app, { contextFor, fail });
+
+  // -------------------------------------------------------------------------
+  // Shadow-run and replay routes (spec 04 Phase 6.7)
+  // -------------------------------------------------------------------------
+  // The same trust boundary as the console: staff only, and every route privileged because
+  // migration 0013 gives the app role no grant. A shadow run writes to shadow_run rather than
+  // profile_assessment, so its results have no path to a notification.
+
+  registerShadowModeRoutes(app, { contextFor, fail });
 
   // -------------------------------------------------------------------------
   // Fallbacks

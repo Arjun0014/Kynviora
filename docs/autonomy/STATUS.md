@@ -9,18 +9,18 @@ Last updated: 2026-09-01
 
 ## Current position
 
-|                    |                                                             |
-| ------------------ | ----------------------------------------------------------- |
-| **Current stage**  | Stage 6 (governance), after completing Stage 8              |
-| **Current phase**  | Shadow mode and replay (6.7)                                |
-| **Last completed** | Phase 6.6 Reviewer queue and publication controls           |
-| **Branch**         | `master`                                                    |
-| **Latest commit**  | `feat(governance): reviewer queue and publication controls` |
-| **Baseline tag**   | `baseline-spec-only`                                        |
+|                    |                                                |
+| ------------------ | ---------------------------------------------- |
+| **Current stage**  | Stage 6 (governance), after completing Stage 8 |
+| **Current phase**  | Wiring the Expo screens to the API (DEV-007)   |
+| **Last completed** | Phase 6.7 Shadow mode and replay               |
+| **Branch**         | `master`                                       |
+| **Latest commit**  | `feat(governance): shadow mode and replay`     |
+| **Baseline tag**   | `baseline-spec-only`                           |
 
 ## Verification state
 
-- **1812 tests passing**, 0 failing, across 45 files.
+- **1881 tests passing**, 0 failing, across 48 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -36,7 +36,7 @@ npm run verify
 | Area                                                       | State                                                |
 | ---------------------------------------------------------- | ---------------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                   |
-| Database schema, 12 migrations, full RLS                   | Complete, 269 tests incl. threats A1/A2/A3           |
+| Database schema, 13 migrations, full RLS                   | Complete, 293 tests incl. threats A1/A2/A3           |
 | Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                  |
 | Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                   |
 | Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                   |
@@ -50,6 +50,7 @@ npm run verify
 | Household Review Inbox, record-writing completion          | Complete, 95 tests                                   |
 | Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                                  |
 | Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006) |
+| Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                   |
 | End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                   |
 | Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                  |
 | Caregiver, export, notification, inbox, reconciliation UI  | Typecheck; **not wired** (`DEV-007`)                 |
@@ -85,28 +86,26 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Shadow mode and replay** (Phase 6.7). It is the direct follow-on from the reviewer console:
-6.6 records that a reviewer verified expected matched-user volume and rule matching behaviour, and
-6.7 builds the thing they would look at to do so honestly - shadow runs against synthetic and
-historical datasets, affected product and potential-user-match counts, false-positive samples, and
-replay after a source, rule or normalization change. Read `04` Phase 6.7 and `10`'s
-false-positive investigation procedure first. Its exit criteria are both implementable with no
-external dependency: a new high-impact rule can be evaluated without notifying anyone, and a
-regulatory correction recomputes dependent views reproducibly.
+**Wire the Expo screens to the API contract** (`DEV-007`). Every feature phase since Stage 7 has
+left a screen that typechecks against the presentation package and is not connected to anything:
+Shelf, Trust Passport, Regulatory Lens, caregiver access, Visit Pack, notification settings, Review
+Inbox and reconciliation. The presentation layer and the API contract both exist and are tested, so
+this is wiring rather than design - and it is the largest gap between "implemented" and "usable".
 
-Note what 6.6 did **not** do: it did not clear `BLK-006`. The console is the workflow a qualified
-reviewer would use, and no qualified reviewer exists. Do not read "reviewer console complete" as
-"safety rules can now be published".
+Alternatively **Phase 4.3** (dose events and adherence history) or **Phase 7.1** (assessment states
+and inbox), both fully implementable with no external dependency.
+
+Note what the two governance phases did **not** do: they did not clear `BLK-006`. The reviewer
+console is the workflow a qualified reviewer would use and the shadow run is what they would look
+at; no qualified reviewer exists, and nothing in the shipped fixtures is publishable.
 
 ## Next three planned tasks
 
-1. Wire the Expo screens to the API contract, replacing the placeholder states with the Shelf,
-   Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification, Review Inbox and
-   reconciliation surfaces the presentation package supports (`DEV-007`).
-2. Observability projections (`20`), including the review-queue age that becomes measurable once
+1. Observability projections (`20`), including the review-queue age that becomes measurable once
    inbox derivation moves behind a scheduler (`DEV-013`).
-3. A staff reviewer console interface, on its own origin and session policy (`DEV-016`). It is
+2. A staff reviewer console interface, on its own origin and session policy (`DEV-016`). It is
    deliberately not a screen in the Expo app.
+3. Phase 7.1 assessment states and inbox, which the shadow and replay machinery now supports.
 
 ## Recent decisions worth knowing
 
@@ -175,6 +174,16 @@ reviewer would use, and no qualified reviewer exists. Do not read "reviewer cons
 - **DEC-033** - inside the reviewer console, separation-of-duties and role-not-permitted are
   `VALIDATION_FAILED` (400), not `PERMISSION_DENIED`. The 404 rule is about a caller's standing
   to look at all, not about the pairing of a reviewer with a request they can already see.
+
+- **DEC-034** - a shadow run carries counts and de-identified samples and **no recipients**, and
+  its results live in `shadow_run` rather than `profile_assessment`. That is what makes "evaluated
+  without user notification" structural rather than a flag somebody must remember to check.
+- **DEC-035** - `runShadow` satisfies the approval and enabled gates with a _local_ projection,
+  because the rule a shadow run measures is by definition one nobody has approved. Safe only
+  because the function refuses a non-shadow rule and the output cannot become user-visible. Do not
+  generalise it into a parameter on `evaluateRule`.
+- **DEC-036** - a two-person safety-rule publication must name a shadow run **of that rule**. The
+  trigger checks the pairing, not the presence.
 
 ## Traps to avoid on resume
 
@@ -256,3 +265,16 @@ reviewer would use, and no qualified reviewer exists. Do not read "reviewer cons
 28. A published `assessment_rule_version` now needs a non-empty `approved_jurisdictions`. If an
     older fixture starts failing with `rule_published_has_approved_scope`, give it a scope rather
     than relaxing the constraint - a rule with no approved scope runs everywhere.
+29. Do not add a recommendation, threshold, score or "safe to publish" field to a shadow run.
+    `22` requires release thresholds to be set by leadership against a labelled dataset and
+    `BLK-008` records that none exists; a verdict here would invent one and a reviewer would read
+    it as an answer. Tests assert the absence over the run's keys and the API response.
+30. Do not let a historical shadow run measure `INGREDIENT_SENSITIVITY` or
+    `DUPLICATE_ACTIVE_INGREDIENT`. The shelf join carries no ingredient declaration, so the run
+    would under-count - and an under-count reads as "this affects nobody" (`DEV-018`).
+31. `MatchConfidence` (EXACT / PROBABLE / UNCONFIRMED / NOT_MATCHED) and `ItemVerification`
+    (CONFIRMED / PROBABLE / PARTIAL / CONFLICTING / UNVERIFIED) both contain `PROBABLE`. A
+    constraint written with the wrong list passes a fixture and refuses every real row. This
+    happened once in `0013`.
+32. A replay never writes back. `profile_assessment` is append-only and a replay is a diff
+    somebody reads before anything reaches a user.

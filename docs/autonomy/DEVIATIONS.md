@@ -316,7 +316,7 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   policy, with the MFA/passkey and environment isolation `13` requires. It is deliberately not the
   Expo app.
 
-## DEV-017 - Rule preview is deferred to shadow mode
+## DEV-017 - Rule preview is deferred to shadow mode (CLOSED by Phase 6.7)
 
 - **Affected specification**: `04` Phase 6.6 lists "rule preview" among its expected output.
 - **Expected behaviour**: before approving a rule, a reviewer sees what it would do - which
@@ -336,5 +336,33 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Risk**: moderate, and it is why this is written down. A reviewer confirming
   `EXPECTED_MATCH_VOLUME` today is confirming a judgement rather than a computed figure, and the
   system records the confirmation either way.
-- **Required future work**: Phase 6.7. When shadow runs exist, the single-request view should
-  carry the run's output, and `EXPECTED_MATCH_VOLUME` should be confirmable only against one.
+- **Required future work**: ~~Phase 6.7~~ **done**. Phase 6.7 shipped shadow runs, and migration
+  `0013` requires a two-person safety-rule publication to name a run of that rule (DEC-036), so
+  `EXPECTED_MATCH_VOLUME` is now confirmed against a computed figure rather than a judgement. What
+  remains is presentational: the single-request view returns `shadowRunId` and a reviewer must
+  fetch the run separately, which a staff console would join up (`DEV-016`).
+
+## DEV-018 - A historical shadow run cannot measure substance-matching rules
+
+- **Affected specification**: `04` Phase 6.7 lists shadow-run mode "against synthetic/historical
+  datasets" without qualifying which rules can be measured against which.
+- **Expected behaviour**: any rule kind can be shadow-run against the real shelf, and the counts
+  are what that rule would actually produce.
+- **Implemented behaviour**: the historical dataset builder assembles items from `owned_item`
+  joined to `batch_or_lot` and `product_identity`, and profile facts from `allergy_record`. It
+  does **not** carry the confirmed ingredient declaration or the canonical substance key, so
+  `INGREDIENT_SENSITIVITY` and `DUPLICATE_ACTIVE_INGREDIENT` are **refused** for a historical run
+  with `historical_dataset_incomplete_for_rule`. Both kinds run normally against a synthetic
+  dataset, where the caller supplies the substance keys.
+- **Reason**: the alternative was to run them anyway and report fewer matches than the rule would
+  really produce. An under-count on a blast-radius screen reads as "this affects nobody", which is
+  the most dangerous wrong answer that number can give - and a reviewer confirming
+  `EXPECTED_MATCH_VOLUME` against it would be confirming something false. Refusing is honest;
+  under-measuring is not.
+- **Temporary or permanent**: temporary. The join is the missing piece, not the design.
+- **Risk**: low, and bounded by the refusal. The visible cost is that a sensitivity rule cannot yet
+  be measured against real data, which is worth knowing when Phase 5.4 unblocks.
+- **Required future work**: join the confirmed formulation declaration and the normalized
+  substance keys into the historical dataset, then remove both kinds from
+  `HISTORICAL_UNSUPPORTED_KINDS`. `BLK-003` gates the substance vocabulary those keys come from,
+  so this is downstream of it.
