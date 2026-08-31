@@ -9,14 +9,14 @@ Last updated: 2026-08-31
 
 ## Current position
 
-|                    |                                        |
-| ------------------ | -------------------------------------- |
-| **Current stage**  | Stage 8 (family collaboration)         |
-| **Current phase**  | Household Review Inbox (8.3)           |
-| **Last completed** | Phase 8.2 caregiver alert delivery     |
-| **Branch**         | `master`                               |
-| **Latest commit**  | `feat(care): caregiver alert delivery` |
-| **Baseline tag**   | `baseline-spec-only`                   |
+|                    |                                                                           |
+| ------------------ | ------------------------------------------------------------------------- |
+| **Current stage**  | Stage 8 (family collaboration)                                            |
+| **Current phase**  | Household Review Inbox (8.3)                                              |
+| **Last completed** | Phase 8.2 caregiver alert delivery                                        |
+| **Branch**         | `master`                                                                  |
+| **Latest commit**  | `feat(care): caregiver alert delivery with two-dial notification privacy` |
+| **Baseline tag**   | `baseline-spec-only`                                                      |
 
 ## Verification state
 
