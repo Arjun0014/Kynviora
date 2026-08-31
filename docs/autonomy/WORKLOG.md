@@ -493,3 +493,76 @@ records. Missed-dose dispatch is implemented and enforced but nothing calls it y
 grace window that decides when a dose counts as unrecorded is an unmade product decision
 (`DEV-011`). The notification settings screen typechecks and derives every example from the same
 renderer the server dispatches with, but like the other screens it is not wired (`DEV-007`).
+
+### Phase 8.3 - Household Review Inbox
+
+Two exit criteria, and both are the kind that a working implementation can satisfy in appearance
+while failing in fact.
+
+**"Review tasks are clearly different from safety alerts."** The schema from `0004` had already
+got this right - no urgency column, no evidence level - so the work was keeping it true through
+three more layers. The domain type has no such field and a test asserts it over the object's own
+keys. The API payload carries none of the vocabulary and a test greps the response body for it.
+The presentation layer may use only `neutral` and `informational`; `action` and `attention` are
+excluded by a closed union, and a test derives the alert tones from `presentUrgency` itself rather
+than hard-coding them, so the exclusion cannot drift if the alert palette changes.
+
+The place this is usually lost is the screen: the backend keeps the two apart, and then both
+render as cards with a coloured left bar and become indistinguishable at a glance. So the mobile
+screen has no tone-coloured edge, no count badge and no ranking - a ranked list with a badge _is_
+an alert list, whatever the tokens say.
+
+**"Completing a task updates the relevant authoritative record."** This was the real design
+problem, because `review_task` already had a `state` column and a Done button would have been
+both obvious and wrong (DEC-027). So closing is not expressible as a state change: the endpoint
+takes the _change_, applies it to the record first, and closes the task only if that write
+affected a row. Three layers enforce it - the domain refuses an empty change list, refuses a
+change aimed at another record, and refuses a field outside the closed list for that kind; and
+`review_task_closed_wrote_something` is a CHECK, so "mark done" is unwritable even by a direct
+SQL statement that never touches the API.
+
+"Not applicable" is not the exception it looks like. Deciding a task does not apply is itself a
+fact about the record - "I looked at this pack and the details are right" is what
+`last_reviewed_at` means - so both outcomes write and neither can write nothing.
+
+**Derivation, not accumulation.** The tasks that should be open are a pure function of the record
+state, so a task cannot outlive the condition that produced it. That also makes the refresh
+idempotent, which the partial unique index over open tasks turns into a guarantee rather than a
+convention. Derivation runs privileged over the whole profile, deliberately: under the caller's
+row-level view, the _stored_ task list would depend on who last opened the inbox, and a caregiver
+with narrow capabilities would silently shrink the owner's list by looking at it. The listing is
+filtered afterwards by joining each task to its subject through the RLS-scoped connection - a
+subject the caller cannot read comes back null and the task is dropped, so the existing policies
+do the filtering and no new predicate was needed.
+
+**The bug the tests found.** `COMPLETION_CAPABILITY` first mapped the owned-item kinds to
+`MANAGE_SHELF`. Three API tests failed, and the reason was better than the fix: `owned_item_update`
+narrows by `item_kind` - shelf for a personal-care product, medicines for a medicine - and a task
+row names only the item's ID, so neither the domain nor the row-level policy can tell which
+applies. Naming one made the domain disagree with the policy that actually decides. It is now
+`COMPLETION_CAPABILITIES`, plural, listing both for those kinds, with the division of labour
+stated: the domain checks that the caller holds a management capability at all, and the database -
+which knows the item kind - makes the binding decision. A test pins the case where the domain
+admits and the database refuses, and asserts the task stays open (DEC-028).
+
+### Things worth recording
+
+- Writing `` `03` `` inside a SQL template literal terminated the string and produced
+  "Octal literals are not allowed" from a comment. Backticks are fine in a JSDoc block and fatal
+  inside a template literal; the SQL comment now says "Spec 03".
+- `DatabaseConnection.query` returns `affectedRows`, not `rowCount`. The whole "did the record
+  write actually happen" mechanism depends on that value, so it is worth knowing which name the
+  port uses.
+- Migration `0010` made `subject_kind` NOT NULL, which broke a pre-existing `db/shelf.test.ts`
+  insert that predated the column. Updated rather than worked around - the test now inserts the
+  subject the way every other caller does.
+
+### State at end of Phase 8.3
+
+1587 tests passing across 38 files, up from 1492 across 34. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`. 95 new tests: 35 domain, 21 database, 21 API, 18
+presentation.
+
+Outstanding: derivation runs on read rather than on a schedule, because no scheduler exists yet
+(`DEV-013`); the three intervals are engineering defaults awaiting product sign-off (`DEV-012`);
+and the inbox screen typechecks but is not wired (`DEV-007`).

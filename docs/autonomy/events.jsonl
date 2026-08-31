@@ -72,3 +72,14 @@
 {"ts": "2026-08-31T16:53:00Z", "type": "test_added", "detail": "append-only asserted at both layers: no service grant, and the trigger refuses a privileged role"}
 {"ts": "2026-08-31T16:56:00Z", "type": "deviation_recorded", "detail": "DEV-011 missed-dose dispatch is enforced but unscheduled; the grace window is an unmade product decision"}
 {"ts": "2026-08-31T16:58:00Z", "type": "phase_complete", "detail": "Phase 8.2 caregiver alert delivery; 1492 tests across 34 files, verify exit 0"}
+{"ts": "2026-08-31T17:05:00Z", "type": "phase_started", "detail": "Phase 8.3 Household Review Inbox"}
+{"ts": "2026-08-31T17:12:00Z", "type": "decision_recorded", "detail": "DEC-027 a review task is closed by writing to the record, not by a state change"}
+{"ts": "2026-08-31T17:18:00Z", "type": "migration_added", "detail": "0010_review_inbox: generic subject, per-kind capability policy, closed-task-wrote-something CHECK"}
+{"ts": "2026-08-31T17:26:00Z", "type": "defect_found", "detail": "backticks inside a SQL template literal terminated the string; surfaced as an octal-literal parse error"}
+{"ts": "2026-08-31T17:27:00Z", "type": "defect_fixed", "detail": "SQL comment now says Spec 03 with no backticks"}
+{"ts": "2026-08-31T17:33:00Z", "type": "test_failed", "detail": "three API tests: domain named MANAGE_SHELF where owned_item_update requires MANAGE_MEDICINES for a medicine"}
+{"ts": "2026-08-31T17:36:00Z", "type": "decision_recorded", "detail": "DEC-028 inbox authorization follows the record; COMPLETION_CAPABILITIES lists both management capabilities and the database narrows by item kind"}
+{"ts": "2026-08-31T17:38:00Z", "type": "test_added", "detail": "the domain admits and the database refuses; the task stays open"}
+{"ts": "2026-08-31T17:44:00Z", "type": "deviation_recorded", "detail": "DEV-012 review intervals are engineering defaults; DEV-013 derivation runs on read, not on a schedule"}
+{"ts": "2026-08-31T17:48:00Z", "type": "test_updated", "detail": "db/shelf.test.ts review_task insert updated for the NOT NULL subject columns added by 0010"}
+{"ts": "2026-08-31T17:52:00Z", "type": "phase_complete", "detail": "Phase 8.3 Household Review Inbox; 1587 tests across 38 files, verify exit 0"}

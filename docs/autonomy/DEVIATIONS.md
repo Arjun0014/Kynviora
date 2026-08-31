@@ -203,3 +203,46 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   The gap is that nothing is delivered at all until a window is chosen.
 - **Required future work**: a product decision on the grace window, then a scheduler that derives
   occurrence keys from `medicine_schedule` and calls the existing dispatch.
+
+## DEV-012 - Review Inbox intervals are engineering defaults
+
+- **Affected specification**: `04` Phase 8.3 names the task kinds - "item not reviewed recently",
+  "caregiver grant expiring", "refill estimate needs review" - without defining recently, soon or
+  stale. `23` lists these as product decisions.
+- **Expected behaviour**: product-defined intervals, ideally informed by what people actually find
+  useful rather than annoying.
+- **Implemented behaviour**: `ITEM_REVIEW_INTERVAL_DAYS = 180`, `GRANT_EXPIRY_NOTICE_DAYS = 14`,
+  `REFILL_ESTIMATE_STALE_DAYS = 30`, each a named constant in `reviewInbox.ts` rather than a
+  literal inside a query.
+- **Reason**: 180 days is roughly a medication-review interval and long enough that a shelf of
+  twenty items does not generate a wall of work. 14 days gives time to arrange a renewal without
+  the notice sitting around so long it becomes furniture. 30 days matches the outer edge of a
+  typical supply cycle. All three are judgement, not evidence.
+- **Temporary or permanent**: temporary.
+- **Risk**: low, and asymmetric in the safe direction - the failure mode of a wrong interval is a
+  list that is too long or too short, never a missed safety alert. The inbox is explicitly not a
+  safety surface and its copy says so.
+- **Required future work**: product sign-off on all three. Changing any of them is a one-line
+  edit by construction; a test asserts each is a positive integer so a change cannot silently
+  disable a task kind.
+
+## DEV-013 - Inbox derivation runs on read rather than on a schedule
+
+- **Affected specification**: `04` Phase 8.3 does not say when review tasks are generated. `20`
+  expects background work to be observable.
+- **Expected behaviour**: a scheduled pass that keeps the inbox current, with the metrics `20`
+  wants.
+- **Implemented behaviour**: `GET /v1/profiles/:profileId/review-tasks` refreshes derivation
+  before listing. Derivation is pure and idempotent, and a partial unique index over open tasks
+  makes a repeat harmless, so refreshing on read is safe.
+- **Reason**: no scheduler exists in this codebase yet, and adding one for a single consumer would
+  be infrastructure ahead of need. Deriving on read also means the list is never stale, which a
+  periodic job would not guarantee.
+- **Temporary or permanent**: temporary. The derivation function takes a snapshot and a clock, so
+  a scheduler can call it unchanged.
+- **Risk**: low now, growing with profile size - the read does four queries over one profile.
+  Acceptable at MVP scale and worth measuring before it is not.
+- **Required future work**: move derivation behind a scheduler when one exists, and emit the
+  queue-age metric `20` asks for. Until then a task is only ever raised when someone looks, so a
+  notification about review work is not possible - which is consistent with the inbox being
+  deliberately non-urgent.

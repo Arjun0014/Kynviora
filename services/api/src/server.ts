@@ -36,6 +36,7 @@ import { toErrorResponse, statusForCode } from './errors.js';
 import { nodeInviteTokenService, registerCaregiverRoutes } from './caregiver.js';
 import { registerVisitPackRoutes, sha256ContentDigest } from './visitPack.js';
 import { registerAlertDeliveryRoutes } from './alertDelivery.js';
+import { registerReviewInboxRoutes } from './reviewInbox.js';
 
 /** Maximum request body. `13` requires body-size limits; 1MB is ample for JSON payloads. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
@@ -588,6 +589,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
   // instead and takes a transport port.
 
   registerAlertDeliveryRoutes(app, { contextFor, fail });
+
+  // -------------------------------------------------------------------------
+  // Household Review Inbox routes (spec 04 Phase 8.3)
+  // -------------------------------------------------------------------------
+  // Derivation runs privileged over the whole profile; the listing is filtered by row-level
+  // security afterwards. Completion writes the authoritative record first and closes the task
+  // as a consequence, so there is deliberately no mark-done endpoint.
+
+  registerReviewInboxRoutes(app, { contextFor, fail });
 
   // -------------------------------------------------------------------------
   // Fallbacks

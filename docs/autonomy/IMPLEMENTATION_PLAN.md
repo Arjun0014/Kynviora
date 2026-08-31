@@ -185,7 +185,7 @@ restart, which needs a device (`BLK-002`).
 | ----- | ----------------------------------- | ------------- |
 | 8.1   | Caregiver invitation and grants     | `COMPLETE`    |
 | 8.2   | Caregiver alert delivery            | `COMPLETE`    |
-| 8.3   | Household Review Inbox              | `NOT_STARTED` |
+| 8.3   | Household Review Inbox              | `COMPLETE`    |
 | 8.4   | Visit Pack                          | `COMPLETE`    |
 | 8.5   | Medicine Reconciliation workflow v1 | `NOT_STARTED` |
 
@@ -224,6 +224,25 @@ rather than shown as a blank.
 exists, so nothing claims a device received anything (`BLK-009`); the missed-dose dispatch is
 enforced but unscheduled, because the grace window is an unmade product decision (`DEV-011`); and
 the settings screen typechecks but is not wired (`DEV-007`).
+
+**8.3**: complete. Migration `0010` generalises the `review_task` subject so a task can be about a
+caregiver grant or a published alert as well as an owned item, adds a partial unique index over
+open tasks that makes derivation idempotent, and adds `review_task_closed_wrote_something` - a
+CHECK making a closed task with no recorded field change unrepresentable.
+
+Both exit criteria are structural. _Review tasks are clearly different from safety alerts_: no
+urgency, evidence level, severity or score exists on the table, the domain type, or the API
+payload, and the presentation layer may use only the two calm tones, with the alert tones derived
+from `presentUrgency` in the test rather than hard-coded. _Completing a task updates the relevant
+authoritative record_: there is no mark-done path - the endpoint applies the change to the record
+first and closes the task only if that write affected a row, the domain refuses an empty change
+list or a field outside the closed list for that kind, and the CHECK refuses a closed row with no
+fields even to a direct SQL statement (DEC-027). Authorization follows the record rather than the
+inbox, so the inbox cannot become a permission side channel (DEC-028).
+
+95 tests across the domain, database, API and presentation suites. Outstanding: derivation runs on
+read rather than on a schedule (`DEV-013`), the three intervals are engineering defaults
+(`DEV-012`), and the inbox screen typechecks but is not wired (`DEV-007`).
 
 **8.4**: complete. Migration `0008` adds `visit_pack`, which stores a selection-and-version
 manifest and a content digest rather than a copy of the exported content (DEC-022), expires by a
@@ -267,20 +286,21 @@ window are engineering defaults (`DEV-009`, `DEV-010`).
 
 ## Immediate next work
 
-1. **Household Review Inbox** (Phase 8.3): non-urgent quality and care tasks displayed without
-   safety-alert styling, using the caregiver authorization model Phase 8.1 established.
-2. **Reviewer console publication workflow** (Phase 6.6): two-person approval where policy
+1. **Reviewer console publication workflow** (Phase 6.6): two-person approval where policy
    requires it, emergency withdrawal, and immutable audit.
+2. **Medicine Reconciliation workflow v1** (Phase 8.5), the last unstarted phase in Stage 8.
 3. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
-   Shelf, Trust Passport and Regulatory Lens surfaces the presentation package already supports.
+   Shelf, Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification and Review Inbox
+   surfaces the presentation package already supports (`DEV-007`).
 4. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
-   cache-hit rate, assessment recomputation throughput.
+   cache-hit rate, assessment recomputation throughput. The review-queue age becomes measurable
+   once inbox derivation moves behind a scheduler (`DEV-013`).
 5. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch and its authorization already exist; nothing calls them with a real occurrence.
 
 ## What "complete" means here, and what it does not
 
-Eighteen phases are marked `COMPLETE` above. In every case that means the logic is implemented,
+Nineteen phases are marked `COMPLETE` above. In every case that means the logic is implemented,
 tested, documented and committed - and in most cases the tests execute against a real PostgreSQL
 engine or the real Expo toolchain rather than a mock.
 

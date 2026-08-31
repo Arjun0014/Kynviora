@@ -641,3 +641,84 @@ only, with no recipient identity and no body.
 
 **Sources.** `04` Phase 8.2; `13` (privileged operations, idempotency); `15` A6; `16` (audit
 without duplicating sensitive content); `07.5` (a repeated evaluation must not re-notify).
+
+---
+
+## DEC-027 - A review task is closed by writing to the record, not by a state change
+
+**Context.** `04` Phase 8.3 exit criterion: "Completing a task updates the relevant authoritative
+record." `review_task` already had a `state` column from migration `0004`, so the obvious
+implementation - a Done button that sets `state = 'COMPLETED'` - was available and would have
+satisfied the criterion in appearance while violating it in fact.
+
+**Options.** (a) A `state` change, trusting the client to have also written the record.
+(b) Two endpoints, one to write the record and one to close the task. (c) One endpoint that takes
+the _change_, applies it to the authoritative record, and closes the task as a consequence.
+
+**Decision.** (c), enforced at three layers. `evaluateCompletion` refuses a completion with no
+changes, refuses a change targeting anything but the task's own subject, and refuses a field
+outside `COMPLETABLE_FIELDS` for that kind. The route applies the record write **first** and
+closes the task only if it affected a row. And `review_task_closed_wrote_something` is a CHECK
+constraint: a row that is `COMPLETED` or `DISMISSED` with an empty `completion_fields` cannot
+exist, so "mark done" is unwritable even by a direct SQL statement that bypasses the API.
+
+`NOT_APPLICABLE` is not an exception. Deciding a task does not apply is itself information about
+the record - "I looked at this pack and the details are right" is exactly what `last_reviewed_at`
+means - so both outcomes write and neither can write nothing.
+
+**Rationale.** (a) makes the exit criterion a claim about the client. (b) leaves the two writes
+separable, so the failure mode is a task closed over a record that never changed. The whole point
+of the criterion is that a to-do list about someone's medicines is worse than no list: it produces
+the feeling of having maintained the data without the fact.
+
+The field allow-list is what makes the criterion say "the **relevant** record". Without it a
+completion could satisfy "change something" by touching an unrelated column, and the inbox would
+be a general-purpose write endpoint that happens to close a task.
+
+**Consequences.** The completion payload is larger than a tick, and the UI must offer the actual
+change. That is the intended cost. If the record write is refused - by row-level security, or
+because the row is gone - nothing closes and the task stays open, which is the correct outcome
+and is asserted by a test. The user-facing copy says so out loud: "Kynviora does not keep a
+separate tick list."
+
+**Sources.** `04_STAGES_AND_PHASES.md` Phase 8.3; `16` (audit without duplicating content);
+DEC-022 (the same instinct: record the event, not a second copy of the thing).
+
+---
+
+## DEC-028 - Inbox authorization follows the record, and the database has the last word
+
+**Context.** `review_task` had an UPDATE policy requiring `MANAGE_CARE`. Completing a task writes
+to an owned item, a caregiver grant, a safety receipt or a refill estimate - none of which
+`MANAGE_CARE` governs.
+
+**Options.** (a) Keep a single inbox permission. (b) Require the capability of the underlying
+record, named per task kind. (c) Derive it dynamically from the subject row.
+
+**Decision.** (b). `COMPLETION_CAPABILITIES` maps each kind to the capabilities that admit it, and
+the `review_task_complete` policy repeats the mapping in SQL. A single inbox permission would be a
+privilege side channel: someone with care access could correct a medicine, or renew their own
+caregiver grant, by going through a task instead of the surface that governs it.
+`CAREGIVER_GRANT_EXPIRING` maps to `MANAGE_CAREGIVERS` alone, and renewing a grant additionally
+requires step-up, because it is caregiver administration whichever surface it is reached from.
+
+**The refinement a test forced.** The owned-item kinds list **both** `MANAGE_SHELF` and
+`MANAGE_MEDICINES`. `owned_item_update` narrows by `item_kind` - shelf for a personal-care
+product, medicines for a medicine - and a task row names only the item's ID, so neither the domain
+function nor the row-level policy can tell which applies. The first draft named `MANAGE_SHELF`
+alone and the API tests failed: the domain said yes where the database said no. Listing one would
+be too strict for half the items and misleadingly permissive for the other half.
+
+**Rationale.** So the division of labour is explicit: the domain checks "you hold a management
+capability at all", and `owned_item_update` - which knows the item kind - makes the binding
+decision. The route attempts the record write first, and a write that affects no row closes
+nothing and returns `PERMISSION_DENIED`. The database is the authority, as `13` intends, and the
+domain never claims an authority it cannot exercise.
+
+**Consequences.** A caregiver holding `MANAGE_SHELF` on a profile can open a medicine task and be
+refused at the point of writing rather than at the point of listing. That is slightly later than
+ideal and exactly correct: the alternative is a domain that disagrees with the policy that
+decides. A test pins the case, including that the task stays open.
+
+**Sources.** `04` Phase 8.3; `03` group H (separate permissions); `13` (RLS as defence in depth);
+`14` (step-up for caregiver administration); DEC-020.

@@ -396,8 +396,12 @@ describe('review tasks are separate from safety alerts (spec 04 Phase 8.3)', () 
   it('requires the care capability, not the shelf capability', async () => {
     await t.asService((db) =>
       db.query(
-        `INSERT INTO review_task (profile_id, owned_item_id, task_kind)
-         VALUES ($1, $2, 'BATCH_MISSING')`,
+        // `0010` generalised the subject so a task can be about a grant or an alert as well as an
+        // item, and made it NOT NULL. For an owned-item task the two columns hold the same value,
+        // which is what keeps the ON DELETE CASCADE from this migration meaningful.
+        `INSERT INTO review_task
+           (profile_id, owned_item_id, task_kind, subject_kind, subject_id)
+         VALUES ($1, $2, 'BATCH_MISSING', 'owned_item', $2)`,
         [PROFILE, SHAMPOO],
       ),
     );

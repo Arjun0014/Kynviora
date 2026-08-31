@@ -96,6 +96,11 @@ export const PRIVILEGED_REASONS = [
   // subject itself, because a service connection has no row-level security to fall back on.
   'AUDIT_READ',
   'EXPORT_GENERATION',
+  // Deriving the Review Inbox reads the whole profile - items, grants, alerts, refill estimates.
+  // Running it under the caller's row-level view would make the *stored* task list depend on who
+  // last opened it, so a caregiver with narrow capabilities would silently shrink the owner's
+  // list by looking at it. The listing is filtered by RLS afterwards instead.
+  'REVIEW_TASK_DERIVATION',
   'ACCOUNT_DELETION',
   'PROVIDER_CREDENTIAL_USE',
   'NOTIFICATION_DISPATCH',

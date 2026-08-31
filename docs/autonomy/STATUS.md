@@ -9,18 +9,18 @@ Last updated: 2026-08-31
 
 ## Current position
 
-|                    |                                                                           |
-| ------------------ | ------------------------------------------------------------------------- |
-| **Current stage**  | Stage 8 (family collaboration)                                            |
-| **Current phase**  | Household Review Inbox (8.3)                                              |
-| **Last completed** | Phase 8.2 caregiver alert delivery                                        |
-| **Branch**         | `master`                                                                  |
-| **Latest commit**  | `feat(care): caregiver alert delivery with two-dial notification privacy` |
-| **Baseline tag**   | `baseline-spec-only`                                                      |
+|                    |                                                       |
+| ------------------ | ----------------------------------------------------- |
+| **Current stage**  | Stage 8 (family collaboration)                        |
+| **Current phase**  | Medicine Reconciliation (8.5); Reviewer console (6.6) |
+| **Last completed** | Phase 8.3 Household Review Inbox                      |
+| **Branch**         | `master`                                              |
+| **Latest commit**  | `feat(care): Household Review Inbox`                  |
+| **Baseline tag**   | `baseline-spec-only`                                  |
 
 ## Verification state
 
-- **1492 tests passing**, 0 failing, across 34 files.
+- **1587 tests passing**, 0 failing, across 38 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -36,7 +36,7 @@ npm run verify
 | Area                                                       | State                                       |
 | ---------------------------------------------------------- | ------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                          |
-| Database schema, 9 migrations, full RLS                    | Complete, 176 tests incl. threats A1/A2/A3  |
+| Database schema, 10 migrations, full RLS                   | Complete, 197 tests incl. threats A1/A2/A3  |
 | Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                         |
 | Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                          |
 | Safety rule engine with replay; schedule and refill        | Complete, 88 tests                          |
@@ -47,14 +47,15 @@ npm run verify
 | Caregiver invitation, acceptance, revocation, audit        | Complete, 150 tests                         |
 | Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                         |
 | Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009) |
+| Household Review Inbox, record-writing completion          | Complete, 95 tests                          |
 | End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                          |
 | Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**         |
-| Caregiver, Visit Pack, notification screens                | Typecheck; **not wired** (`DEV-007`)        |
+| Caregiver, export, notification, inbox screens             | Typecheck; **not wired** (`DEV-007`)        |
 | CI pipeline                                                | Written; not yet run on a real runner       |
 
-Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack and
-alert-delivery rows each count tests that also appear in the database row, because those features
-span every layer. The presentation and API rows count only their own general suites, not the
+Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
+alert-delivery and Review Inbox rows each count tests that also appear in the database row,
+because those features span every layer. The presentation and API rows count only their own general suites, not the
 per-feature ones. Per-file counts are reproducible with `npx vitest run --reporter=json`.
 
 ## Known failing tests
@@ -80,22 +81,27 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Household Review Inbox** (Phase 8.3). Collect non-urgent work that improves data quality and
-care readiness - item not reviewed recently, batch missing, formula needs confirmation, OCR field
-unresolved, caregiver grant expiring, safety item awaiting confirmation - and display it
-_without_ safety-alert styling, which is the point of the phase rather than a detail of it. The
-caregiver authorization model from Phase 8.1 and the presentation separation between evidence and
-urgency both already exist; the new work is the task vocabulary, its lifecycle, and a surface that
-cannot be mistaken for the alert inbox.
+**Medicine Reconciliation workflow v1** (Phase 8.5) - the last unstarted phase in Stage 8 - or
+**Reviewer console publication workflow** (Phase 6.6) if reconciliation turns out to need a
+product decision nobody has made. Read `04` Phase 8.5 before choosing: reconciliation compares
+what the household believes it has against what a professional record says, and the framing that
+matters is `09`'s - Kynviora never tells anyone to stop a prescription medicine, so a
+reconciliation difference is a question to raise, never an instruction. The vocabulary must
+contain no outcome that reads as one.
+
+Phase 6.6 is fully implementable and blocked on nothing: two-person approval where policy requires
+it, emergency withdrawal, and immutable audit. Note that it does not require `BLK-006` to be
+resolved - it builds the workflow a qualified reviewer would use, without publishing anything.
 
 ## Next three planned tasks
 
 1. Reviewer console publication workflow (Phase 6.6): two-person approval where policy requires
    it, emergency withdrawal, and immutable audit.
 2. Wire the Expo screens to the API contract, replacing the placeholder states with the Shelf,
-   Trust Passport, Regulatory Lens, caregiver, Visit Pack and notification surfaces the
-   presentation package supports (`DEV-007`).
-3. Medicine Reconciliation workflow v1 (Phase 8.5).
+   Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification and Review Inbox surfaces
+   the presentation package supports (`DEV-007`).
+3. Observability projections (`20`), including the review-queue age that becomes measurable once
+   inbox derivation moves behind a scheduler (`DEV-013`).
 
 ## Recent decisions worth knowing
 
@@ -136,6 +142,14 @@ cannot be mistaken for the alert inbox.
 - **DEC-026** - `alert_delivery` records that a notification happened, to whom, and at which
   level. It has no body column, and it is append-only. The body is the string written to be read
   on a locked screen (`15` A6); storing it would outlive the alert's withdrawal.
+- **DEC-027** - a review task is closed by **writing to the authoritative record**, never by a
+  state change. The endpoint applies the change first and closes the task only if it affected a
+  row; a CHECK makes a closed task with no recorded field change unrepresentable. There is no
+  mark-done path, and "not applicable" writes too.
+- **DEC-028** - inbox authorization follows the _record_, not the inbox, so it cannot become a
+  permission side channel. The owned-item kinds list both `MANAGE_SHELF` and `MANAGE_MEDICINES`
+  because `owned_item_update` narrows by `item_kind` and a task row names only the item ID - the
+  domain checks the coarse capability, the database makes the binding decision.
 
 ## Traps to avoid on resume
 
@@ -177,3 +191,13 @@ cannot be mistaken for the alert inbox.
 15. Do not give the owner a second notification dial. Every recipient already has a personal
     preference, so an `owner_detail` on the profile policy would be two answers to one question
     (DEC-025). The caregiver ceiling is about other people's devices and does not apply to them.
+16. Do not add a "mark done" path to the Review Inbox, and do not relax
+    `review_task_closed_wrote_something` to make a test pass. Completing a task writes to the
+    authoritative record; that is the phase's exit criterion, not an implementation detail
+    (DEC-027).
+17. Do not give a review task an urgency, evidence level, severity, priority or score, in the
+    table, the domain type, the API payload or the tone. Tests assert the absence at every layer,
+    and the presentation tone list is a closed union that excludes the alert tones on purpose.
+18. Backticks are fatal inside a SQL template literal - `` `03` `` in a SQL comment terminates the
+    string and surfaces as an unrelated parse error. Write "Spec 03" in SQL; keep the backticks
+    for JSDoc.
