@@ -660,3 +660,106 @@ Stage 8 is now complete. Outstanding on this phase: matching is by a caller-supp
 than by catalog identity (`DEV-014`), the current list is typed in rather than extracted from the
 attached document (`DEV-015`, `BLK-007`), and the review screen typechecks but is not wired
 (`DEV-007`).
+
+### Phase 6.6 - Reviewer queue and publication controls
+
+Two exit criteria, and the first one is a sentence with two load-bearing words:
+"High-impact content cannot be published by an **unauthorized** **single** path."
+
+_Unauthorized_ is about where the right to approve comes from. Before this phase,
+`assessment_rule_version.approved_by_reviewer_id` was free text - a team name would have satisfied
+it - and nothing established that the named reviewer existed or was entitled to approve what they
+had approved. `14` says admin and reviewer roles are not inferred from client claims, so migration
+`0012` adds a `reviewer` table keyed by user ID, with the roles `10` names, and the approval
+trigger checks the claimed role against a stored ACTIVE grant. Nobody may grant themselves one: a
+CHECK refuses a row whose grantee is its granter, because the ability to create an approver is the
+two-person rule's weakest point.
+
+_Single_ turned out to be four different failures rather than one, and each is refused separately:
+
+- **Not a reviewer.** No stored role, no access - and the console returns 404, so it is not an
+  oracle for which queue items exist.
+- **Not that kind of reviewer.** `10` says regulatory comparison is a separate publication
+  responsibility from clinical safety assessment, so a legal-scope reviewer cannot approve a safety
+  rule and no clinical role can approve a legal status. Without this, "two-person approval" is
+  satisfiable by two people neither of whom can judge the content (DEC-032).
+- **Not enough people.** A UNIQUE constraint over request and reviewer makes one person one vote,
+  and the gate counts distinct reviewers rather than rows - counting rows is the obvious way to
+  satisfy a two-person rule with one person.
+- **Not a second pair of hands.** The requester may neither approve nor execute their own
+  publication. This is `10`'s separation of duties arriving by the most ordinary route: the person
+  who wrote it also signs it off.
+
+**The scope half of exit criterion 2.** "Scoped to the intended jurisdiction" is where a
+two-person rule quietly becomes a one-person rule. A request naming GB and NI can collect two
+approvals and still have a jurisdiction nobody reviewed, so the gate requires **each** jurisdiction
+to reach the count on its own. `10` requires Great Britain and Northern Ireland to be reviewed
+separately where applicable; here that is a count of distinct approvers per element of the array,
+and the refusal names which scope fell short. A safety rule has no jurisdiction column of its own -
+it would otherwise run everywhere - so publication writes the approved scope onto the rule, and a
+CHECK makes a published rule with no scope unrepresentable.
+
+**Why the checks live in the database.** `14` says there must be "no direct database editing of
+publication state as normal workflow". A rule enforced only in the API makes it not a _normal_
+workflow; making it not a workflow at all takes triggers. So the approval count, the separation of
+duties, the role mapping and the scope are all enforced in `0012` as well as in the domain, and the
+database tests exercise them by direct SQL with no API in the picture. The sharpest test of the
+whole design is in the API suite, though: two qualified reviewers approve a regulatory record, and
+the Citation Gate refuses it anyway because the record has no source document. Two governance
+layers, and satisfying one does not satisfy the other.
+
+**The asymmetry that took thinking about.** The obvious design gives withdrawal the same
+governance as the publication it reverses. That is wrong, and stating the failure modes side by
+side is what showed it: a wrongly-published alert tells a real person to act on Kynviora's
+authority, while a wrongly-withdrawn one removes information - the state the product is in for
+everything it does not cover. `15`'s reviewer-compromise threat is about _creating_ false
+publications. So withdrawal needs one reviewer, the requester may be that reviewer, the global
+publication block does not stop it, and `10`'s ten-item checklist is not asked for. A ten-item form
+in front of an emergency stop is a reason the emergency stop does not get used (DEC-031).
+
+**The checklist.** `10` lists ten things a reviewer must verify before high-severity publication.
+Encoding them mattered because two people clicking approve is not the same as two people doing
+those ten checks, and only the second is what the governance model asks for. They are recorded
+**per approval**, not per request: the point of a second reviewer is that they check
+independently, and letting the first one's confirmations stand for both would make the second
+signature ceremonial. The threshold is the same one that requires two people, so "high-impact"
+means one thing in the module. A rejection carries no checklist - demanding a reviewer confirm ten
+things about content they are turning down would be asking them to vouch for it.
+
+### Things worth recording
+
+- The first execution gate returned early when the row was already executed, so a second update to
+  EXECUTED was silently allowed and would have overwritten who published it. "Publication is
+  attributable" would have held only until somebody wrote to the row again. A decided request is
+  now final, and any further write is refused.
+- Four database tests were asserting the append-only trigger and getting "permission denied"
+  instead: the service role holds no DELETE or UPDATE grant, so the missing GRANT refuses before
+  the trigger runs. Both layers are right. The tests now assert each separately - the grant as the
+  service role, the trigger as the table owner - which is a better test than either.
+- Migration `0012` broke two pre-existing assertions in `db/regulatory.test.ts`, both by firing
+  before the constraint the test was about. Fixed by giving those fixtures a valid approved scope
+  so the constraint under test is the only thing wrong with the row. This is the same lesson as
+  Phase 8.5's: a test pinned to one constraint out of several that all refuse the row is testing
+  evaluation order.
+- A `Record<K, readonly V[]>` annotation does not flow into a nested `Object.freeze([...])` - the
+  inner call widens to `string[]` and the outer annotation then fails. Dropping the inner freeze
+  restores the contextual type. The same thing bites a nested frozen object of functions, where
+  the parameters become implicitly `any`.
+- Postgres refuses a statement supplied more parameters than it references, so a shared parameter
+  list across four differently-shaped target writes fails at bind time rather than at typecheck.
+  Each write now builds its own list.
+
+### What this phase does not do
+
+It does not make anything publishable. `BLK-006` is unchanged: this builds the workflow a
+qualified reviewer would use, and no qualified reviewer exists. There is also no console
+interface - the API is complete and there is deliberately no mobile screen, because `0012` gives
+the app role no grant on any of these tables and the household app is not where staff software
+belongs (`DEV-016`). "Rule preview" is deferred to Phase 6.7, because a preview worth trusting is
+a shadow run and a weaker one would give a reviewer a second, less accurate answer to the same
+question (`DEV-017`).
+
+### State at end of Phase 6.6
+
+1812 tests passing across 45 files, up from 1696 across 42. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 116 new tests: 43 domain, 44 database, 29 API.

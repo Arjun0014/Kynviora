@@ -148,7 +148,7 @@ restart, which needs a device (`BLK-002`).
 | 6.3   | AI-assisted discovery, extraction, Citation Gate   | `IN_PROGRESS` |
 | 6.4   | Global Regulatory Registry                         | `COMPLETE`    |
 | 6.5   | Deterministic rule engine and assessment inputs    | `IN_PROGRESS` |
-| 6.6   | Reviewer queue and publication controls            | `NOT_STARTED` |
+| 6.6   | Reviewer queue and publication controls            | `COMPLETE`    |
 | 6.7   | Shadow mode and replay                             | `NOT_STARTED` |
 
 - **6.1**: source classes, per-source `allowedInfluence`, licence review state and coverage
@@ -157,6 +157,35 @@ restart, which needs a device (`BLK-002`).
   adapters outstanding (`BLK-007`).
 - **6.4**: registry types, multi-status records, conditions, supersession, and the Lens
   projection are complete with 40 tests.
+
+**6.6**: complete. Migration `0012` adds `reviewer` (roles held by user ID, never by a name
+string), `publication_request`, an append-only `publication_approval`, and a single-row
+`publication_control` for the global emergency stop.
+
+_High-impact content cannot be published by an unauthorized single path_ is refused four separate
+ways, because "single path" turned out to be four failures: no stored reviewer role at all; a role
+that cannot judge this kind of content, since `10` keeps regulatory publication separate from
+clinical (DEC-032); not enough distinct people, counted as `DISTINCT reviewer_user_id` behind a
+UNIQUE over request and reviewer; and the requester approving or executing their own work.
+
+_Publication is attributable, reversible, and scoped_ is carried by the append-only approval table,
+by an emergency withdrawal that is deliberately cheaper than publication (DEC-031), and by an
+execution gate that requires **each** requested jurisdiction to reach the approval count on its
+own - approving for GB does not publish for NI. A safety rule gains `approved_jurisdictions`, and a
+published rule with no approved scope is unrepresentable.
+
+Every rule is enforced in the domain, again as a trigger in `0012`, and again at the route, because
+`14` requires that direct database editing of publication state is not a normal workflow. `10`'s
+ten-item high-severity checklist is recorded per approval rather than per request, since the point
+of a second reviewer is that they check independently.
+
+116 tests across the domain (43), database (44) and API (29) suites, including the case that shows
+the layering: two qualified reviewers approve a regulatory record and the Citation Gate refuses it
+anyway.
+
+Outstanding: this does **not** clear `BLK-006` - it builds the workflow a qualified reviewer would
+use, and none exists. There is no console interface and deliberately no mobile screen (`DEV-016`),
+and rule preview is deferred to Phase 6.7 (`DEV-017`).
 
 ---
 
@@ -316,9 +345,11 @@ and the review screen typechecks but is not wired (`DEV-007`).
 
 ## Immediate next work
 
-1. **Reviewer console publication workflow** (Phase 6.6): two-person approval where policy
-   requires it, emergency withdrawal, and immutable audit. Stage 8 is now complete, so this is the
-   largest fully-implementable phase left.
+1. **Shadow mode and replay** (Phase 6.7): shadow-run mode against synthetic and historical
+   datasets, affected product and potential-user-match counts, false-positive samples, and replay
+   after a source or rule change. It is the direct follow-on from 6.6 - the reviewer console
+   records that a reviewer verified expected match volume, and 6.7 is what they would look at to
+   do so (`DEV-017`).
 2. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
    Shelf, Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification, Review Inbox and
    reconciliation surfaces the presentation package already supports (`DEV-007`).

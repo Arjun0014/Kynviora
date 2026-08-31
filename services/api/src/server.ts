@@ -38,6 +38,7 @@ import { registerVisitPackRoutes, sha256ContentDigest } from './visitPack.js';
 import { registerAlertDeliveryRoutes } from './alertDelivery.js';
 import { registerReviewInboxRoutes } from './reviewInbox.js';
 import { registerReconciliationRoutes } from './reconciliation.js';
+import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
 
 /** Maximum request body. `13` requires body-size limits; 1MB is ample for JSON payloads. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
@@ -608,6 +609,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
   // RLS so the flow cannot change what the caller could not change directly.
 
   registerReconciliationRoutes(app, { contextFor, fail });
+
+  // -------------------------------------------------------------------------
+  // Reviewer console routes (spec 04 Phase 6.6)
+  // -------------------------------------------------------------------------
+  // Staff software, not a user surface. Migration 0012 gives the app role no grant on any of
+  // these tables, so every route here is privileged by construction and authorization is the
+  // stored reviewer role rather than a claim in the request (spec 14).
+
+  registerReviewerConsoleRoutes(app, { contextFor, fail });
 
   // -------------------------------------------------------------------------
   // Fallbacks

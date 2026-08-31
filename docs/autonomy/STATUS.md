@@ -9,18 +9,18 @@ Last updated: 2026-09-01
 
 ## Current position
 
-|                    |                                                      |
-| ------------------ | ---------------------------------------------------- |
-| **Current stage**  | Stage 8 (family collaboration)                       |
-| **Current phase**  | Reviewer console publication workflow (6.6)          |
-| **Last completed** | Phase 8.5 Medicine Reconciliation (Stage 8 complete) |
-| **Branch**         | `master`                                             |
-| **Latest commit**  | `feat(care): Medicine Reconciliation workflow v1`    |
-| **Baseline tag**   | `baseline-spec-only`                                 |
+|                    |                                                             |
+| ------------------ | ----------------------------------------------------------- |
+| **Current stage**  | Stage 6 (governance), after completing Stage 8              |
+| **Current phase**  | Shadow mode and replay (6.7)                                |
+| **Last completed** | Phase 6.6 Reviewer queue and publication controls           |
+| **Branch**         | `master`                                                    |
+| **Latest commit**  | `feat(governance): reviewer queue and publication controls` |
+| **Baseline tag**   | `baseline-spec-only`                                        |
 
 ## Verification state
 
-- **1696 tests passing**, 0 failing, across 42 files.
+- **1812 tests passing**, 0 failing, across 45 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -33,29 +33,31 @@ npm run verify
 
 ## What is genuinely built and tested
 
-| Area                                                       | State                                       |
-| ---------------------------------------------------------- | ------------------------------------------- |
-| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                          |
-| Database schema, 11 migrations, full RLS                   | Complete, 225 tests incl. threats A1/A2/A3  |
-| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                         |
-| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                          |
-| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                          |
-| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                          |
-| Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                         |
-| API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                          |
-| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                          |
-| Caregiver invitation, acceptance, revocation, audit        | Complete, 150 tests                         |
-| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                         |
-| Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009) |
-| Household Review Inbox, record-writing completion          | Complete, 95 tests                          |
-| Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                         |
-| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                          |
-| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**         |
-| Caregiver, export, notification, inbox, reconciliation UI  | Typecheck; **not wired** (`DEV-007`)        |
-| CI pipeline                                                | Written; not yet run on a real runner       |
+| Area                                                       | State                                                |
+| ---------------------------------------------------------- | ---------------------------------------------------- |
+| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                   |
+| Database schema, 12 migrations, full RLS                   | Complete, 269 tests incl. threats A1/A2/A3           |
+| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                  |
+| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                   |
+| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                   |
+| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                                   |
+| Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                                  |
+| API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                                   |
+| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                                   |
+| Caregiver invitation, acceptance, revocation, audit        | Complete, 150 tests                                  |
+| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                                  |
+| Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009)          |
+| Household Review Inbox, record-writing completion          | Complete, 95 tests                                   |
+| Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                                  |
+| Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006) |
+| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                   |
+| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                  |
+| Caregiver, export, notification, inbox, reconciliation UI  | Typecheck; **not wired** (`DEV-007`)                 |
+| CI pipeline                                                | Written; not yet run on a real runner                |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
-alert-delivery, Review Inbox and reconciliation rows each count tests that also appear in the
+alert-delivery, Review Inbox, reconciliation and reviewer-console rows each count tests that
+also appear in the
 database row, because those features span every layer. The presentation and API rows count only
 their own general suites, not the per-feature ones. Per-file counts are reproducible with
 `npx vitest run --reporter=json`.
@@ -83,23 +85,28 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Reviewer console publication workflow** (Phase 6.6). Stage 8 is complete, so this is the
-largest fully-implementable phase left. It is blocked on nothing: two-person approval where policy
-requires it, emergency withdrawal, and immutable audit. Note that it does **not** require
-`BLK-006` to be resolved - it builds the workflow a qualified reviewer would use, without
-publishing anything. Read `04` Phase 6.6 and `23`'s approval requirements first, and expect the
-hard part to be the same shape as Phase 8.5's: the workflow must make an unreviewed publication
-unrepresentable rather than merely disallowed.
+**Shadow mode and replay** (Phase 6.7). It is the direct follow-on from the reviewer console:
+6.6 records that a reviewer verified expected matched-user volume and rule matching behaviour, and
+6.7 builds the thing they would look at to do so honestly - shadow runs against synthetic and
+historical datasets, affected product and potential-user-match counts, false-positive samples, and
+replay after a source, rule or normalization change. Read `04` Phase 6.7 and `10`'s
+false-positive investigation procedure first. Its exit criteria are both implementable with no
+external dependency: a new high-impact rule can be evaluated without notifying anyone, and a
+regulatory correction recomputes dependent views reproducibly.
+
+Note what 6.6 did **not** do: it did not clear `BLK-006`. The console is the workflow a qualified
+reviewer would use, and no qualified reviewer exists. Do not read "reviewer console complete" as
+"safety rules can now be published".
 
 ## Next three planned tasks
 
-1. Reviewer console publication workflow (Phase 6.6): two-person approval where policy requires
-   it, emergency withdrawal, and immutable audit.
-2. Wire the Expo screens to the API contract, replacing the placeholder states with the Shelf,
+1. Wire the Expo screens to the API contract, replacing the placeholder states with the Shelf,
    Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification, Review Inbox and
    reconciliation surfaces the presentation package supports (`DEV-007`).
-3. Observability projections (`20`), including the review-queue age that becomes measurable once
+2. Observability projections (`20`), including the review-queue age that becomes measurable once
    inbox derivation moves behind a scheduler (`DEV-013`).
+3. A staff reviewer console interface, on its own origin and session policy (`DEV-016`). It is
+   deliberately not a screen in the Expo app.
 
 ## Recent decisions worth knowing
 
@@ -157,6 +164,17 @@ unrepresentable rather than merely disallowed.
   professional confirmation carries no side of its own, because a pharmacist may confirm the older
   dose; the screen has to ask. Refused by the domain, by the API and by
   `difference_settled_has_side`.
+
+- **DEC-031** - withdrawal is deliberately cheaper than publication: one reviewer, the requester
+  may be that reviewer, the global publication block does not stop it, and no checklist. A
+  wrongly-published alert tells someone to act; a wrongly-withdrawn one only removes information.
+  Do not "fix" the asymmetry.
+- **DEC-032** - the right to approve is a stored `reviewer` row keyed by user ID, and clinical
+  and regulatory approval are not interchangeable. A legal-scope reviewer cannot approve a safety
+  rule; no clinical role can approve a legal status.
+- **DEC-033** - inside the reviewer console, separation-of-duties and role-not-permitted are
+  `VALIDATION_FAILED` (400), not `PERMISSION_DENIED`. The 404 rule is about a caller's standing
+  to look at all, not about the pairing of a reviewer with a request they can already see.
 
 ## Traps to avoid on resume
 
@@ -224,3 +242,17 @@ unrepresentable rather than merely disallowed.
     testing evaluation order.
 23. `expectDenied` takes a non-async arrow, so `expectDenied(() => f(await g()))` is a parse
     error, not a type error. Hoist the setup above the call.
+24. Do not make emergency withdrawal need two people, a checklist, or an unblocked publication
+    control. The asymmetry with publication is the design (DEC-031), and every one of those
+    changes makes the fail-safe path slower than the dangerous one.
+25. Do not add a single generic reviewer role, and do not let a clinical role approve a regulatory
+    record or the reverse. `10` makes them separate publication responsibilities, and the mapping
+    exists twice on purpose - `APPROVING_ROLES` in the domain and `kynviora.role_may_approve`
+    in SQL (DEC-032).
+26. Do not count approval _rows_. The gate counts `DISTINCT reviewer_user_id` per jurisdiction,
+    which is what makes two-person approval mean two people and makes a GB approval not an NI one.
+27. Phase 6.6 did **not** clear `BLK-006`. The console is the workflow a qualified reviewer would
+    use; no qualified reviewer exists, and nothing in the shipped fixtures is publishable.
+28. A published `assessment_rule_version` now needs a non-empty `approved_jurisdictions`. If an
+    older fixture starts failing with `rule_published_has_approved_scope`, give it a scope rather
+    than relaxing the constraint - a rule with no approved scope runs everywhere.

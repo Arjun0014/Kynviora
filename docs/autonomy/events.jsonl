@@ -91,3 +91,13 @@
 {"ts": "2026-09-01T01:54:00Z", "type": "decision_recorded", "detail": "DEC-029 difference kinds name the lists not the medicine; DEC-030 the adopted side is stated, never inferred from recency"}
 {"ts": "2026-09-01T01:55:00Z", "type": "deviation_recorded", "detail": "DEV-014 matching is by caller-supplied key; DEV-015 the current list is typed in, not extracted (BLK-007)"}
 {"ts": "2026-09-01T01:56:00Z", "type": "phase_complete", "detail": "Phase 8.5 Medicine Reconciliation; 1696 tests across 42 files, verify exit 0; Stage 8 complete"}
+{"ts": "2026-09-01T02:00:00Z", "type": "phase_started", "detail": "Phase 6.6 reviewer queue and publication controls"}
+{"ts": "2026-09-01T02:02:00Z", "type": "code_added", "detail": "domain reviewerConsole: roles, approval policy, per-jurisdiction tally, execution gate"}
+{"ts": "2026-09-01T02:04:00Z", "type": "migration_added", "detail": "0012 reviewer, publication_request, publication_approval, publication_control; approval admission and execution gate triggers"}
+{"ts": "2026-09-01T02:06:00Z", "type": "bug_found", "detail": "execution gate allowed a second EXECUTED update, overwriting decided_by_user_id; a decided request is now final"}
+{"ts": "2026-09-01T02:07:00Z", "type": "test_fixed", "detail": "append-only assertions were hitting the missing GRANT first; now assert grant as service and trigger as owner"}
+{"ts": "2026-09-01T02:09:00Z", "type": "code_added", "detail": "spec 10 high-severity publication checklist, enforced per approval at domain, schema and API"}
+{"ts": "2026-09-01T02:11:00Z", "type": "test_updated", "detail": "db/regulatory.test.ts published-rule fixtures updated for rule_published_has_approved_scope"}
+{"ts": "2026-09-01T02:13:00Z", "type": "decision_recorded", "detail": "DEC-031 withdrawal is cheaper than publication; DEC-032 approval right is a stored role and clinical is not regulatory; DEC-033 the 404 rule is about standing, not pairing"}
+{"ts": "2026-09-01T02:14:00Z", "type": "deviation_recorded", "detail": "DEV-016 console backend without an interface; DEV-017 rule preview deferred to Phase 6.7"}
+{"ts": "2026-09-01T02:15:00Z", "type": "phase_complete", "detail": "Phase 6.6 reviewer console; 1812 tests across 45 files, verify exit 0; BLK-006 unchanged"}

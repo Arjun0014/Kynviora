@@ -461,10 +461,12 @@ describe('safety publication boundary (threat A3)', () => {
         `INSERT INTO assessment_rule_version
            (rule_key, version, rule_kind, evidence_level, max_urgency,
             required_item_verification, required_profile_provenance, explanation_template_id,
-            review_state, approved_by_reviewer_id, approved_at, shadow_mode, enabled)
+            review_state, approved_by_reviewer_id, approved_at, shadow_mode, enabled,
+            approved_jurisdictions)
          VALUES ('batch-recall', 'v1', 'BATCH_ACTION_MATCH', 'A', 'HIGH',
                  ARRAY['CONFIRMED'], ARRAY['USER_REPORTED'], 'tpl-v1',
-                 'PUBLISHED', 'synthetic-test-reviewer', now(), false, true)
+                 'PUBLISHED', 'synthetic-test-reviewer', now(), false, true,
+                 ARRAY['GB']::text[])
          RETURNING id`,
       ),
     );
@@ -475,12 +477,15 @@ describe('safety publication boundary (threat A3)', () => {
     const message = await expectDenied(() =>
       t.asService((db) =>
         db.query(
+          // The approved scope is supplied so that migration 0012's constraint is satisfied and
+          // the missing reviewer is the only thing wrong with this row - otherwise the test would
+          // be asserting whichever constraint Postgres happens to evaluate first.
           `INSERT INTO assessment_rule_version
              (rule_key, version, rule_kind, evidence_level, max_urgency,
               required_item_verification, required_profile_provenance, explanation_template_id,
-              review_state)
+              review_state, approved_jurisdictions)
            VALUES ('x', 'v1', 'EXPIRY', 'B', 'LOW', ARRAY['CONFIRMED'], ARRAY['USER_REPORTED'],
-                   'tpl', 'PUBLISHED')`,
+                   'tpl', 'PUBLISHED', ARRAY['GB']::text[])`,
         ),
       ),
     );

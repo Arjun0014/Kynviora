@@ -293,3 +293,48 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Required future work**: route the attached asset through the Phase 3.3 extraction pipeline
   once `BLK-007` clears, presenting each extracted line for confirmation before it enters the
   comparison.
+
+## DEV-016 - The reviewer console has a backend and no interface
+
+- **Affected specification**: `04` Phase 6.6 lists a "source/evidence/legal-scope view" and a
+  reviewer queue among its expected output, which implies a screen.
+- **Expected behaviour**: a staff web console where a reviewer sees the queue, opens a candidate
+  alongside its source documents and legal scope, works the checklist, and approves or returns it.
+- **Implemented behaviour**: the API those screens would call, in full - queue, single-request view
+  with every approval and a per-jurisdiction tally, decisions, execution, and the global block -
+  plus the governance rules at three layers. No interface.
+- **Reason**: there is no staff web application in this repository, and there should not be a
+  reviewer screen in the mobile app: `0012` gives `kynviora_app` no grant on any of these tables
+  precisely because the console is not a user surface (`14`). Building the household app's first
+  staff screen would have contradicted the boundary this phase exists to draw. The presentation
+  package is likewise untouched - its copy rules and forbidden-claim scans are about what
+  Kynviora says to a household, and reviewer-facing strings are not that.
+- **Temporary or permanent**: temporary. The API is the contract a console would build against.
+- **Risk**: low. Nothing is publishable today regardless (`BLK-006`), and the workflow is fully
+  exercised by tests rather than by a screen.
+- **Required future work**: a separate staff application, on its own origin and its own session
+  policy, with the MFA/passkey and environment isolation `13` requires. It is deliberately not the
+  Expo app.
+
+## DEV-017 - Rule preview is deferred to shadow mode
+
+- **Affected specification**: `04` Phase 6.6 lists "rule preview" among its expected output.
+- **Expected behaviour**: before approving a rule, a reviewer sees what it would do - which
+  products and formulations it matches, how many users it would reach, and a sample of the
+  matches - so the approval is informed rather than nominal.
+- **Implemented behaviour**: the checklist records that the reviewer verified rule matching
+  behaviour, expected matched-user volume and affected identifiers (`10`), and a high-severity
+  approval is refused without those confirmations. What the reviewer looks at to make them is not
+  produced by this phase.
+- **Reason**: a preview worth trusting is a shadow run, and `04` Phase 6.7 is exactly that -
+  shadow-run mode against synthetic and historical datasets, affected product counts,
+  potential-user-match counts and false-positive samples. Building a weaker preview here would
+  have produced a second, less accurate answer to the same question, and a reviewer comparing two
+  numbers is worse off than one with none.
+- **Temporary or permanent**: temporary. The checklist item is the placeholder and names the
+  obligation.
+- **Risk**: moderate, and it is why this is written down. A reviewer confirming
+  `EXPECTED_MATCH_VOLUME` today is confirming a judgement rather than a computed figure, and the
+  system records the confirmation either way.
+- **Required future work**: Phase 6.7. When shadow runs exist, the single-request view should
+  carry the run's output, and `EXPECTED_MATCH_VOLUME` should be confirmable only against one.

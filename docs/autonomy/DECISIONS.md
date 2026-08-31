@@ -788,3 +788,100 @@ assume. A professional confirmation landing on `PREVIOUS` changes nothing on the
 recorded as a decision, not as an absence of one - and a test asserts the shelf is untouched.
 
 **Sources.** `04` Phase 8.5; `09`; `07` (provenance and attribution); DEC-024.
+
+---
+
+## DEC-031 - Withdrawal is deliberately cheaper than publication
+
+**Context.** Phase 6.6 requires two-person approval for high-impact publication and an emergency
+withdrawal control. The obvious symmetry - the same governance in both directions - is wrong, and
+it took stating the failure modes side by side to see why.
+
+**Options.** (a) Withdrawal needs the same approvals as the publication it reverses.
+(b) Withdrawal needs one reviewer, and the person who asked may be that reviewer.
+(c) Withdrawal needs no reviewer at all.
+
+**Decision.** (b). `requiredApprovals` returns 1 for `WITHDRAW` whatever the content's declared
+urgency; the separation-of-duties rule that forbids a requester approving or executing their own
+request applies to `PUBLISH` only; the global publication block does not stop a withdrawal; and
+`10`'s high-severity checklist is not asked for.
+
+**Rationale.** The two failure modes are not symmetric. A wrongly-published alert tells a real
+person to do something on Kynviora's authority. A wrongly-withdrawn one removes information, which
+is the state the product is in for every item it does not cover anyway. `15`'s reviewer-compromise
+threat is about _creating_ false publications. Making the safe direction the slow one would mean a
+live wrong alert stays up while somebody hunts for a second reviewer, and a ten-item form in front
+of an emergency stop is a reason the emergency stop does not get used.
+
+(c) was rejected because attribution survives either way and costs nothing: a withdrawal still
+names who did it and still requires a stated reason, which is what an incident review needs.
+
+**Consequences.** A single compromised reviewer account can un-publish content. That is accepted:
+the damage is the absence of information, which is recoverable by re-publishing through the full
+two-person path, and it is bounded by the audit trail. The reverse - one account publishing a
+false CRITICAL alert - remains impossible, which is the asymmetry the design is buying.
+
+**Sources.** `04` Phase 6.6; `10` (emergency controls); `13`; `14`; `15`.
+
+---
+
+## DEC-032 - The right to approve is a stored role, and clinical is not regulatory
+
+**Context.** Before this phase, `assessment_rule_version.approved_by_reviewer_id` and its
+regulatory equivalents were free-text columns. Anything could be written into them, including a
+team name, and nothing established that the named reviewer existed or was entitled to approve
+what they had approved.
+
+**Options.** (a) Keep the free-text reviewer name and validate it in the API. (b) A `reviewer`
+table keyed by user, with a single generic reviewer role. (c) A `reviewer` table with the named
+roles `10` requires, and a mapping from content kind to the roles that may approve it.
+
+**Decision.** (c). `14` says admin/reviewer roles are not inferred from client claims, and `13`
+forbids shared accounts, so a role is held by a user ID in a stored row. The role a reviewer acts
+in is recorded on each approval, because a person may hold two and which one they used is part of
+what makes the decision attributable.
+
+**Rationale.** (b) would satisfy "two-person approval" with two people neither of whom can judge
+the content in front of them, which reads as governance and is not. `10` is explicit that
+regulatory comparison is a separate publication responsibility from clinical safety assessment,
+so `REGULATORY_LEGAL_REVIEWER` cannot approve a safety rule and no clinical role can approve a
+legal status. `CONTENT_PLAIN_LANGUAGE_OWNER` may approve an alert publication and nothing else:
+reviewing the wording is not reviewing the finding.
+
+**Consequences.** The mapping exists twice - as `APPROVING_ROLES` in the domain and as
+`kynviora.role_may_approve` in SQL - for the same reason the Citation Gate exists twice. `14`
+requires that direct database editing of publication state is not a normal workflow, and the way
+to mean that is for the database to refuse it too. A test inserts an approval directly and watches
+the trigger refuse it.
+
+**Sources.** `10` (required roles, separation of duties); `13`; `14`; `04` Phase 6.6.
+
+---
+
+## DEC-033 - A 404 is about standing, not about the pairing
+
+**Context.** `PERMISSION_DENIED` maps to 404 everywhere in this API so it is not an existence
+oracle (trap 14). The first draft of the reviewer console returned it for "you may not approve
+your own request" and "that role cannot judge this kind of content", and the tests showed what
+that costs: a bare 404 with no reason, to a caller who can already see the request in their queue.
+
+**Options.** (a) Keep `PERMISSION_DENIED` for consistency. (b) Classify the two pairing rules as
+`VALIDATION_FAILED`, keeping `PERMISSION_DENIED` for questions of standing.
+
+**Decision.** (b). Not holding any reviewer role, and holding a role one does not actually have,
+stay `PERMISSION_DENIED` and 404 - those are about whether the caller belongs here at all, and the
+404 is doing real work. Separation of duties and role-not-permitted-for-kind become 400 with their
+reason codes.
+
+**Rationale.** The 404 rule exists to stop the API confirming that a given ID exists. Inside the
+reviewer console the caller is an established reviewer and the queue lists these requests by
+design, so there is nothing left to hide - and what is wrong is the _pairing_ of this reviewer
+with this request, not their standing to be looking at it. A silent 404 there costs the reviewer
+the reason and buys nothing.
+
+**Consequences.** The console can tell a reviewer why a control is unavailable, and the queue
+reports `youMayApprove` per item so it does not offer a control the database will refuse. Trap 14
+still holds everywhere else, and the two error classes now mean different things rather than one
+of them meaning both.
+
+**Sources.** `13`; `14`; trap 14; `04` Phase 6.6.

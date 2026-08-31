@@ -107,6 +107,11 @@ export const PRIVILEGED_REASONS = [
   // role. The one write to a medicine deliberately does not: it goes through RLS, so the inbox
   // cannot change what the caller could not have changed on the medicine screen itself.
   'RECONCILIATION',
+  // The reviewer console has no app-role grant at all - spec 14 keeps publication state off every
+  // user surface - so every read and write here is privileged by construction. Authorization is
+  // the stored reviewer role, checked in SQL, because a service connection has no row-level
+  // security to fall back on.
+  'REVIEWER_CONSOLE',
   'ACCOUNT_DELETION',
   'PROVIDER_CREDENTIAL_USE',
   'NOTIFICATION_DISPATCH',
