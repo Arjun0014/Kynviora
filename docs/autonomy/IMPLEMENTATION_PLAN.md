@@ -184,7 +184,7 @@ restart, which needs a device (`BLK-002`).
 | Phase | Title                               | Status        |
 | ----- | ----------------------------------- | ------------- |
 | 8.1   | Caregiver invitation and grants     | `COMPLETE`    |
-| 8.2   | Caregiver alert delivery            | `NOT_STARTED` |
+| 8.2   | Caregiver alert delivery            | `COMPLETE`    |
 | 8.3   | Household Review Inbox              | `NOT_STARTED` |
 | 8.4   | Visit Pack                          | `COMPLETE`    |
 | 8.5   | Medicine Reconciliation workflow v1 | `NOT_STARTED` |
@@ -203,6 +203,27 @@ presentation suites.
 
 Outstanding: the mobile screens are built and typecheck but are not wired to a repository
 (`DEV-007`), and the invitation lifetime defaults await product sign-off (`DEV-006`).
+
+**8.2**: complete. Migration `0009` adds `profile_notification_policy` (the owner's ceiling on what
+a caregiver notification may reveal), `notification_preference` (each recipient's own setting for
+their own device), and an append-only `alert_delivery` that records the recipient, the event and
+the disclosure level - never the notification body (DEC-026).
+
+The exit criterion is deny-by-default authorization, so recipient selection is a filter: a
+candidate is dropped unless something affirmatively admits it, and every drop carries a named
+reason that forms part of the returned plan rather than a log line. `MISSED_DOSE` requires
+`RECEIVE_MISSED_DOSE` and deliberately not `VIEW_SAFETY`; both directions are asserted at the
+domain, the database and the API, which is the separate-permission requirement in `03` group H.
+Disclosure is the narrower of the owner's ceiling and the recipient's preference, defaulting to
+`GENERIC` on both sides so absence is never read as permission (DEC-025). A withdrawn alert is
+refused outright rather than delivered to nobody, and the caregiver alert view narrows a resolution
+by _column_: the outcome is visible, the free-text note is not, and the withholding is reported
+rather than shown as a blank.
+
+126 tests across the domain, database, API and presentation suites. Outstanding: no push provider
+exists, so nothing claims a device received anything (`BLK-009`); the missed-dose dispatch is
+enforced but unscheduled, because the grace window is an unmade product decision (`DEV-011`); and
+the settings screen typechecks but is not wired (`DEV-007`).
 
 **8.4**: complete. Migration `0008` adds `visit_pack`, which stores a selection-and-version
 manifest and a content digest rather than a copy of the exported content (DEC-022), expires by a
@@ -246,20 +267,20 @@ window are engineering defaults (`DEV-009`, `DEV-010`).
 
 ## Immediate next work
 
-1. **Caregiver alert delivery** (Phase 8.2): share only the safety information the profile
-   owner permitted, with generic notification content by default (`03` group H).
-2. **Household Review Inbox** (Phase 8.3): non-urgent quality and care tasks displayed without
+1. **Household Review Inbox** (Phase 8.3): non-urgent quality and care tasks displayed without
    safety-alert styling, using the caregiver authorization model Phase 8.1 established.
-3. **Reviewer console publication workflow** (Phase 6.6): two-person approval where policy
+2. **Reviewer console publication workflow** (Phase 6.6): two-person approval where policy
    requires it, emergency withdrawal, and immutable audit.
-4. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
+3. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
    Shelf, Trust Passport and Regulatory Lens surfaces the presentation package already supports.
-5. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
+4. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
    cache-hit rate, assessment recomputation throughput.
+5. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
+   dispatch and its authorization already exist; nothing calls them with a real occurrence.
 
 ## What "complete" means here, and what it does not
 
-Seventeen phases are marked `COMPLETE` above. In every case that means the logic is implemented,
+Eighteen phases are marked `COMPLETE` above. In every case that means the logic is implemented,
 tested, documented and committed - and in most cases the tests execute against a real PostgreSQL
 engine or the real Expo toolchain rather than a mock.
 

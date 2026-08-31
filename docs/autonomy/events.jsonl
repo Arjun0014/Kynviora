@@ -60,3 +60,15 @@
 {"ts": "2026-08-31T16:18:00Z", "type": "test_added", "detail": "regression test asserts created_at is anchored to the injected clock"}
 {"ts": "2026-08-31T16:19:00Z", "type": "defect_fixed", "detail": "literal U+001F/U+001E removed from packages/domain/src/visitPack.test.ts; repo-wide scan clean (trap 7)"}
 {"ts": "2026-08-31T16:22:00Z", "type": "phase_verified", "detail": "Phase 8.4 Visit Pack; 1366 tests across 30 files, verify exit 0"}
+{"ts": "2026-08-31T16:30:00Z", "type": "phase_started", "detail": "Phase 8.2 caregiver alert delivery"}
+{"ts": "2026-08-31T16:34:00Z", "type": "decision_recorded", "detail": "DEC-025 notification disclosure is two dials, the narrower wins"}
+{"ts": "2026-08-31T16:36:00Z", "type": "defect_found", "detail": "policy carried both a caregiver ceiling and an ownerDetail; the owner then had two dials that could disagree"}
+{"ts": "2026-08-31T16:37:00Z", "type": "defect_fixed", "detail": "ownerDetail removed from policy and migration; the owner's own preference is the only dial that applies to them"}
+{"ts": "2026-08-31T16:41:00Z", "type": "migration_added", "detail": "0009_alert_delivery: policy ceiling, per-user preference, append-only delivery record with per-recipient dedupe"}
+{"ts": "2026-08-31T16:44:00Z", "type": "decision_recorded", "detail": "DEC-026 a delivery record stores that it happened, never what it said"}
+{"ts": "2026-08-31T16:48:00Z", "type": "blocker_recorded", "detail": "BLK-009 no push notification credentials; delivery goes through a recording transport port"}
+{"ts": "2026-08-31T16:50:00Z", "type": "test_failed", "detail": "four API tests expected 403; PERMISSION_DENIED maps to 404 by design so the API is not an existence oracle"}
+{"ts": "2026-08-31T16:51:00Z", "type": "test_replaced", "detail": "anti-enumeration asserted directly: a real and an invented profile return byte-identical bodies"}
+{"ts": "2026-08-31T16:53:00Z", "type": "test_added", "detail": "append-only asserted at both layers: no service grant, and the trigger refuses a privileged role"}
+{"ts": "2026-08-31T16:56:00Z", "type": "deviation_recorded", "detail": "DEV-011 missed-dose dispatch is enforced but unscheduled; the grace window is an unmade product decision"}
+{"ts": "2026-08-31T16:58:00Z", "type": "phase_complete", "detail": "Phase 8.2 caregiver alert delivery; 1492 tests across 34 files, verify exit 0"}

@@ -566,3 +566,78 @@ invariant is named rather than caught incidentally by an expiry test.
 
 **Sources.** `14_SECURITY.md`; `15` A2 (revocation takes effect immediately); DEC-010 and the
 lint rule forbidding `new Date()` in production code.
+
+---
+
+## DEC-025 - Notification disclosure is two dials, and the narrower always wins
+
+**Context.** `03` group H requires generic notification content by default; `16` requires
+caregiver notifications to reveal minimal information and forbids using "family" to justify broad
+hidden access. Two people have a legitimate say in what a caregiver's lock screen shows: the
+profile owner, whose health information it is, and the caregiver, whose device it is.
+
+**Options.** (a) Owner decides alone. (b) Recipient decides alone. (c) Owner sets a ceiling, the
+recipient sets their own preference, and the effective level is the narrower of the two.
+
+**Decision.** (c). `profile_notification_policy.max_caregiver_detail` is the owner's ceiling;
+`notification_preference.detail_level` is each recipient's own setting. `selectRecipients` takes
+`narrowerOf` the two. Levels are `GENERIC` (reveals nothing), `CATEGORY` (the kind of update, no
+person or product), `NAMED` (may name both), ordered so the rule is literally "take the smaller
+index". A missing row on either side means `GENERIC`, so absence is never read as permission.
+
+The owner is exempt from the ceiling, because the ceiling limits what leaves the profile onto
+somebody else's device and is not a restriction they place on themselves. Their own preference is
+the only dial that applies to them - and it still defaults to `GENERIC`.
+
+**Rationale.** (a) ignores that a caregiver may be on a shared or work phone the owner knows
+nothing about. (b) lets a caregiver decide how much of someone else's health information appears
+on a screen in a room the owner has never been in - which is exactly the "family justifies broad
+access" pattern `16` names. Neither answer may override the other, so both apply.
+
+The policy table deliberately holds **one** column. An earlier draft also gave it an `owner_detail`,
+which a test caught: every recipient already has a personal preference, so a second owner-level
+dial for the owner's own notifications was a duplicate answer to a question that has one, and the
+two could disagree.
+
+**Consequences.** A caregiver can be shown a level they did not choose, so the settings screen
+says why (`OWNER_CAP_NOTE`) and marks unreachable levels rather than hiding them - a missing
+option is indistinguishable from a broken screen. Raising the ceiling requires owner identity and
+step-up; `MANAGE_CAREGIVERS` deliberately does not carry it, because an administrator who could
+raise it would change what every other caregiver receives without the owner observing it.
+
+**Sources.** `03` group H; `16` (caregiver privacy, data minimization); `15` A6; `04` Phase 8.2;
+DEC-020 (delegation may not widen what the owner did not approve).
+
+---
+
+## DEC-026 - A delivery record stores that it happened, never what it said
+
+**Context.** `04` Phase 8.2 needs a durable record of what was sent, for the owner's benefit and
+for deduplication. The notification body is the one string in the system written expressly to be
+readable on a locked screen (`15` A6).
+
+**Options.** (a) Store the rendered body. (b) Store nothing and rely on the audit log. (c) Store
+the recipient, the event, and the disclosure level - and re-render the text when needed.
+
+**Decision.** (c). `alert_delivery` holds `recipient_user_id`, `event_kind`, the reference that
+identifies the event, `detail_level` and `delivered_at`. No body column exists. The table is
+append-only, and the app role holds no INSERT: `13` lists notification dispatch among the
+privileged server-only operations.
+
+**Rationale.** Storing the body would put the lock-screen string into a durable table with a
+different access path from the alert it describes, outliving the alert's withdrawal - the same
+objection as DEC-022 for Visit Packs. The level plus the event is enough to answer every question
+the record exists for: was this person told, when, and how much did it show.
+
+Deduplication is a unique index per `(event, recipient)` rather than a read-then-write, because
+two dispatches racing would both read "not yet delivered". Per recipient rather than per alert, so
+a caregiver whose grant is accepted after the first dispatch is still told exactly once.
+
+**Consequences.** The delivery row is written _before_ the transport is called, so a crash between
+the two leaves a recorded delivery that never arrived rather than an arrival nobody recorded - the
+failure that re-notifies. That is the safer direction for a notification and the wrong one for a
+payment; it is chosen deliberately, and a test pins it. Audit detail carries counts and levels
+only, with no recipient identity and no body.
+
+**Sources.** `04` Phase 8.2; `13` (privileged operations, idempotency); `15` A6; `16` (audit
+without duplicating sensitive content); `07.5` (a repeated evaluation must not re-notify).

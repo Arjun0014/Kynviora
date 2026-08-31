@@ -35,6 +35,7 @@ import { createRequestContext } from './context.js';
 import { toErrorResponse, statusForCode } from './errors.js';
 import { nodeInviteTokenService, registerCaregiverRoutes } from './caregiver.js';
 import { registerVisitPackRoutes, sha256ContentDigest } from './visitPack.js';
+import { registerAlertDeliveryRoutes } from './alertDelivery.js';
 
 /** Maximum request body. `13` requires body-size limits; 1MB is ample for JSON payloads. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
@@ -578,6 +579,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
   // domain.
 
   registerVisitPackRoutes(app, { contextFor, fail, digest: sha256ContentDigest() });
+
+  // -------------------------------------------------------------------------
+  // Caregiver alert delivery routes (spec 04 Phase 8.2)
+  // -------------------------------------------------------------------------
+  // Notification settings and the caregiver alert view. Dispatch itself is deliberately not a
+  // route - nothing user-facing triggers a notification - so it is exported as a function
+  // instead and takes a transport port.
+
+  registerAlertDeliveryRoutes(app, { contextFor, fail });
 
   // -------------------------------------------------------------------------
   // Fallbacks

@@ -9,18 +9,18 @@ Last updated: 2026-08-31
 
 ## Current position
 
-|                    |                                                       |
-| ------------------ | ----------------------------------------------------- |
-| **Current stage**  | Stage 8 (family collaboration)                        |
-| **Current phase**  | Caregiver alert delivery (8.2); Review Inbox (8.3)    |
-| **Last completed** | Phase 8.4 Visit Pack                                  |
-| **Branch**         | `master`                                              |
-| **Latest commit**  | `feat(export): Visit Pack with reviewed-content gate` |
-| **Baseline tag**   | `baseline-spec-only`                                  |
+|                    |                                        |
+| ------------------ | -------------------------------------- |
+| **Current stage**  | Stage 8 (family collaboration)         |
+| **Current phase**  | Household Review Inbox (8.3)           |
+| **Last completed** | Phase 8.2 caregiver alert delivery     |
+| **Branch**         | `master`                               |
+| **Latest commit**  | `feat(care): caregiver alert delivery` |
+| **Baseline tag**   | `baseline-spec-only`                   |
 
 ## Verification state
 
-- **1366 tests passing**, 0 failing, across 30 files.
+- **1492 tests passing**, 0 failing, across 34 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -33,27 +33,29 @@ npm run verify
 
 ## What is genuinely built and tested
 
-| Area                                                       | State                                      |
-| ---------------------------------------------------------- | ------------------------------------------ |
-| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                         |
-| Database schema, 7 migrations, full RLS                    | Complete, 126 tests incl. threats A1/A2/A3 |
-| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                        |
-| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                         |
-| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                         |
-| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                         |
-| Presentation layer, accessibility tokens, safety copy      | Complete, 461 tests                        |
-| API boundary (Fastify), RLS-scoped context                 | Complete, 85 tests                         |
-| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                         |
-| Caregiver invitation, acceptance, revocation, audit        | Complete, 150 tests                        |
-| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                        |
-| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                         |
-| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**        |
-| Caregiver and Visit Pack screens                           | Typecheck; **not wired** (`DEV-007`)       |
-| CI pipeline                                                | Written; not yet run on a real runner      |
+| Area                                                       | State                                       |
+| ---------------------------------------------------------- | ------------------------------------------- |
+| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                          |
+| Database schema, 9 migrations, full RLS                    | Complete, 176 tests incl. threats A1/A2/A3  |
+| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                         |
+| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                          |
+| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                          |
+| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                          |
+| Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                         |
+| API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                          |
+| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                          |
+| Caregiver invitation, acceptance, revocation, audit        | Complete, 150 tests                         |
+| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                         |
+| Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009) |
+| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                          |
+| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**         |
+| Caregiver, Visit Pack, notification screens                | Typecheck; **not wired** (`DEV-007`)        |
+| CI pipeline                                                | Written; not yet run on a real runner       |
 
-Rows are areas, not a partition. The caregiver and Visit Pack rows count the same tests that also
-appear in the database, API, presentation and domain rows, because each feature spans all four
-layers. Per-file counts are reproducible with `npx vitest run --reporter=json`.
+Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack and
+alert-delivery rows each count tests that also appear in the database row, because those features
+span every layer. The presentation and API rows count only their own general suites, not the
+per-feature ones. Per-file counts are reproducible with `npx vitest run --reporter=json`.
 
 ## Known failing tests
 
@@ -64,36 +66,36 @@ None.
 See `BLOCKERS.md`. None of them stops further work; each has a port, a local adapter, and
 documented configuration requirements.
 
-| ID      | Class                               | Blocks                                      |
-| ------- | ----------------------------------- | ------------------------------------------- |
-| BLK-001 | `EXTERNAL_SERVICE`                  | Managed Postgres/Supabase parity            |
-| BLK-002 | `ENVIRONMENT`                       | On-device encryption proof; all device E2E  |
-| BLK-003 | `EXTERNAL_CREDENTIAL` + `LICENSING` | GS1/provider identity resolution            |
-| BLK-004 | `DATA_AVAILABILITY`                 | Publishing any regulatory status as trusted |
-| BLK-005 | `LEGAL_REVIEW`                      | Source snapshot retention                   |
-| BLK-006 | `CLINICAL_REVIEW` + `LEGAL_REVIEW`  | Publishing any safety rule; public beta     |
-| BLK-007 | `EXTERNAL_CREDENTIAL`               | Real OCR/multimodal extraction              |
-| BLK-008 | `DATA_AVAILABILITY`                 | Every numeric release threshold (Stage 9.1) |
+| ID      | Class                               | Blocks                                        |
+| ------- | ----------------------------------- | --------------------------------------------- |
+| BLK-001 | `EXTERNAL_SERVICE`                  | Managed Postgres/Supabase parity              |
+| BLK-002 | `ENVIRONMENT`                       | On-device encryption proof; all device E2E    |
+| BLK-003 | `EXTERNAL_CREDENTIAL` + `LICENSING` | GS1/provider identity resolution              |
+| BLK-004 | `DATA_AVAILABILITY`                 | Publishing any regulatory status as trusted   |
+| BLK-005 | `LEGAL_REVIEW`                      | Source snapshot retention                     |
+| BLK-006 | `CLINICAL_REVIEW` + `LEGAL_REVIEW`  | Publishing any safety rule; public beta       |
+| BLK-007 | `EXTERNAL_CREDENTIAL`               | Real OCR/multimodal extraction                |
+| BLK-008 | `DATA_AVAILABILITY`                 | Every numeric release threshold (Stage 9.1)   |
+| BLK-009 | `EXTERNAL_CREDENTIAL`               | Actually sending any notification to a device |
 
 ## Immediate next task
 
-**Caregiver alert delivery** (Phase 8.2). Deliver safety information to a caregiver only to the
-extent the profile owner permitted, with generic notification content by default (`03` group H),
-reusing the capability model Phase 8.1 established - `VIEW_SAFETY` and `RECEIVE_MISSED_DOSE` both
-already exist as capabilities and are enforced by `has_capability`. Note that delivery is
-implementable without `BLK-006` being resolved: the routing, permission filtering and
-notification-content rules are testable over synthetic alerts, and nothing here publishes a
-safety rule.
+**Household Review Inbox** (Phase 8.3). Collect non-urgent work that improves data quality and
+care readiness - item not reviewed recently, batch missing, formula needs confirmation, OCR field
+unresolved, caregiver grant expiring, safety item awaiting confirmation - and display it
+_without_ safety-alert styling, which is the point of the phase rather than a detail of it. The
+caregiver authorization model from Phase 8.1 and the presentation separation between evidence and
+urgency both already exist; the new work is the task vocabulary, its lifecycle, and a surface that
+cannot be mistaken for the alert inbox.
 
 ## Next three planned tasks
 
-1. Household Review Inbox (Phase 8.3): non-urgent quality and care tasks, displayed without
-   safety-alert styling, using the caregiver authorization model Phase 8.1 established.
-2. Reviewer console publication workflow (Phase 6.6): two-person approval where policy requires
+1. Reviewer console publication workflow (Phase 6.6): two-person approval where policy requires
    it, emergency withdrawal, and immutable audit.
-3. Wire the Expo screens to the API contract, replacing the placeholder states with the Shelf,
-   Trust Passport, Regulatory Lens, caregiver and Visit Pack surfaces the presentation package
-   supports (`DEV-007`).
+2. Wire the Expo screens to the API contract, replacing the placeholder states with the Shelf,
+   Trust Passport, Regulatory Lens, caregiver, Visit Pack and notification surfaces the
+   presentation package supports (`DEV-007`).
+3. Medicine Reconciliation workflow v1 (Phase 8.5).
 
 ## Recent decisions worth knowing
 
@@ -127,6 +129,13 @@ safety rule.
   `expires_at > now()`), because an injectable clock must never resurrect an expired grant.
   **Written domain data** uses the injected clock, so rows stay replayable. Never put both inside
   one comparison - see trap 12.
+- **DEC-025** - notification disclosure is two dials and the narrower wins: the owner's ceiling on
+  what any caregiver notification may reveal, and each recipient's own setting for their own
+  device. Both default to `GENERIC`, so a missing row is never permission. The owner is exempt
+  from the ceiling, because it limits what leaves the profile onto someone else's device.
+- **DEC-026** - `alert_delivery` records that a notification happened, to whom, and at which
+  level. It has no body column, and it is append-only. The body is the string written to be read
+  on a locked screen (`15` A6); storing it would outlive the alert's withdrawal.
 
 ## Traps to avoid on resume
 
@@ -162,3 +171,9 @@ safety rule.
 13. Heredocs in this environment collapse `\\` to `\`, so a `\uXXXX` escape written that way lands
     as a real control character - the corruption trap 7 warns about, arriving by a second route.
     Build such escapes with `String.fromCharCode(92)` instead, and re-scan afterwards.
+14. `PERMISSION_DENIED` maps to **404**, not 403, so the API is not an existence oracle for IDs.
+    A new test asserting 403 for an unauthorized caller is asserting the wrong thing. 403 belongs
+    to `STEP_UP_REQUIRED` alone.
+15. Do not give the owner a second notification dial. Every recipient already has a personal
+    preference, so an `owner_detail` on the profile policy would be two answers to one question
+    (DEC-025). The caregiver ceiling is about other people's devices and does not apply to them.

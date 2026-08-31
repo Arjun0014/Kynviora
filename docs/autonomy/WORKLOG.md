@@ -416,3 +416,80 @@ The mobile review screen is built and typechecks against the real contract - it 
 count and section name from the same selection that will be sent, so it cannot describe an export
 it is not about to make - but like the caregiver screens it is not wired to a repository
 (`DEV-007`).
+
+### Phase 8.2 - Caregiver alert delivery
+
+The exit criterion is that caregiver access is testable through deny-by-default authorization
+cases, which is really a statement about shape: a feature that decides who to notify by
+accumulating reasons to include people cannot be tested that way, because there is no single place
+where the "no" lives. So delivery is a filter over candidates. Each candidate is dropped unless
+something affirmatively admits it, every drop carries a named reason, and the reasons are part of
+the returned plan rather than a log line - which is what makes each one a test.
+
+**Two questions, kept apart.** Who may be told is an authorization question, answered by
+capabilities and nothing else. How much the notification says is a disclosure question, answered
+by preferences. Conflating them is how caregiver features leak, so they are two functions:
+`selectRecipients` cannot render text and `notificationFor` cannot add a recipient.
+
+**The permissions really are separate.** `MISSED_DOSE` maps to `RECEIVE_MISSED_DOSE` and
+deliberately not to `VIEW_SAFETY`. A caregiver watching for a recall is not thereby entitled to
+know whether someone took their tablets this morning, and `03` group H requires that separation.
+Both directions are asserted - safety access does not admit dose notifications, dose access does
+not admit safety ones - at the domain, the database and the API.
+
+**Disclosure is two dials and the narrower wins** (DEC-025). The owner sets a ceiling on what any
+caregiver notification may show; each recipient sets their own preference for their own device.
+Neither may override the other, so both apply. The interesting bug was one the tests found rather
+than one I reasoned my way to: the first draft also gave the policy an `ownerDetail`, and the test
+asserting "the owner is not subject to the caregiver ceiling" failed, because the owner then had
+two dials that could disagree. Removing it was the fix - every recipient already has a personal
+preference, and the ceiling is about other people's devices.
+
+**What gets written down** (DEC-026). `alert_delivery` stores the recipient, the event, the
+disclosure level and the time - never the body. The body is the one string in the system written
+expressly to be readable on a locked screen, and storing it would put it in a durable table with a
+different access path from the alert it describes, outliving that alert's withdrawal. Same
+objection as DEC-022. A test dumps the whole table and asserts no medicine name and no person's
+name appears in it.
+
+The delivery row is written _before_ the transport is called. A crash between the two then leaves
+a recorded delivery that never arrived, rather than an arrival nobody recorded - which is the
+failure that re-notifies. That is the right direction for a notification and the wrong one for a
+payment, so it is chosen deliberately and pinned by a test that injects a throwing transport.
+
+**A withdrawn alert is refused, not quietly skipped.** Returning an empty plan would write an
+audit record of a dispatch with zero recipients, which reads as though the alert were live and
+simply had no audience. `19` lists "stale withdrawn alert still actionable" as release-blocking,
+and a notification is the least revocable form of actionable.
+
+**Resolution state is narrowed by column, not by row.** RLS already limits the caregiver alert
+view to `VIEW_SAFETY` holders and published alerts. What row-level security cannot express is that
+a caregiver sees the resolution _outcome_ but not the free-text note - the one field a user can
+put anything into, possibly written for themselves. And a withheld note is reported as withheld
+rather than left blank, because a blank reads as "there is no note", which is a different claim.
+
+### Things worth recording
+
+- Four API tests expected 403 and got 404. The code was right: `PERMISSION_DENIED` maps to 404
+  deliberately so the API is not an existence oracle for profile IDs. The tests now assert that
+  property directly - a real profile and an invented one return byte-identical bodies.
+- `alert_delivery` is refused mutation by two independent mechanisms, and the first test asserted
+  only whichever fired first. Split into three: the service role has no UPDATE or DELETE grant at
+  all, and the append-only trigger refuses both even from a role that does hold the privilege.
+  Asserting only the outer layer would let the inner one be dropped unnoticed.
+- The heredoc collapse noted in the resume section bit again while escaping control characters -
+  `\` became `\`, so `\u001F` written that way lands as a real control character. Building the
+  escape with `String.fromCharCode(92)` is the reliable form. Recorded as trap 13.
+
+### State at end of Phase 8.2
+
+1492 tests passing across 34 files, up from 1366 across 30. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`. 126 new tests: 38 domain, 32 database, 36 API, 20
+presentation.
+
+Outstanding: no push provider exists, so nothing here claims a device received anything
+(`BLK-009`) - delivery goes through a `NotificationTransport` port whose only implementation
+records. Missed-dose dispatch is implemented and enforced but nothing calls it yet, because the
+grace window that decides when a dose counts as unrecorded is an unmade product decision
+(`DEV-011`). The notification settings screen typechecks and derives every example from the same
+renderer the server dispatches with, but like the other screens it is not wired (`DEV-007`).

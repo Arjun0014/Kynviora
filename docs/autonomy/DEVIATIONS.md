@@ -182,3 +182,24 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Risk**: low. The section is never included unless the user selects it, and the window only
   affects what is offered.
 - **Required future work**: product sign-off, ideally informed by what clinicians say is useful.
+
+## DEV-011 - Missed-dose delivery has no scheduler behind it yet
+
+- **Affected specification**: `04` Phase 8.2 lists an optional missed-dose permission; `04` Phase
+  4.3 owns dose recording, and nothing in either phase defines when a scheduled dose becomes
+  "not recorded yet".
+- **Expected behaviour**: a scheduler that observes a passed occurrence and dispatches.
+- **Implemented behaviour**: `dispatchAlert` accepts `MISSED_DOSE` with a caller-supplied
+  `doseOccurrenceKey`, enforces `RECEIVE_MISSED_DOSE`, renders non-judgemental copy and dedupes
+  per occurrence per recipient. No component currently calls it with a real occurrence: the
+  grace window that decides when a dose counts as unrecorded is a product decision nobody has
+  made, and `18` forbids shaming copy, which makes "how long before we tell a relative" a
+  question with a wrong answer rather than a missing one.
+- **Reason**: the authorization and disclosure half of the feature is complete and testable
+  without it, and inventing a grace window would embed an unapproved judgement about somebody's
+  medication routine.
+- **Temporary or permanent**: temporary.
+- **Risk**: low. The permission is enforced and tested; nothing is delivered that should not be.
+  The gap is that nothing is delivered at all until a window is chosen.
+- **Required future work**: a product decision on the grace window, then a scheduler that derives
+  occurrence keys from `medicine_schedule` and calls the existing dispatch.

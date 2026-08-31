@@ -138,3 +138,23 @@ implemented, the exact configuration required is documented, and independent wor
 - **To resolve**: assemble a labelled dataset under an approved study design, then run the
   evaluation harness. Note `22` also requires product/safety leadership to assign the numeric
   accept/reject thresholds - an approval decision, not an engineering one.
+
+## BLK-009 - No push notification credentials or delivery provider
+
+- **Class**: `EXTERNAL_CREDENTIAL`
+- **Status**: OPEN - worked around
+- **Blocks**: actual delivery of any notification to a device; end-to-end verification that a
+  lock-screen body renders as designed; delivery-failure and retry behaviour under a real
+  provider; `15` A6 verification on a physical locked device.
+- **Detail**: no FCM, APNs or Expo push credentials are available in this environment, and `14`
+  lists notification server credentials among the secrets that must be held server-side. Nothing
+  here can demonstrate that a device received a notification.
+- **Workaround in place**: delivery is decided, recorded and rendered behind a
+  `NotificationTransport` port. The only implementation is `recordingTransport`, which records
+  what it was asked to send and claims nothing about arrival. The recipient decision, the
+  disclosure level and the exact body are therefore fully tested; the wire is not. Delivery rows
+  are written before the transport is called, so a provider failure leaves a recorded delivery
+  rather than an unrecorded arrival.
+- **To resolve**: obtain provider credentials, set the corresponding `KYNVIORA_PUSH_*` values,
+  implement the adapter behind the existing port, and re-run the delivery suite against it. The
+  lock-screen assertions in `15` A6 additionally need a physical device (`BLK-002`).
