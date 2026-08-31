@@ -246,3 +246,50 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   queue-age metric `20` asks for. Until then a task is only ever raised when someone looks, so a
   notification about review work is not possible - which is consistent with the inbox being
   deliberately non-urgent.
+
+## DEV-014 - Reconciliation matches two lists by a caller-supplied key, not by catalog identity
+
+- **Affected specification**: `04` Phase 8.5 lists "previous/current list comparison" without
+  saying how a line on one list is recognised as the same medicine on the other.
+- **Expected behaviour**: Kynviora recognises that "Synthetic Tablet A 500mg" on a discharge
+  summary is the shelf item the household already holds, using catalog normalization.
+- **Implemented behaviour**: `diffMedicationLists` matches on a `matchKey` supplied by the caller
+  and on nothing else. The shelf side keys on the owned item's own ID, so two packs of the same
+  medicine stay distinct; the current side must state which shelf line each entry corresponds to.
+- **Reason**: deciding that two differently-named lines are the same medicine is an identity
+  judgement, and the catalog layer is where the normalization, the provenance and the ability to
+  say how sure it is already live. Inventing a second, weaker matcher inside reconciliation would
+  produce a confident-looking comparison built on a guess - and a wrong match here does not
+  produce a missing row, it produces a **fabricated disagreement between two real medicines**,
+  which is the worst possible output of this screen.
+- **Temporary or permanent**: temporary in scope, permanent in shape. Reconciliation should keep
+  taking a supplied key; the automatic proposal of that key belongs in the catalog resolver
+  (Phase 3.4).
+- **Risk**: usability, not safety. A user who does not pair the lines sees every medicine reported
+  as `ONLY_IN_PREVIOUS` plus `ONLY_IN_CURRENT`, which is noisy but not wrong - and the copy for
+  those kinds already says Kynviora cannot tell why a line is absent.
+- **Required future work**: cache-first resolver (Phase 3.4) proposes a pairing, the user confirms
+  it, and the confirmed pairing becomes the match key. The confirmation step is not optional: an
+  unconfirmed automatic pairing would reintroduce exactly the guess this deviation avoids.
+
+## DEV-015 - The current list is typed in, not read from the attached source
+
+- **Affected specification**: `04` Phase 8.5 lists "source attachment" as expected output, and the
+  workflow is framed around a discharge summary or printed list.
+- **Expected behaviour**: the household photographs the new list and Kynviora extracts the lines
+  from it, with field-level assertions and a confirmation step as `04` Phase 3.3 describes.
+- **Implemented behaviour**: `reconciliation.source_evidence_asset_id` references an existing
+  `evidence_asset`, so the document travels with the comparison and a later reader can see what
+  was being compared against. The lines themselves arrive in the request body, entered by the
+  person holding the document.
+- **Reason**: `BLK-007` - no OCR or multimodal extraction engine is available, and Phase 3.3's
+  rule is that unconfirmed machine provenance is never trusted anyway. A human-entered current
+  list is the confirmed case, not a degraded one.
+- **Temporary or permanent**: temporary for the capture step, permanent for the confirmation. Even
+  with extraction, `09` and Phase 3.3 require the person to confirm each field before it is
+  compared, because a mis-read strength would manufacture a disagreement that does not exist.
+- **Risk**: low. Typing is slower, and a typo produces a visible difference the user is looking
+  straight at rather than a silent one.
+- **Required future work**: route the attached asset through the Phase 3.3 extraction pipeline
+  once `BLK-007` clears, presenting each extracted line for confirmation before it enters the
+  comparison.

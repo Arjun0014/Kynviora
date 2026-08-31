@@ -566,3 +566,97 @@ presentation.
 Outstanding: derivation runs on read rather than on a schedule, because no scheduler exists yet
 (`DEV-013`); the three intervals are engineering defaults awaiting product sign-off (`DEV-012`);
 and the inbox screen typechecks but is not wired (`DEV-007`).
+
+### Phase 8.5 - Medicine Reconciliation workflow v1
+
+One exit criterion, and it is the sharpest one in the project: "Kynviora never chooses which
+conflicting instruction is medically correct."
+
+Reconciliation is exactly the feature where that is hardest to hold, because the user arrives with
+two lists that disagree - the discharge summary says 10 mg, the pack at home says 5 mg - and the
+single most helpful-seeming thing the software could do is say which one to follow. It is also the
+one thing `09` forbids in terms. A rule saying "do not choose" would not survive contact with the
+next feature request, so the criterion was built as a **shape** at four layers, each of which
+makes choosing unrepresentable rather than merely disallowed.
+
+**The schema has nowhere to put an answer.** `reconciliation_difference` stores `previous_value`
+and `current_value` and no third column. A test enumerates `information_schema.columns` and
+asserts that `suggested_value`, `preferred_value`, `correct_value`, `winner`, `confidence` and
+`score` are absent, so the mechanism is checked against the real table rather than against a type
+that a migration could quietly outgrow.
+
+**The vocabulary cannot say it.** Every settled resolution names a human or a document. A CHECK
+refuses `AUTO_RESOLVED`, `SYSTEM_CHOSE` and `RECOMMENDED`, and a second test reads
+`pg_get_constraintdef` and asserts the constraint's own text contains no such token - because the
+point is that no member exists, not that one spelling is refused.
+
+**The difference kinds name the lists, not the medicine.** `04` Phase 8.5 says
+"added/removed/changed", and those words are used on the screen but not in the vocabulary.
+"Removed" is a claim about the medicine - it implies someone stopped it - while what Kynviora
+knows is that a line is on one list and not the other. A medicine absent from a discharge summary
+may have been stopped, or the summary may only have covered the admission, and those have
+opposite correct actions. So the kinds are `ONLY_IN_PREVIOUS` / `ONLY_IN_CURRENT` /
+`FIELD_DIFFERS` / `MATCHES`, and the `ONLY_IN_PREVIOUS` copy says outright that Kynviora cannot
+tell which (DEC-029). `MATCHES` is reported rather than dropped: a list showing only problems
+misrepresents the scale of what changed, which is the most reassuring part of a reconciliation.
+
+**The design flaw the tests exposed.** `evaluateResolution` first treated
+`CONFIRMED_WITH_PHARMACIST` as adopting the current list. Writing the test made both branches
+collapse to the same result, which is usually a sign a real case is missing - and it was. A
+pharmacist may confirm the _older_ dose, and frequently does: the new list may be a transcription
+error, or may describe an intended change that never happened. Inferring `CURRENT` because the
+current list is newer is precisely the judgement Phase 8.5 forbids, made on a heuristic that has
+nothing to do with medicine. So every settling resolution must name the side, the person supplies
+it, and `difference_settled_has_side` enforces it at the schema level too (DEC-030). A test pins
+the case the whole design exists for: a prescriber confirming `PREVIOUS`, with the shelf
+untouched.
+
+**One row per differing field, not per medicine.** A medicine whose strength and directions both
+differ produces two rows, because they are two questions with potentially different answers - a
+pharmacist might confirm the new strength and the old directions. Collapsing them would force one
+decision onto two facts, which is a quiet way of deciding for someone.
+
+**Where it would actually have been lost.** By the time a difference reaches a screen the domain
+and the schema have both refused to hold an answer, so the only way left to choose one is
+_visually_, and it takes no code at all: bold the new value, grey the old one, pre-select "I'm
+going with the new list". So both sides come from one `presentSide` function that returns the same
+tone and an `emphasised: false` flag for each, the mobile screen renders them through a single
+style object rather than two that happen to match, no resolution option carries a `recommended` or
+`default` field, and a test asserts no such key exists rather than that none is currently set. The
+user's own resolutions are written in the first person - "I'm going with the new list" - because
+an imperative on a button is Kynviora telling someone what to do with a medicine.
+
+**Unresolved is an outcome, not a failure.** `04` Phase 8.5 lists unresolved differences as
+expected output. Someone who cannot reach their pharmacist today has a real state, and forcing a
+choice to clear the screen is how a reconciliation produces a confidently wrong record. So
+`canComplete` requires only that every difference has been _looked at_, `STILL_UNRESOLVED` records
+that honestly, and the completion message reports the count without treating it as a problem.
+
+**Privilege.** Creation and resolution recording are privileged, because the rows are about the
+profile and the difference set must be identical whoever opens it. The one write to a medicine
+deliberately is not: it goes through the RLS-scoped connection, so the flow cannot change what the
+caller could not have changed on the medicine screen itself. Starting a reconciliation takes
+`MANAGE_MEDICINES`, not `VIEW_MEDICINES` - a caregiver who may read the shelf may not rewrite it -
+and `PERMISSION_DENIED` maps to 404 as everywhere else, with a test asserting the response for a
+real profile is byte-identical to the one for an invented ID.
+
+### Things worth recording
+
+- `expectDenied` fires on whichever CHECK Postgres evaluates first, and an invented resolution
+  violates two of them. Two tests were asserting the constraint they were _about_ rather than the
+  one that happens to fire; the fix was to assert the refusal against either, and to check the
+  vocabulary separately by reading the constraint definition. A test that names one constraint out
+  of several that all refuse the same row is testing evaluation order, not behaviour.
+- An arrow function passed to `expectDenied` is not async, so `expectDenied(() => f(await g()))`
+  is a parse error rather than a type error. Hoist the setup above the call.
+
+### State at end of Phase 8.5
+
+1696 tests passing across 42 files, up from 1587 across 38. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 109 new tests: 30 domain, 28 database, 20 API, 31
+presentation.
+
+Stage 8 is now complete. Outstanding on this phase: matching is by a caller-supplied key rather
+than by catalog identity (`DEV-014`), the current list is typed in rather than extracted from the
+attached document (`DEV-015`, `BLK-007`), and the review screen typechecks but is not wired
+(`DEV-007`).

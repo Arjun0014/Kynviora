@@ -83,3 +83,11 @@
 {"ts": "2026-08-31T17:44:00Z", "type": "deviation_recorded", "detail": "DEV-012 review intervals are engineering defaults; DEV-013 derivation runs on read, not on a schedule"}
 {"ts": "2026-08-31T17:48:00Z", "type": "test_updated", "detail": "db/shelf.test.ts review_task insert updated for the NOT NULL subject columns added by 0010"}
 {"ts": "2026-08-31T17:52:00Z", "type": "phase_complete", "detail": "Phase 8.3 Household Review Inbox; 1587 tests across 38 files, verify exit 0"}
+{"ts": "2026-09-01T01:45:00Z", "type": "phase_resumed", "detail": "Phase 8.5 reconciled on resume: domain, migration 0011 and API existed and were green at 1637 tests; database, presentation and mobile layers outstanding"}
+{"ts": "2026-09-01T01:47:00Z", "type": "test_added", "detail": "db/reconciliation.test.ts - 28 constraint and RLS tests, including that the table has no column for an answer"}
+{"ts": "2026-09-01T01:48:00Z", "type": "test_fixed", "detail": "two db tests asserted the constraint they were about rather than the one Postgres evaluates first"}
+{"ts": "2026-09-01T01:50:00Z", "type": "code_added", "detail": "presentation layer: both sides one tone and one emphasis flag, no recommended option field, 31 tests"}
+{"ts": "2026-09-01T01:52:00Z", "type": "code_added", "detail": "ReconciliationReview mobile screen; both sides share a single style object"}
+{"ts": "2026-09-01T01:54:00Z", "type": "decision_recorded", "detail": "DEC-029 difference kinds name the lists not the medicine; DEC-030 the adopted side is stated, never inferred from recency"}
+{"ts": "2026-09-01T01:55:00Z", "type": "deviation_recorded", "detail": "DEV-014 matching is by caller-supplied key; DEV-015 the current list is typed in, not extracted (BLK-007)"}
+{"ts": "2026-09-01T01:56:00Z", "type": "phase_complete", "detail": "Phase 8.5 Medicine Reconciliation; 1696 tests across 42 files, verify exit 0; Stage 8 complete"}

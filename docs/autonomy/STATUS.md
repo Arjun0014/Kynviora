@@ -3,24 +3,24 @@
 **Resume checkpoint.** Read this first on any autonomous restart, then `git log`, then the tail
 of `WORKLOG.md`, then `BLOCKERS.md`.
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 ---
 
 ## Current position
 
-|                    |                                                       |
-| ------------------ | ----------------------------------------------------- |
-| **Current stage**  | Stage 8 (family collaboration)                        |
-| **Current phase**  | Medicine Reconciliation (8.5); Reviewer console (6.6) |
-| **Last completed** | Phase 8.3 Household Review Inbox                      |
-| **Branch**         | `master`                                              |
-| **Latest commit**  | `feat(care): Household Review Inbox`                  |
-| **Baseline tag**   | `baseline-spec-only`                                  |
+|                    |                                                      |
+| ------------------ | ---------------------------------------------------- |
+| **Current stage**  | Stage 8 (family collaboration)                       |
+| **Current phase**  | Reviewer console publication workflow (6.6)          |
+| **Last completed** | Phase 8.5 Medicine Reconciliation (Stage 8 complete) |
+| **Branch**         | `master`                                             |
+| **Latest commit**  | `feat(care): Medicine Reconciliation workflow v1`    |
+| **Baseline tag**   | `baseline-spec-only`                                 |
 
 ## Verification state
 
-- **1587 tests passing**, 0 failing, across 38 files.
+- **1696 tests passing**, 0 failing, across 42 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -36,7 +36,7 @@ npm run verify
 | Area                                                       | State                                       |
 | ---------------------------------------------------------- | ------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                          |
-| Database schema, 10 migrations, full RLS                   | Complete, 197 tests incl. threats A1/A2/A3  |
+| Database schema, 11 migrations, full RLS                   | Complete, 225 tests incl. threats A1/A2/A3  |
 | Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                         |
 | Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                          |
 | Safety rule engine with replay; schedule and refill        | Complete, 88 tests                          |
@@ -48,15 +48,17 @@ npm run verify
 | Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                         |
 | Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009) |
 | Household Review Inbox, record-writing completion          | Complete, 95 tests                          |
+| Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                         |
 | End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                          |
 | Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**         |
-| Caregiver, export, notification, inbox screens             | Typecheck; **not wired** (`DEV-007`)        |
+| Caregiver, export, notification, inbox, reconciliation UI  | Typecheck; **not wired** (`DEV-007`)        |
 | CI pipeline                                                | Written; not yet run on a real runner       |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
-alert-delivery and Review Inbox rows each count tests that also appear in the database row,
-because those features span every layer. The presentation and API rows count only their own general suites, not the
-per-feature ones. Per-file counts are reproducible with `npx vitest run --reporter=json`.
+alert-delivery, Review Inbox and reconciliation rows each count tests that also appear in the
+database row, because those features span every layer. The presentation and API rows count only
+their own general suites, not the per-feature ones. Per-file counts are reproducible with
+`npx vitest run --reporter=json`.
 
 ## Known failing tests
 
@@ -81,25 +83,21 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Medicine Reconciliation workflow v1** (Phase 8.5) - the last unstarted phase in Stage 8 - or
-**Reviewer console publication workflow** (Phase 6.6) if reconciliation turns out to need a
-product decision nobody has made. Read `04` Phase 8.5 before choosing: reconciliation compares
-what the household believes it has against what a professional record says, and the framing that
-matters is `09`'s - Kynviora never tells anyone to stop a prescription medicine, so a
-reconciliation difference is a question to raise, never an instruction. The vocabulary must
-contain no outcome that reads as one.
-
-Phase 6.6 is fully implementable and blocked on nothing: two-person approval where policy requires
-it, emergency withdrawal, and immutable audit. Note that it does not require `BLK-006` to be
-resolved - it builds the workflow a qualified reviewer would use, without publishing anything.
+**Reviewer console publication workflow** (Phase 6.6). Stage 8 is complete, so this is the
+largest fully-implementable phase left. It is blocked on nothing: two-person approval where policy
+requires it, emergency withdrawal, and immutable audit. Note that it does **not** require
+`BLK-006` to be resolved - it builds the workflow a qualified reviewer would use, without
+publishing anything. Read `04` Phase 6.6 and `23`'s approval requirements first, and expect the
+hard part to be the same shape as Phase 8.5's: the workflow must make an unreviewed publication
+unrepresentable rather than merely disallowed.
 
 ## Next three planned tasks
 
 1. Reviewer console publication workflow (Phase 6.6): two-person approval where policy requires
    it, emergency withdrawal, and immutable audit.
 2. Wire the Expo screens to the API contract, replacing the placeholder states with the Shelf,
-   Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification and Review Inbox surfaces
-   the presentation package supports (`DEV-007`).
+   Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification, Review Inbox and
+   reconciliation surfaces the presentation package supports (`DEV-007`).
 3. Observability projections (`20`), including the review-queue age that becomes measurable once
    inbox derivation moves behind a scheduler (`DEV-013`).
 
@@ -151,6 +149,15 @@ resolved - it builds the workflow a qualified reviewer would use, without publis
   because `owned_item_update` narrows by `item_kind` and a task row names only the item ID - the
   domain checks the coarse capability, the database makes the binding decision.
 
+- **DEC-029** - the reconciliation difference vocabulary names a fact about the two _lists_, not a
+  change to the medicine. There is no `ADDED`, `REMOVED` or `CHANGED`: "removed" implies someone
+  stopped the medicine, and a line missing from a discharge summary may equally mean the summary
+  only covered the admission. A CHECK refuses those words as difference kinds.
+- **DEC-030** - which value now stands is **stated by a person**, never inferred from recency. A
+  professional confirmation carries no side of its own, because a pharmacist may confirm the older
+  dose; the screen has to ask. Refused by the domain, by the API and by
+  `difference_settled_has_side`.
+
 ## Traps to avoid on resume
 
 1. Do not add a conversion between `EvidenceLevel` and `ActionUrgency`, or any aggregate score.
@@ -201,3 +208,19 @@ resolved - it builds the workflow a qualified reviewer would use, without publis
 18. Backticks are fatal inside a SQL template literal - `` `03` `` in a SQL comment terminates the
     string and surfaces as an unrelated parse error. Write "Spec 03" in SQL; keep the backticks
     for JSDoc.
+19. Do not add a third value column to `reconciliation_difference`, or a `suggestedValue`,
+    `preferred`, `confidence` or `score` field to the difference type, the API payload or the
+    presentation view. Tests enumerate the real table's columns and the object's own keys. The
+    absence is the exit criterion of Phase 8.5, not a gap somebody forgot to fill.
+20. Do not make a professional confirmation adopt the current list. It reads like a shortcut and
+    it is the exact judgement `04` Phase 8.5 forbids - the pharmacist may have confirmed the older
+    dose. Every settling resolution takes an explicit side from the person (DEC-030).
+21. Do not emphasise one side of a difference in a screen or a stylesheet. Both sides come from
+    `presentSide`, which returns the same tone and `emphasised: false` for each, and a test
+    compares them. Bolding the newer value chooses for the user without a sentence saying so.
+22. When asserting that a CHECK refuses a row, remember Postgres reports whichever constraint it
+    evaluates first. If several would refuse the same row, match on any of them, or assert the
+    property directly by reading `pg_get_constraintdef`. A test pinned to one constraint name is
+    testing evaluation order.
+23. `expectDenied` takes a non-async arrow, so `expectDenied(() => f(await g()))` is a parse
+    error, not a type error. Hoist the setup above the call.

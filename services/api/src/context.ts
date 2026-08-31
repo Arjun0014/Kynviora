@@ -101,6 +101,12 @@ export const PRIVILEGED_REASONS = [
   // last opened it, so a caregiver with narrow capabilities would silently shrink the owner's
   // list by looking at it. The listing is filtered by RLS afterwards instead.
   'REVIEW_TASK_DERIVATION',
+  // A reconciliation writes rows describing two medication lists, one of which the caller typed
+  // in. The rows are about the profile rather than about the caller, and the difference set must
+  // be identical whoever opens it, so creation and resolution recording go through the service
+  // role. The one write to a medicine deliberately does not: it goes through RLS, so the inbox
+  // cannot change what the caller could not have changed on the medicine screen itself.
+  'RECONCILIATION',
   'ACCOUNT_DELETION',
   'PROVIDER_CREDENTIAL_USE',
   'NOTIFICATION_DISPATCH',

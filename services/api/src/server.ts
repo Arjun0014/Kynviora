@@ -37,6 +37,7 @@ import { nodeInviteTokenService, registerCaregiverRoutes } from './caregiver.js'
 import { registerVisitPackRoutes, sha256ContentDigest } from './visitPack.js';
 import { registerAlertDeliveryRoutes } from './alertDelivery.js';
 import { registerReviewInboxRoutes } from './reviewInbox.js';
+import { registerReconciliationRoutes } from './reconciliation.js';
 
 /** Maximum request body. `13` requires body-size limits; 1MB is ample for JSON payloads. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
@@ -598,6 +599,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
   // as a consequence, so there is deliberately no mark-done endpoint.
 
   registerReviewInboxRoutes(app, { contextFor, fail });
+
+  // -------------------------------------------------------------------------
+  // Medicine Reconciliation routes (spec 04 Phase 8.5)
+  // -------------------------------------------------------------------------
+  // The comparison is a pure function over two lists and decides nothing. The only write to a
+  // medicine happens when a person explicitly adopted the current value, and it goes through
+  // RLS so the flow cannot change what the caller could not change directly.
+
+  registerReconciliationRoutes(app, { contextFor, fail });
 
   // -------------------------------------------------------------------------
   // Fallbacks

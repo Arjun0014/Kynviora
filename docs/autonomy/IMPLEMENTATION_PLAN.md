@@ -181,13 +181,13 @@ restart, which needs a device (`BLK-002`).
 
 ## Stage 8 - Family Collaboration, Review Inbox, Visit Pack
 
-| Phase | Title                               | Status        |
-| ----- | ----------------------------------- | ------------- |
-| 8.1   | Caregiver invitation and grants     | `COMPLETE`    |
-| 8.2   | Caregiver alert delivery            | `COMPLETE`    |
-| 8.3   | Household Review Inbox              | `COMPLETE`    |
-| 8.4   | Visit Pack                          | `COMPLETE`    |
-| 8.5   | Medicine Reconciliation workflow v1 | `NOT_STARTED` |
+| Phase | Title                               | Status     |
+| ----- | ----------------------------------- | ---------- |
+| 8.1   | Caregiver invitation and grants     | `COMPLETE` |
+| 8.2   | Caregiver alert delivery            | `COMPLETE` |
+| 8.3   | Household Review Inbox              | `COMPLETE` |
+| 8.4   | Visit Pack                          | `COMPLETE` |
+| 8.5   | Medicine Reconciliation workflow v1 | `COMPLETE` |
 
 **8.1**: complete. Migration `0007` adds `caregiver_invitation` with hash-only token storage
 (DEC-018), a column-level `GRANT` that keeps the hash unreadable by the app role (DEC-021), and a
@@ -262,6 +262,36 @@ data and refuses on any difference, including a changed caveat or a note added a
 screen typechecks but is not wired (`DEV-007`); the 72-hour retention and the 90-day recent-changes
 window are engineering defaults (`DEV-009`, `DEV-010`).
 
+**8.5**: complete. Migration `0011` adds `reconciliation` and `reconciliation_difference`. The
+single exit criterion - _Kynviora never chooses which conflicting instruction is medically
+correct_ - is carried structurally at four layers rather than asserted as a rule:
+
+- **Schema.** `reconciliation_difference` has `previous_value` and `current_value` and no third
+  column for an answer, so a system-chosen winner is unwritable even by direct SQL. Every settled
+  member of the resolution vocabulary names a person or a document; a CHECK refuses
+  `AUTO_RESOLVED`, `SYSTEM_CHOSE` and `RECOMMENDED`, and another refuses `ADDED` / `REMOVED` /
+  `CHANGED` as difference kinds (DEC-029).
+- **Domain.** The difference type has no `suggestedValue`, `preferred` or `confidence` field, and
+  `evaluateResolution` refuses a settling resolution that does not say which value now stands -
+  including a professional confirmation, because a pharmacist may well confirm the older dose and
+  inferring the newer list would be the software deciding (DEC-030).
+- **API.** The comparison is a pure function over two lists. The only write to a medicine happens
+  when a person explicitly adopted the current value, and it goes through the RLS-scoped
+  connection, so the flow cannot change what the caller could not change on the medicine screen.
+- **Presentation.** Both sides share one tone and one emphasis flag, each is labelled by where it
+  came from rather than by age or authority, and no resolution option carries a `recommended` or
+  `default` field. The screen's own copy says Kynviora does not know which version is right and
+  will not pick one.
+
+Completion does not require every difference to be settled: `04` Phase 8.5 lists unresolved
+differences as expected output, so `STILL_UNRESOLVED` is a first-class outcome and the completion
+response reports the count plainly.
+
+109 tests across the domain (30), database (28), API (20) and presentation (31) suites.
+Outstanding: matching is by a caller-supplied key rather than catalog identity (`DEV-014`); the
+current list is typed in rather than extracted from the attached document (`DEV-015`, `BLK-007`);
+and the review screen typechecks but is not wired (`DEV-007`).
+
 ---
 
 ## Stage 9 - Production Hardening, Validation, MVP Beta
@@ -287,15 +317,15 @@ window are engineering defaults (`DEV-009`, `DEV-010`).
 ## Immediate next work
 
 1. **Reviewer console publication workflow** (Phase 6.6): two-person approval where policy
-   requires it, emergency withdrawal, and immutable audit.
-2. **Medicine Reconciliation workflow v1** (Phase 8.5), the last unstarted phase in Stage 8.
-3. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
-   Shelf, Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification and Review Inbox
-   surfaces the presentation package already supports (`DEV-007`).
-4. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
+   requires it, emergency withdrawal, and immutable audit. Stage 8 is now complete, so this is the
+   largest fully-implementable phase left.
+2. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
+   Shelf, Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification, Review Inbox and
+   reconciliation surfaces the presentation package already supports (`DEV-007`).
+3. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
    cache-hit rate, assessment recomputation throughput. The review-queue age becomes measurable
    once inbox derivation moves behind a scheduler (`DEV-013`).
-5. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
+4. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch and its authorization already exist; nothing calls them with a real occurrence.
 
 ## What "complete" means here, and what it does not

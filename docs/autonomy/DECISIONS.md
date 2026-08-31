@@ -722,3 +722,69 @@ decides. A test pins the case, including that the task stays open.
 
 **Sources.** `04` Phase 8.3; `03` group H (separate permissions); `13` (RLS as defence in depth);
 `14` (step-up for caregiver administration); DEC-020.
+
+---
+
+## DEC-029 - The difference vocabulary names a fact about the lists, not a change to the medicine
+
+**Context.** `04` Phase 8.5 lists the expected output as "added/removed/changed fields". Those are
+the natural words, and they are the words the screen uses in prose. The question was whether they
+should also be the vocabulary - the enum stored in the database and carried through the API.
+
+**Options.** (a) `ADDED` / `REMOVED` / `CHANGED`, matching the spec's wording exactly.
+(b) `ONLY_IN_CURRENT` / `ONLY_IN_PREVIOUS` / `FIELD_DIFFERS` / `MATCHES`, naming what was
+observed. (c) The spec's words with a comment explaining they do not mean what they say.
+
+**Decision.** (b). "Removed" is a claim about the medicine - it implies someone stopped it. What
+Kynviora actually knows is a fact about two documents: this line is on one list and not the other.
+A medicine on the old list and absent from a discharge summary may have been stopped, or the
+summary may only have covered the admission. Those are different situations with opposite correct
+actions, and nothing in the system can tell them apart.
+
+**Rationale.** The exit criterion is that Kynviora never chooses which conflicting instruction is
+medically correct. A vocabulary that says `REMOVED` has already chosen, before any screen is
+written, and every layer above it inherits the claim. `MATCHES` is in the list for the opposite
+reason: a comparison that showed only problems would misrepresent the scale of what changed, which
+is the most reassuring thing a reconciliation can get right.
+
+**Consequences.** The presentation layer carries the burden of saying this in words - the
+`ONLY_IN_PREVIOUS` copy states that Kynviora cannot tell why the medicine is absent - and three
+tests assert the absence of "stopped", "discontinued" and "no longer" from the API body, the
+domain vocabulary and the screen copy. A database CHECK refuses `ADDED`, `REMOVED`, `CHANGED` and
+`STOPPED` as difference kinds, so the words cannot return through a direct write.
+
+**Sources.** `04` Phase 8.5; `09` (never instruct a stop); `18` (state limitations); `07`.
+
+---
+
+## DEC-030 - Which value now stands is stated by a person, never inferred from recency
+
+**Context.** `evaluateResolution` first treated `CONFIRMED_WITH_PHARMACIST` as adopting the
+current list, on the reasoning that a professional confirming a difference must mean the newer
+document is right. Writing the tests exposed that the two branches of the function collapsed to
+the same result, which is usually a sign that a real case is missing. It was: a pharmacist may
+confirm the _older_ dose, and frequently does - the new list may be a transcription error, or may
+describe an intended change that never happened.
+
+**Options.** (a) Infer the side from the resolution: a confirmation adopts the current list.
+(b) Require the person to say which value was confirmed, for every settling resolution.
+(c) Require it only where the resolution does not name a side itself.
+
+**Decision.** (b), implemented as (c)'s shape: `USER_KEPT_PREVIOUS` and `USER_ADOPTED_CURRENT`
+name their own side and a CHECK requires the stored `adopted_side` to agree with them, while the
+three confirmations carry no side and the caller must supply one. `STILL_UNRESOLVED` may carry
+none at all.
+
+**Rationale.** Inferring `CURRENT` because the current list is newer is precisely the judgement
+Phase 8.5 forbids: it is the software deciding which of two conflicting instructions is medically
+correct, on the basis of a heuristic that has nothing to do with medicine. "Confirmed with
+pharmacist" does not say what was confirmed, and a record that assumed would be wrong in exactly
+the cases where the reconciliation mattered most.
+
+**Consequences.** The API refuses a settling resolution with no side (`resolution_needs_a_side`),
+and `difference_settled_has_side` refuses it at the schema level too. The presentation layer's
+`optionsNeedingASide()` returns the three confirmations, so the screen has to ask rather than
+assume. A professional confirmation landing on `PREVIOUS` changes nothing on the shelf and is
+recorded as a decision, not as an absence of one - and a test asserts the shelf is untouched.
+
+**Sources.** `04` Phase 8.5; `09`; `07` (provenance and attribution); DEC-024.
