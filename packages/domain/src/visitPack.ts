@@ -288,6 +288,36 @@ export const MAX_VISIT_PACK_ENTRIES = 200;
  * with the request. The digest comparison comes last, because it is only meaningful once the
  * selection has been shown to be well-formed.
  */
+/**
+ * The caveat carried by every note the user wrote.
+ *
+ * `09` requires a reader to be able to tell what came from a record and what came from a person.
+ * A clinician reading a Visit Pack has to know that a note is somebody's own words rather than
+ * something Kynviora verified.
+ */
+export const USER_NOTE_CAVEAT = 'Written by the person or their caregiver.';
+
+/**
+ * Turn free-text notes into entries.
+ *
+ * Exported because the **client** must build the identical list before hashing it: the digest
+ * covers the notes as well as the selected records, so a client that omitted them - or spelled the
+ * caveat differently - would compute a digest the server refuses with `EXPORT_CONTENT_CHANGED`,
+ * and the failure would look like the content had changed when nothing had. One definition, both
+ * sides.
+ */
+export function toNoteEntries(notes: readonly string[]): readonly VisitPackEntry[] {
+  return notes.map((line, index) => ({
+    section: 'QUESTIONS_AND_NOTES',
+    entityKind: 'user_note',
+    // Padded so the canonical sort is by position rather than lexicographic on "10" vs "9".
+    entityId: `note:${String(index).padStart(4, '0')}`,
+    version: 1,
+    lines: [line],
+    caveat: USER_NOTE_CAVEAT,
+  }));
+}
+
 export function evaluateGeneration(context: GenerationContext): Result<VisitPackPlan, DomainError> {
   const { request, available, stepUpFresh, now, digest } = context;
 
@@ -335,17 +365,7 @@ export function evaluateGeneration(context: GenerationContext): Result<VisitPack
     });
   }
 
-  const noteEntries = request.notes.map((line, index): VisitPackEntry => ({
-    section: 'QUESTIONS_AND_NOTES',
-    entityKind: 'user_note',
-    // Padded so the canonical sort is by position rather than lexicographic on "10" vs "9".
-    entityId: `note:${String(index).padStart(4, '0')}`,
-    version: 1,
-    lines: [line],
-    caveat: 'Written by the person or their caregiver.',
-  }));
-
-  const entries = [...selected, ...noteEntries];
+  const entries = [...selected, ...toNoteEntries(request.notes)];
   const contentDigest = digestSelection(entries, digest);
 
   if (contentDigest !== request.reviewedDigest) {

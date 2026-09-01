@@ -178,6 +178,7 @@ export const VISIT_PACK_COPY = Object.freeze({
   stepUpPrompt: 'Confirm it is you before creating the pack.',
   changedSinceReview:
     'Something in this list changed while you were looking at it. Check it again before sharing.',
+  createdHeading: 'The summary is ready',
   generatedNote: 'The pack is dated, so a reader can see how current it is.',
   expiredNote: 'This pack has expired. Create a new one to share it again.',
   driftNote:

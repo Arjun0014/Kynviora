@@ -1328,3 +1328,39 @@ happens to return a `relationship`. Both are ways of getting the right answer by
 **Consequences.** One field, and the wrong inference is unavailable rather than merely discouraged.
 
 **Sources.** `13`; `16`; `04` Phase 8.1.
+
+---
+
+## DEC-048 - The client hashes what it displayed, and the canonical form has one definition
+
+**Context.** DEC-023 makes "a user can review exactly what will be shared" a property of the system
+rather than a claim about the client: generation quotes the digest of the reviewed content, and the
+server rebuilds the selection from live records, recomputes the digest, and refuses with
+`EXPORT_CONTENT_CHANGED` if it differs. Wiring the screen meant deciding where the client's digest
+comes from.
+
+**Decision.** The screen fetches candidates **once** and everything downstream works from that
+list. `buildVisitPack` hashes exactly those entries and never re-fetches. `canonicalizeSelection`
+is imported from the domain unchanged, so the two sides cannot disagree about what is being hashed;
+only the hashing itself is a port, because SHA-256 is asynchronous on every platform and comes from
+a different module on each - `expo-crypto` on a device, `node:crypto` in a test.
+
+**The duplication that had to be removed.** The note entries were built inline inside
+`evaluateGeneration`, with the caveat as a string literal. The digest covers the notes as well as
+the records, so a client that spelled that caveat differently - or omitted the notes - would
+compute a digest the server refuses, and the user would be told the content had changed when
+nothing had. `toNoteEntries` and `USER_NOTE_CAVEAT` are now exported and used by both sides.
+
+**An unrecognised entry is refused, not coerced.** The canonical form includes the section, the
+entity kind and the caveat verbatim. Substituting a default for a value this client does not
+recognise produces a digest that differs from the server's, so `EXPORT_CONTENT_CHANGED` would start
+firing for a reason it was not built to report - and the user would be told their records moved
+when the app was simply older than the server. `toEntry` returns `null` and the draft is refused
+with a message about updating the app.
+
+**Consequences.** `EXPORT_CONTENT_CHANGED` is handled as the one refusal on this path that is not a
+mistake: the screen reloads and returns the user to the list rather than retrying, because retrying
+sends the same stale digest and a person pressing "try again" three times deserves better than
+three identical refusals.
+
+**Sources.** `04` Phase 8.4; `06` Journey 8; `14`; DEC-022; DEC-023.

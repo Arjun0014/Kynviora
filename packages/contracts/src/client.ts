@@ -390,7 +390,17 @@ export interface KynvioraClient {
   ): Promise<ApiOutcome<Record<string, unknown>>>;
 
   visitPackCandidates(profileId: string): Promise<ApiOutcome<VisitPackCandidatesResponse>>;
-  createVisitPack(body: VisitPackGeneration): Promise<ApiOutcome<Record<string, unknown>>>;
+  /**
+   * Generate a pack.
+   *
+   * Requires step-up (`14`) and an idempotency key (`13`). The key is a parameter for the same
+   * reason it is on an invitation: regenerated on retry it would produce a second export of the
+   * same content, each with its own retrieval URL and its own expiry.
+   */
+  createVisitPack(
+    body: VisitPackGeneration,
+    idempotencyKey: string,
+  ): Promise<ApiOutcome<Record<string, unknown>>>;
 
   reconciliation(id: string): Promise<ApiOutcome<ReconciliationResponse>>;
   resolveDifference(
@@ -509,7 +519,8 @@ export function createClient(options: ClientOptions): KynvioraClient {
     visitPackCandidates: (profileId) =>
       get<VisitPackCandidatesResponse>('/v1/visit-packs/candidates', { profileId }),
 
-    createVisitPack: (body) => send<Record<string, unknown>>('POST', '/v1/visit-packs', body),
+    createVisitPack: (body, idempotencyKey) =>
+      send<Record<string, unknown>>('POST', '/v1/visit-packs', body, idempotencyKey),
 
     reconciliation: (id) =>
       get<ReconciliationResponse>(`/v1/reconciliations/${encodeURIComponent(id)}`),

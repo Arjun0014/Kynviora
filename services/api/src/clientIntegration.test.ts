@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { start, type StartedServer } from './main.js';
@@ -13,10 +14,13 @@ import {
   buildCompletion,
   buildInvitation,
   buildUrl,
+  buildVisitPack,
+  contentChanged,
   accessList,
   reviewInboxView,
   safetyView,
   shelfView,
+  type DigestFn,
   type KynvioraClient,
 } from '@kynviora/contracts';
 import { SCREEN_STATE_PRESENTATION } from '@kynviora/presentation';
@@ -466,5 +470,109 @@ describe('inviting a caregiver, end to end', () => {
     expect(profiles.kind).toBe('OK');
     if (profiles.kind !== 'OK') return;
     expect(profiles.value.profiles[0]?.isOwner).toBe(true);
+  });
+});
+
+describe('the Visit Pack, end to end', () => {
+  /**
+   * The exit criterion of Phase 8.4, exercised through the code the app runs.
+   *
+   * "A user can review exactly what will be shared" is a property of the system rather than a
+   * claim about the client, and DEC-023 is what makes it one: the server rebuilds the selection
+   * from live records, recomputes the digest, and refuses if it differs from the one quoted. That
+   * only works if both sides hash the same thing - which no unit test on either side can prove
+   * alone.
+   */
+  const sha256: DigestFn = (canonical) =>
+    Promise.resolve(createHash('sha256').update(canonical).digest('hex'));
+
+  const elevated = () =>
+    createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(SEED.userId, { stepUp: true }),
+    });
+
+  it('accepts a digest the client computed from what it displayed', async () => {
+    const candidates = await owner.visitPackCandidates(SEED.profileId);
+    expect(candidates.kind).toBe('OK');
+    if (candidates.kind !== 'OK') return;
+    expect(candidates.value.candidates.length).toBeGreaterThan(0);
+
+    const draft = await buildVisitPack(
+      {
+        profileId: SEED.profileId,
+        candidates: candidates.value.candidates,
+        selectedEntityIds: candidates.value.candidates.map((entry) => entry.entityId),
+        notes: ['Is the rash related?'],
+        reviewedAt: candidates.value.serverTime,
+      },
+      sha256,
+    );
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+
+    const created = await elevated().createVisitPack(draft.body, crypto.randomUUID());
+    // If the two sides disagreed about the canonical form this would be
+    // EXPORT_CONTENT_CHANGED - which is exactly the failure the digest exists to report, and
+    // exactly the false alarm a mismatched client would produce.
+    expect(created.kind).toBe('OK');
+  });
+
+  it('refuses a digest of content the user did not see', async () => {
+    // DEC-023 in the direction that matters. A client quoting a digest for anything other than
+    // what it displayed is refused, whether that is a bug or an attempt to widen an export.
+    const candidates = await owner.visitPackCandidates(SEED.profileId);
+    if (candidates.kind !== 'OK') return;
+
+    const draft = await buildVisitPack(
+      {
+        profileId: SEED.profileId,
+        candidates: candidates.value.candidates,
+        selectedEntityIds: candidates.value.candidates.slice(0, 1).map((e) => e.entityId),
+        reviewedAt: candidates.value.serverTime,
+      },
+      // A hash of something else entirely.
+      () => Promise.resolve(createHash('sha256').update('not what was shown').digest('hex')),
+    );
+    if (!draft.ok) return;
+
+    const created = await elevated().createVisitPack(draft.body, crypto.randomUUID());
+    expect(created.kind).toBe('REFUSED');
+    if (created.kind !== 'REFUSED') return;
+    expect(created.code).toBe('EXPORT_CONTENT_CHANGED');
+    expect(contentChanged(created)).toBe(true);
+  });
+
+  it('refuses an export without step-up', async () => {
+    // `14` treats an export without re-authentication as the failure, whatever else is wrong -
+    // the route checks it before it parses the body.
+    const candidates = await owner.visitPackCandidates(SEED.profileId);
+    if (candidates.kind !== 'OK') return;
+
+    const draft = await buildVisitPack(
+      {
+        profileId: SEED.profileId,
+        candidates: candidates.value.candidates,
+        selectedEntityIds: candidates.value.candidates.slice(0, 1).map((e) => e.entityId),
+        reviewedAt: candidates.value.serverTime,
+      },
+      sha256,
+    );
+    if (!draft.ok) return;
+
+    expect((await owner.createVisitPack(draft.body, crypto.randomUUID())).kind).toBe(
+      'STEP_UP_REQUIRED',
+    );
+  });
+
+  it('offers a stranger nothing to export', async () => {
+    // RLS-scoped, so a profile the caller cannot reach yields an empty candidate list rather than
+    // a refusal - the same non-confirming behaviour as the shelf.
+    const candidates = await stranger.visitPackCandidates(SEED.profileId);
+    if (candidates.kind === 'OK') {
+      expect(candidates.value.candidates).toEqual([]);
+    } else {
+      expect(candidates.kind).toBe('UNAVAILABLE');
+    }
   });
 });

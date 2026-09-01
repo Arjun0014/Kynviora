@@ -419,9 +419,10 @@ The **caregiver invitation** is built: capability selection limited to what the 
 delegate (DEC-045), a step-up-scoped request (`DEV-025`), a token emitted once and held nowhere,
 and outstanding invitations now visible on the Care screen (DEC-046).
 
-Still to build, each because it needs a screen rather than a button (`DEV-022`): the Visit Pack
-selection and review flow, the reconciliation difference resolution, and revocation. Every one
-exists on the client and is exercised by tests.
+The **Visit Pack** is built: selection, a review step whose displayed content is what gets hashed,
+and a digest a live server accepts (DEC-048).
+
+Still to build (`DEV-022`): the reconciliation difference resolution, and revocation.
 
 `DEV-021` records that screen behaviour is tested in the packages rather than in the app, and what
 that does and does not cover.
@@ -430,10 +431,10 @@ that does and does not cover.
 
 ## Immediate next work
 
-1. Finish `DEV-007`: the Visit Pack selection and review flow, the reconciliation difference
-   resolution, and revocation. The Visit Pack is next - it is the one whose exit criterion is a
-   property of the request rather than of the screen, because generation quotes the digest of
-   exactly what the user reviewed and is refused if it has moved (DEC-023).
+1. Finish `DEV-007`: the reconciliation difference resolution, then revocation. Reconciliation is
+   the last write flow and the one with the sharpest rule - which value now stands is stated by a
+   person and never inferred from recency, and a professional confirmation carries no side of its
+   own (DEC-030).
 2. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
    cache-hit rate, assessment recomputation throughput. The review-queue age becomes measurable
    once inbox derivation moves behind a scheduler (`DEV-013`).

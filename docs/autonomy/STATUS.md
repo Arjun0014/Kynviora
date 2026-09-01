@@ -102,13 +102,13 @@ documented configuration requirements.
 the shared client, and the only writes are the notification preference and a dose event. Five
 flows remain, and each needs a screen rather than a button (`DEV-022`):
 
-1. The **Visit Pack** selection and review flow, which quotes a digest of exactly what the user
-   reviewed and is refused with `EXPORT_CONTENT_CHANGED` if it has moved (DEC-023).
-2. The **reconciliation** difference resolution, where the side is stated by a person (DEC-030).
-3. **Revocation**, which needs the step-up prompt the invitation flow already has and a
+1. The **reconciliation** difference resolution, where the side is stated by a person and never
+   inferred from recency (DEC-030). The last of the write flows.
+2. **Revocation**, which now has the step-up seam the invitation flow introduced and needs a
    confirmation that never applies the change locally (`12`).
 
-Done: the **review task editor** (five of seven kinds; `BATCH_MISSING` and
+Done: the **Visit Pack** (selection, review, and a digest the live server accepts), the
+**review task editor** (five of seven kinds; `BATCH_MISSING` and
 `FORMULA_NEEDS_CONFIRMATION` wait on guided capture, `DEV-024`) and the **caregiver invitation**
 (capability selection limited to what the inviter may delegate, a step-up-scoped request, and a
 token emitted once and never held anywhere).
@@ -248,6 +248,10 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
   credential for one intent.
 - **DEC-047** - `GET /v1/profiles` carries `isOwner`. `isManaged` is about the person the profile
   is for and is **not** ownership; reading one as the other is a real mistake this field removes.
+
+- **DEC-048** - the Visit Pack client hashes the candidates it **displayed** and never re-fetches
+  before hashing. `canonicalizeSelection` and `toNoteEntries` come from the domain so both sides
+  build the same string. An entry this client cannot canonicalise is refused, never coerced.
 
 ## Traps to avoid on resume
 
@@ -396,3 +400,16 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 50. Do not return the invited email address from `GET /v1/caregiver-invitations`. It returns
     `boundToAddress` instead - whether the link is bound is the fact the owner needs, and the
     address is personal data on a screen someone else may be reading (`14`).
+51. Do not re-fetch Visit Pack candidates before computing the digest. It would quote a digest of
+    content the user never saw and silently disarm `EXPORT_CONTENT_CHANGED` - the request would
+    succeed and the guarantee would be gone with nothing failing to say so (DEC-048).
+52. Do not inline the user-note caveat or rebuild note entries by hand. The digest covers the
+    notes, so `toNoteEntries` and `USER_NOTE_CAVEAT` are exported and used by both sides; a second
+    spelling produces a refusal that reads as "your records changed" when nothing did.
+53. Do not coerce an unrecognised Visit Pack section, entity kind or caveat to a default. The
+    canonical form includes each verbatim, so a substitution produces a mismatched digest and
+    `EXPORT_CONTENT_CHANGED` starts reporting a record change that did not happen.
+54. Every mutation that mints something - a dose event, an invitation, a Visit Pack - takes an
+    idempotency key as a **parameter**. A key generated inside the client is regenerated on retry,
+    which is a second write rather than a replay. `createVisitPack` shipped without one and every
+    generation failed with `VALIDATION_FAILED` until an end-to-end test posted a real request.

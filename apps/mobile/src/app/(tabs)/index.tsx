@@ -41,12 +41,17 @@ import { Screen } from '@/components/Screen';
 import { ResourceState } from '@/components/ScreenState';
 import { ReviewInbox } from '@/features/reviewInbox/ReviewInbox';
 import { ReviewTaskEditor } from '@/features/reviewInbox/ReviewTaskEditor';
+import { VisitPackFlow } from '@/features/visitPack/VisitPackFlow';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 export default function TodayScreen() {
   const { client } = useApi();
   const { activeProfile, activeProfileId } = useProfiles();
 
   const [editing, setEditing] = useState<ReviewTaskView | null>(null);
+  // `06` Journey 8 lives here because Today is where an appointment belongs - the screen's own
+  // introduction has always said "due medicines, appointments and anything that needs review".
+  const [preparingPack, setPreparingPack] = useState(false);
   const [saving, setSaving] = useState<ScreenStateKind | null>(null);
   const [savingMessage, setSavingMessage] = useState<string | null>(null);
 
@@ -132,7 +137,13 @@ export default function TodayScreen() {
         <Text style={styles.profile}>{activeProfile.displayName}</Text>
       )}
 
-      {editing !== null ? (
+      {preparingPack ? (
+        <VisitPackFlow
+          onClose={() => {
+            setPreparingPack(false);
+          }}
+        />
+      ) : editing !== null ? (
         <ReviewTaskEditor
           kind={editing.kind}
           subjectId={editing.subjectId}
@@ -152,6 +163,17 @@ export default function TodayScreen() {
         <ReviewInbox state="READY" tasks={inbox.tasks} onStartTask={onStartTask} />
       ) : (
         <ResourceState resource={resource} onRetry={onRetry} />
+      )}
+
+      {preparingPack || editing !== null ? null : (
+        <PrimaryButton
+          label="Prepare a summary for an appointment"
+          variant="secondary"
+          accessibilityHint="Choose what to share with a health professional. Nothing is included until you choose it."
+          onPress={() => {
+            setPreparingPack(true);
+          }}
+        />
       )}
 
       {/* `06` requires a partial result to be visible as one. A silently shorter list is the

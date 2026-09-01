@@ -147,3 +147,9 @@
 {"ts": "2026-09-01T14:20:00Z", "type": "decision_recorded", "detail": "DEC-045 non-delegable capabilities are absent not disabled; DEC-046 the Care screen lists invitations too; DEC-047 GET /v1/profiles says isOwner"}
 {"ts": "2026-09-01T14:21:00Z", "type": "deviation_recorded", "detail": "DEV-025 step-up is a confirmation with no proof behind it; DEV-026 a caregiver is offered no capabilities to delegate"}
 {"ts": "2026-09-01T14:22:00Z", "type": "milestone", "detail": "caregiver invitation end to end, step-up gated, token emitted once; 2087 tests across 62 files, verify exit 0"}
+{"ts": "2026-09-01T14:27:00Z", "type": "work_started", "detail": "DEV-007 write flow 3: the Visit Pack selection and review"}
+{"ts": "2026-09-01T14:28:00Z", "type": "code_changed", "detail": "toNoteEntries and USER_NOTE_CAVEAT exported from the domain: the digest covers the notes, so both sides must build them identically"}
+{"ts": "2026-09-01T14:30:00Z", "type": "bug_found", "detail": "createVisitPack sent no idempotency key, so every generation failed with VALIDATION_FAILED before the digest was compared"}
+{"ts": "2026-09-01T14:32:00Z", "type": "decision_recorded", "detail": "DEC-048 the client hashes what it displayed; the canonical form has one definition; an unrecognised entry is refused rather than coerced"}
+{"ts": "2026-09-01T14:35:00Z", "type": "verified", "detail": "the client digest is accepted by a live server, and a digest of anything else is refused with EXPORT_CONTENT_CHANGED"}
+{"ts": "2026-09-01T14:36:00Z", "type": "milestone", "detail": "Visit Pack selection, review and generation end to end; 2104 tests across 63 files, verify exit 0"}

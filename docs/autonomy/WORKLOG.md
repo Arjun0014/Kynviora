@@ -1156,3 +1156,60 @@ merged access list, and 5 end to end against a real server process.
 
 Two `DEV-007` write flows remain: the Visit Pack selection and the reconciliation difference
 resolution. Revocation still has no screen.
+
+### The Visit Pack - the third write flow
+
+The flow whose exit criterion is a property of the request rather than of the screen. DEC-023 says
+generation quotes the digest of the content the user reviewed and is refused if recomputing it from
+live records differs, and that is what makes "a user can review exactly what will be shared" a fact
+about the system instead of a promise about the client.
+
+**So the client hashes what it displayed.** The candidates are fetched once and everything
+downstream works from that list. Re-fetching before hashing would quote a digest of content the
+user never saw and would silently disarm the refusal that makes the promise real - the request
+would succeed and the guarantee would be gone, with nothing failing to say so.
+
+`canonicalizeSelection` is imported from the domain unchanged. Only the hashing is a port, because
+SHA-256 is asynchronous on every platform and comes from a different module on each.
+
+**One duplication had to go first.** The note entries were built inline inside
+`evaluateGeneration`, with the caveat as a string literal. The digest covers the notes too, so a
+client spelling that caveat differently would compute a digest the server refuses - and the user
+would be told their records had changed when nothing had. `toNoteEntries` and `USER_NOTE_CAVEAT`
+are now exported and used by both sides (DEC-048).
+
+**An entry this client cannot canonicalise is refused rather than coerced.** The canonical form
+includes the section, the entity kind and the caveat verbatim, so a substituted default produces a
+mismatched digest - and `EXPORT_CONTENT_CHANGED` would start reporting "your records moved" when
+the truth is "this app is older than the server". The draft is refused with a message that says to
+update the app.
+
+**A bug found by running it.** `createVisitPack` on the client sent no idempotency key, and the
+route requires one - so every generation attempt failed with `VALIDATION_FAILED` before the digest
+was ever compared. It was invisible until an end-to-end test posted a real request. The key is now
+a parameter, for the same reason it is on an invitation: regenerated on retry it produces a second
+export of the same content, each with its own retrieval URL and its own expiry.
+
+**The one refusal here that is not a mistake.** `EXPORT_CONTENT_CHANGED` means the records
+genuinely moved between review and generation. The screen reloads and returns the user to the
+selection rather than offering a retry, because retrying sends the same stale digest and a person
+pressing "try again" three times deserves better than three identical refusals.
+
+### Things worth recording
+
+- The end-to-end test is the only place that could prove the two digests agree. A unit test on
+  either side proves each computes _something_ consistently; only a live server rebuilding the
+  selection from its own records proves they compute the _same_ thing. It caught the missing
+  idempotency key on the way.
+- The flow lives on Today. `06` Journey 8 has no destination of its own, and Today's introduction
+  has always said "due medicines, appointments and anything that needs review" - an appointment
+  summary belongs where the appointment does.
+
+### State
+
+2104 tests passing across 63 files, up from 2087 across 62. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 17 new tests: 13 for the pack builder and 4 end to
+end against a real server process.
+
+One `DEV-007` write flow remains - the reconciliation difference resolution - plus revocation,
+which now has the step-up seam it needs.
