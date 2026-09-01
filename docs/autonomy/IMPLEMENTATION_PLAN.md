@@ -263,8 +263,18 @@ shows its counts beside the checklist item that asks about them.
   without. The **first** criterion is what blocks the phase: "usability participants can explain
   why they received a test alert" needs human participants, which nobody here can convene. Same
   shape as 7.2's block.
-- **7.4**: `diffIngredients` provides the formulation half; the regulatory-version diff is
-  outstanding.
+- **7.4**: both halves of the comparison now exist. `diffIngredients` covers formulation;
+  `diffRegulatoryVersions` covers the regulatory version, and `attributeChange` answers the exit
+  criterion - a regulator acting, the source correcting itself, Kynviora correcting itself, or
+  nobody having recorded which (DEC-074). Every mechanism is implemented and tested against both
+  halves of the vocabulary.
+
+  **Outstanding, and why the phase is not complete.** There is no route and no screen, because
+  neither can return anything: a version diff needs two published regulatory versions and the
+  Citation Gate refuses every shipped fixture (DEC-016, `BLK-004`), so a route would be a handler
+  nobody could exercise. The attribution half _is_ reachable through `assessment_correction`
+  without any published regulatory record, and wiring that is the next piece of 7.4. The exit
+  criterion itself - "users can distinguish" - needs usability participants, as 7.3's does.
 
 ---
 

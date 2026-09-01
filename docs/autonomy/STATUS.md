@@ -20,7 +20,7 @@ Last updated: 2026-09-01
 
 ## Verification state
 
-- **2602 tests passing**, 0 failing, across 81 files.
+- **2629 tests passing**, 0 failing, across 82 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -85,6 +85,7 @@ the API will not distinguish them.
 | Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006)    |
 | Staff surface split, console package, console process      | Complete, 172 tests; **authenticates nobody** (BLK-010) |
 | Alert detail, explainability, report-incorrect             | Complete, 89 tests; **no alert to open** (BLK-006)      |
+| Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)          |
 | Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                      |
 | End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                      |
 | Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                     |
@@ -158,9 +159,10 @@ in a banner.
 
 Next, in the order they build on each other:
 
-1. **Phase 7.4's regulatory half.** `diffIngredients` covers formulation. The regulatory-version
-   diff - what changed, and whether a regulator acted or Kynviora corrected itself - is the
-   outstanding half, and its exit criterion is exactly that distinction.
+1. **Phase 7.4's route.** The diff and the attribution are built and tested (DEC-074). A version
+   diff has nothing to compare until two regulatory versions are published, which `BLK-004`
+   prevents - but the **attribution** half is reachable today through `assessment_correction`
+   without any published regulatory record, and that is the piece to wire next.
 2. **Phase 7.6** - resolution and the Safety Receipt. `safety_receipt` already exists with its
    full vocabulary and 7.3 writes one member of it (`REPORTED_INCORRECT_MATCH`). What remains is
    the rest of the vocabulary, the versioned receipt, and making corrections visible without
@@ -175,12 +177,16 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 
 ## Next three planned tasks
 
-1. Phase 7.4's regulatory-version diff, distinguishing a regulator's action from a correction.
+1. Phase 7.4's route, carrying the attribution from `assessment_correction`.
 2. Phase 7.6 - resolution outcomes and the versioned Safety Receipt.
 3. Phase 7.5's remainder - deduplication, digests, quiet hours, revalidation on open.
 
 ## Recent decisions worth knowing
 
+- **DEC-074** - a change is attributed from what was **recorded**, never from what the two versions
+  look like. A regulator tightening a limit and Kynviora discovering it mis-extracted the old one
+  are byte-identical, so `attributeChange` reads the correction row and the supersession link and
+  inspects neither version. Four answers, and `NOT_STATED` is one of them.
 - **DEC-070** - where a fact came from is a **type**. Every value on the alert detail carries a
   `FactBasis` and there is no constructor without one, so a new field cannot reach the screen
   unlabelled. Six bases, not two: a batch number read off the pack and one somebody typed are both
@@ -678,3 +684,14 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 97. Do not use `git add -A` to stage a commit in this repository. `docs/autonomy/
 last_session_messeges.md` is untracked on purpose and was swept into a feature commit that
     way; stage paths explicitly.
+98. Do not infer why a regulatory record changed from the two versions. There is no arithmetic
+    that separates a regulator acting from Kynviora correcting itself, and every heuristic fails
+    in the case that matters (DEC-074).
+99. Do not default `NOT_STATED` to either side, and do not attribute an unrecognised correction
+    kind to the regulator. Both directions are wrong and the second is the dangerous one.
+100. Do not make `@kynviora/presentation` or `@kynviora/contracts` depend on
+     `@kynviora/regulatory`. Those two are carried in the Expo bundle and the registry is not; the
+     diff shape is declared structurally and pinned by a test in the regulatory suite.
+101. Do not `String()` an `unknown` that reaches a screen. A condition shape this build did not
+     expect would render as `[object Object]` beside somebody's medicine; narrow to scalars and
+     report anything else as absent.

@@ -1813,3 +1813,57 @@ Nothing here is visible against the seed, and that is correct: no rule is approv
 no regulatory record passes the Citation Gate (`BLK-004`), so every safety line has a null alert
 identifier and the "why am I seeing this?" control appears nowhere. Absent rather than disabled,
 which is the same rule the Lens control already followed on that screen.
+
+### Phase 7.4's regulatory half - the question that has no arithmetic
+
+`diffIngredients` had covered formulation since Stage 3. The regulatory-version diff was recorded
+as the outstanding half, and writing it turned out to be mostly one decision.
+
+**The exit criterion cannot be computed.** "Users can distinguish a new regulator action from a
+Kynviora correction" sounds like a rendering problem and is not. The two cases produce identical
+evidence: a regulator tightening a concentration limit and Kynviora discovering it had
+mis-extracted the old limit both appear as a new version superseding the old with a different
+`maxConcentrationPercent`. Every heuristic over the pair fails in the case that matters - "the
+effective date moved, so the regulator acted" is wrong the moment a correction carries a new date -
+and being wrong here means telling somebody the law changed when in fact the software was wrong
+about their medicine.
+
+So `attributeChange` inspects neither version. It reads whether an `assessment_correction` row
+exists and what kind it names, and whether the new version supersedes an earlier one. That is
+DEC-030 again on a different subject: which of two readings stands is stated by somebody, not
+derived from recency.
+
+**Four answers rather than two.** `04` names two and there is a third that is neither - the source
+correcting its own publication - and a fourth that must not be folded into any of them.
+`NOT_STATED` is a member of the union: defaulting an unattributed change to a regulator action
+hands Kynviora's mistakes to the regulator, and defaulting it to a correction claims a mistake
+nobody found. An unrecognised correction kind attributes to Kynviora, because a value this build
+has never seen becoming "the law changed" is the one direction this must not fail in.
+
+**The copy is deliberately blunt.** "Kynviora corrected itself" rather than "this alert has been
+updated". `02` names trustworthiness as the product, and the euphemism is the sentence that makes
+a person distrust everything else on the screen at the moment they work out what it meant.
+
+**A boundary held.** The first draft had `@kynviora/presentation` importing `RegulatoryDiff` from
+`@kynviora/regulatory`. Presentation is carried in the Expo bundle and the registry is not - no
+household package has ever imported it. The vocabulary moved to `@kynviora/domain`, where closed
+vocabularies live, and presentation declares the diff shape structurally. Structural mirrors drift,
+so the regulatory suite - the one place both packages are present - assigns a real diff to the
+declared shape and fails if they part company.
+
+**A lint rule caught a real one.** `String(value)` over an `unknown` condition would have rendered
+`[object Object]` on a safety screen for any condition shape this build did not expect. It now
+narrows to string, number and boolean and reports anything else as absent, which is the honest
+answer and the one a screen can say out loud.
+
+**What is not built, and why.** No route and no screen. A version diff needs two published
+regulatory versions, and the Citation Gate refuses every shipped fixture (DEC-016, `BLK-004`), so
+a route would be a handler nobody could exercise and a screen would be a page nobody could reach.
+The attribution half is reachable through `assessment_correction` without any published regulatory
+record, and that is the next piece.
+
+### State
+
+2629 tests passing across 82 files, up from 2602 across 81. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 27 new tests, including every member of both
+vocabularies through the attribution and the cross-package pin.

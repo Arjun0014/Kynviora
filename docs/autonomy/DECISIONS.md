@@ -1983,3 +1983,45 @@ citation cannot be reproduced.
 withholding what it licenses would disclose the thing the review is about.
 
 **Sources.** `04` Phase 7.3; `25`; `BLK-005`.
+
+## DEC-074 - A change is attributed from what was recorded, never from what it looks like
+
+**Context.** `04` Phase 7.4's exit criterion is that users can distinguish a new regulator action
+from a Kynviora correction.
+
+**Decision.** `attributeChange` reads two recorded facts - whether an `assessment_correction` row
+exists and what kind it names, and whether the new regulatory version supersedes an earlier one -
+and returns one of `REGULATOR_ACTED`, `SOURCE_CORRECTED_ITSELF`, `KYNVIORA_CORRECTED_ITSELF` or
+`NOT_STATED`. It inspects neither version's contents.
+
+**Rationale.** The two cases the criterion separates produce identical evidence. A regulator
+tightening a concentration limit and Kynviora discovering it had mis-extracted the old limit both
+look like a new version superseding the old with a different `maxConcentrationPercent`. Any
+heuristic over the version pair is wrong in exactly the cases that matter - "the effective date
+moved, so the regulator acted" fails the moment a correction carries a new date - and a wrong
+answer here tells somebody the law changed when in fact the software was wrong about their
+medicine. DEC-030's shape on a different subject: which of two readings stands is stated, not
+derived.
+
+**Four members, not two.** A source correcting its own publication is neither of the two `04`
+names, and a reader deciding how much to trust what they were told before needs it apart from
+both. `NOT_STATED` is a member rather than a fallback: defaulting an unattributed change to a
+regulator action would hand Kynviora's mistakes to the regulator, and defaulting it to a
+correction would claim a mistake nobody found.
+
+**An unrecognised correction kind attributes to Kynviora.** The criterion exists so a reader can
+tell when the software was wrong; a value this build does not recognise becoming "the law changed"
+is the one direction it must not fail in.
+
+**The diff reaches no verdict.** No "stricter", "relaxed" or severity delta anywhere. `09` forbids
+value judgements between jurisdictions, and between two versions of one rule the same holds:
+whether a narrowed limit matters depends on what the reader is doing with the substance. Statuses
+added and removed are two lists rather than one replacement, because "RESTRICTED became
+PROHIBITED" is a sentence about severity that nobody wrote.
+
+**Whether the action changed is a separate question, separately answered.** It is read from the
+two assessments' frozen urgency and template rather than derived from the rule diff, because a
+regulator can narrow a limit without altering what a household should do about a pack they already
+own.
+
+**Sources.** `04` Phase 7.4; `07`; `09`; DEC-007; DEC-030; DEC-065.
