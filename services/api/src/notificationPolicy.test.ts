@@ -1,12 +1,16 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance, FastifyRequest, InjectOptions } from 'fastify';
 import { createServer } from './server.js';
+import { createRequestContext } from './context.js';
+import { dispatchAlert, recordingTransport } from './alertDelivery.js';
 import type { DatabaseConnection, DatabasePool, Principal } from './context.js';
 import { createTestDb, testUuid, type TestDb } from '../../../db/harness/harness.js';
 import {
   ACTION_URGENCIES,
   MAX_CHANNEL_FOR_URGENCY,
   instantFrom,
+  regulatoryDifferenceUrgency,
+  type ActionUrgency,
   noopLogger,
   unsafeId,
   type Instant,
@@ -448,5 +452,137 @@ describe('the notification settings a person can read', () => {
     // and `14` keeps what it does not need out of a log.
     expect(detail).toContain('quiet_hours_set');
     expect(detail).not.toContain('1320');
+  });
+});
+
+describe('the dispatcher acts on the policy, not only reports it', () => {
+  async function dispatch(
+    urgency: ActionUrgency,
+    alertId: string,
+    localMinuteOfDay: number | null = null,
+  ) {
+    const transport = recordingTransport();
+    const ctx = createRequestContext({
+      pool: {
+        withUser: (userId, fn) => t.asUser(userId, (db) => fn(db as unknown as DatabaseConnection)),
+        withService: (fn) => t.asService((db) => fn(db as unknown as DatabaseConnection)),
+      },
+      principal: principalFor(OWNER),
+      correlationId: 'test-correlation',
+      now: currentNow,
+      logger: noopLogger(),
+    });
+    const result = await dispatchAlert(
+      ctx,
+      {
+        profileId: PROFILE,
+        eventKind: 'SAFETY_ALERT',
+        alertPublicationId: alertId,
+        urgency,
+        localMinuteOfDay,
+        subject: {
+          kind: 'SAFETY_ALERT',
+          profileDisplayName: 'Parent A (synthetic)',
+          itemDisplayName: 'Synthetic Tablet',
+        },
+      },
+      transport,
+    );
+    return { result, transport };
+  }
+
+  it('sends nothing to any device for a foreign regulatory difference', async () => {
+    const { alertId } = await publishAlert();
+    // Exit criterion 1 end to end: the urgency a foreign difference defaults to, through the real
+    // dispatcher, reaches nobody's device. A policy the dispatcher did not consult would be a
+    // rule that was correct, tested, and reachable by nobody.
+    const urgency = regulatoryDifferenceUrgency({
+      observedIn: 'JP',
+      profileMarkets: ['GB'],
+      reviewedUrgencyForContext: null,
+    }).urgency;
+
+    const { result, transport } = await dispatch(urgency, alertId);
+    if (!result.ok) throw new Error('expected dispatch to succeed');
+    expect(result.value.timing.channel).toBe('IN_APP_ONLY');
+    expect(transport.sent).toEqual([]);
+    // The owner was a legitimate recipient and was still kept off the device, which is the
+    // difference between "nobody was entitled" and "nothing was loud enough".
+    expect(result.value.plan.recipients.map((r) => r.userId)).toContain(OWNER);
+    expect(result.value.withheldFromDevice).toContain(OWNER);
+  });
+
+  it('still records the delivery, so a digest has something to be assembled from', async () => {
+    const { alertId } = await publishAlert();
+    await dispatch('LOW', alertId);
+    const rows = await t.asService((db) =>
+      db.query<{ n: string }>(
+        'SELECT count(*) AS n FROM alert_delivery WHERE alert_publication_id = $1',
+        [alertId],
+      ),
+    );
+    // `04` asks for a digest policy for lower urgency. A digest is assembled from what was
+    // recorded rather than from what was pushed, so the row exists and the transport does not.
+    expect(Number(rows.rows[0]?.n)).toBeGreaterThan(0);
+  });
+
+  it('sends for an urgency that reaches a device', async () => {
+    const { alertId } = await publishAlert();
+    const { result, transport } = await dispatch('HIGH', alertId);
+    if (!result.ok) throw new Error('expected dispatch to succeed');
+    expect(result.value.timing.channel).toBe('INTERRUPT');
+    expect(transport.sent.length).toBeGreaterThan(0);
+  });
+
+  it('holds a HIGH alert inside the profile own quiet hours', async () => {
+    await t.asService((db) =>
+      db.query(
+        `INSERT INTO profile_notification_policy
+           (profile_id, quiet_hours_start_minute, quiet_hours_end_minute)
+         VALUES ($1, $2, $3)`,
+        [PROFILE, 22 * 60, 7 * 60],
+      ),
+    );
+    const { alertId } = await publishAlert();
+    const { result, transport } = await dispatch('HIGH', alertId, 3 * 60);
+    if (!result.ok) throw new Error('expected dispatch to succeed');
+    expect(result.value.timing.held).toBe(true);
+    expect(transport.sent).toEqual([]);
+  });
+
+  it('wakes somebody for a CRITICAL one inside the same window', async () => {
+    await t.asService((db) =>
+      db.query(
+        `INSERT INTO profile_notification_policy
+           (profile_id, quiet_hours_start_minute, quiet_hours_end_minute)
+         VALUES ($1, $2, $3)`,
+        [PROFILE, 22 * 60, 7 * 60],
+      ),
+    );
+    const { alertId } = await publishAlert();
+    const { result, transport } = await dispatch('CRITICAL', alertId, 3 * 60);
+    if (!result.ok) throw new Error('expected dispatch to succeed');
+    expect(result.value.timing.reason).toBe('PIERCED_QUIET_HOURS');
+    expect(transport.sent.length).toBeGreaterThan(0);
+  });
+
+  it('records the channel and the reason in the audit detail', async () => {
+    const { alertId } = await publishAlert();
+    await dispatch('INFORMATIONAL', alertId);
+    const events = await t.asService((db) =>
+      db.query<{ detail: unknown }>(
+        `SELECT detail FROM audit_event WHERE action = 'alert.delivery.dispatched'
+            AND target_id = $1`,
+        [alertId],
+      ),
+    );
+    const detail = JSON.stringify(events.rows[0]?.detail);
+    // `20`: "nothing was sent because the urgency was informational" is what an operator
+    // investigating a missing notification needs and cannot otherwise reconstruct.
+    expect(detail).toContain('IN_APP_ONLY');
+    expect(detail).toContain('URGENCY_CEILING');
+    // And still no medicine and no person.
+    expect(detail).not.toContain('Synthetic Tablet');
+    expect(detail).not.toContain('Parent A');
   });
 });

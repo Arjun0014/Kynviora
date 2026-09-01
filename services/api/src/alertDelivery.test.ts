@@ -5,7 +5,14 @@ import { createRequestContext } from './context.js';
 import type { DatabaseConnection, DatabasePool, Principal } from './context.js';
 import { dispatchAlert, recordingTransport } from './alertDelivery.js';
 import { createTestDb, testUuid, type TestDb } from '../../../db/harness/harness.js';
-import { instantFrom, noopLogger, unsafeId, type Instant, type UserId } from '@kynviora/domain';
+import {
+  instantFrom,
+  noopLogger,
+  unsafeId,
+  type ActionUrgency,
+  type Instant,
+  type UserId,
+} from '@kynviora/domain';
 import { ALL_FIXTURE_SOURCES, asApprovedSourceForTest } from '@kynviora/fixtures';
 import type { SourceRegistryEntry } from '@kynviora/regulatory';
 
@@ -227,7 +234,7 @@ function contextFor(userId: string) {
   });
 }
 
-async function dispatchSafety(alertId: string = ALERT) {
+async function dispatchSafety(alertId: string = ALERT, urgency: ActionUrgency = 'HIGH') {
   const transport = recordingTransport();
   const result = await dispatchAlert(
     contextFor(OWNER),
@@ -235,6 +242,10 @@ async function dispatchSafety(alertId: string = ALERT) {
       profileId: PROFILE_A,
       eventKind: 'SAFETY_ALERT',
       alertPublicationId: alertId,
+      // Stated rather than defaulted (`04` Phase 7.5). These tests are about who is told and at
+      // what detail level, so they use an urgency that reaches a device; the channel decision
+      // itself is tested in `notificationPolicy.test.ts` and in the domain suite.
+      urgency,
       subject: { kind: 'SAFETY_ALERT', profileDisplayName: PERSON, itemDisplayName: MEDICINE },
     },
     transport,
@@ -345,6 +356,7 @@ describe('dispatch: who is told', () => {
         profileId: PROFILE_B,
         eventKind: 'SAFETY_ALERT',
         alertPublicationId: ALERT,
+        urgency: 'HIGH',
         subject: { kind: 'SAFETY_ALERT', profileDisplayName: PERSON, itemDisplayName: MEDICINE },
       },
       transport,
@@ -366,6 +378,7 @@ describe('dispatch: missed dose is a separate permission', () => {
         profileId: PROFILE_A,
         eventKind: 'MISSED_DOSE',
         doseOccurrenceKey: key,
+        urgency: 'HIGH',
         subject: { kind: 'MISSED_DOSE', profileDisplayName: PERSON, itemDisplayName: MEDICINE },
       },
       transport,
@@ -403,6 +416,7 @@ describe('dispatch: missed dose is a separate permission', () => {
       {
         profileId: PROFILE_A,
         eventKind: 'MISSED_DOSE',
+        urgency: 'HIGH',
         subject: { kind: 'MISSED_DOSE', profileDisplayName: PERSON, itemDisplayName: MEDICINE },
       },
       transport,
@@ -496,6 +510,7 @@ describe('dispatch: what is written down', () => {
           profileId: PROFILE_A,
           eventKind: 'SAFETY_ALERT',
           alertPublicationId: ALERT,
+          urgency: 'HIGH',
           subject: { kind: 'SAFETY_ALERT', profileDisplayName: PERSON, itemDisplayName: MEDICINE },
         },
         throwing,

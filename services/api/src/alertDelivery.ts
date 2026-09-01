@@ -51,7 +51,10 @@ import {
   type ProfileNotificationPolicy,
   type UserId,
   ACTION_URGENCIES,
+  deliveryDecision,
   isValidQuietHours,
+  type ActionUrgency,
+  type DeliveryTiming,
   type QuietHours,
 } from '@kynviora/domain';
 import { QUIET_HOURS_COPY, quietHoursLabel, urgencyChannelLines } from '@kynviora/presentation';
@@ -295,6 +298,23 @@ export interface DispatchInput {
   /** Required for `MISSED_DOSE`: identifies the occurrence, so a repeat does not re-notify. */
   readonly doseOccurrenceKey?: string;
   readonly subject: NotificationSubject;
+  /**
+   * The urgency this event carries, frozen on the assessment (`04` Phase 7.5).
+   *
+   * Required, with no default, for the reason `createServer`'s `surface` is required (DEC-066):
+   * this decides how loudly Kynviora speaks about somebody's medicine, and a caller that could
+   * omit it is a caller that could omit it by accident. A default of `INFORMATIONAL` would be
+   * silent - safe, and silently wrong; a default of anything else would be a push nobody chose.
+   */
+  readonly urgency: ActionUrgency;
+  /**
+   * The recipient's current minute from local midnight, where anybody knows it.
+   *
+   * Nobody does yet (`DEV-030`), so quiet hours are computed and hold nothing. Passing `null`
+   * rather than guessing is what keeps a CRITICAL recall from waiting for a window that never
+   * ends.
+   */
+  readonly localMinuteOfDay?: number | null;
 }
 
 export interface DispatchResult {
@@ -302,6 +322,15 @@ export interface DispatchResult {
   readonly sent: readonly Notification[];
   /** Recipients skipped because this exact event had already been delivered to them. */
   readonly alreadyDelivered: readonly UserId[];
+  /**
+   * The channel and timing this event was allowed (`04` Phase 7.5).
+   *
+   * Reported rather than only acted on, so a caller and an audit reader can both see that a
+   * foreign regulatory difference produced `IN_APP_ONLY` rather than a push that failed quietly.
+   */
+  readonly timing: DeliveryTiming;
+  /** Recipients the timing decision kept off a device. Never silent - `04` asks for the policy. */
+  readonly withheldFromDevice: readonly UserId[];
 }
 
 /**
@@ -369,6 +398,13 @@ export async function dispatchAlert(
       loadCandidates(db, profileId),
     ]);
 
+    const policyRow = await db.query<PolicyRow>(
+      `SELECT max_caregiver_detail, quiet_hours_start_minute, quiet_hours_end_minute
+         FROM profile_notification_policy WHERE profile_id = $1`,
+      [profileId],
+    );
+    const policyQuietHours = quietHoursFrom(policyRow.rows[0] ?? null);
+
     const decision = selectRecipients(
       { kind: input.eventKind, profileId, alertState },
       candidates,
@@ -378,8 +414,25 @@ export async function dispatchAlert(
     if (isErr(decision)) return { ok: false as const, error: decision.error };
     const plan = decision.value;
 
+    // `04` Phase 7.5. `selectRecipients` decided the audience and the level; this decides the
+    // channel and whether to hold. The two are composed rather than merged - a quiet-hours
+    // deferral cannot add a recipient and an urgency cannot raise a detail level - and this one
+    // runs second so it can only ever quieten what the first allowed.
+    //
+    // The deduplication flag is `false` here and the unique index below is what actually enforces
+    // it: two dispatches racing would both read "not yet delivered", so the constraint decides and
+    // the decision reports the ceiling.
+    const timing = deliveryDecision({
+      urgency: input.urgency,
+      deliverable: input.eventKind !== 'SAFETY_ALERT' || alertState === 'PUBLISHED',
+      alreadyDelivered: false,
+      quietHours: policyQuietHours,
+      localMinuteOfDay: input.localMinuteOfDay ?? null,
+    });
+
     const sent: Notification[] = [];
     const alreadyDelivered: UserId[] = [];
+    const withheldFromDevice: UserId[] = [];
 
     for (const recipient of plan.recipients) {
       const inserted = await db.query<{ id: string }>(
@@ -407,6 +460,18 @@ export async function dispatchAlert(
         continue;
       }
 
+      // The delivery row is written either way: `04` Phase 7.5 asks for a digest policy, and a
+      // digest is assembled from what was recorded rather than from what was pushed. What the
+      // channel decides is whether anything reaches a device now.
+      //
+      // Exit criterion 1 arrives here: an INFORMATIONAL event - which is what a foreign
+      // regulatory difference defaults to (`09`) - takes this branch and the transport is never
+      // called, so there is no push and no digest line to mistake for a personal alert.
+      if (timing.channel !== 'INTERRUPT' || timing.held) {
+        withheldFromDevice.push(recipient.userId);
+        continue;
+      }
+
       const notification = notificationFor(recipient, input.subject);
       await transport.send(notification);
       sent.push(notification);
@@ -421,11 +486,23 @@ export async function dispatchAlert(
         ctx.principal.userId,
         input.alertPublicationId ?? null,
         ctx.correlationId,
-        JSON.stringify(deliveryAuditDetail(plan)),
+        // The channel and the reason beside the plan. `20` asks for operational evidence, and
+        // "nothing was sent because the urgency was informational" is exactly what an operator
+        // investigating a missing notification needs and cannot otherwise reconstruct.
+        JSON.stringify({
+          ...deliveryAuditDetail(plan),
+          channel: timing.channel,
+          channel_reason: timing.reason,
+          held: timing.held,
+          withheld_from_device: withheldFromDevice.length,
+        }),
       ],
     );
 
-    return { ok: true as const, value: { plan, sent, alreadyDelivered } };
+    return {
+      ok: true as const,
+      value: { plan, sent, alreadyDelivered, timing, withheldFromDevice },
+    };
   });
 }
 
