@@ -1957,3 +1957,75 @@ Phase 7.6 is `COMPLETE` rather than blocked. Both exit criteria are structural a
 unlike 7.2 and 7.3 neither of them needs a human participant. The screen is unreachable in practice
 for the usual reason - `BLK-006` means nothing is publishable, so there is no alert to resolve -
 but that is a blocker on the data, not on the phase.
+
+### Phase 7.5 - notification policy
+
+Started from an audit of what already existed rather than from the spec's list, and three of the
+seven expected outputs turned out to be built already: generic lock-screen notifications and the
+deduplication identifiers came with Phase 8.2, and `FOREIGN_REGULATORY_DEFAULT_URGENCY` had been
+sitting in `vocabulary.ts` since Stage 1 with exactly one consumer - its own test. A constant
+nothing reads is a decision nobody made.
+
+**The first exit criterion needed a third channel.** "A new foreign restriction does not
+automatically produce a red/high-severity personal alert" reads like a severity question and is a
+channel question. With two channels - now or later - the best a foreign restriction could do is
+produce a digest line, which is a smaller version of the thing the criterion forbids. So there are
+three, and `IN_APP_ONLY` means nothing reaches a device at all. `MAX_CHANNEL_FOR_URGENCY` maps
+`INFORMATIONAL` to it, and that single row is the criterion (DEC-077).
+
+`regulatoryDifferenceUrgency` is the enforcement point the Stage 1 constant never had. The only
+escape is a reviewed rule that named this context, which `09` explicitly permits, and the result
+reports `raisedByReviewedRule` so nobody can mistake a reviewed decision for a computed one. A
+profile with no recorded market has nothing local: everything is foreign until somebody says where
+care happens, because telling a person their own regulator has acted when a different one has is
+the worse direction to fail in.
+
+**The second exit criterion was about where the check lives.** "Stale/corrected notifications
+cannot remain actionable without revalidation." A revalidation route would have satisfied the
+words and not the sentence - a client can skip a route. It belongs to the read that renders the
+screen, and `AlertDetailInput.revalidation` is required rather than optional, so the compiler
+refuses a caller that omits it. Making it required broke two call sites immediately, which is the
+type system doing the job the criterion describes.
+
+The withdrawn half needs no notice at all. `alert_publication`'s policy admits `PUBLISHED` only,
+so the row never arrives, and the caller cannot distinguish that from having lost access - which
+is exactly what DEC-039 says the server is willing to say.
+
+**Two decisions that could have gone either way.** A held alert stays `HIGH` rather than becoming
+a digest item, because turning it into one would report a lower urgency than a reviewer approved
+and `23` D-005 forbids exactly that elsewhere. And only `CRITICAL` pierces quiet hours: a recall
+on a medicine somebody is taking tonight is the case quiet hours must not swallow, and a pack
+expiring in three weeks is not (DEC-078). The settings copy says the exception out loud, because a
+person who believed quiet hours silenced everything would be relying on Kynviora for something it
+will not do.
+
+**No timezone, and that is the honest version.** Quiet hours are minutes from local midnight and
+the recipient's local minute is supplied by the caller. Storing an offset would be storing a number
+somebody invented that is wrong twice a year, and converting an instant without one would be
+inventing the answer at the moment it decides whether a person is woken. Nobody supplies the value
+yet, so quiet hours currently hold nothing (`DEV-030`) - and not holding is the safe direction,
+because a `CRITICAL` recall waiting for a window that never closes is worse than an inconvenient
+hour.
+
+**The near-miss.** The decision layer was committed, tested at four layers, and called by nothing.
+It was one commit from being written into the plan as complete - which is `DEV-026`'s failure
+exactly: a rule that was correct, tested, and reachable by nobody. `dispatchAlert` now runs
+`deliveryDecision` after `selectRecipients`, and the end-to-end test that proves criterion 1 finds
+the owner a legitimate recipient with nothing sent to them. "Nobody was entitled" and "nothing was
+loud enough" are different facts and `withheldFromDevice` reports the second, so neither can be
+read as the other.
+
+**What is deliberately not built.** No digest queue table. `BLK-009` means nothing is sent, and a
+table whose rows nobody would ever drain is speculative structure a later reader mistakes for a
+working mechanism. The delivery row is still written when the channel is quiet, because a digest
+is assembled from what was recorded rather than from what was pushed - so when the dispatcher
+arrives, the data is already there.
+
+### State
+
+2820 tests passing across 91 files, up from 2733 across 87. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 87 new tests across four suites.
+
+Stage 7's buildable work is finished. 7.1, 7.4, 7.5 and 7.6 are `COMPLETE`; 7.2 and 7.3 are
+`BLOCKED_EXTERNAL` on usability participants nobody here can convene, with every item of their
+expected output built and tested.

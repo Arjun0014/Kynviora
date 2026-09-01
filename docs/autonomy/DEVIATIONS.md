@@ -655,3 +655,30 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   (receipt ID, resolution, note, recorded at, actor) written in the same transaction as the audit
   row, with `safety_receipt` keeping the current answer as a denormalised head. That is additive:
   no existing policy, grant or index changes, and the route keeps one writer.
+
+---
+
+## DEV-030 - Nobody supplies a local time, so quiet hours hold nothing
+
+- **Affected specification**: `04` Phase 7.5 lists quiet hours as expected output.
+- **Expected behaviour**: notifications a household would rather not receive overnight wait until
+  morning, in the household's own overnight rather than in a server's.
+- **Implemented behaviour**: the window is stored as minutes from local midnight on
+  `profile_notification_policy`, `withinQuietHours` and `deliveryDecision` apply it, and every
+  layer is tested. What no caller supplies is `localMinuteOfDay`: `dispatchAlert` takes it as an
+  input and every current caller passes `null`, so quiet hours currently hold nothing.
+- **Reason**: Kynviora stores no timezone for anybody. There is no column for one, no device has
+  ever reported one (`BLK-002`), and a stored UTC offset would be a number somebody invented that
+  is wrong twice a year across a DST boundary. Converting an instant to a local minute without
+  one would be inventing the answer at the moment it decides whether a person is woken up.
+- **Temporary or permanent**: temporary.
+- **Risk**: low, and deliberately biased. Not holding is the safe direction: the failure it avoids
+  is a `CRITICAL` recall waiting for a window that never ends. The settings screen says so - the
+  copy for an unknown local time reads "Nothing is being held back" rather than leaving an empty
+  state that would read as "quiet hours are working" (DEC-078).
+- **Required future work**: the client reports its own local minute on the request that triggers a
+  dispatch, or the profile records an IANA zone and the server converts. The second is better and
+  costs a column, a migration and a zone database; the first is cheaper and puts the value in the
+  hands of the device that actually knows it. Either way `deliveryDecision` does not change - it
+  already takes the value rather than computing it, which is why this is a wiring gap rather than
+  a design one.

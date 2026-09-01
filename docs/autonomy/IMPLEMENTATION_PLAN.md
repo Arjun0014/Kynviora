@@ -246,7 +246,7 @@ shows its counts beside the checklist item that asks about them.
 | 7.2   | Global Regulatory Lens          | `BLOCKED_EXTERNAL` |
 | 7.3   | Alert detail and explainability | `BLOCKED_EXTERNAL` |
 | 7.4   | Evidence and Regulatory Diff    | `IN_PROGRESS`      |
-| 7.5   | Notification policy             | `NOT_STARTED`      |
+| 7.5   | Notification policy             | `COMPLETE`         |
 | 7.6   | Resolution and Safety Receipt   | `COMPLETE`         |
 
 - **7.2**: the projection, all four hard guarantees, and the UI are implemented and tested. What
@@ -268,6 +268,40 @@ shows its counts beside the checklist item that asks about them.
   criterion - a regulator acting, the source correcting itself, Kynviora correcting itself, or
   nobody having recorded which (DEC-074). Every mechanism is implemented and tested against both
   halves of the vocabulary.
+- **7.5**: complete. Three of the seven expected outputs already existed and had never been
+  connected to anything - generic lock-screen notifications by default and the deduplication
+  identifiers came with Phase 8.2, and `FOREIGN_REGULATORY_DEFAULT_URGENCY` had been declared in
+  Stage 1 with no consumer. The four that were missing are the urgency-based delivery policy, the
+  digest policy for lower urgency, quiet hours, and revalidation when opened.
+
+  **Exit criterion 1** - "a new foreign restriction does not automatically produce a
+  red/high-severity personal alert" - is one row of a table. `MAX_CHANNEL_FOR_URGENCY` maps
+  `INFORMATIONAL` to `IN_APP_ONLY`, a channel below the digest that reaches no device at all, and
+  `regulatoryDifferenceUrgency` is the enforcement point the Stage 1 constant never had. A
+  property test runs every combination of urgency, deliverability, deduplication, quiet hours and
+  local time and asserts none can make an event louder than its urgency allows; an end-to-end test
+  drives the real dispatcher and finds the owner a legitimate recipient with nothing sent to them
+  (DEC-077).
+
+  **Exit criterion 2** - "stale/corrected notifications cannot remain actionable without
+  revalidation" - is _where_ the check lives rather than that it exists. The read that renders the
+  alert performs it, so a client cannot skip it and still act, and `AlertDetailInput.revalidation`
+  is required so the compiler refuses a caller that omits it. A correction recorded after the
+  notification withdraws the report-incorrect action and replaces it with a sentence saying what
+  changed. The withdrawn half needs no notice: `alert_publication`'s policy admits `PUBLISHED`
+  only, so the row never arrives at all.
+
+  Migration `0014` extends the policy row rather than adding a table, and adds
+  `notification_revalidation` - append-only, readable only by the person who opened it, carrying
+  no column that could hold what a notification said. There is deliberately no digest queue:
+  `BLK-009` means nothing is sent, and a table nobody would drain is speculative structure a later
+  reader would mistake for a working mechanism.
+
+  87 tests across the domain (35), presentation (13), API (25) and database (14) suites.
+  Outstanding: no caller supplies a recipient's local minute, so quiet hours currently hold
+  nothing (`DEV-030`); and real delivery remains blocked (`BLK-009`), so the transport this policy
+  gates is still a recording stub.
+
 - **7.6**: complete. Every item of expected output exists - the seven-member resolution
   vocabulary, `POST /v1/alerts/:alertId/resolutions`, `GET /v1/alerts/:alertId/receipt`, the
   contracts client, and the screen the receipt opens on from the alert detail - and both exit
@@ -535,20 +569,21 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
-1. Phase 7.5: notification policy. `alertDelivery` already decides who may be told what and at
-   what detail level; what is missing is the policy layer above it - quiet hours, per-profile
-   thresholds, and the digest that `04` asks for. Real delivery stays blocked (`BLK-009`), and
-   the policy is testable without it.
-2. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
-   dispatch and its authorization already exist; nothing calls them with a real occurrence.
+1. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
+   dispatch, its authorization and now its delivery policy all exist; nothing calls them with a
+   real occurrence.
+2. The notification settings screen. The route reports quiet hours, the urgency-to-channel table
+   and the copy that explains both; no client renders any of it, so a person cannot set a window
+   they can already be governed by.
 3. Stage 9.2's release gates that do not need a threshold nobody has set (`BLK-008`).
 
 Done since this list was last written: the staff reviewer console and the API surface split
-(`DEV-016`, `DEV-017`), Phase 7.3, Phase 7.4's regulatory half, and Phase 7.6 end to end.
+(`DEV-016`, `DEV-017`), Phase 7.3, Phase 7.4's regulatory half, Phase 7.6 end to end, and Phase
+7.5 including the dispatcher that acts on it.
 
 ## What "complete" means here, and what it does not
 
-Twenty-six phases are marked `COMPLETE` above. In every case that means the logic is
+Twenty-seven phases are marked `COMPLETE` above. In every case that means the logic is
 implemented, tested, documented and committed - and in most cases the tests execute against a real
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
@@ -557,8 +592,8 @@ device, a credential, a labelled dataset, human participants, or a qualified hum
 those are marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even
 where all buildable work is finished. `BLOCKERS.md` records what each one needs.
 
-The counts above are the tables' own, recounted whenever a status changes: 26 `COMPLETE`, 9
-`IN_PROGRESS`, 7 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
+The counts above are the tables' own, recounted whenever a status changes: 27 `COMPLETE`, 9
+`IN_PROGRESS`, 6 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
 `04` defines. A prose count that drifts from the table it describes is the quiet way a status
 document stops being one - and the first version of this paragraph drifted immediately, because it
 was measured before the same commit moved 2.1. Count the rows:

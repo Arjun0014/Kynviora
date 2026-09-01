@@ -2090,3 +2090,71 @@ later change to a query, and a test asserts no user identifier appears in the re
 a reviewer or an operator with the right access can read either. It is not on this screen.
 
 **Sources.** `03` group H; `14`; DEC-026; DEC-072.
+
+---
+
+## DEC-077 - There is a channel below the digest, and INFORMATIONAL uses it
+
+**Date:** 2026-09-02
+**Phase:** 7.5
+**Status:** Accepted
+
+`04` Phase 7.5 asks for an "urgency-based delivery policy" and a "digest policy for lower
+urgency", which reads as two channels: a notification now, or a notification later. There are
+three, and the third is the one the phase's first exit criterion turns on.
+
+**`IN_APP_ONLY` means nothing reaches a device at all.** No push, no digest line, nothing until
+somebody opens Kynviora of their own accord. `MAX_CHANNEL_FOR_URGENCY` maps `INFORMATIONAL` to it.
+
+**That single row is exit criterion 1.** "A new foreign restriction does not automatically produce
+a red/high-severity personal alert." A foreign regulatory difference defaults to `INFORMATIONAL`
+(`09`, and `FOREIGN_REGULATORY_DEFAULT_URGENCY` has said so since Stage 1), so it now produces
+silence rather than a quieter alarm. Two channels would have made the criterion "a foreign
+restriction produces a _digest line_", which is a smaller version of the thing it forbids.
+
+**No setting raises it.** The criterion says "does not automatically", and a default somebody can
+flip is a default. `min_urgency_for_device` exists on the policy row and can only quieten.
+
+**The escape is a reviewed rule and nothing else.** `09` permits a stronger action where "a
+separate reviewed rule establishes" one for the user's context. `regulatoryDifferenceUrgency`
+takes that as an input and reports `raisedByReviewedRule` on the result, so a caller cannot
+mistake a reviewed decision for a computed one.
+
+**A profile with no recorded market has nothing local.** Everything is foreign until somebody says
+where care happens. The failure that avoids is telling a person their own regulator has acted when
+a different one has, which is worse than under-stating a real local change.
+
+**Sources.** `04` Phase 7.5; `09`; `02`; `07`; `24`.
+
+---
+
+## DEC-078 - Quiet hours hold, and exactly one urgency pierces them
+
+**Date:** 2026-09-02
+**Phase:** 7.5
+**Status:** Accepted
+
+Two decisions inside one feature, and both could reasonably have gone the other way.
+
+**Held, not downgraded.** A `HIGH` alert inside quiet hours stays `HIGH` and stays an interrupt;
+it arrives when the window ends. Turning it into a digest item would report a lower urgency than a
+reviewer approved, and `23` D-005 forbids evaluation adjusting what a reviewer set. The channel is
+the loudest thing Kynviora controls and it gets the same discipline.
+
+**`CRITICAL` pierces and `HIGH` does not.** A recall on a medicine somebody is taking tonight is
+the case quiet hours must not swallow. A pack expiring in three weeks is not, and a phone lighting
+up at 3am about it is exactly the alarm optimisation `02` names as an anti-feature. The two
+vocabularies - which urgencies interrupt, and which interrupt _through_ quiet hours - are
+deliberately different lengths, and that difference is the whole content of
+`URGENCIES_PIERCING_QUIET_HOURS`.
+
+**The copy says the exception out loud.** A person who believed quiet hours silenced everything
+would be relying on Kynviora for something it will not do, and the settings screen is where that
+is corrected before they rely on it rather than after.
+
+**Not knowing the time sends rather than holds.** No device reports a timezone yet (`DEV-030`), so
+`localMinuteOfDay` is `null` and nothing is held. The alternative failure - a `CRITICAL` recall
+waiting for a window that never ends because nobody could tell it the window had closed - is
+strictly worse than a notification arriving at an inconvenient hour.
+
+**Sources.** `04` Phase 7.5; `02`; `23` D-005; `DEV-030`.

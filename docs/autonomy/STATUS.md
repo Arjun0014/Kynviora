@@ -20,7 +20,7 @@ Last updated: 2026-09-02
 
 ## Verification state
 
-- **2733 tests passing**, 0 failing, across 87 files.
+- **2820 tests passing**, 0 failing, across 91 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -731,3 +731,38 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
 112. `approved_jurisdictions` must be non-empty on a `PUBLISHED` rule
      (`rule_published_has_approved_scope`, migration `0012`). A fixture that publishes a rule
      without it fails in `beforeAll`, and the suite reports `app.close()` on undefined instead.
+113. Do not add a delivery channel meaning "a quieter notification" and stop there. `04` Phase
+     7.5's first exit criterion needs a channel that reaches no device at all, and two channels
+     would make it "a foreign restriction produces a digest line" - a smaller version of the thing
+     it forbids (DEC-077).
+114. Do not give `DispatchInput` a default urgency. It decides how loudly Kynviora speaks about
+     somebody's medicine: `INFORMATIONAL` would be silent and silently wrong, anything else a push
+     nobody chose. Required, like `createServer`'s `surface` (DEC-066).
+115. Do not downgrade a held alert to a digest item. It is still the urgency a reviewer approved
+     and still an interrupt when the window ends; `23` D-005 forbids evaluation adjusting what a
+     reviewer set, and the channel gets the same discipline (DEC-078).
+116. Do not let `HIGH` pierce quiet hours. Only `CRITICAL` does. The two vocabularies are
+     different lengths on purpose, and a phone lighting up at 3am about a pack expiring in three
+     weeks is the alarm optimisation `02` refuses.
+117. Do not hold a notification when nobody knows the recipient's local time. `localMinuteOfDay`
+     is `null` everywhere today (`DEV-030`) and not holding is the safe direction - a `CRITICAL`
+     recall waiting for a window that never closes is the worse failure.
+118. Do not store a timezone offset on a profile to make quiet hours work. It is a number somebody
+     invented and it is wrong twice a year. The window is local minutes and the local minute is
+     supplied, not computed.
+119. Do not make revalidation its own route. Exit criterion 2 is "cannot remain actionable
+     **without** revalidation", and a separate route is one a client can skip. It belongs to the
+     read that renders the screen, and `AlertDetailInput.revalidation` is required so the compiler
+     refuses a caller that omits it.
+120. Do not add a "still current" banner. A screen that announced it on every ordinary open would
+     train people to skip the notice on the one occasion it says something else.
+121. Do not turn a withdrawn alert into a revalidation notice on the detail route.
+     `alert_publication`'s policy admits `PUBLISHED` only, so the row never arrives, and a caller
+     cannot tell that from having lost access - which is the answer the server is willing to give
+     (DEC-039).
+122. Do not ship a decision layer without the caller that consults it. `deliveryDecision` was
+     committed, tested at four layers, and reachable by nobody for exactly one commit. That is
+     `DEV-026`'s failure and it nearly went into the plan as complete.
+123. Do not add a digest queue table before something drains it. `BLK-009` means nothing is sent,
+     and a table nobody would drain is speculative structure a later reader mistakes for a working
+     mechanism.
