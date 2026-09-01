@@ -48,6 +48,7 @@ import {
   presentUrgency,
   type StatusPresentation,
 } from './status.js';
+import { revalidationNotice } from './notificationPolicy.js';
 
 // ---------------------------------------------------------------------------
 // Where a fact came from
@@ -446,6 +447,19 @@ export interface AlertDetailInput {
   readonly monitoredJurisdictions: readonly string[];
   /** Whether this alert already carries a reported-incorrect record. */
   readonly alreadyReportedIncorrect: boolean;
+  /**
+   * What a re-read found, compared with what a notification said (`04` Phase 7.5).
+   *
+   * Supplied on every read rather than only when opened from a notification, because the exit
+   * criterion is that a stale notification cannot remain actionable **without** revalidation -
+   * and the way to make that true is that the read which renders the screen performs it. A
+   * caller that could omit it would be a caller that could skip it.
+   */
+  readonly revalidation: {
+    readonly outcome: string;
+    readonly actionable: boolean;
+    readonly fromNotification: boolean;
+  };
 }
 
 export interface AlertDetailView {
@@ -464,6 +478,14 @@ export interface AlertDetailView {
   readonly urgency: StatusPresentation;
   readonly evidence: StatusPresentation;
   readonly matchConfidence: StatusPresentation;
+
+  /**
+   * What changed since the notification, where anything did.
+   *
+   * `null` on an ordinary open. A screen announcing "still current" every time would train people
+   * to skip the notice on the one occasion it says something else.
+   */
+  readonly revalidationNotice: { readonly heading: string; readonly body: string } | null;
 
   readonly facts: readonly AlertFact[];
   readonly reasons: MatchReasonsView;
@@ -591,6 +613,10 @@ export function alertDetailView(input: AlertDetailInput): AlertDetailView {
 
   const isLive = input.state === 'PUBLISHED';
 
+  // Only where something changed. A withdrawn alert already has its own notice above and does not
+  // need a second one saying the same thing in different words.
+  const revalidation = isLive ? revalidationNotice(input.revalidation.outcome) : null;
+
   return {
     alertPublicationId: input.alertPublicationId,
     isLive,
@@ -626,13 +652,24 @@ export function alertDetailView(input: AlertDetailInput): AlertDetailView {
     basisNote:
       'Every line above says where it came from. The ones marked as worked out by Kynviora are ' +
       'the ones it decided rather than was told.',
+    revalidationNotice: revalidation,
     // A withdrawn alert takes no feedback: there is nothing live to correct, and a report against
-    // it would be recorded as though it were.
-    actions: !isLive || input.alreadyReportedIncorrect ? [] : [REPORT_INCORRECT_ACTION],
+    // it would be recorded as though it were. A stale notification takes none either, and that
+    // second clause is `04` Phase 7.5's exit criterion 2 - the actions are gone because the read
+    // that built this screen revalidated, not because a client remembered to hide them.
+    actions:
+      !isLive || !input.revalidation.actionable || input.alreadyReportedIncorrect
+        ? []
+        : [REPORT_INCORRECT_ACTION],
     actionsUnavailableBecause: !isLive
       ? 'This alert has been withdrawn, so there is nothing to report about it.'
-      : input.alreadyReportedIncorrect
-        ? 'You have already told Kynviora this match is wrong. That is recorded on this alert.'
-        : null,
+      : !input.revalidation.actionable
+        ? // The notice above says what changed. This says what it means for the controls, because
+          // a screen whose buttons vanished without a sentence reads as one that broke.
+          'What Kynviora told you has changed since the notification, so there is nothing to ' +
+          'report from this page until you have read what changed.'
+        : input.alreadyReportedIncorrect
+          ? 'You have already told Kynviora this match is wrong. That is recorded on this alert.'
+          : null,
   };
 }

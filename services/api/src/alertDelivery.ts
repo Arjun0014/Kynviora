@@ -50,7 +50,11 @@ import {
   type ProfileId,
   type ProfileNotificationPolicy,
   type UserId,
+  ACTION_URGENCIES,
+  isValidQuietHours,
+  type QuietHours,
 } from '@kynviora/domain';
+import { QUIET_HOURS_COPY, quietHoursLabel, urgencyChannelLines } from '@kynviora/presentation';
 import type { DatabaseConnection, RequestContext } from './context.js';
 import { hasFreshStepUp } from './context.js';
 
@@ -93,7 +97,55 @@ const profileParamsSchema = z.object({ profileId: z.string().uuid() });
 
 const preferenceBodySchema = z.object({ detailLevel: detailLevelSchema });
 
-const policyBodySchema = z.object({ maxCaregiverDetail: detailLevelSchema });
+/**
+ * The owner's ceiling, plus the Phase 7.5 half: when a notification may arrive at all.
+ *
+ * Quiet hours are optional and are set or cleared together - `null` for both means none, and one
+ * bound alone is a window whose other end somebody has to invent. The database refuses the same
+ * shape (`notification_quiet_hours_paired`), so a request that got past this would still fail.
+ */
+const policyBodySchema = z
+  .object({
+    maxCaregiverDetail: detailLevelSchema,
+    quietHoursStartMinute: z.number().int().min(0).max(1439).nullable().optional(),
+    quietHoursEndMinute: z.number().int().min(0).max(1439).nullable().optional(),
+  })
+  .refine(
+    (body) =>
+      ((body.quietHoursStartMinute ?? null) === null) ===
+      ((body.quietHoursEndMinute ?? null) === null),
+    { message: 'Quiet hours are set or cleared together.' },
+  )
+  .refine(
+    (body) =>
+      body.quietHoursStartMinute === null ||
+      body.quietHoursStartMinute === undefined ||
+      body.quietHoursStartMinute !== body.quietHoursEndMinute,
+    // Equal bounds are a zero-length window or a whole-day one depending on which way they are
+    // read, and the thing being decided is whether a phone lights up at three in the morning.
+    { message: 'Quiet hours must have two different bounds.' },
+  );
+
+/**
+ * The window on a policy row, or `null`.
+ *
+ * Both bounds or neither, mirroring `notification_quiet_hours_paired`. A row that somehow held one
+ * bound reads as no window rather than as a half-open one, which is the direction that holds
+ * nothing back.
+ */
+function quietHoursFrom(
+  row: {
+    readonly quiet_hours_start_minute: number | null;
+    readonly quiet_hours_end_minute: number | null;
+  } | null,
+): QuietHours | null {
+  if (row === null) return null;
+  const start = row.quiet_hours_start_minute;
+  const end = row.quiet_hours_end_minute;
+  if (start === null || end === null) return null;
+  const window = { startMinute: start, endMinute: end };
+  return isValidQuietHours(window) ? window : null;
+}
 
 // ---------------------------------------------------------------------------
 // Row shapes
@@ -101,6 +153,8 @@ const policyBodySchema = z.object({ maxCaregiverDetail: detailLevelSchema });
 
 interface PolicyRow {
   readonly max_caregiver_detail: string;
+  readonly quiet_hours_start_minute: number | null;
+  readonly quiet_hours_end_minute: number | null;
 }
 
 interface PreferenceRow {
@@ -436,9 +490,10 @@ export function registerAlertDeliveryRoutes(
 
     const owner = await ownsProfile(ctx, params.data.profileId);
 
-    const { policy, preference } = await ctx.db(async (db) => {
+    const { policy, quietHours, preference } = await ctx.db(async (db) => {
       const policyRow = await db.query<PolicyRow>(
-        'SELECT max_caregiver_detail FROM profile_notification_policy WHERE profile_id = $1',
+        `SELECT max_caregiver_detail, quiet_hours_start_minute, quiet_hours_end_minute
+           FROM profile_notification_policy WHERE profile_id = $1`,
         [profileId],
       );
       const prefRow = await db.query<PreferenceRow>(
@@ -450,6 +505,7 @@ export function registerAlertDeliveryRoutes(
         policy:
           asDetailLevel(policyRow.rows[0]?.max_caregiver_detail ?? null) ??
           DEFAULT_NOTIFICATION_DETAIL,
+        quietHours: quietHoursFrom(policyRow.rows[0] ?? null),
         preference: asDetailLevel(prefRow.rows[0]?.detail_level ?? null),
       };
     });
@@ -471,6 +527,16 @@ export function registerAlertDeliveryRoutes(
       effectiveDetail: effective,
       cappedByOwner: !owner && effective !== chosen,
       levels: NOTIFICATION_DETAIL_LEVELS,
+      // `04` Phase 7.5. Sent to every reader of the settings, not only the owner: a caregiver who
+      // receives nothing at 3am deserves to know a window is doing that rather than a bug, which
+      // is the same reason the ceiling is readable (`16`).
+      quietHours,
+      quietHoursLabel:
+        quietHours === null ? null : quietHoursLabel(quietHours.startMinute, quietHours.endMinute),
+      quietHoursCopy: QUIET_HOURS_COPY,
+      // What each urgency does, read from the domain ceiling rather than restated here, so a
+      // screen cannot describe a policy the server does not have.
+      urgencyChannels: urgencyChannelLines(ACTION_URGENCIES),
       serverTime: ctx.now,
     });
   });
@@ -574,12 +640,21 @@ export function registerAlertDeliveryRoutes(
     await ctx.privileged('NOTIFICATION_DISPATCH', async (db) => {
       await db.query(
         `INSERT INTO profile_notification_policy
-           (profile_id, max_caregiver_detail, updated_by_user_id)
-         VALUES ($1, $2, $3)
+           (profile_id, max_caregiver_detail, quiet_hours_start_minute, quiet_hours_end_minute,
+            updated_by_user_id)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (profile_id)
-         DO UPDATE SET max_caregiver_detail = EXCLUDED.max_caregiver_detail,
-                       updated_by_user_id   = EXCLUDED.updated_by_user_id`,
-        [params.data.profileId, body.data.maxCaregiverDetail, ctx.principal.userId],
+         DO UPDATE SET max_caregiver_detail     = EXCLUDED.max_caregiver_detail,
+                       quiet_hours_start_minute = EXCLUDED.quiet_hours_start_minute,
+                       quiet_hours_end_minute   = EXCLUDED.quiet_hours_end_minute,
+                       updated_by_user_id       = EXCLUDED.updated_by_user_id`,
+        [
+          params.data.profileId,
+          body.data.maxCaregiverDetail,
+          body.data.quietHoursStartMinute ?? null,
+          body.data.quietHoursEndMinute ?? null,
+          ctx.principal.userId,
+        ],
       );
       await db.query(
         `INSERT INTO audit_event
@@ -590,7 +665,12 @@ export function registerAlertDeliveryRoutes(
           ctx.principal.userId,
           params.data.profileId,
           ctx.correlationId,
-          JSON.stringify({ max_caregiver_detail: body.data.maxCaregiverDetail }),
+          // Minutes of a day, which say nothing about anybody's health. The detail level is a
+          // closed vocabulary and safe to record for the same reason.
+          JSON.stringify({
+            max_caregiver_detail: body.data.maxCaregiverDetail,
+            quiet_hours_set: (body.data.quietHoursStartMinute ?? null) !== null,
+          }),
         ],
       );
     });
@@ -598,6 +678,13 @@ export function registerAlertDeliveryRoutes(
     return reply.status(200).send({
       profileId: params.data.profileId,
       maxCaregiverDetail: body.data.maxCaregiverDetail,
+      quietHours:
+        (body.data.quietHoursStartMinute ?? null) === null
+          ? null
+          : {
+              startMinute: body.data.quietHoursStartMinute,
+              endMinute: body.data.quietHoursEndMinute,
+            },
       serverTime: ctx.now,
     });
   });

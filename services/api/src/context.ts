@@ -122,6 +122,11 @@ export const PRIVILEGED_REASONS = [
   // insert is privileged, and the route establishes authority first by reading the alert under
   // row-level security - a caller who cannot see it cannot report on it.
   'SAFETY_RECEIPT',
+  // Recording that an alert opened from a notification was revalidated. The app role reads its
+  // own rows and holds no INSERT: a person may report that they opened something, not create
+  // rows naming whichever alert and user they like. The route establishes authority first by
+  // reading the alert under row-level security, exactly as the receipt insert does.
+  'NOTIFICATION_REVALIDATION',
 ] as const;
 export type PrivilegedReason = (typeof PRIVILEGED_REASONS)[number];
 

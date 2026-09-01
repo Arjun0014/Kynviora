@@ -29,12 +29,29 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { domainError, type DomainError } from '@kynviora/domain';
+import {
+  domainError,
+  instantFrom,
+  revalidate,
+  type DomainError,
+  type Instant,
+} from '@kynviora/domain';
 import { alertDetailView, type AlertDetailInput } from '@kynviora/presentation';
 import type { RequestContext } from './context.js';
 import { recordSafetyResolution } from './safetyReceipt.js';
 
 const paramsSchema = z.object({ alertId: z.string().uuid() });
+
+/**
+ * Opening from a notification.
+ *
+ * `notifiedAt` is what the notification claimed, reported by the client that is opening it. It is
+ * not trusted as a fact about the world - nothing is decided from it except whether a recorded
+ * correction post-dates it, and a client that lied would only ever disarm its own controls.
+ */
+const detailQuerySchema = z.object({
+  notifiedAt: z.string().datetime().optional(),
+});
 
 /**
  * What a person may say about an alert from the detail screen.
@@ -92,6 +109,10 @@ interface DetailRow {
 function isoOrNull(value: Date | string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function instantOrNull(value: string | null): Instant | null {
+  return value === null ? null : instantFrom(value);
 }
 
 /** A `date` column, rendered as the date it is rather than as an instant. */
@@ -188,6 +209,30 @@ export function registerAlertDetailRoutes(app: FastifyInstance, deps: AlertDetai
   // GET /v1/alerts/:alertId
   // -------------------------------------------------------------------------
 
+  /**
+   * When the assessment behind this alert was last corrected, if it ever was.
+   *
+   * Under row-level security, so a correction this caller may not read does not disarm their
+   * controls with an explanation they cannot see. `correction_read` scopes it to the profile.
+   */
+  async function lastCorrectedAt(
+    ctx: RequestContext,
+    assessmentId: string,
+  ): Promise<string | null> {
+    const result = await ctx.db((db) =>
+      db.query<{ corrected_at: Date | string }>(
+        `SELECT corrected_at
+           FROM assessment_correction
+          WHERE original_assessment_id = $1 OR corrected_assessment_id = $1
+          ORDER BY corrected_at DESC
+          LIMIT 1`,
+        [assessmentId],
+      ),
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : isoOrNull(row.corrected_at);
+  }
+
   app.get<{ Params: { alertId: string } }>('/v1/alerts/:alertId', async (request, reply) => {
     const ctx = await contextFor(request, reply);
     if (!ctx) return;
@@ -197,8 +242,51 @@ export function registerAlertDetailRoutes(app: FastifyInstance, deps: AlertDetai
     // which of their guesses were well-formed.
     if (!params.success) return fail(reply, noSuchAlert, ctx.correlationId);
 
+    const query = detailQuerySchema.safeParse(request.query ?? {});
+    if (!query.success) {
+      return fail(
+        reply,
+        domainError('VALIDATION_FAILED', 'Invalid query.', { reason_code: 'query_schema' }),
+        ctx.correlationId,
+      );
+    }
+
     const row = await loadDetail(ctx, params.data.alertId);
+    // A withdrawn alert and one this caller may not see are the same answer here, and that is
+    // deliberate: `alert_publication`'s policy admits PUBLISHED only, so exit criterion 2's
+    // withdrawn half is enforced by the row never arriving rather than by a notice. The client
+    // opening from a notification reads this as NO_LONGER_VISIBLE, which is all it can honestly
+    // conclude and all the server is willing to say (DEC-039).
     if (row === null) return fail(reply, noSuchAlert, ctx.correlationId);
+
+    // `04` Phase 7.5 exit criterion 2: the read that renders the screen performs the
+    // revalidation, so a client cannot skip it and still act. It runs on every open, not only on
+    // one from a notification - a caller that could omit it would be a caller that could skip it,
+    // and `AlertDetailInput` requires the field for the same reason.
+    const revalidation = revalidate({
+      notifiedAt: query.data.notifiedAt === undefined ? null : instantFrom(query.data.notifiedAt),
+      currentState: row.alert_state,
+      lastCorrectedAt: instantOrNull(await lastCorrectedAt(ctx, row.assessment_id)),
+    });
+
+    if (query.data.notifiedAt !== undefined) {
+      await ctx.privileged('NOTIFICATION_REVALIDATION', async (db) => {
+        await db.query(
+          // What the re-read concluded, and nothing about the medicine. `20` keeps subjects out
+          // of operational tables and `15` A6 keeps notification bodies out of durable ones.
+          `INSERT INTO notification_revalidation
+             (alert_publication_id, opened_by_user_id, notified_at, revalidated_at, outcome)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            row.alert_id,
+            ctx.principal.userId,
+            query.data.notifiedAt,
+            ctx.now,
+            revalidation.outcome,
+          ],
+        );
+      });
+    }
 
     const expiresOn = dateOrNull(row.item_expires_on);
     const nowDate = ctx.now.slice(0, 10);
@@ -248,6 +336,7 @@ export function registerAlertDetailRoutes(app: FastifyInstance, deps: AlertDetai
 
       monitoredJurisdictions: await monitoredJurisdictions(),
       alreadyReportedIncorrect: row.reported_incorrect,
+      revalidation,
     };
 
     // The view is built server-side and sent whole. The alternative - sending the row and letting

@@ -63,6 +63,7 @@ function detail(overrides: Partial<AlertDetailInput> = {}): AlertDetailInput {
     source: SOURCE,
     monitoredJurisdictions: ['GB', 'NI'],
     alreadyReportedIncorrect: false,
+    revalidation: { outcome: 'STILL_CURRENT', actionable: true, fromNotification: false },
     ...overrides,
   };
 }
