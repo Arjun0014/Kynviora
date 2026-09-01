@@ -4,6 +4,8 @@ import {
   resourceDescription,
   resourceFor,
   resourceRetryLabel,
+  refreshedResource,
+  retainsPreviousContent,
   staleResource,
 } from './resource.js';
 import type { ApiOutcome } from './outcome.js';
@@ -144,5 +146,95 @@ describe('the other constructors', () => {
     expect(resource.state).toBe('STALE');
     expect(resource.value).toEqual({ items: ['a'] });
     expect(SCREEN_STATE_PRESENTATION.STALE.showsContent).toBe(true);
+  });
+});
+
+describe('a refresh over content already on screen', () => {
+  const previous: List = { items: ['a'] };
+
+  it('keeps the content when the check never happened', () => {
+    // DEC-041: the request did not reach a server, so nothing was said about this caller's
+    // access. The list stays and the state says it is older than it looks.
+    for (const outcome of [
+      { kind: 'OFFLINE' } as const,
+      { kind: 'SERVER_ERROR', retryable: true, correlationId: null } as const,
+    ]) {
+      const resource = refreshedResource<List>(outcome, previous, { isEmpty });
+      expect(resource.state).toBe('STALE');
+      expect(resource.value).toEqual(previous);
+    }
+  });
+
+  it('takes the content away when the server answered that it is not theirs', () => {
+    // Spec 15 A2, one layer up from the database. A revoked caregiver's next read comes back
+    // UNAVAILABLE, and a screen that kept the previous list under a "not up to date" label would
+    // still be showing them the content their access was removed from.
+    for (const outcome of [
+      { kind: 'UNAVAILABLE' } as const,
+      { kind: 'AUTHORIZATION_LOST' } as const,
+      { kind: 'UNAUTHENTICATED' } as const,
+      { kind: 'STEP_UP_REQUIRED' } as const,
+    ]) {
+      const resource = refreshedResource<List>(outcome, previous, { isEmpty });
+      expect(resource.value).toBeNull();
+      expect(resource.state).not.toBe('STALE');
+    }
+  });
+
+  it('is exhaustive over the failure union', () => {
+    // The rule is only worth anything if a new outcome has to be classified rather than
+    // defaulting into the retaining branch.
+    const failures: Exclude<ApiOutcome<List>, { kind: 'OK' }>[] = [
+      { kind: 'OFFLINE' },
+      { kind: 'SERVER_ERROR', retryable: true, correlationId: null },
+      { kind: 'UNAVAILABLE' },
+      { kind: 'AUTHORIZATION_LOST' },
+      { kind: 'UNAUTHENTICATED' },
+      { kind: 'STEP_UP_REQUIRED' },
+      { kind: 'REFUSED', code: 'X', message: 'x', retryable: false, correlationId: null },
+    ];
+    for (const failure of failures) {
+      expect(typeof retainsPreviousContent(failure)).toBe('boolean');
+    }
+  });
+
+  it('shows a refusal message rather than hiding it under stale content', () => {
+    // The one failure the server wrote words for. Burying them under the previous list would
+    // remove the only thing telling the user what to do.
+    const resource = refreshedResource<List>(
+      {
+        kind: 'REFUSED',
+        code: 'X',
+        message: 'Try a different date.',
+        retryable: true,
+        correlationId: 'c-2',
+      },
+      previous,
+      { isEmpty },
+    );
+    expect(resource.state).toBe('RECOVERABLE_ERROR');
+    expect(resource.message).toBe('Try a different date.');
+    expect(resource.value).toBeNull();
+  });
+
+  it('does not invent content on a first load', () => {
+    const resource = refreshedResource<List>({ kind: 'OFFLINE' }, null, { isEmpty });
+    expect(resource.state).toBe('OFFLINE');
+    expect(resource.value).toBeNull();
+  });
+
+  it('replaces the content on success', () => {
+    const resource = refreshedResource<List>(ok(['b']), previous, { isEmpty });
+    expect(resource.state).toBe('READY');
+    expect(resource.value).toEqual({ items: ['b'] });
+  });
+
+  it('reports an empty success as empty, not as the previous list', () => {
+    // A revoked caregiver's shelf comes back OK and empty, because row-level security filters
+    // the rows rather than refusing the request. Keeping the old list here would be the same
+    // failure by a quieter route.
+    const resource = refreshedResource<List>(ok([]), previous, { isEmpty });
+    expect(resource.state).toBe('EMPTY');
+    expect(resource.value).toBeNull();
   });
 });

@@ -123,3 +123,59 @@ export function resourceDescription(resource: Resource<unknown>): string {
 export function resourceRetryLabel(resource: Resource<unknown>): string | null {
   return presentScreenState(resource.state).retryLabel;
 }
+
+// ---------------------------------------------------------------------------
+// Refreshing over content that is already on screen
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a failed refresh may leave the previous content on screen.
+ *
+ * The rule is not "did the request fail" but **did the server say something about this caller's
+ * access**. `OFFLINE` and `SERVER_ERROR` say nothing: the authorization check did not produce an
+ * answer, so what is on screen is simply older than it looks and {@link staleResource} labels it
+ * (DEC-041).
+ *
+ * Every other failure is an answer, and the answer is no. `15` A2 requires a revoked caregiver to
+ * lose access on their very next authenticated access, and the server implements that exactly -
+ * `has_capability` re-evaluates the grant per request. A client that kept the medicine list on
+ * screen under a "not up to date" label would reintroduce the same threat one layer up: the
+ * person whose access was removed would still be reading the content, and the label would not
+ * take it away from them. `UNAVAILABLE` is the shape revocation actually arrives in, because
+ * `PERMISSION_DENIED` is answered with 404 so the API is not an existence oracle (DEC-039).
+ *
+ * `REFUSED` retains nothing for a different reason: it is the one failure carrying a message the
+ * server wrote for this user to act on, and burying it under stale content hides the only thing
+ * that would tell them what to do.
+ */
+export function retainsPreviousContent(outcome: Exclude<ApiOutcome<unknown>, { kind: 'OK' }>) {
+  switch (outcome.kind) {
+    case 'OFFLINE':
+    case 'SERVER_ERROR':
+      return true;
+    case 'UNAUTHENTICATED':
+    case 'AUTHORIZATION_LOST':
+    case 'STEP_UP_REQUIRED':
+    case 'UNAVAILABLE':
+    case 'REFUSED':
+      return false;
+  }
+}
+
+/**
+ * What a screen shows after a refresh over content it already had.
+ *
+ * The whole decision, in one place, so a screen cannot half-implement it. A hook that inlined
+ * this branch is how the retention rule above came to apply to every failure at once.
+ *
+ * @param previous The content currently on screen, or `null` if this is the first load.
+ */
+export function refreshedResource<T>(
+  outcome: ApiOutcome<T>,
+  previous: T | null,
+  options: ResourceOptions<T> = {},
+): Resource<T> {
+  const next = resourceFor(outcome, options);
+  if (outcome.kind === 'OK' || previous === null) return next;
+  return retainsPreviousContent(outcome) ? staleResource(previous) : next;
+}

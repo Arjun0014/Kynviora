@@ -17,13 +17,17 @@
  * alternatives are both wrong: discarding a medicine list because a refresh timed out takes away
  * something the user was reading, and leaving it up unlabelled presents old information as
  * current, which `18` forbids.
+ *
+ * AND IT DOES NOT KEEP CONTENT THE SERVER HAS JUST WITHDRAWN
+ * That only applies to a failure saying nothing about this caller's access. `refreshedResource`
+ * makes the distinction and this hook makes no decision of its own: a revoked caregiver's next
+ * read must take the content off the screen, not label it (`15` A2).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   loadingResource,
-  resourceFor,
-  staleResource,
+  refreshedResource,
   type ApiOutcome,
   type Resource,
   type ResourceOptions,
@@ -87,22 +91,11 @@ export function useResource<T>(
         if (!live) return;
         setRefreshing(false);
 
-        const next = resourceFor(outcome, optionsRef.current);
-
-        if (next.value !== null) {
-          lastValueRef.current = next.value;
-          setResource(next);
-          return;
-        }
-
-        // The refresh failed and there is content on screen. Keep it and say it is older than it
-        // looks, rather than taking it away or leaving it looking current.
-        const previous = lastValueRef.current;
-        if (outcome.kind !== 'OK' && previous !== null) {
-          setResource(staleResource(previous));
-          return;
-        }
-
+        // The whole decision lives in the contracts package, where it is tested: whether a
+        // failure may leave the previous content up is a security question on this screen, not a
+        // rendering preference (`15` A2, DEC-041).
+        const next = refreshedResource(outcome, lastValueRef.current, optionsRef.current);
+        lastValueRef.current = next.value;
         setResource(next);
       },
       () => {
