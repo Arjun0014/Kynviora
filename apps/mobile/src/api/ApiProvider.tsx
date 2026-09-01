@@ -22,6 +22,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import {
   ANONYMOUS,
   createClient,
+  developmentSession,
   resolveApiConfig,
   resolveSession,
   type ClientSession,
@@ -34,6 +35,22 @@ export interface ApiContextValue {
   readonly session: ClientSession;
   /** Why there is no client, in words a developer can act on. Never shown to a user verbatim. */
   readonly configurationError: string | null;
+  /**
+   * A client whose session asserts step-up, or `null` where none can be produced.
+   *
+   * `14` requires re-authentication for exports, caregiver administration and account deletion,
+   * and the server checks freshness independently - `hasFreshStepUp` compares the assertion
+   * against a fifteen-minute window on the request's own clock.
+   *
+   * **This is a development stand-in, and it proves nothing.** Phase 1.1 has not chosen an auth
+   * provider, so there is no re-authentication to perform; the development authenticator turns a
+   * header into an assertion and a header is a client claim (DEC-038, `DEV-019`). What is real
+   * here is the *shape*: a screen asks the user to confirm, an elevated client makes exactly the
+   * one request that needs it, and the ordinary client is used for everything else - so the
+   * privileged session never outlives the action. When Phase 1.1 lands, this function performs
+   * the real prompt and nothing else changes.
+   */
+  elevate(): KynvioraClient | null;
 }
 
 const ApiContext = createContext<ApiContextValue | null>(null);
@@ -61,16 +78,25 @@ export function resolveApiContext(
 
   try {
     const config = resolveApiConfig({ env });
+    const client = createClient({ config, session: session.session });
+    const current = session.session;
     return {
-      client: createClient({ config, session: session.session }),
-      session: session.session,
+      client,
+      session: current,
       configurationError: session.error,
+      elevate: () =>
+        current.kind === 'DEVELOPMENT'
+          ? client.withSession(developmentSession(current.userId, { stepUp: true }))
+          : null,
     };
   } catch (error) {
     return {
       client: null,
       session: ANONYMOUS,
       configurationError: error instanceof Error ? error.message : String(error),
+      // Nothing to elevate. An anonymous session asserting step-up would be asserting that
+      // somebody confirmed being nobody.
+      elevate: () => null,
     };
   }
 }

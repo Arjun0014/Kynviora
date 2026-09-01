@@ -1084,3 +1084,75 @@ the payload builder, and 3 end to end against a real server process.
 
 Four `DEV-007` write flows remain: the caregiver invitation, the step-up prompt, the Visit Pack
 selection, and the reconciliation difference resolution.
+
+### The caregiver invitation - the second write flow
+
+The `DEV-007` flow with a real security shape. Handing out a bearer credential is the most
+consequential thing this app does, and three separate rules meet on one screen: step-up (`14`),
+the delegation limit (DEC-020), and a token emitted exactly once and unrecoverable afterwards
+(DEC-018).
+
+**Three steps, in that order.** Choose, confirm, then the link. Choosing and confirming are
+separate because `18` requires a screen to say what it is about to do before doing it, and the
+review step renders `summarizeAccess` in full - including `notIncluded`, because someone reading
+only what was granted will not notice what was withheld. The link comes last because it does not
+exist until the request succeeds.
+
+**What happens to the token.** Nothing. It is held in component state, rendered by a selectable
+`Text`, and dropped when the screen closes. Not stored, not logged, not put in a URL, not passed to
+a share sheet or a clipboard helper, and not touched by any code between the response and the
+screen - which is the shortest way to keep a live credential out of a log. `buildUrl` refuses a
+query parameter whose name looks like a credential, so trap 11 is a runtime failure rather than a
+review someone has to remember, and a test asserts the invitation module's own source contains no
+mention of a token at all.
+
+**The screen offers only what can be delegated.** Not everything-with-some-disabled: a greyed-out
+"manage caregivers" box tells a caregiver the capability exists and that they are not trusted with
+it, on a screen about their family (DEC-045). The server decides again on the request; this only
+keeps the screen from offering a control whose sole outcome is `CAPABILITY_ESCALATION`.
+
+**Step-up is scoped to one request.** `elevate()` builds an elevated client at the moment of
+sending; every other request on the screen uses the ordinary one, so the privileged session never
+outlives the action. It asserts rather than proves, because Phase 1.1 has not chosen a provider -
+`DEV-025` records that the shape is what is permanent here, and that the server checks freshness
+independently either way.
+
+**A gap that would have produced a second credential.** After sending an invitation the Care screen
+showed nothing new, because `GET /v1/caregiver-grants` returns grants and a grant does not exist
+until acceptance. An owner seeing no change reasonably sends a second invitation - which mints a
+second live credential for one intent, exactly what the idempotency key on the create route exists
+to prevent, defeated by the screen rather than by the protocol. `GET /v1/caregiver-invitations`
+now returns outstanding invitations and the screen renders both lists as one (DEC-046).
+
+The route needed no new authorization: `caregiver_invitation_select` already admits the owner, an
+administering caregiver and the account that accepted, and deliberately not the intended recipient
+before acceptance. The app role's column-level `GRANT` omits `token_hash` entirely, so the query
+could not have selected it even if it had tried. The response says `boundToAddress` rather than the
+address itself - `14` treats an address as personal data and this list is read on a screen someone
+else may be looking at.
+
+**A wrong inference, removed.** The invite screen gated on ownership by reading `isManaged`, which
+is a different fact: it describes the person the profile is for, not who administers it, and an
+owner may perfectly well own a managed profile. `GET /v1/profiles` now says `isOwner` outright
+(DEC-047). It discloses nothing - a caller who owns a profile already knows - and it makes the
+wrong inference unavailable rather than merely discouraged.
+
+### Things worth recording
+
+- A caregiver is currently offered nothing to delegate, because the grants listing does not
+  identify which grant is the caller's own and reading identity out of a development session to
+  make an authorization decision is the shape of mistake `13` exists to prevent. The rule is
+  implemented and tested; only the input is missing (`DEV-026`). The failure is in the safe
+  direction and it is visible.
+- The Care screen makes two requests and combines them into one resource. When the invitations
+  call fails and the grants call succeeds the result is `PARTIAL`, which says the list is
+  incomplete rather than showing a shorter one as though it were the whole answer.
+
+### State
+
+2087 tests passing across 62 files, up from 2062 across 61. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 25 new tests: 15 for the invitation draft, 5 for the
+merged access list, and 5 end to end against a real server process.
+
+Two `DEV-007` write flows remain: the Visit Pack selection and the reconciliation difference
+resolution. Revocation still has no screen.

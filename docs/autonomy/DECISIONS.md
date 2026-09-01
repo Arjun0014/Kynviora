@@ -1241,3 +1241,90 @@ development seed now ages one item past the review interval, because otherwise e
 was a `BATCH_MISSING` and a developer opening Today would see only work the app cannot do.
 
 **Sources.** `04` Phase 8.3 and Phase 3.2; `07`; `08`; DEC-027; trap 16.
+
+---
+
+## DEC-045 - A capability the inviter cannot delegate is absent, not disabled
+
+**Context.** The invite screen has to choose what to offer. `canDelegateCapabilities` is the
+authority and lives in the domain: a profile owner may grant anything; a caregiver may grant only
+what they hold, and never `MANAGE_CAREGIVERS` (DEC-020).
+
+**Options.** (a) Offer everything and let the server refuse with `CAPABILITY_ESCALATION`. (b) Offer
+everything, disabling what cannot be granted. (c) Offer only what can be granted.
+
+**Decision.** (c). `selectableCapabilities` mirrors the delegation rule and returns a list;
+`buildInvitation` refuses anything outside it before a request is built.
+
+**Rationale.** This is a usability decision rather than a security one - the server refuses either
+way - and the difference is what the screen teaches. (a) sends a request whose refusal tells a
+caregiver something about the permission model by being refused. (b) is worse: a greyed-out
+"manage caregivers" box states that the capability exists and that this person is not trusted with
+it, on a screen about someone's family.
+
+The mirroring is deliberate duplication and is documented as such in the module: the domain
+decides, this only keeps the screen from offering a control whose sole outcome is a refusal.
+
+**Consequences.** A caregiver whose own capabilities the client does not yet know is offered
+nothing rather than something that might be refused - the safe direction, and visible rather than
+silent. `GET /v1/caregiver-grants` does not return the caller's own capabilities, so that is where
+it stays until it does.
+
+**Sources.** `04` Phase 8.1; `16`; `18`; DEC-019/020.
+
+---
+
+## DEC-046 - The Care screen lists outstanding invitations, not only grants
+
+**Context.** `GET /v1/caregiver-grants` returns `caregiver_grant` rows, and a grant does not exist
+until someone accepts. So after sending an invitation the Care screen showed exactly what it had
+shown before: nothing.
+
+**Options.** (a) Leave it, and have the invite screen say the invitation was sent. (b) Return
+pending invitations from the grants route. (c) Add `GET /v1/caregiver-invitations` and render both
+lists as one.
+
+**Decision.** (c).
+
+**Rationale.** (a) is not a cosmetic gap. An owner who sees no change reasonably sends a second
+invitation, which mints a second live credential for one intent - precisely what the idempotency
+key on the create route exists to prevent, defeated by the screen rather than by the protocol.
+(b) conflates two records with different lifecycles and different visibility rules.
+
+The route needed no new authorization: `caregiver_invitation_select` already admits the profile
+owner, an administering caregiver and the account that accepted, and deliberately not the intended
+recipient before acceptance - they hold the token, and matching an invitation to an address they
+have not proven they control would leak that the profile exists. The app role's column-level
+`GRANT` omits `token_hash` entirely, so "the app role cannot read the secret" stays a database fact
+rather than a property of how this query happens to be written (DEC-021).
+
+**What the response deliberately omits.** The invited address. It returns `boundToAddress: true`
+instead - whether the link is bound to one person or open to anyone holding it, which is the fact
+an owner needs. `14` treats an address as personal data and this list is read on a screen someone
+else may be looking at.
+
+**Consequences.** The Care screen makes two requests and combines them. If the invitations call
+fails and the grants call succeeds the resource is `PARTIAL`, which says the list is incomplete
+rather than showing a shorter one as though it were the whole answer.
+
+**Sources.** `04` Phase 8.1; `13`; `14`; `16`; DEC-018; DEC-021.
+
+---
+
+## DEC-047 - `GET /v1/profiles` says whether the caller owns each profile
+
+**Context.** The invite screen gates on ownership, and the profiles response carried only
+`isManaged`. It was read as ownership, which is wrong: `isManaged` describes the person the profile
+is for - somebody being looked after - and says nothing about who administers it. An owner may
+perfectly well own a managed profile.
+
+**Decision.** The response carries `isOwner`, computed as `owner_user_id = current principal`.
+
+**Rationale.** It discloses nothing: a caller who owns a profile already knows they own it, and the
+field says nothing about anyone else. The alternative was for every screen that gates on ownership
+to infer it - from `isManaged`, which is a different fact, or from a second request to a route that
+happens to return a `relationship`. Both are ways of getting the right answer by accident.
+
+**Consequences.** One field, and the wrong inference is unavailable rather than merely discouraged.
+
+**Sources.** `13`; `16`; `04` Phase 8.1.

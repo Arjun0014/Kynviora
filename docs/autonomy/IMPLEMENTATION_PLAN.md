@@ -415,10 +415,13 @@ completion writes to the authoritative record (DEC-043, DEC-044). `BATCH_MISSING
 `FORMULA_NEEDS_CONFIRMATION` wait on guided capture, because both write a `uuid` naming a catalog
 record only capture can create (`DEV-024`).
 
-Still to build, each because it needs a screen rather than a button (`DEV-022`): the invitation
-flow with its once-shown token, the step-up prompt, the Visit Pack selection and review flow, and
-the reconciliation difference resolution. Every one exists on the client and is exercised by
-tests.
+The **caregiver invitation** is built: capability selection limited to what the inviter may
+delegate (DEC-045), a step-up-scoped request (`DEV-025`), a token emitted once and held nowhere,
+and outstanding invitations now visible on the Care screen (DEC-046).
+
+Still to build, each because it needs a screen rather than a button (`DEV-022`): the Visit Pack
+selection and review flow, the reconciliation difference resolution, and revocation. Every one
+exists on the client and is exercised by tests.
 
 `DEV-021` records that screen behaviour is tested in the packages rather than in the app, and what
 that does and does not cover.
@@ -427,9 +430,10 @@ that does and does not cover.
 
 ## Immediate next work
 
-1. Finish `DEV-007`: the four remaining write flows above, starting with the caregiver invitation
-   screen - it is the one with a real security shape to get right, because the token is shown once
-   and must never reach a URL, a log or an exception (DEC-018, trap 11).
+1. Finish `DEV-007`: the Visit Pack selection and review flow, the reconciliation difference
+   resolution, and revocation. The Visit Pack is next - it is the one whose exit criterion is a
+   property of the request rather than of the screen, because generation quotes the digest of
+   exactly what the user reviewed and is refused if it has moved (DEC-023).
 2. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
    cache-hit rate, assessment recomputation throughput. The review-queue age becomes measurable
    once inbox derivation moves behind a scheduler (`DEV-013`).

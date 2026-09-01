@@ -6,7 +6,9 @@ import {
   asChosenDetailLevel,
   asNotificationDetailLevel,
   asReviewTaskKind,
+  accessList,
   caregiverAccessRows,
+  invitationAccessRows,
   reviewInboxView,
   asActionUrgency,
   asEvidenceLevel,
@@ -274,5 +276,64 @@ describe('a missing notification preference is never permission', () => {
     expect(asChosenDetailLevel(null)).toBeNull();
     expect(asChosenDetailLevel('GENERIC')).toBe('GENERIC');
     expect(asChosenDetailLevel('SHOUT_IT')).toBeNull();
+  });
+});
+
+describe('the access list shows invitations as well as grants', () => {
+  const invitation = {
+    id: 'inv-1',
+    profileId: 'p1',
+    invitedByUserId: 'u1',
+    capabilities: ['VIEW_SHELF', 'FLY_A_PLANE'],
+    status: 'PENDING',
+    createdAt: '2026-09-01T00:00:00.000Z',
+    expiresAt: '2026-09-08T00:00:00.000Z',
+    grantExpiresAt: null,
+    boundToAddress: true,
+  };
+
+  const grant = {
+    id: 'g1',
+    profileId: 'p1',
+    granteeUserId: 'u2',
+    grantedByUserId: 'u1',
+    capabilities: ['VIEW_SAFETY'],
+    status: 'ACTIVE',
+    invitedAt: '2026-08-01T00:00:00.000Z',
+    acceptedAt: '2026-08-02T00:00:00.000Z',
+    expiresAt: null,
+    revokedAt: null,
+  };
+
+  it('reads a pending invitation as invited, never as access', () => {
+    // The presentation says "they have been invited and have not accepted yet. They have no
+    // access." That is the distinction that matters when the question is who can read this
+    // profile, and a pending invitation shown as ACTIVE would answer it wrongly.
+    const rows = invitationAccessRows([invitation]);
+    expect(rows[0]?.state).toBe('INVITED');
+  });
+
+  it('never names the invited address', () => {
+    // `14` treats an address as personal data and this list may be read over someone's shoulder.
+    // Whether the link is bound is the fact the owner actually needs.
+    const bound = invitationAccessRows([invitation])[0];
+    const open = invitationAccessRows([{ ...invitation, boundToAddress: false }])[0];
+    expect(bound?.displayName).not.toMatch(/@/);
+    expect(bound?.displayName).not.toBe(open?.displayName);
+  });
+
+  it('drops a capability it cannot describe, as it does for a grant', () => {
+    expect(invitationAccessRows([invitation])[0]?.capabilities).toEqual(['VIEW_SHELF']);
+  });
+
+  it('puts outstanding invitations before accepted grants', () => {
+    // Not a ranking - neither carries urgency. It is what an owner is looking for immediately
+    // after sending one.
+    const rows = accessList([grant], [invitation]);
+    expect(rows.map((row) => row.state)).toEqual(['INVITED', 'ACTIVE']);
+  });
+
+  it('is just the grants when there are no invitations', () => {
+    expect(accessList([grant])).toEqual(caregiverAccessRows([grant]));
   });
 });

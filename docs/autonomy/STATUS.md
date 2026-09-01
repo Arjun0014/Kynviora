@@ -102,16 +102,16 @@ documented configuration requirements.
 the shared client, and the only writes are the notification preference and a dose event. Five
 flows remain, and each needs a screen rather than a button (`DEV-022`):
 
-1. The **caregiver invitation** screen. The token is shown once and is unrecoverable afterwards
-   (DEC-018), and it must never reach a URL, a log or an exception (trap 11).
-2. The **step-up prompt**, which revocation and export both need (`14`).
-3. The **Visit Pack** selection and review flow, which quotes a digest of exactly what the user
-   reviewed (DEC-023).
-4. The **reconciliation** difference resolution, where the side is stated by a person (DEC-030).
+1. The **Visit Pack** selection and review flow, which quotes a digest of exactly what the user
+   reviewed and is refused with `EXPORT_CONTENT_CHANGED` if it has moved (DEC-023).
+2. The **reconciliation** difference resolution, where the side is stated by a person (DEC-030).
+3. **Revocation**, which needs the step-up prompt the invitation flow already has and a
+   confirmation that never applies the change locally (`12`).
 
-The **review task editor** is done: five of the seven task kinds complete from the inbox and write
-to the record. `BATCH_MISSING` and `FORMULA_NEEDS_CONFIRMATION` wait on guided capture, because
-both write a `uuid` naming a catalog record that only capture can create (`DEV-024`).
+Done: the **review task editor** (five of seven kinds; `BATCH_MISSING` and
+`FORMULA_NEEDS_CONFIRMATION` wait on guided capture, `DEV-024`) and the **caregiver invitation**
+(capability selection limited to what the inviter may delegate, a step-up-scoped request, and a
+token emitted once and never held anywhere).
 
 Alternatively **Phase 4.3** (dose events and adherence history) or **Phase 7.1** (assessment states
 and inbox), both fully implementable with no external dependency.
@@ -239,6 +239,15 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
   strings off a pack. They are `REFERENCE` inputs the editor does not render, and their task kinds
   report `completableHere: false` and offer **no** fields - not even the paired `*_verification`,
   which would close "add the batch number" without one.
+
+- **DEC-045** - the invite screen offers only capabilities the inviter may delegate. Absent, not
+  disabled: a greyed-out control states that a capability exists and that this person is not
+  trusted with it.
+- **DEC-046** - the Care screen lists outstanding invitations as well as grants. Without it an
+  owner sees no change after sending and reasonably sends a second, minting a second live
+  credential for one intent.
+- **DEC-047** - `GET /v1/profiles` carries `isOwner`. `isManaged` is about the person the profile
+  is for and is **not** ownership; reading one as the other is a real mistake this field removes.
 
 ## Traps to avoid on resume
 
@@ -377,3 +386,13 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 46. Do not "simplify" the seed by dropping the two-hundred-day-old item. Without it every derived
     review task is a `BATCH_MISSING`, which needs guided capture - a developer opening Today would
     see only work the app cannot do and would reasonably think the screen was broken.
+47. The invitation token is returned once and is never stored, logged, put in a URL, or passed to
+    a share sheet or clipboard helper. A test asserts `invitation.ts` does not contain the word.
+    Do not add a "copy again" affordance: the server holds only a hash and has nothing to reissue.
+48. Do not keep an elevated client. `elevate()` is called at the moment of a step-up-gated request
+    and discarded; a client that stayed elevated makes `14`'s requirement decorative (DEV-025).
+49. Do not read `isManaged` as ownership. It describes the person the profile is for. Use
+    `isOwner` (DEC-047).
+50. Do not return the invited email address from `GET /v1/caregiver-invitations`. It returns
+    `boundToAddress` instead - whether the link is bound is the fact the owner needs, and the
+    address is personal data on a screen someone else may be reading (`14`).

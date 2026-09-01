@@ -45,7 +45,13 @@ import {
   presentVerification,
   type StatusPresentation,
 } from '@kynviora/presentation';
-import type { AlertSummary, CaregiverGrant, ReviewTask, ShelfItem } from './client.js';
+import type {
+  AlertSummary,
+  CaregiverGrant,
+  PendingInvitation,
+  ReviewTask,
+  ShelfItem,
+} from './client.js';
 import type { CaregiverAccessState } from '@kynviora/presentation';
 
 // ---------------------------------------------------------------------------
@@ -361,4 +367,41 @@ export function asChosenDetailLevel(raw: string | null): NotificationDetailLevel
   return raw !== null && (NOTIFICATION_DETAIL_LEVELS as readonly string[]).includes(raw)
     ? (raw as NotificationDetailLevel)
     : null;
+}
+
+/**
+ * Rows for an invitation nobody has accepted yet.
+ *
+ * `INVITED` rather than `ACTIVE`, which is the distinction that matters when the question is who
+ * can read this profile: the presentation says "they have been invited and have not accepted yet.
+ * They have no access."
+ *
+ * The person is identified as an address-bound invitation or an open link, never by the address.
+ * `14` treats an address as personal data and this list may be read over somebody's shoulder;
+ * whether the link is open to anyone holding it is the fact the owner actually needs.
+ */
+export function invitationAccessRows(
+  invitations: readonly PendingInvitation[],
+): readonly CaregiverAccessRowView[] {
+  return invitations.map((invitation) => ({
+    id: invitation.id,
+    state: 'INVITED' as const,
+    capabilities: invitation.capabilities.filter(isCaregiverCapability),
+    displayName: invitation.boundToAddress ? 'Invited by email' : 'Invitation link',
+    expiresAt: invitation.grantExpiresAt,
+  }));
+}
+
+/**
+ * The access list a person reads: accepted grants and outstanding invitations together.
+ *
+ * Invitations first, because they are the thing that just changed and the thing an owner is
+ * looking for after sending one. Not a ranking - there is no urgency on either.
+ */
+export function accessList(
+  grants: readonly CaregiverGrant[],
+  invitations: readonly PendingInvitation[] = [],
+  displayNames: Readonly<Record<string, string>> = {},
+): readonly CaregiverAccessRowView[] {
+  return [...invitationAccessRows(invitations), ...caregiverAccessRows(grants, displayNames)];
 }

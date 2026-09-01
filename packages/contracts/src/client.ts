@@ -34,7 +34,16 @@ export interface ProfileSummary {
   readonly id: string;
   readonly displayName: string;
   readonly ageBand: string | null;
+  /** Whether the profile is for someone the account holder looks after. Not about authority. */
   readonly isManaged: boolean;
+  /**
+   * Whether this caller owns the profile.
+   *
+   * The signal screens gate on. Deliberately distinct from `isManaged`, which is about the person
+   * the profile is for: an owner may perfectly well own a managed profile, and reading one as the
+   * other produced a caregiver-invite screen that offered the wrong capabilities.
+   */
+  readonly isOwner: boolean;
 }
 
 export interface ProfilesResponse {
@@ -147,6 +156,24 @@ export interface CaregiverGrantsResponse {
   readonly serverTime: string;
 }
 
+export interface PendingInvitation {
+  readonly id: string;
+  readonly profileId: string;
+  readonly invitedByUserId: string;
+  readonly capabilities: readonly string[];
+  readonly status: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly grantExpiresAt: string | null;
+  /** Whether the link is bound to one address. Never the address itself (`14`). */
+  readonly boundToAddress: boolean;
+}
+
+export interface InvitationsResponse {
+  readonly invitations: readonly PendingInvitation[];
+  readonly serverTime: string;
+}
+
 export interface VisitPackCandidate {
   readonly section: string;
   readonly entityKind: string;
@@ -246,6 +273,36 @@ export interface DifferenceResolution {
   readonly note?: string | null;
 }
 
+export interface InvitationRequest {
+  readonly profileId: string;
+  readonly capabilities: readonly string[];
+  /**
+   * Bind the invitation to one verified address, or omit for a link anyone holding it may redeem.
+   *
+   * In the body only. `14` treats an address as personal data and `13` forbids sensitive data in a
+   * query string; `buildUrl` refuses one anyway, but the shape of this request is what keeps it
+   * out in the first place.
+   */
+  readonly invitedEmail?: string;
+  readonly invitationTtlDays?: number;
+  readonly grantExpiresAt?: string;
+}
+
+export interface InvitationCreated {
+  readonly invitationId: string;
+  /**
+   * The live credential, emitted exactly once.
+   *
+   * Unrecoverable afterwards - the server stores only a SHA-256 hash (DEC-018), so an idempotent
+   * retry cannot re-issue it and says so. It must never reach a URL, a log line or an exception
+   * message (trap 11). Nothing in this client passes it anywhere.
+   */
+  readonly token: string;
+  readonly expiresAt: string;
+  readonly capabilities: readonly string[];
+  readonly serverTime: string;
+}
+
 export interface VisitPackGeneration {
   readonly profileId: string;
   readonly selectedEntityIds: readonly string[];
@@ -289,6 +346,31 @@ export interface KynvioraClient {
   listCaregiverGrants(query?: {
     readonly profileId?: string;
   }): Promise<ApiOutcome<CaregiverGrantsResponse>>;
+
+  /**
+   * Create an invitation.
+   *
+   * Requires step-up (`14`), which is why the session carries it rather than this method - a
+   * caller that could pass "yes I am sure" here would be asserting the thing step-up exists to
+   * prove. The idempotency key is a parameter for the same reason it is on a dose event: a key
+   * regenerated on retry would mint a second live token for one intent, which is two credentials
+   * where the owner believes there is one.
+   */
+  createInvitation(
+    body: InvitationRequest,
+    idempotencyKey: string,
+  ): Promise<ApiOutcome<InvitationCreated>>;
+
+  /**
+   * Invitations nobody has accepted yet.
+   *
+   * Separate from `listCaregiverGrants` because they are separate records: a grant does not exist
+   * until acceptance. The Care screen shows both, so an owner who has just sent an invitation can
+   * see it and does not send a second.
+   */
+  listInvitations(query?: {
+    readonly profileId?: string;
+  }): Promise<ApiOutcome<InvitationsResponse>>;
 
   profileAlerts(profileId: string): Promise<ApiOutcome<ProfileAlertsResponse>>;
   notificationSettings(profileId: string): Promise<ApiOutcome<NotificationSettingsResponse>>;
@@ -383,6 +465,12 @@ export function createClient(options: ClientOptions): KynvioraClient {
 
     listCaregiverGrants: (query) =>
       get<CaregiverGrantsResponse>('/v1/caregiver-grants', { profileId: query?.profileId }),
+
+    createInvitation: (body, idempotencyKey) =>
+      send<InvitationCreated>('POST', '/v1/caregiver-invitations', body, idempotencyKey),
+
+    listInvitations: (query) =>
+      get<InvitationsResponse>('/v1/caregiver-invitations', { profileId: query?.profileId }),
 
     profileAlerts: (profileId) =>
       get<ProfileAlertsResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/alerts`),

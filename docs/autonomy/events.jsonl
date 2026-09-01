@@ -139,3 +139,11 @@
 {"ts": "2026-09-01T14:05:00Z", "type": "code_changed", "detail": "seed ages one item past ITEM_REVIEW_INTERVAL_DAYS so at least one derived task is completable by hand; seed now takes the clock"}
 {"ts": "2026-09-01T14:06:00Z", "type": "deviation_recorded", "detail": "DEV-023 the editor offers only RESOLVED; DEV-024 two task kinds await guided capture"}
 {"ts": "2026-09-01T14:07:00Z", "type": "milestone", "detail": "completing a review task writes to the record end to end; 2062 tests across 61 files, verify exit 0"}
+{"ts": "2026-09-01T14:12:00Z", "type": "work_started", "detail": "DEV-007 write flow 2: the caregiver invitation, with step-up and a token shown once"}
+{"ts": "2026-09-01T14:14:00Z", "type": "code_added", "detail": "invitation draft model mirroring the delegation rule; createInvitation on the client; elevate() on the API provider"}
+{"ts": "2026-09-01T14:16:00Z", "type": "bug_found", "detail": "the invite screen gated on isManaged, which describes the person the profile is for rather than who administers it"}
+{"ts": "2026-09-01T14:18:00Z", "type": "bug_found", "detail": "after sending, the Care screen showed nothing: a grant does not exist until acceptance, so an owner would send a second invitation and mint a second live credential"}
+{"ts": "2026-09-01T14:19:00Z", "type": "code_added", "detail": "GET /v1/caregiver-invitations returning outstanding invitations, with boundToAddress rather than the address"}
+{"ts": "2026-09-01T14:20:00Z", "type": "decision_recorded", "detail": "DEC-045 non-delegable capabilities are absent not disabled; DEC-046 the Care screen lists invitations too; DEC-047 GET /v1/profiles says isOwner"}
+{"ts": "2026-09-01T14:21:00Z", "type": "deviation_recorded", "detail": "DEV-025 step-up is a confirmation with no proof behind it; DEV-026 a caregiver is offered no capabilities to delegate"}
+{"ts": "2026-09-01T14:22:00Z", "type": "milestone", "detail": "caregiver invitation end to end, step-up gated, token emitted once; 2087 tests across 62 files, verify exit 0"}

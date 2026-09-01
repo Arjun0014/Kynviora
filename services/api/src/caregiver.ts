@@ -653,6 +653,86 @@ export function registerCaregiverRoutes(app: FastifyInstance, deps: CaregiverRou
   // POST /v1/caregiver-invitations/decline
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // GET /v1/caregiver-invitations
+  // -------------------------------------------------------------------------
+  // Invitations nobody has accepted yet.
+  //
+  // Without this the Care screen showed nothing after an invitation was sent - a grant row does
+  // not exist until acceptance - so an owner would reasonably send a second one. That is not a
+  // cosmetic gap: it mints a second live credential for one intent, which is exactly what the
+  // idempotency key on the create route exists to prevent.
+  //
+  // `token_hash` is not selected and could not be: the app role holds a column-level GRANT that
+  // omits it, so "the app role cannot read the secret" stays a database fact rather than a
+  // property of how this query happens to be written (DEC-021).
+  //
+  // Visibility is `caregiver_invitation_select`: the profile owner, an administering caregiver,
+  // and the account that accepted it. Deliberately not the intended recipient before acceptance -
+  // they hold the token, and matching an invitation to an address they have not proven they
+  // control would leak that the profile exists.
+
+  app.get('/v1/caregiver-invitations', async (request, reply) => {
+    const ctx = await contextFor(request, reply);
+    if (!ctx) return;
+
+    const query = z.object({ profileId: uuidSchema.optional() }).safeParse(request.query);
+    if (!query.success) {
+      return fail(
+        reply,
+        domainError('VALIDATION_FAILED', 'Invalid query parameters.', {
+          reason_code: 'query_schema',
+        }),
+        ctx.correlationId,
+      );
+    }
+
+    const params: unknown[] = [];
+    let where = "WHERE status = 'PENDING'";
+    if (query.data.profileId) {
+      params.push(query.data.profileId);
+      where += ` AND profile_id = $${String(params.length)}`;
+    }
+
+    const result = await ctx.db((db) =>
+      db.query<{
+        id: string;
+        profile_id: string;
+        invited_by_user_id: string;
+        capabilities: string[];
+        status: string;
+        created_at: Date | string;
+        expires_at: Date | string;
+        grant_expires_at: Date | string | null;
+        invited_email_normalized: string | null;
+      }>(
+        `SELECT id, profile_id, invited_by_user_id, capabilities, status, created_at, expires_at,
+                grant_expires_at, invited_email_normalized
+           FROM caregiver_invitation ${where}
+          ORDER BY created_at DESC, id`,
+        params,
+      ),
+    );
+
+    return reply.send({
+      invitations: result.rows.map((row) => ({
+        id: row.id,
+        profileId: row.profile_id,
+        invitedByUserId: row.invited_by_user_id,
+        capabilities: row.capabilities,
+        status: row.status,
+        createdAt: asIso(row.created_at),
+        expiresAt: asIso(row.expires_at),
+        grantExpiresAt: row.grant_expires_at === null ? null : asIso(row.grant_expires_at),
+        // Whether it is bound to one address, never the address itself. `14` treats an address as
+        // personal data and this list may be read over someone's shoulder; whether the link is
+        // open to anyone holding it is the fact the owner actually needs.
+        boundToAddress: row.invited_email_normalized !== null,
+      })),
+      serverTime: ctx.now,
+    });
+  });
+
   app.post('/v1/caregiver-invitations/decline', async (request, reply) => {
     const ctx = await contextFor(request, reply);
     if (!ctx) return;
@@ -783,6 +863,10 @@ export function registerCaregiverRoutes(app: FastifyInstance, deps: CaregiverRou
   // -------------------------------------------------------------------------
   // GET /v1/caregiver-grants
   // -------------------------------------------------------------------------
+
+  function asIso(value: Date | string): string {
+    return value instanceof Date ? value.toISOString() : value;
+  }
 
   app.get('/v1/caregiver-grants', async (request, reply) => {
     const ctx = await contextFor(request, reply);

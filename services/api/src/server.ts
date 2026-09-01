@@ -228,8 +228,9 @@ export function createServer(options: ServerOptions): FastifyInstance {
         display_name: string;
         age_band: string | null;
         is_managed: boolean;
+        owner_user_id: string;
       }>(
-        `SELECT id, display_name, age_band, is_managed
+        `SELECT id, display_name, age_band, is_managed, owner_user_id
          FROM profile
          WHERE deleted_at IS NULL
          ORDER BY created_at`,
@@ -242,6 +243,12 @@ export function createServer(options: ServerOptions): FastifyInstance {
         displayName: row.display_name,
         ageBand: row.age_band,
         isManaged: row.is_managed,
+        // Whether *this caller* owns the profile, not who does. It discloses nothing - a caller
+        // who owns a profile already knows it - and it stops every screen that gates on ownership
+        // inferring it from something else. `isManaged` is about the person the profile is for
+        // and says nothing about who administers it; reading it as ownership was a real mistake
+        // this field exists to remove.
+        isOwner: row.owner_user_id === (ctx.principal.userId as string),
       })),
       serverTime: ctx.now,
     });

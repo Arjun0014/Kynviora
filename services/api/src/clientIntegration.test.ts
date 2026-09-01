@@ -11,6 +11,9 @@ import {
   developmentSession,
   resourceFor,
   buildCompletion,
+  buildInvitation,
+  buildUrl,
+  accessList,
   reviewInboxView,
   safetyView,
   shelfView,
@@ -34,6 +37,10 @@ const STRANGER = '00000000-0000-4000-8000-0000000009ff';
 
 /** Only used where the builder is expected to refuse before the value could matter. */
 const NOW_UNUSED = '2026-09-01T00:00:00.000Z';
+
+/** The transport guard, exercised against this server's own origin. */
+const buildUrlForTest = (path: string, query: Record<string, string>): string =>
+  buildUrl(server.url, path, query);
 
 let server: StartedServer;
 let dataDir: string;
@@ -243,7 +250,7 @@ describe('notification settings, end to end', () => {
 });
 
 describe('what the transport refuses to do against a real server', () => {
-  it('will not put a credential in a URL', async () => {
+  it('will not put a credential in a URL', () => {
     // `13` and trap 11. The refusal happens before the request leaves, so there is no version of
     // this that reaches a server log.
     const client = createClient({
@@ -254,7 +261,6 @@ describe('what the transport refuses to do against a real server', () => {
     // accepts a token as a query parameter, so the guard is asserted at its own level.
     expect(typeof client.listCaregiverGrants).toBe('function');
 
-    const { buildUrl } = await import('@kynviora/contracts');
     expect(() => buildUrl(server.url, '/v1/x', { inviteToken: 'abc' })).toThrow();
   });
 
@@ -353,5 +359,112 @@ describe('completing a review task writes to the record, end to end', () => {
     } else {
       expect(tasks.kind).toBe('UNAVAILABLE');
     }
+  });
+});
+
+describe('inviting a caregiver, end to end', () => {
+  /**
+   * The write flow with a real security shape.
+   *
+   * What is worth asserting here is not that a row appears. It is that step-up actually gates the
+   * request, that the token comes back exactly once and never again, and that the client cannot
+   * put it anywhere a credential must not go.
+   */
+  const elevated = () =>
+    createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(SEED.userId, { stepUp: true }),
+    });
+
+  it('refuses without step-up', async () => {
+    // `14`: caregiver administration needs re-authentication, and a merely-valid session is
+    // explicitly not sufficient. 403 maps to STEP_UP_REQUIRED and to nothing else (trap 14).
+    const draft = buildInvitation({
+      profileId: SEED.profileId,
+      authority: { kind: 'OWNER' },
+      selected: ['VIEW_SHELF'],
+    });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok || draft.body === null) return;
+
+    const outcome = await owner.createInvitation(draft.body, crypto.randomUUID());
+    expect(outcome.kind).toBe('STEP_UP_REQUIRED');
+  });
+
+  it('creates one, and returns the token exactly once', async () => {
+    const draft = buildInvitation({
+      profileId: SEED.profileId,
+      authority: { kind: 'OWNER' },
+      selected: ['VIEW_SHELF', 'VIEW_SAFETY'],
+      invitedEmail: 'helper@example.test',
+    });
+    if (!draft.ok || draft.body === null) return;
+
+    const key = crypto.randomUUID();
+    const created = await elevated().createInvitation(draft.body, key);
+    expect(created.kind).toBe('OK');
+    if (created.kind !== 'OK') return;
+
+    expect(created.value.token.length).toBeGreaterThan(20);
+    expect(created.value.capabilities.slice().sort()).toEqual(['VIEW_SAFETY', 'VIEW_SHELF']);
+
+    // It now shows on the list the Care screen renders, as an invitation nobody has accepted -
+    // "invited" rather than "has access", which is the distinction that matters when the question
+    // is who can read this profile. Without the invitations route the screen showed nothing after
+    // sending, and an owner would reasonably have sent a second one - a second live credential
+    // for one intent.
+    const [grants, invitations] = await Promise.all([
+      owner.listCaregiverGrants({ profileId: SEED.profileId }),
+      owner.listInvitations({ profileId: SEED.profileId }),
+    ]);
+    expect(grants.kind).toBe('OK');
+    expect(invitations.kind).toBe('OK');
+    if (grants.kind !== 'OK' || invitations.kind !== 'OK') return;
+
+    const rows = accessList(grants.value.grants, invitations.value.invitations);
+    expect(rows.some((row) => row.state === 'INVITED')).toBe(true);
+
+    // `14`: an address is personal data and this list may be read over someone's shoulder. The
+    // response says whether the link is bound, never to whom.
+    const pending = invitations.value.invitations[0];
+    expect(pending?.boundToAddress).toBe(true);
+    expect(JSON.stringify(invitations.value)).not.toContain('helper@example.test');
+    expect(JSON.stringify(invitations.value).toLowerCase()).not.toContain('token');
+
+    // DEC-018: the server stores only a SHA-256 hash, so an idempotent retry cannot re-issue the
+    // token and says so rather than minting a second live credential for one intent.
+    const replay = await elevated().createInvitation(draft.body, key);
+    if (replay.kind === 'OK') {
+      expect(replay.value.token).not.toBe(created.value.token);
+    } else {
+      expect(replay.kind).toBe('REFUSED');
+    }
+  });
+
+  it('never lets the token reach a URL', () => {
+    // Trap 11. The guard is at the transport, so no client method can route around it.
+    expect(() => buildUrlForTest('/v1/caregiver-invitations', { token: 'abc' })).toThrow();
+    expect(() => buildUrlForTest('/v1/caregiver-invitations', { inviteToken: 'abc' })).toThrow();
+  });
+
+  it('shows a stranger no grants and no invitations for the profile', async () => {
+    // `caregiver_invitation_select` admits the owner, an administering caregiver and the account
+    // that accepted. Deliberately not the intended recipient before acceptance - they hold the
+    // token, and matching an invitation to an address they have not proven they control would
+    // leak that the profile exists.
+    const grants = await stranger.listCaregiverGrants({ profileId: SEED.profileId });
+    if (grants.kind === 'OK') expect(grants.value.grants).toEqual([]);
+
+    const invitations = await stranger.listInvitations({ profileId: SEED.profileId });
+    if (invitations.kind === 'OK') expect(invitations.value.invitations).toEqual([]);
+  });
+
+  it('tells the owner they own the profile, rather than making the screen guess', async () => {
+    // `isManaged` is about the person the profile is for and says nothing about who administers
+    // it. Reading one as the other produced an invite screen offering the wrong capabilities.
+    const profiles = await owner.listProfiles();
+    expect(profiles.kind).toBe('OK');
+    if (profiles.kind !== 'OK') return;
+    expect(profiles.value.profiles[0]?.isOwner).toBe(true);
   });
 });

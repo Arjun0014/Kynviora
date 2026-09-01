@@ -508,3 +508,49 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Required future work**: Phase 3.2 capture, then a picker that resolves a scanned or typed code
   to a `batch_or_lot` record. At that point set `input` back from `REFERENCE` for both fields and
   the form becomes completable with no other change.
+
+## DEV-025 - Step-up is a confirmation screen with no proof behind it
+
+- **Affected specification**: `14` (re-authentication for exports, caregiver administration and
+  account deletion; MFA or passkey), `04` Phase 1.1.
+- **Expected behaviour**: a high-impact action prompts for a passkey or a second factor, and the
+  session carries a verified step-up the server can trust.
+- **Implemented behaviour**: `ApiProvider.elevate()` returns a client whose development session
+  asserts step-up via a header. The invite screen shows a confirmation step and the caller builds
+  the elevated client at the moment of sending, uses it for exactly that one request, and discards
+  it. The server checks freshness independently - `hasFreshStepUp` compares the assertion against a
+  fifteen-minute window on the request's own clock.
+- **Reason**: Phase 1.1 has not chosen an auth provider, so there is no re-authentication to
+  perform. A header is a client claim (DEC-038, `DEV-019`), and this asserts rather than proves.
+- **Temporary or permanent**: temporary. What is permanent is the **shape**: a screen that states
+  what is about to happen, an elevated client scoped to one request, and an ordinary client for
+  everything else - so the privileged session never outlives the action. When Phase 1.1 lands,
+  `elevate()` performs the real prompt and no calling code changes.
+- **Risk**: bounded by the same three refusals as `DEV-019` - the development authenticator does
+  not exist without the flag, throws under `NODE_ENV=production`, and grants no staff role. On a
+  machine running with the flag, step-up is not a barrier; nowhere else does the header mean
+  anything at all.
+- **Required future work**: Phase 1.1, then `elevate()` performs the real re-authentication.
+  Delete the header path at the same time as `devAuth.ts` rather than leaving both available.
+
+## DEV-026 - A caregiver is offered no capabilities to delegate
+
+- **Affected specification**: `04` Phase 8.1, `16` (a caregiver may pass on only what they hold).
+- **Expected behaviour**: a caregiver holding `MANAGE_CAREGIVERS` can invite someone else and offer
+  any capability they hold themselves, except caregiver administration (DEC-020).
+- **Implemented behaviour**: `selectableCapabilities` implements exactly that rule and is tested,
+  but the Care screen passes `ownCapabilities: []` because `GET /v1/caregiver-grants` does not
+  return the caller's own capabilities in a form the screen can identify as theirs. A non-owner is
+  therefore offered nothing.
+- **Reason**: the grants listing returns every grant the caller may see, which for an administering
+  caregiver includes other people's. Picking out their own means matching on the grantee's user ID,
+  and the client does not carry the authenticated user's ID as a first-class value - the session
+  does, but reading identity out of a development session to make an authorization decision is the
+  shape of mistake `13` exists to prevent.
+- **Temporary or permanent**: temporary.
+- **Risk**: low and in the safe direction. A caregiver who should be able to delegate sees an empty
+  list and cannot - visible, not silent, and it grants nobody anything. The opposite failure would
+  offer capabilities the server then refuses.
+- **Required future work**: return the caller's own capabilities per profile from the API - the
+  notification-settings route already computes a `relationship` for the caller, so the shape exists
+  - then pass them into `inviterAuthority`. `selectableCapabilities` needs no change.
