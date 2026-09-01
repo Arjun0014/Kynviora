@@ -30,11 +30,56 @@ npm run typecheck
 npm test
 ```
 
-Run the mobile app (requires an Android SDK and a development build - see `BLK-002`):
+---
+
+## Running it
+
+The API runs against a local PostgreSQL that the process owns - PGlite persisted to a directory,
+which is genuine PostgreSQL 18.3 rather than a mock. There is no service to provision and no
+connection string to set, which is how `BLK-001` is worked around for development.
+
+```bash
+KYNVIORA_DEV_AUTH=1 KYNVIORA_DEV_SEED=1 npm run dev
+```
+
+That migrates, seeds one synthetic household, and listens on `127.0.0.1:3000`. The seed prints the
+user ID to send as a header:
+
+```bash
+curl -H "x-kynviora-dev-user: 00000000-0000-4000-8000-00000000d001" http://127.0.0.1:3000/v1/profiles
+```
+
+**`KYNVIORA_DEV_AUTH` is a development backdoor.** Phase 1.1 has not chosen an auth provider, so
+nothing yet produces a real session; this fills the gap so the app can be run at all. It refuses to
+exist under `NODE_ENV=production`, it grants no reviewer role - a header is a client claim, and
+`14` says staff roles are never inferred from one - and with no header every request is
+unauthenticated. All three are tested.
+
+Without the flag the server refuses to start rather than silently authenticating nobody. Set
+`KYNVIORA_ALLOW_ANONYMOUS_START=1` if that is what you want.
+
+### What will be empty, and why that is correct
+
+The Safety and Regulatory Lens screens show nothing against the development seed. That is the
+design working:
+
+- **`BLK-006`** - no safety rule or regulatory record is publishable without a qualified clinical
+  or legal reviewer, and none exists.
+- **`DEC-016`** - every shipped regulatory fixture is deliberately rejected by the Citation Gate,
+  because the research behind them came from search summaries rather than retrieved official
+  documents. A test asserts they stay rejected.
+
+Seeding content to make those screens look populated would put exactly the material in front of a
+developer that the governance layers exist to keep out.
+
+### On a phone
 
 ```bash
 npm --prefix apps/mobile run android
 ```
+
+Requires an Android SDK and a development build (`BLK-002`). Expo Go will not work: the encrypted
+local store uses SQLCipher, which needs `npx expo prebuild` first.
 
 ---
 

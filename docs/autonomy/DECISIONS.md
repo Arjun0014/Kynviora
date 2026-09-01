@@ -984,3 +984,83 @@ closed by this and by the run itself.
 
 **Sources.** `04` Phase 6.6 and 6.7; `10` (rule authoring: shadow-mode result where required;
 high-severity publication checklist); `22`.
+
+---
+
+## DEC-037 - The development database is PGlite on disk, and the seed lives inside the server
+
+**Context.** Everything in this repository was verifiable and none of it was runnable. There was no
+`main.ts`, no migration runner outside the test harness, and nothing that produced a `Principal` -
+so the authorization rules could be proven and the app could not be opened. `BLK-001` records that
+there is no managed Postgres and no Docker here, which is why the gap had persisted.
+
+**Options.** (a) Wait for `BLK-001`: require a provisioned Postgres before anything can run.
+(b) Add a `pg` driver and a connection string, and document that a database must be provided.
+(c) Run against PGlite persisted to a directory - the same engine the authorization suite already
+uses, with a `dataDir` instead of memory.
+
+**Decision.** (c). `createRuntimeDb` opens a directory and applies migrations, and the API process
+owns it. No service to provision, no connection string, no Docker.
+
+**Rationale.** PGlite is genuine PostgreSQL 18.3, so the roles, the `FORCE ROW LEVEL SECURITY`
+policies and the triggers all behave exactly as the test suite proves they do - which is the whole
+reason DEC-004 chose it. (a) leaves the project in the state that prompted this: correct and
+unopenable. (b) is the right production answer and the wrong development one, because it makes
+"can I see it work" depend on somebody else's infrastructure.
+
+The `RuntimeDb` interface is the seam. When `BLK-001` is resolved a second implementation lands
+behind it and the API does not change.
+
+**The mistake worth recording.** The seed was a standalone script first. PGlite is a **single
+writer**: a seed process opening the same directory as a running server does not share its state,
+and whichever exits last writes its snapshot over the other's. The seed reported success against a
+database that stayed empty. So seeding now happens inside the API process on the connection it
+already holds, behind `KYNVIORA_DEV_SEED=1` - one writer, one path, and the race cannot be
+reintroduced by running two commands in the wrong order.
+
+**Consequences.** Requests are serialised, because there is one connection. That is fine for
+development and is stated in the module rather than discovered later. `main.test.ts` starts real
+processes on real ports and asserts the authorization boundary against the real engine, which is
+the first test in the repository that exercises role switching, the request GUC and the policies
+together.
+
+**Sources.** `BLK-001`; DEC-004/005; `13`; `14`; `21`.
+
+---
+
+## DEC-038 - A development authenticator, and the three ways it fails closed
+
+**Context.** Phase 1.1 is `NOT_STARTED` deliberately - the schema holds no password hash because
+the auth provider is an unmade product decision. Every route derives its authority from a
+`Principal`, and nothing produced one, so no route could be exercised by hand.
+
+**Options.** (a) Decide the auth provider now to unblock running the app. (b) A development
+authenticator behind a flag. (c) Leave it, and accept that the app cannot be run until Phase 1.1.
+
+**Decision.** (b). `createDevAuthenticator` reads a UUID from `x-kynviora-dev-user` and produces an
+ordinary principal.
+
+**Rationale.** (a) is deciding a product question for an engineering convenience, which is the
+wrong order. (c) is what had already happened and is why this was needed.
+
+The reason a backdoor is acceptable here is that it fails closed in three independent directions,
+each of which is tested: it does not exist unless `KYNVIORA_DEV_AUTH` is exactly `1`; it **throws**
+rather than warning under `NODE_ENV=production`, because a copied `.env` is the ordinary way a
+development flag reaches a deployment; and with no header it returns `null`, which every route
+already treats as unauthenticated.
+
+**What it deliberately does not grant.** No reviewer role. `14` says admin and reviewer roles are
+not inferred from client claims, and a header is a client claim - so the reviewer console still
+requires a row in `reviewer`, which the seed does not create. A test asserts the seeded owner gets
+404 from `/v1/reviewer/queue`. Handing out staff access through a header would be exactly the shape
+of the thing Phases 6.6 and 6.7 spent their time refusing.
+
+Step-up is a separate header and off by default, so the paths that require it can be exercised in
+both directions rather than being permanently satisfied.
+
+**Consequences.** The server refuses to start when no authenticator is configured, rather than
+coming up and rejecting everything - a server that authenticates nobody fails in a way that looks
+like a bug in every route, and the distinction is worth one explicit error at startup.
+`KYNVIORA_ALLOW_ANONYMOUS_START=1` opts into it deliberately.
+
+**Sources.** `04` Phase 1.1; `13`; `14`; DEC-032.

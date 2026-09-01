@@ -366,3 +366,48 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   substance keys into the historical dataset, then remove both kinds from
   `HISTORICAL_UNSUPPORTED_KINDS`. `BLK-003` gates the substance vocabulary those keys come from,
   so this is downstream of it.
+
+## DEV-019 - A development authenticator stands in for Phase 1.1
+
+- **Affected specification**: `04` Phase 1.1 (authentication and session lifecycle), `13` and `14`
+  (reviewer console requires MFA/passkey, session expiration, no shared accounts).
+- **Expected behaviour**: a real auth provider issues sessions; the API derives a `Principal` from
+  a verified token; reviewer access additionally requires strong authentication.
+- **Implemented behaviour**: `createDevAuthenticator` turns an `x-kynviora-dev-user` header into an
+  ordinary principal, behind `KYNVIORA_DEV_AUTH=1`. It throws under `NODE_ENV=production`, returns
+  `null` with no header, and grants **no** reviewer role - the console still requires a stored
+  `reviewer` row, and a test asserts the seeded owner is refused by it.
+- **Reason**: Phase 1.1 is unstarted because the provider is an unmade product decision, and the
+  schema deliberately holds no password hash. Deciding it to unblock local development would be
+  settling a product question for an engineering convenience. Without something, nothing produced a
+  `Principal` and no route could be exercised by hand at all.
+- **Temporary or permanent**: temporary, and structurally so - `ServerOptions.authenticate` was
+  always an injected port precisely so this choice stayed deferred. The real authenticator drops
+  into the same slot.
+- **Risk**: low, and bounded by three tested refusals plus the absence of any staff authority. The
+  residual risk is somebody running with the flag on a machine reachable from a network, which is
+  why the server binds `127.0.0.1` by default.
+- **Required future work**: Phase 1.1. When it lands, delete `devAuth.ts` and its test rather than
+  leaving both paths available - a backdoor kept "just for development" beside a real
+  authenticator is one that eventually runs somewhere else.
+
+## DEV-020 - The local database is single-writer and development-only
+
+- **Affected specification**: `13` (connection pooling), `21` (environments), `11` (system
+  architecture).
+- **Expected behaviour**: the API talks to a managed PostgreSQL over a pool, sized and measured.
+- **Implemented behaviour**: `createRuntimeDb` opens PGlite against a directory. It is real
+  PostgreSQL 18.3, so every constraint, trigger and RLS policy behaves as tested - but it is one
+  connection, so requests are serialised, and two processes opening the same directory do not share
+  state.
+- **Reason**: `BLK-001`. There is no managed Postgres and no Docker here, and requiring one before
+  anything could run is what had kept the project unopenable.
+- **Temporary or permanent**: temporary. `RuntimeDb` is the interface a pooled implementation lands
+  behind without the API changing.
+- **Risk**: it measures nothing about pooling, extensions or performance under load, and it must
+  not be read as having done so. The single-writer property already caused one silent failure (a
+  standalone seed that reported success against an empty database), which is why seeding moved
+  inside the server process (DEC-037).
+- **Required future work**: resolve `BLK-001`, add a pooled implementation, and re-run the
+  authorization suite against it - the suite is the thing that has to pass unchanged for the swap
+  to be trustworthy.

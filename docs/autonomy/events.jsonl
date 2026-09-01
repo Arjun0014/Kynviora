@@ -110,3 +110,13 @@
 {"ts": "2026-09-01T02:38:00Z", "type": "decision_recorded", "detail": "DEC-034 a shadow run has no recipients; DEC-035 the approval gate is satisfied locally and why that is not a bypass; DEC-036 a high-impact rule publication names a run of that rule"}
 {"ts": "2026-09-01T02:39:00Z", "type": "deviation_recorded", "detail": "DEV-018 a historical run refuses substance-matching rules rather than under-measuring them; DEV-017 closed by this phase"}
 {"ts": "2026-09-01T02:40:00Z", "type": "phase_complete", "detail": "Phase 6.7 shadow mode and replay; 1881 tests across 48 files, verify exit 0"}
+{"ts": "2026-09-01T02:50:00Z", "type": "work_started", "detail": "making the stack runnable: no main.ts, no migration runner outside the harness, nothing producing a Principal"}
+{"ts": "2026-09-01T02:53:00Z", "type": "code_added", "detail": "db/src runtime: PGlite persisted to a directory, role-scoped connections with the superuser guard, idempotent migrations with checksum-drift refusal"}
+{"ts": "2026-09-01T02:56:00Z", "type": "code_added", "detail": "services/api/src/main.ts process entry and devAuth.ts development authenticator"}
+{"ts": "2026-09-01T02:58:00Z", "type": "bug_found", "detail": "entry-point check compared a percent-encoded import.meta.url to an argv path; the process started, did nothing and exited zero"}
+{"ts": "2026-09-01T03:00:00Z", "type": "bug_found", "detail": "standalone seed raced the running server; PGlite is a single writer and the seed reported success against an empty database"}
+{"ts": "2026-09-01T03:02:00Z", "type": "bug_found", "detail": "StartedServer.url used the requested port, so port 0 produced http://127.0.0.1:0"}
+{"ts": "2026-09-01T03:05:00Z", "type": "verified", "detail": "anonymous 401; owner sees 1 profile and 3 items; stranger sees empty; seeded owner refused by the reviewer queue"}
+{"ts": "2026-09-01T03:07:00Z", "type": "decision_recorded", "detail": "DEC-037 PGlite on disk and the seed inside the server; DEC-038 the development authenticator and its three refusals"}
+{"ts": "2026-09-01T03:08:00Z", "type": "deviation_recorded", "detail": "DEV-019 development authenticator stands in for Phase 1.1; DEV-020 the local database is single-writer and development-only"}
+{"ts": "2026-09-01T03:09:00Z", "type": "milestone", "detail": "npm run dev starts a server against a persisted PostgreSQL; 1902 tests across 50 files, verify exit 0"}

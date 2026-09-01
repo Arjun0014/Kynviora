@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "migrate:test": "tsx harness/cli.ts"
+    "migrate": "tsx src/cli.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8"

@@ -852,3 +852,84 @@ format all clean via `npm run verify`, exit 0. 69 new tests: 28 safety domain, 2
 Stage 6 is now complete apart from 6.3 and 6.5, both of which are `IN_PROGRESS` on external
 dependencies. Outstanding on this phase: a historical run cannot measure substance-matching rules
 (`DEV-018`), and there is still no staff interface for any of it (`DEV-016`).
+
+### Making it runnable
+
+Not a spec phase. It closes the gap between "implemented" and "openable", which had grown wide
+enough that the honest answer to "can I see it work" was no.
+
+**What was actually missing.** `services/api/package.json` pointed `dev` at `src/main.ts` and that
+file did not exist. There was no migration runner outside the test harness. Nothing produced a
+`Principal`, so no route could be exercised by hand. Fifty test files proved the authorization
+rules held and none of them proved the process could start.
+
+**The database.** `BLK-001` says there is no managed Postgres and no Docker here, and that had
+been read as "nothing can run until somebody provisions one". It does not have to be: PGlite -
+already the migration and RLS engine under DEC-004 - persists to a directory, and it is genuine
+PostgreSQL 18.3 rather than a mock. So `createRuntimeDb` opens a directory, applies migrations, and
+hands out role-scoped connections with the same discipline the test harness uses, superuser guard
+included. No service to provision, no connection string (DEC-037). `RuntimeDb` is the seam a pooled
+implementation lands behind when `BLK-001` clears.
+
+**The authenticator.** Phase 1.1 is unstarted because the provider is an unmade product decision,
+and deciding it to unblock local development would be the wrong order. So there is a development
+authenticator that turns a header into an ordinary principal, and the reason a backdoor is
+acceptable is that it fails closed three independent ways, each tested: it needs
+`KYNVIORA_DEV_AUTH=1` exactly, it **throws** under `NODE_ENV=production` rather than warning, and
+with no header it returns `null`. It grants no reviewer role - a header is a client claim and `14`
+says staff roles are never inferred from one - so the seeded owner gets 404 from the reviewer
+queue, which is asserted (DEC-038).
+
+The server also refuses to start when no authenticator is configured. A server that authenticates
+nobody fails in a way that looks like a bug in every route, and one explicit error at startup is
+worth more than fifty confusing 401s.
+
+**Three bugs, all found by running it.**
+
+- The entry-point check was `import.meta.url.endsWith(process.argv[1])`. On Windows the URL is
+  percent-encoded and the argv path is not, so it never matched: the process started, did nothing,
+  and exited zero. Now compared as resolved filesystem paths.
+- `StartedServer.url` was built from the _requested_ port. With `port: 0` - how a test starts
+  several servers at once - that produced `http://127.0.0.1:0` and a connect error naming neither
+  the cause nor the port. Now read from `app.server.address()`.
+- The seed was a standalone script, and PGlite is a single writer. Running it against the same
+  directory as a live server does not share state, and whichever process exits last overwrites the
+  other. It reported success against a database that stayed empty. Seeding now happens inside the
+  API process on the connection it already holds, so the race is not reintroducible by running two
+  commands in the wrong order.
+
+**What the seed deliberately does not contain.** No safety rule, no regulatory record, no alert.
+Publishing any of those needs a qualified reviewer (`BLK-006`) and retrieved official documents
+(`BLK-004`), so the Safety and Regulatory Lens screens are empty against it - and a test asserts
+they are. Seeding content to make those screens look populated would put exactly the material in
+front of a developer that Phases 6.6 and 6.7 exist to keep out. Every product name begins with
+"Synthetic".
+
+**What the process test buys.** Every other suite injects a pool into `createServer`, which proves
+the routes and proves nothing about the wiring beneath them. `main.test.ts` boots real processes on
+real ports and asks the four questions a developer asks first: does it start, does it refuse me
+when I am nobody, does it show me my own shelf, and does it show me somebody else's. The last one
+is the one worth a process test - role switching, the request GUC and the RLS policies are all
+doing their real jobs, and a mistake in the wiring between them would pass every other test in the
+repository. A stranger gets 200 with an empty list, which is Phase 8.1's exit criterion in terms:
+"an empty page - not a 403".
+
+### Things worth recording
+
+- Lint caught two `new Date()` calls in `main.ts`. The composition root felt like a legitimate
+  exception; it is not, because `systemClock()` already exists as the single sanctioned source of
+  ambient time. Opening a second one in the one file nobody injects into is how the rule starts
+  eroding. The logger now takes the clock too.
+- Migration loading moved from `db/harness/harness.ts` to `db/src/migrations.ts`, re-exported so
+  every existing test import still works. The runtime needed it and importing it from a file called
+  "harness" would have been misleading about what runs in production.
+
+### State
+
+1902 tests passing across 50 files, up from 1881 across 48. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 21 new tests: 12 for the development authenticator,
+9 for the process.
+
+`npm run dev` now starts a server against a persisted PostgreSQL with a synthetic household in it.
+The remaining gap between that and holding the app on a phone is `DEV-007` - the Expo screens are
+still placeholders - and `BLK-002`, which needs an Android SDK on a real machine.

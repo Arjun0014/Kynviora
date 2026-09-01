@@ -374,20 +374,39 @@ and the review screen typechecks but is not wired (`DEV-007`).
 
 ---
 
+## Making it runnable
+
+Not a spec phase, and recorded here because it changed what the repository is rather than what it
+contains. Everything above was verifiable and none of it was runnable: `services/api` had no
+process entry point, migrations ran only inside the test harness, and nothing produced a
+`Principal`, so no route could be exercised by hand.
+
+| Piece                                         | Where                            |
+| --------------------------------------------- | -------------------------------- |
+| Persisted PostgreSQL, role-scoped connections | `db/src/runtime.ts`              |
+| Migration runner and CLI                      | `db/src/migrations.ts`, `cli.ts` |
+| Synthetic development fixture                 | `db/src/seed.ts`                 |
+| Process entry point                           | `services/api/src/main.ts`       |
+| Development identity boundary                 | `services/api/src/devAuth.ts`    |
+
+`npm run dev` now starts a server against a database the process owns (DEC-037), with a
+header-based development identity that fails closed three ways and grants no staff role
+(DEC-038). `DEV-019` and `DEV-020` record both as temporary stand-ins for Phase 1.1 and
+`BLK-001`.
+
+---
+
 ## Immediate next work
 
-1. **Shadow mode and replay** (Phase 6.7): shadow-run mode against synthetic and historical
-   datasets, affected product and potential-user-match counts, false-positive samples, and replay
-   after a source or rule change. It is the direct follow-on from 6.6 - the reviewer console
-   records that a reviewer verified expected match volume, and 6.7 is what they would look at to
-   do so (`DEV-017`).
-2. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
+1. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
    Shelf, Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification, Review Inbox and
-   reconciliation surfaces the presentation package already supports (`DEV-007`).
-3. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
+   reconciliation surfaces the presentation package already supports (`DEV-007`). This is now the
+   largest gap between "implemented" and "usable", and the runnable stack is what makes it
+   testable end to end rather than against a mock.
+2. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
    cache-hit rate, assessment recomputation throughput. The review-queue age becomes measurable
    once inbox derivation moves behind a scheduler (`DEV-013`).
-4. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
+3. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch and its authorization already exist; nothing calls them with a real occurrence.
 
 ## What "complete" means here, and what it does not

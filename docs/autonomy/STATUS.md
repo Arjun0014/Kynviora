@@ -13,14 +13,14 @@ Last updated: 2026-09-01
 | ------------------ | ---------------------------------------------- |
 | **Current stage**  | Stage 6 (governance), after completing Stage 8 |
 | **Current phase**  | Wiring the Expo screens to the API (DEV-007)   |
-| **Last completed** | Phase 6.7 Shadow mode and replay               |
+| **Last completed** | Making the stack runnable (not a spec phase)   |
 | **Branch**         | `master`                                       |
-| **Latest commit**  | `feat(governance): shadow mode and replay`     |
+| **Latest commit**  | `feat(dev): a runnable local stack`            |
 | **Baseline tag**   | `baseline-spec-only`                           |
 
 ## Verification state
 
-- **1881 tests passing**, 0 failing, across 48 files.
+- **1902 tests passing**, 0 failing, across 50 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -30,6 +30,18 @@ npm run verify
 
 - Database tests execute against real PostgreSQL 18.3 via PGlite as a non-superuser role.
 - The mobile app typechecks against the real Expo SDK 57 / RN 0.86 / React 19.2 toolchain.
+- `main.test.ts` boots real API processes on real ports against a persisted database, so role
+  switching, the request GUC and the RLS policies are exercised together rather than mocked.
+
+### Running it
+
+```bash
+KYNVIORA_DEV_AUTH=1 KYNVIORA_DEV_SEED=1 npm run dev
+```
+
+Migrates, seeds one synthetic household and listens on `127.0.0.1:3000`. The seed prints the user
+ID to send as `x-kynviora-dev-user`. Safety and Regulatory Lens are **empty** against this seed on
+purpose - `BLK-006` and DEC-016, not a configuration mistake.
 
 ## What is genuinely built and tested
 
@@ -91,6 +103,10 @@ left a screen that typechecks against the presentation package and is not connec
 Shelf, Trust Passport, Regulatory Lens, caregiver access, Visit Pack, notification settings, Review
 Inbox and reconciliation. The presentation layer and the API contract both exist and are tested, so
 this is wiring rather than design - and it is the largest gap between "implemented" and "usable".
+
+There is now a server to wire them **to**: `npm run dev` starts a real process against a persisted
+database with a synthetic household in it, so the wiring can be tested end to end rather than
+against a mock of a contract.
 
 Alternatively **Phase 4.3** (dose events and adherence history) or **Phase 7.1** (assessment states
 and inbox), both fully implementable with no external dependency.
@@ -185,6 +201,16 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 - **DEC-036** - a two-person safety-rule publication must name a shadow run **of that rule**. The
   trigger checks the pairing, not the presence.
 
+- **DEC-037** - the development database is PGlite persisted to a directory, and the seed runs
+  **inside** the API process. PGlite is a single writer: a standalone seed against the same
+  directory as a running server does not share its state, and the last process to exit overwrites
+  the other. That failed silently once. `RuntimeDb` is the seam a pooled implementation lands
+  behind when `BLK-001` clears.
+- **DEC-038** - the development authenticator turns a header into an ordinary principal and fails
+  closed three ways: it needs `KYNVIORA_DEV_AUTH=1` exactly, it **throws** under
+  `NODE_ENV=production`, and with no header it returns `null`. It grants **no** reviewer role,
+  because a header is a client claim and `14` says staff roles are never inferred from one.
+
 ## Traps to avoid on resume
 
 1. Do not add a conversion between `EvidenceLevel` and `ActionUrgency`, or any aggregate score.
@@ -278,3 +304,18 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
     happened once in `0013`.
 32. A replay never writes back. `profile_assessment` is append-only and a replay is a diff
     somebody reads before anything reaches a user.
+33. Do not run a seed or a migration as a separate process against a data directory a server has
+    open. PGlite is a **single writer**: the two processes do not share state and the last one to
+    exit overwrites the other, so the seed reports success against a database that stays empty.
+    Seeding lives inside the API process for this reason (DEC-037).
+34. Do not seed a safety rule, a regulatory record or an alert to make a screen look populated.
+    The empty Safety and Regulatory Lens screens are `BLK-006` and DEC-016 working, and a
+    developer looking at seeded safety content is exactly what Phases 6.6 and 6.7 exist to stop.
+35. Do not compare `import.meta.url` to `process.argv[1]` by string suffix to detect an entry
+    point. On Windows the URL is percent-encoded and the argv path is not, so it never matches and
+    the process starts, does nothing and exits zero. Compare resolved filesystem paths.
+36. Do not build a server URL from the **requested** port. `port: 0` asks the OS to pick, which is
+    how a test starts several servers at once; read `app.server.address()` instead.
+37. The composition root is not an exception to the `new Date()` ban. `systemClock()` is the one
+    sanctioned source of ambient time, and opening a second one in the file nobody injects into is
+    how the rule erodes. The logger takes the clock too.

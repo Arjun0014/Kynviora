@@ -18,38 +18,20 @@
  */
 
 import { PGlite } from '@electric-sql/pglite';
-import { readdirSync, readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-export const MIGRATIONS_DIR = join(HERE, '..', 'migrations');
+// Migration loading and the role names live in `db/src` so the runtime can use them without
+// importing a file called "harness". Re-exported here so every existing test import keeps
+// working, and so the schema a test asserts against is loaded by the same code that migrates a
+// real process.
+export {
+  APP_ROLE,
+  MIGRATIONS_DIR,
+  SERVICE_ROLE,
+  loadMigrations,
+  type Migration,
+} from '../src/migrations.js';
 
-/** Database roles used by the application (see `0001_foundation.sql`). */
-export const APP_ROLE = 'kynviora_app';
-export const SERVICE_ROLE = 'kynviora_service';
-
-export interface Migration {
-  readonly version: string;
-  readonly sql: string;
-  readonly checksum: string;
-}
-
-/** Read migrations in lexical order. Filenames are zero-padded so this is also numeric order. */
-export function loadMigrations(dir: string = MIGRATIONS_DIR): Migration[] {
-  return readdirSync(dir)
-    .filter((f) => f.endsWith('.sql'))
-    .sort()
-    .map((file) => {
-      const sql = readFileSync(join(dir, file), 'utf8');
-      return {
-        version: file.replace(/\.sql$/, ''),
-        sql,
-        checksum: createHash('sha256').update(sql).digest('hex'),
-      };
-    });
-}
+import { APP_ROLE, MIGRATIONS_DIR, SERVICE_ROLE, loadMigrations } from '../src/migrations.js';
 
 export interface TestDb {
   readonly db: PGlite;

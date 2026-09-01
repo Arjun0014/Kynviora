@@ -11,3 +11,6 @@ coverage/
 Thumbs.db
 *.tsbuildinfo
 .turbo/
+
+# Local development database (BLK-001 workaround; PGlite persisted to disk).
+.kynviora-data/

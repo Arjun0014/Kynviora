@@ -23,7 +23,9 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
     "verify": "npm run typecheck && npm run typecheck:mobile && npm run lint && npm run format:check && npm test",
-    "typecheck:mobile": "npm --prefix apps/mobile run typecheck"
+    "typecheck:mobile": "npm --prefix apps/mobile run typecheck",
+    "dev": "npm --prefix services/api run dev",
+    "migrate": "npm --prefix db run migrate"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
