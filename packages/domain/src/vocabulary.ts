@@ -530,3 +530,52 @@ export const isCaregiverCapability = makeGuard(CAREGIVER_CAPABILITIES);
 export const DOSE_EVENT_KINDS = ['TAKEN', 'SKIPPED', 'SNOOZED', 'UNABLE_TO_TAKE'] as const;
 export type DoseEventKind = Member<typeof DOSE_EVENT_KINDS>;
 export const isDoseEventKind = makeGuard(DOSE_EVENT_KINDS);
+
+// ---------------------------------------------------------------------------
+// Why what Kynviora says changed (spec 04 Phase 7.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Why a regulatory record or an assessment now says something different.
+ *
+ * `04` Phase 7.4's exit criterion is that users can distinguish a new regulator action from a
+ * Kynviora correction. Four members rather than two, because there is a third case that is
+ * neither - a source correcting its own publication - and a fourth that must not be silently
+ * folded into any of them.
+ *
+ * `NOT_STATED` is a first-class member. A change nobody attributed is not a regulator action, and
+ * defaulting it to one would hand Kynviora's mistakes to the regulator; defaulting it to a
+ * correction would claim a mistake nobody found. The screen has to say that nobody recorded it.
+ *
+ * The vocabulary lives here rather than in `@kynviora/regulatory` so that the presentation layer
+ * can name it without depending on the registry - the same reason every other closed vocabulary
+ * is in this package.
+ */
+export const CHANGE_ATTRIBUTIONS = [
+  'REGULATOR_ACTED',
+  'SOURCE_CORRECTED_ITSELF',
+  'KYNVIORA_CORRECTED_ITSELF',
+  'NOT_STATED',
+] as const;
+export type ChangeAttribution = Member<typeof CHANGE_ATTRIBUTIONS>;
+export const isChangeAttribution = makeGuard(CHANGE_ATTRIBUTIONS);
+
+/**
+ * Correction kinds, mirroring `assessment_correction.correction_kind`.
+ *
+ * `SOURCE_CORRECTED` is the regulator correcting itself and is a fact about the source. Every
+ * other member is Kynviora having been wrong about something - its rule, the item's identity, the
+ * formulation, or a fact on the profile - and `WITHDRAWN_NO_LONGER_APPLICABLE` belongs there
+ * deliberately: withdrawing an alert because it no longer applies is Kynviora revising what it
+ * said, whatever prompted it.
+ */
+export const CORRECTION_KINDS = [
+  'SOURCE_CORRECTED',
+  'RULE_CORRECTED',
+  'ITEM_IDENTITY_CORRECTED',
+  'FORMULATION_CORRECTED',
+  'PROFILE_FACT_CORRECTED',
+  'WITHDRAWN_NO_LONGER_APPLICABLE',
+] as const;
+export type CorrectionKind = Member<typeof CORRECTION_KINDS>;
+export const isCorrectionKind = makeGuard(CORRECTION_KINDS);

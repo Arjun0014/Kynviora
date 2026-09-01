@@ -11,5 +11,8 @@
   "dependencies": {
     "@kynviora/domain": "*",
     "@kynviora/fixtures": "*"
+  },
+  "devDependencies": {
+    "@kynviora/presentation": "*"
   }
 }

@@ -8,3 +8,4 @@
 export * from './records.js';
 export * from './citationGate.js';
 export * from './lens.js';
+export * from './diff.js';
