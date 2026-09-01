@@ -25,6 +25,8 @@ import {
   domainError,
   isErr,
   isItemVerification,
+  manualEntryLimits,
+  normalizeManualEntry,
   type DomainError,
   type Instant,
   type InviteTokenService,
@@ -32,7 +34,7 @@ import {
   type Logger,
   type UserId,
 } from '@kynviora/domain';
-import { itemDetailView } from '@kynviora/presentation';
+import { itemDetailView, manualEntryOutcomeView } from '@kynviora/presentation';
 import { projectLens, type SourceRegistryEntry } from '@kynviora/regulatory';
 import type { DatabasePool, Principal, RequestContext } from './context.js';
 import { createRequestContext } from './context.js';
@@ -61,6 +63,31 @@ import { registerShadowModeRoutes } from './shadowMode.js';
  * an end-to-end test completed a review task and then re-read the shelf, which is the only order
  * of operations that produces a non-null value.
  */
+/**
+ * Run a write that row-level security may refuse, and report the refusal as an absence.
+ *
+ * A policy that admits nothing on INSERT raises `42501` rather than returning no rows, so without
+ * this a caller writing to a profile they do not hold gets a 500. `13` wants a profile ID to
+ * narrow rather than to grant, and the answer for "not yours" has to be the answer for "not
+ * there".
+ *
+ * Only the insufficient-privilege code is mapped. Anything else is a real failure and must not be
+ * disguised as a missing profile - a bug hidden behind a plausible answer is worse than a 500.
+ */
+async function insertOrRefusal<T>(ctx: RequestContext, run: () => Promise<T>): Promise<T | null> {
+  try {
+    return await run();
+  } catch (cause) {
+    const code = (cause as { code?: unknown }).code;
+    const message = cause instanceof Error ? cause.message : String(cause);
+    if (code === '42501' || /row-level security/i.test(message)) {
+      ctx.logger.info('api.write_refused_by_policy', { correlationId: ctx.correlationId });
+      return null;
+    }
+    throw cause;
+  }
+}
+
 /** Unknown means unverified. Never `CONFIRMED` - the reassuring member is never the fallback. */
 function asItemVerification(raw: string): ItemVerification {
   return isItemVerification(raw) ? raw : 'UNVERIFIED';
@@ -169,6 +196,39 @@ const shelfQuerySchema = cursorQuerySchema.extend({
 });
 
 const itemParamsSchema = z.object({ itemId: uuidSchema });
+
+/**
+ * A manually entered item (`04` Phases 2.2 and 2.3).
+ *
+ * Shape only. What the values may be is `normalizeManualEntry`'s question, in the domain, where a
+ * refusal can say which field and why - and where the rule lives once rather than in every route
+ * that ever accepts one.
+ *
+ * There is no field for a verification state, a confidence, a catalog identifier or a
+ * corroboration. Their absence is what stops a hand-typed record claiming `CONFIRMED` or reaching
+ * the shared catalog (`15` A11), and it is enforced by `.strict()` refusing anything else.
+ */
+const manualEntryBodySchema = z
+  .object({
+    profileId: uuidSchema,
+    itemKind: z.enum(['MEDICINE', 'PERSONAL_CARE']),
+    displayName: z.string(),
+    brand: z.string().nullish(),
+    manufacturer: z.string().nullish(),
+    market: z.string().nullish(),
+    recordedGtin: z.string().nullish(),
+    recordedLotCode: z.string().nullish(),
+    expiresOn: z.string().nullish(),
+    startedOn: z.string().nullish(),
+    notes: z.string().nullish(),
+    strengthText: z.string().nullish(),
+    dosageForm: z.string().nullish(),
+    directionsText: z.string().nullish(),
+    personalCareCategory: z.string().nullish(),
+    ingredientDeclarationRaw: z.string().nullish(),
+    labelVersionNote: z.string().nullish(),
+  })
+  .strict();
 
 const lensQuerySchema = z.object({
   substanceKey: z.string().min(1).max(128),
@@ -519,6 +579,103 @@ export function createServer(options: ServerOptions): FastifyInstance {
       return reply.send({
         items: validated.data,
         nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
+        serverTime: ctx.now,
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // POST /v1/items  (`04` Phases 2.2 and 2.3 - manual entry)
+    // -------------------------------------------------------------------------
+    // The only way anything in this build creates an `owned_item` from a user surface.
+    //
+    // Written through the caller's own connection, not the service role. `owned_item_insert`
+    // requires `MANAGE_SHELF` for a personal-care item and `MANAGE_MEDICINES` for a medicine, and
+    // routing this through the policy written for it means the route cannot create an item on a
+    // profile the caller could not otherwise write to - the authorization is the policy rather
+    // than a check somebody has to remember.
+    //
+    // WHAT THIS ROUTE WILL NOT DO
+    // Touch the catalog. `product_identity_id`, `formulation_id` and `batch_id` are left NULL and
+    // there is no code path here that could set one: a household typing a barcode is not the
+    // catalog learning one, which is `15` A11 with the attacker replaced by an honest person
+    // mis-reading a label. Promotion is `04` Phase 3.5's corroborated path and stays separate.
+    //
+    // It also will not set a verification state. The three axes keep migration `0004`'s
+    // `UNVERIFIED` default, which is the vocabulary's word for "nobody has checked" rather than a
+    // default answer - and `08` reserves `CONFIRMED` for something read off the pack.
+
+    app.post('/v1/items', async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      const body = manualEntryBodySchema.safeParse(request.body ?? {});
+      if (!body.success) {
+        return fail(
+          reply,
+          domainError('VALIDATION_FAILED', 'Invalid request body.', { reason_code: 'body_schema' }),
+          ctx.correlationId,
+        );
+      }
+
+      // The domain decides what the values may be, so a refusal names the field and the reason.
+      const normalized = normalizeManualEntry(body.data);
+      if (isErr(normalized)) return fail(reply, normalized.error, ctx.correlationId);
+      const entry = normalized.value;
+
+      // `owned_item_insert` refuses a profile this caller may not write to by raising, not by
+      // returning no rows, so the refusal is caught here and answered as absence. Only the
+      // insufficient-privilege code is mapped: anything else is a real failure and must not be
+      // disguised as a missing profile, which would hide a bug behind a plausible answer.
+      const inserted = await insertOrRefusal(ctx, () =>
+        ctx.db((db) =>
+          db.query<{ id: string }>(
+            // Every value comes from the submission or is NULL. Nothing here supplies a fallback,
+            // which is `04` Phase 2.2's second exit criterion in the one place it could be lost.
+            `INSERT INTO owned_item
+               (profile_id, item_kind, display_name, brand, manufacturer, market,
+                recorded_gtin, recorded_lot_code, expires_on, started_on, notes,
+                strength_text, dosage_form, directions_text,
+                personal_care_category, ingredient_declaration_raw, label_version_note)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+             RETURNING id`,
+            [
+              body.data.profileId,
+              entry.itemKind,
+              entry.displayName,
+              entry.brand,
+              entry.manufacturer,
+              entry.market,
+              entry.recordedGtin,
+              entry.recordedLotCode,
+              entry.expiresOn,
+              entry.startedOn,
+              entry.notes,
+              entry.strengthText,
+              entry.dosageForm,
+              entry.directionsText,
+              entry.personalCareCategory,
+              entry.ingredientDeclarationRaw,
+              entry.labelVersionNote,
+            ],
+          ),
+        ),
+      );
+
+      const id = inserted === null ? undefined : inserted.rows[0]?.id;
+      if (id === undefined) {
+        // Row-level security admitted nothing. A profile this caller cannot write to and one that
+        // does not exist are the same answer, so the route is not an oracle for either.
+        return fail(reply, domainError('NOT_FOUND', 'No such profile.'), ctx.correlationId);
+      }
+
+      const limits = manualEntryLimits(entry);
+
+      return reply.status(201).send({
+        id,
+        // What this record cannot support, said now rather than the first time an alert fails to
+        // arrive and nobody knows why (`10`).
+        ...manualEntryOutcomeView([...limits]),
+        limitCodes: limits,
         serverTime: ctx.now,
       });
     });

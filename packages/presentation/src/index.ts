@@ -23,3 +23,4 @@ export * from './regulatoryDiff.js';
 export * from './safetyReceipt.js';
 export * from './notificationPolicy.js';
 export * from './itemDetail.js';
+export * from './manualEntry.js';
