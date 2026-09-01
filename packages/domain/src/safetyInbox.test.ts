@@ -165,6 +165,7 @@ describe('filtering the inbox', () => {
   const line = (over: Partial<SafetyInboxLine> = {}): SafetyInboxLine => ({
     ownedItemId: 'i1',
     displayName: 'Synthetic Tablet A',
+    alertPublicationId: null,
     state: 'INSUFFICIENT_DATA',
     urgency: null,
     evidenceLevel: null,

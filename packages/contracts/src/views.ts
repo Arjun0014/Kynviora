@@ -41,6 +41,7 @@ import {
   type ReviewTaskKind,
 } from '@kynviora/domain';
 import {
+  ICON_NAMES,
   describeAuditAction,
   presentEvidenceLevel,
   presentSafetyState,
@@ -50,6 +51,8 @@ import {
   type StatusPresentation,
 } from '@kynviora/presentation';
 import type {
+  AlertDetailResponse,
+  StatusPresentationResponse,
   AlertSummary,
   CaregiverAuditEvent,
   CaregiverGrant,
@@ -238,6 +241,14 @@ export interface SafetyInboxLineView {
   readonly ownedItemId: string;
   readonly displayName: string;
   /**
+   * The alert this line can open, or `null`.
+   *
+   * `null` on every line whose state came from an assessment rather than a live publication. A
+   * screen offers no "why did I get this?" control where it is absent, which is DEC-045 again:
+   * a disabled control would state that an explanation exists and is being withheld.
+   */
+  readonly alertPublicationId: string | null;
+  /**
    * Three separate presentations, never merged.
    *
    * `23` D-005 forbids combining evidence level and urgency, and Phase 7.1 requires them visibly
@@ -292,6 +303,7 @@ export function safetyInboxView(response: {
   const lines = response.lines.map((line) => ({
     ownedItemId: line.ownedItemId,
     displayName: line.displayName,
+    alertPublicationId: line.alertPublicationId,
     state: presentSafetyState(asProductSafetyState(line.state)),
     // Null together. A line with no live alert has no urgency and no evidence level, and
     // substituting a default for either would put a chip on screen that nobody assigned.
@@ -580,4 +592,155 @@ export function accessList(
   displayNames: Readonly<Record<string, string>> = {},
 ): readonly CaregiverAccessRowView[] {
   return [...invitationAccessRows(invitations), ...caregiverAccessRows(grants, displayNames)];
+}
+
+// ---------------------------------------------------------------------------
+// Alert detail (spec 04 Phase 7.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bases this client knows how to label.
+ *
+ * Mirrors `@kynviora/presentation`'s `FACT_BASES`, and is checked against it by a test rather
+ * than imported, so a server sending a basis this build has never heard of is a case with a
+ * decision rather than a runtime surprise.
+ */
+export const KNOWN_FACT_BASES: readonly string[] = Object.freeze([
+  'RECORDED_BY_A_PERSON',
+  'READ_FROM_THE_PACK',
+  'PUBLISHED_BY_A_SOURCE',
+  'COMPUTED_BY_KYNVIORA',
+  'NOT_KNOWN',
+  'WITHHELD_FROM_THIS_SESSION',
+]);
+
+/**
+ * Narrow a status presentation from the wire, or refuse it.
+ *
+ * `null` where any part is missing or blank. `18` makes the text label the primary carrier of
+ * meaning and forbids colour carrying it alone, so a presentation with no label is one this
+ * screen cannot render honestly - and a chip with an empty label beside a medicine reads as a
+ * state somebody assigned rather than as a gap.
+ */
+export function asStatusPresentation(
+  raw: StatusPresentationResponse | null | undefined,
+): StatusPresentation | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw.label !== 'string' || raw.label.trim() === '') return null;
+  if (typeof raw.description !== 'string' || raw.description.trim() === '') return null;
+  if (typeof raw.accessibilityLabel !== 'string' || raw.accessibilityLabel.trim() === '') {
+    return null;
+  }
+  if (!(ICON_NAMES as readonly string[]).includes(raw.iconName)) return null;
+  return {
+    label: raw.label,
+    iconName: raw.iconName as StatusPresentation['iconName'],
+    tone: raw.tone as StatusPresentation['tone'],
+    description: raw.description,
+    accessibilityLabel: raw.accessibilityLabel,
+  };
+}
+
+export interface AlertFactView {
+  readonly label: string;
+  readonly value: string | null;
+  readonly basis: string;
+  readonly basisText: string;
+}
+
+export interface AlertDetailScreenView {
+  readonly alertPublicationId: string;
+  readonly ownedItemId: string;
+  readonly isLive: boolean;
+  readonly withdrawnNotice: string | null;
+  readonly message: readonly string[] | null;
+  readonly unexplainable: { readonly heading: string; readonly body: string } | null;
+  readonly withheldNotice: string | null;
+  readonly urgency: StatusPresentation | null;
+  readonly evidence: StatusPresentation | null;
+  readonly matchConfidence: StatusPresentation | null;
+  readonly facts: readonly AlertFactView[];
+  /** Facts dropped because this build could not label where they came from. */
+  readonly unlabelledFactCount: number;
+  readonly unlabelledFactNote: string | null;
+  readonly reasons: readonly string[];
+  readonly undescribedReasonNote: string | null;
+  readonly source: {
+    readonly summary: string;
+    readonly reference: string | null;
+    readonly referenceWithheldBecause: string | null;
+    readonly attribution: string | null;
+  };
+  readonly coverageStatement: string;
+  readonly basisNote: string;
+  readonly inferredCount: number;
+  readonly actions: readonly {
+    readonly action: string;
+    readonly label: string;
+    readonly explanation: string;
+  }[];
+  readonly actionsUnavailableBecause: string | null;
+}
+
+/**
+ * The detail, as a screen renders it.
+ *
+ * Almost a pass-through, because the server composed the message: `11` puts safety composition
+ * server-side and a client that rebuilt any of it would carry approved wording in every shipped
+ * build. What this function does decide is the one thing a client must - what to do with a value
+ * it does not recognise.
+ *
+ * A fact whose basis this build cannot label is **dropped and counted**. The whole point of the
+ * screen is that every line says where it came from, so a line with an unlabelled origin defeats
+ * it more thoroughly than an omission the screen admits to - the same choice the Lens makes for
+ * an undescribed regulatory status (DEC-065).
+ */
+export function alertDetailScreenView(response: AlertDetailResponse): AlertDetailScreenView {
+  const labelled: AlertFactView[] = [];
+  let unlabelled = 0;
+
+  for (const entry of response.facts) {
+    if (!KNOWN_FACT_BASES.includes(entry.basis)) {
+      unlabelled += 1;
+      continue;
+    }
+    labelled.push(entry);
+  }
+
+  return {
+    alertPublicationId: response.alertPublicationId,
+    ownedItemId: response.ownedItemId,
+    isLive: response.isLive,
+    withdrawnNotice: response.withdrawnNotice,
+    message: response.message,
+    unexplainable: response.unexplainable,
+    withheldNotice: response.withheldNotice,
+    // Presented separately and never combined (`23` D-005). Narrowed rather than trusted: a
+    // half-formed presentation would render as a chip with a blank label, which on a safety
+    // screen reads as a state nobody assigned.
+    urgency: asStatusPresentation(response.urgency),
+    evidence: asStatusPresentation(response.evidence),
+    matchConfidence: asStatusPresentation(response.matchConfidence),
+    facts: labelled,
+    unlabelledFactCount: unlabelled,
+    unlabelledFactNote:
+      unlabelled === 0
+        ? null
+        : `Kynviora sent ${String(unlabelled)} further ${
+            unlabelled === 1 ? 'detail' : 'details'
+          } this version cannot say the origin of, so they are not shown.`,
+    reasons: response.reasons.reasons,
+    undescribedReasonNote: response.reasons.undescribedNote,
+    source: {
+      summary: response.source.summary,
+      reference: response.source.reference,
+      referenceWithheldBecause: response.source.referenceWithheldBecause,
+      attribution: response.source.attribution,
+    },
+    coverageStatement: response.coverageStatement,
+    basisNote: response.basisNote,
+    inferredCount: response.inferredCount,
+    actions: response.actions,
+    actionsUnavailableBecause: response.actionsUnavailableBecause,
+  };
 }

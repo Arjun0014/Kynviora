@@ -82,6 +82,7 @@ function isoOrNull(value: Date | string | null | undefined): string | null {
 interface InboxRow {
   owned_item_id: string;
   display_name: string;
+  alert_publication_id: string | null;
   substances: { key: string; name: string; concentration: string | number | null }[] | null;
   alert_urgency: string | null;
   alert_evidence_level: string | null;
@@ -142,6 +143,7 @@ export function registerSafetyInboxRoutes(app: FastifyInstance, deps: SafetyInbo
                      JOIN normalized_substance ns ON ns.id = fi.substance_id
                     WHERE fi.formulation_id = i.formulation_id
                       AND fi.mapping_state = 'EXACT') AS substances,
+                  pa_alert.alert_id         AS alert_publication_id,
                   pa_alert.urgency          AS alert_urgency,
                   pa_alert.evidence_level   AS alert_evidence_level,
                   pa_alert.match_confidence AS alert_match_confidence,
@@ -149,7 +151,7 @@ export function registerSafetyInboxRoutes(app: FastifyInstance, deps: SafetyInbo
                   pa_last.evaluated_at      AS assessment_evaluated_at
              FROM owned_item i
              LEFT JOIN LATERAL (
-               SELECT a.urgency, a.evidence_level, a.match_confidence
+               SELECT ap.id AS alert_id, a.urgency, a.evidence_level, a.match_confidence
                  FROM alert_publication ap
                  JOIN profile_assessment a ON a.id = ap.assessment_id
                 WHERE ap.profile_id = i.profile_id
@@ -200,6 +202,11 @@ export function registerSafetyInboxRoutes(app: FastifyInstance, deps: SafetyInbo
         return {
           ownedItemId: row.owned_item_id,
           displayName: row.display_name,
+          // The live alert this line came from, so a screen can open its detail. NULL on a line
+          // with no live alert, which is most of them - and a null here is what keeps the control
+          // absent rather than disabled (DEC-045). A withdrawn alert is filtered out by policy,
+          // so this identifier never points at one.
+          alertPublicationId: row.alert_publication_id,
           // Empty rather than absent where the item has no confirmed ingredient mapping, which
           // is every item until guided capture lands (`DEV-024`, `BLK-007`). A screen offers no
           // Lens control for an empty list, which is absent rather than disabled (DEC-045).

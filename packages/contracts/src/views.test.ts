@@ -403,6 +403,7 @@ describe('the Safety Watch inbox a person reads', () => {
   const line = (over: Record<string, unknown> = {}) => ({
     ownedItemId: 'i1',
     displayName: 'Synthetic Tablet A',
+    alertPublicationId: null,
     state: 'INSUFFICIENT_DATA',
     urgency: null,
     evidenceLevel: null,

@@ -116,6 +116,12 @@ export const PRIVILEGED_REASONS = [
   'PROVIDER_CREDENTIAL_USE',
   'NOTIFICATION_DISPATCH',
   'IDEMPOTENCY_BOOKKEEPING',
+  // Recording a safety receipt. The app role holds SELECT and UPDATE on `safety_receipt` and
+  // deliberately no INSERT: migration 0006 gives a person the right to resolve a receipt that
+  // exists, not to create rows pointing at whichever alert and assessment they name. So the
+  // insert is privileged, and the route establishes authority first by reading the alert under
+  // row-level security - a caller who cannot see it cannot report on it.
+  'SAFETY_RECEIPT',
 ] as const;
 export type PrivilegedReason = (typeof PRIVILEGED_REASONS)[number];
 

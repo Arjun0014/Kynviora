@@ -764,7 +764,13 @@ describe('naming the shelf medicine is what makes a comparison useful', () => {
     expect(read.kind).toBe('OK');
     if (read.kind !== 'OK') return;
 
-    const field = read.value.differences.find((entry) => entry.kind === 'FIELD_DIFFERS');
+    // The strength difference specifically, not the first FIELD_DIFFERS. A named line with no
+    // dosage form produces a second field difference whose current value is null, and `.find()`
+    // over an unordered list picked whichever the database returned first - a test that failed
+    // about one in five runs and named the wrong cause when it did.
+    const field = read.value.differences.find(
+      (entry) => entry.kind === 'FIELD_DIFFERS' && entry.field === 'strengthText',
+    );
     expect(field).toBeDefined();
     if (field === undefined) return;
 
@@ -1606,6 +1612,48 @@ describe('the Safety Watch inbox, end to end', () => {
     const after = await asCaregiver.safetyInbox(SEED.profileId);
     if (after.kind !== 'OK') return;
     expect(after.value.lines).toEqual([]);
+  });
+});
+
+describe('the alert detail, end to end', () => {
+  it('offers no explanation control on a line with no live alert', async () => {
+    // The seed publishes nothing (BLK-006, DEC-016), so every line has a null alert identifier
+    // and the screen offers no "why am I seeing this?" control anywhere. Absent rather than
+    // disabled, which is the same rule the Lens control follows on this screen (DEC-045).
+    const outcome = await owner.safetyInbox(SEED.profileId);
+    expect(outcome.kind).toBe('OK');
+    if (outcome.kind !== 'OK') return;
+
+    const view = safetyInboxView(outcome.value);
+    expect(view.lines.length).toBeGreaterThan(0);
+    for (const line of view.lines) expect(line.alertPublicationId).toBeNull();
+  });
+
+  it('answers an alert nobody may see as absence, over a real connection', async () => {
+    const outcome = await owner.alertDetail('00000000-0000-4000-8000-0000000000aa');
+    // The API answers PERMISSION_DENIED and NOT_FOUND identically with 404, and the client has no
+    // outcome meaning "you are not allowed" (DEC-039). This is that all the way through.
+    expect(outcome.kind).toBe('UNAVAILABLE');
+  });
+
+  it('answers a malformed alert identifier the same way', async () => {
+    const outcome = await owner.alertDetail('not-a-uuid');
+    expect(outcome.kind).toBe('UNAVAILABLE');
+  });
+
+  it('shows a stranger the same absence, without confirming anything exists', async () => {
+    const outcome = await stranger.alertDetail('00000000-0000-4000-8000-0000000000aa');
+    expect(outcome.kind).toBe('UNAVAILABLE');
+  });
+
+  it('refuses an unauthenticated read', async () => {
+    const outcome = await anonymous.alertDetail('00000000-0000-4000-8000-0000000000aa');
+    expect(outcome.kind).toBe('UNAUTHENTICATED');
+  });
+
+  it('will not record a report against an alert the caller cannot reach', async () => {
+    const outcome = await owner.reportIncorrectMatch('00000000-0000-4000-8000-0000000000aa');
+    expect(outcome.kind).toBe('UNAVAILABLE');
   });
 });
 

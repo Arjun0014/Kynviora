@@ -38,6 +38,7 @@ import { registerVisitPackRoutes, sha256ContentDigest } from './visitPack.js';
 import { registerAlertDeliveryRoutes } from './alertDelivery.js';
 import { registerReviewInboxRoutes } from './reviewInbox.js';
 import { registerReconciliationRoutes } from './reconciliation.js';
+import { registerAlertDetailRoutes } from './alertDetail.js';
 import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
 import { registerOperationsRoutes } from './operations.js';
 import { registerSafetyInboxRoutes } from './safetyInbox.js';
@@ -780,6 +781,31 @@ export function createServer(options: ServerOptions): FastifyInstance {
     // RLS so the flow cannot change what the caller could not change directly.
 
     registerReconciliationRoutes(app, { contextFor, fail });
+
+    // -------------------------------------------------------------------------
+    // Alert detail and explainability (spec 04 Phase 7.3)
+    // -------------------------------------------------------------------------
+    // A household route, and one of the few that composes approved safety wording server-side.
+    // `11` puts safety composition on the server: a client that assembled the message would hold
+    // the approved templates, the withheld-reference rule and the known-versus-inferred labelling
+    // in every build that ever shipped.
+
+    registerAlertDetailRoutes(app, {
+      contextFor,
+      fail,
+      monitoredJurisdictions: async () => {
+        const sources = await options.loadSources();
+        const jurisdictions = new Set<string>();
+        for (const source of sources.values()) {
+          if (source.jurisdiction !== null && source.jurisdiction !== undefined) {
+            jurisdictions.add(source.jurisdiction);
+          }
+        }
+        // Sorted, so the coverage sentence does not change wording between two identical
+        // deployments because a Map iterated differently.
+        return [...jurisdictions].sort();
+      },
+    });
 
     // -------------------------------------------------------------------------
     // Safety Watch inbox route (spec 04 Phase 7.1)

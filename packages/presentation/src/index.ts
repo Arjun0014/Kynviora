@@ -18,3 +18,4 @@ export * from './reconciliation.js';
 export * from './screenState.js';
 export * from './reviewTaskEditor.js';
 export * from './doseEvents.js';
+export * from './alertDetail.js';

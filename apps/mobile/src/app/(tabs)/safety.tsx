@@ -46,8 +46,11 @@ import {
 } from '@kynviora/presentation';
 import { PRODUCT_SAFETY_STATES, type ProductSafetyState } from '@kynviora/domain';
 import {
+  alertDetailScreenView,
   lensView,
   safetyInboxView,
+  screenStateForFailure,
+  type AlertDetailScreenView,
   type LensView,
   type SafetyInboxLineView,
 } from '@kynviora/contracts';
@@ -59,6 +62,7 @@ import { ResourceState } from '@/components/ScreenState';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { StatusChip } from '@/components/StatusChip';
 import { RegulatoryLens } from '@/features/lens/RegulatoryLens';
+import { AlertDetail } from '@/features/safety/AlertDetail';
 
 const EMPTY = { lines: [], totalItems: 0 } as const;
 
@@ -85,6 +89,17 @@ export default function SafetyScreen() {
     readonly substanceKey: string;
     readonly disclosedConcentrationPercent: number | null;
   } | null>(null);
+
+  /**
+   * The alert whose detail is open, or `null`.
+   *
+   * `04` Phase 7.3 is reached from a line rather than being its own destination, for the same
+   * reason the Lens is: an alert is about an item, and a detail screen with its own tab would be
+   * a list of alerts again - which is what Phase 7.1 stopped this screen being.
+   */
+  const [alertFor, setAlertFor] = useState<string | null>(null);
+  const [reporting, setReporting] = useState(false);
+  const [reportMessage, setReportMessage] = useState<string | null>(null);
 
   const load = useMemo(
     () =>
@@ -125,9 +140,75 @@ export default function SafetyScreen() {
     [lensResource.value],
   );
 
+  const loadAlert = useMemo(
+    () => (client === null || alertFor === null ? null : () => client.alertDetail(alertFor)),
+    [client, alertFor],
+  );
+
+  const { resource: alertResource, reload: reloadAlert } = useResource(loadAlert, {
+    enabled: alertFor !== null,
+  });
+
+  const alertView: AlertDetailScreenView | null = useMemo(
+    () => (alertResource.value === null ? null : alertDetailScreenView(alertResource.value)),
+    [alertResource.value],
+  );
+
+  /**
+   * Tell the server the match is wrong.
+   *
+   * The outcome union is destructured rather than caught: `06` requires every critical route to
+   * define its offline and error states, and this one has to say plainly whether the report was
+   * recorded. A silent failure here would leave somebody believing they had reported a wrong
+   * alert about their own medicine.
+   */
+  const onReportIncorrect = useCallback(() => {
+    if (client === null || alertFor === null) return;
+    setReporting(true);
+    setReportMessage(null);
+    void client.reportIncorrectMatch(alertFor).then((outcome) => {
+      setReporting(false);
+      if (outcome.kind === 'OK') {
+        setReportMessage(
+          outcome.value.alreadyReported
+            ? 'You had already told Kynviora this match is wrong.'
+            : 'Recorded. Kynviora has kept this on the alert; the alert itself has not changed.',
+        );
+        reloadAlert();
+        return;
+      }
+      setReportMessage(
+        outcome.kind === 'OFFLINE'
+          ? 'Kynviora could not reach the server, so nothing was recorded. Try again later.'
+          : 'Kynviora could not record that. Nothing about the alert has changed.',
+      );
+      // The screen state the failure maps to, so an authorization loss is not reported as a
+      // network problem.
+      void screenStateForFailure(outcome);
+    });
+  }, [client, alertFor, reloadAlert]);
+
   const onRetry = useCallback(() => {
     reload();
   }, [reload]);
+
+  if (alertFor !== null) {
+    return (
+      <Screen title="Safety" intro="What this alert rests on, and what Kynviora worked out.">
+        <AlertDetail
+          view={alertView}
+          state={alertResource.state}
+          onReportIncorrect={onReportIncorrect}
+          reporting={reporting}
+          reportMessage={reportMessage}
+          onClose={() => {
+            setAlertFor(null);
+            setReportMessage(null);
+          }}
+        />
+      </Screen>
+    );
+  }
 
   if (lensFor !== null) {
     return (
@@ -201,7 +282,12 @@ export default function SafetyScreen() {
       ) : null}
 
       {view.lines.map((line) => (
-        <SafetyRow key={line.ownedItemId} line={line} onOpenLens={setLensFor} />
+        <SafetyRow
+          key={line.ownedItemId}
+          line={line}
+          onOpenLens={setLensFor}
+          onOpenAlert={setAlertFor}
+        />
       ))}
 
       {/* Rendered in every state, including the empty one. `09` requires the coverage statement
@@ -214,12 +300,14 @@ export default function SafetyScreen() {
 function SafetyRow({
   line,
   onOpenLens,
+  onOpenAlert,
 }: {
   readonly line: SafetyInboxLineView;
   readonly onOpenLens: (substance: {
     readonly substanceKey: string;
     readonly disclosedConcentrationPercent: number | null;
   }) => void;
+  readonly onOpenAlert: (alertPublicationId: string) => void;
 }) {
   return (
     <View style={styles.alert}>
@@ -241,6 +329,19 @@ function SafetyRow({
           ? 'Kynviora has not assessed this item.'
           : `Last assessed ${line.lastAssessedAt.slice(0, 10)}.`}
       </Text>
+
+      {/* Only where there is a live alert to explain. A line whose state came from an assessment
+          rather than a publication has nothing to open, and a disabled control would state that
+          an explanation exists and is being withheld (DEC-045). */}
+      {line.alertPublicationId === null ? null : (
+        <PrimaryButton
+          label="Why am I seeing this?"
+          variant="secondary"
+          onPress={() => {
+            onOpenAlert(line.alertPublicationId as string);
+          }}
+        />
+      )}
 
       {/* Beside the safety state, never substituted for it (`09`). One control per confirmed
           substance, and none at all where there are none - a Lens opened on a substance nobody

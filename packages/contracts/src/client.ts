@@ -99,6 +99,14 @@ export interface AlertsResponse {
 export interface SafetyInboxLineResponse {
   readonly ownedItemId: string;
   readonly displayName: string;
+  /**
+   * The live alert behind this line, or `null`.
+   *
+   * `null` on every line whose state came from an assessment rather than a publication, which is
+   * most of them. A screen opens the Phase 7.3 detail from this and offers no control where it is
+   * absent - absent rather than disabled, as DEC-045 has it.
+   */
+  readonly alertPublicationId: string | null;
   readonly state: string;
   readonly urgency: string | null;
   readonly evidenceLevel: string | null;
@@ -118,6 +126,88 @@ export interface SafetyInboxLineResponse {
     /** Recorded only where the package actually discloses it. `null` is the common case (`09`). */
     readonly disclosedConcentrationPercent: number | null;
   }[];
+}
+
+/**
+ * One alert, as the server composed it.
+ *
+ * The narrative, the withheld-reference decision and the known-versus-inferred labelling are all
+ * server-side: `11` puts safety composition there, and a client that assembled any of them would
+ * carry the approved wording in every build that ever shipped. This client narrows and renders;
+ * it decides nothing.
+ */
+/**
+ * A status presentation on the wire.
+ *
+ * Declared here rather than imported from `@kynviora/presentation`, like every other wire shape
+ * in this file: the API and the client are separate packages by design, and a shape imported from
+ * the server would make a breaking change to it invisible until runtime. The fields are strings
+ * because that is what arrives; the view narrows them.
+ */
+export interface StatusPresentationResponse {
+  readonly label: string;
+  readonly iconName: string;
+  readonly tone: string;
+  readonly description: string;
+  readonly accessibilityLabel: string;
+}
+
+export interface AlertFactResponse {
+  readonly label: string;
+  readonly value: string | null;
+  readonly basis: string;
+  readonly basisText: string;
+}
+
+export interface AlertDetailResponse {
+  readonly alertPublicationId: string;
+  readonly profileId: string;
+  readonly ownedItemId: string;
+  readonly isLive: boolean;
+  readonly withdrawnNotice: string | null;
+  /** The eight approved parts in order, or `null` where no approved wording applies. */
+  readonly message: readonly string[] | null;
+  readonly unexplainable: { readonly heading: string; readonly body: string } | null;
+  readonly withheldNotice: string | null;
+  /** Three separate presentations. Never merged (`23` D-005). */
+  readonly urgency: StatusPresentationResponse;
+  readonly evidence: StatusPresentationResponse;
+  readonly matchConfidence: StatusPresentationResponse;
+  readonly facts: readonly AlertFactResponse[];
+  readonly reasons: {
+    readonly reasons: readonly string[];
+    readonly undescribedCount: number;
+    readonly undescribedNote: string | null;
+  };
+  readonly source: {
+    readonly organization: string | null;
+    readonly sourceName: string | null;
+    readonly jurisdiction: string | null;
+    readonly reference: string | null;
+    readonly referenceWithheldBecause: string | null;
+    readonly publishedOn: string | null;
+    readonly effectiveFrom: string | null;
+    readonly attribution: string | null;
+    readonly summary: string;
+  };
+  readonly coverageStatement: string;
+  readonly inferredCount: number;
+  readonly basisNote: string;
+  readonly actions: readonly {
+    readonly action: string;
+    readonly label: string;
+    readonly explanation: string;
+  }[];
+  readonly actionsUnavailableBecause: string | null;
+  readonly publishedAt: string;
+  readonly serverTime: string;
+}
+
+export interface IncorrectMatchReported {
+  readonly recorded: boolean;
+  /** True on a repeat. Said rather than pretended, so a screen does not claim a second report. */
+  readonly alreadyReported: boolean;
+  readonly serverTime: string;
 }
 
 export interface SafetyInboxResponse {
@@ -649,6 +739,18 @@ export interface KynvioraClient {
   ): Promise<ApiOutcome<SafetyInboxResponse>>;
 
   profileAlerts(profileId: string): Promise<ApiOutcome<ProfileAlertsResponse>>;
+  /** One alert and everything it rests on (`04` Phase 7.3). */
+  alertDetail(alertId: string): Promise<ApiOutcome<AlertDetailResponse>>;
+  /**
+   * Tell Kynviora a match is wrong.
+   *
+   * Feedback, not a resolution: it records that a person disagrees, and changes neither the alert
+   * nor the assessment. Withdrawing one is a reviewer's decision through the staff console.
+   */
+  reportIncorrectMatch(
+    alertId: string,
+    body?: { readonly note?: string },
+  ): Promise<ApiOutcome<IncorrectMatchReported>>;
   notificationSettings(profileId: string): Promise<ApiOutcome<NotificationSettingsResponse>>;
   setNotificationPreference(
     profileId: string,
@@ -802,6 +904,17 @@ export function createClient(options: ClientOptions): KynvioraClient {
 
     profileAlerts: (profileId) =>
       get<ProfileAlertsResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/alerts`),
+
+    alertDetail: (alertId) => get<AlertDetailResponse>(`/v1/alerts/${encodeURIComponent(alertId)}`),
+
+    // No idempotency key: there is one destination state and the server answers a repeat with
+    // `alreadyReported`, so a retry is the same request rather than a second opinion.
+    reportIncorrectMatch: (alertId, body) =>
+      request<IncorrectMatchReported>(transport, {
+        method: 'POST',
+        path: `/v1/alerts/${encodeURIComponent(alertId)}/report-incorrect`,
+        body: body ?? {},
+      }),
 
     notificationSettings: (profileId) =>
       get<NotificationSettingsResponse>(

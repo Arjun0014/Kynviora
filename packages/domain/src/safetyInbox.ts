@@ -162,6 +162,14 @@ export interface SafetyInboxFilter {
 export interface SafetyInboxLine extends ItemSafetyState {
   readonly ownedItemId: string;
   readonly displayName: string;
+  /**
+   * The live alert this line came from, or `null`.
+   *
+   * `null` on every line with no live alert, which is most of them, and on every line whose state
+   * was derived from an assessment rather than from a publication. A screen opens the Phase 7.3
+   * detail from this and offers no control where it is absent (DEC-045).
+   */
+  readonly alertPublicationId: string | null;
 }
 
 /**
