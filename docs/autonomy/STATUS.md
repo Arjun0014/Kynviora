@@ -20,7 +20,7 @@ Last updated: 2026-09-02
 
 ## Verification state
 
-- **2820 tests passing**, 0 failing, across 91 files.
+- **2891 tests passing**, 0 failing, across 95 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -766,3 +766,31 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
 123. Do not add a digest queue table before something drains it. `BLK-009` means nothing is sent,
      and a table nobody would drain is speculative structure a later reader mistakes for a working
      mechanism.
+124. Do not meet "a user can understand which items need verification or review" with a filter
+     alone. A list where that is visible only to somebody who already knew to filter for it lets
+     nobody understand anything; the reasons belong on the row, and the filter only narrows.
+125. Do not add a "reviewed too long ago" reason to the shelf. It needs an interval, `BLK-008`
+     records that every numeric threshold here is unset, and an invented ninety days is a
+     threshold arriving through the back door on the screen a household reads most.
+     `NEVER_REVIEWED` is the absence of a timestamp and is a different, honest statement.
+126. Do not merge the three verification axes into one `NEEDS_VERIFICATION` reason. `08` keeps
+     them separate and `02` forbids the aggregate; a merged reason is that aggregate with the
+     number left off. Six members, one per facet per unsettled state.
+127. Do not add a count of what needs attention, per item or per shelf. `02` forbids the aggregate
+     and Phase 8.3 forbids the badge. The row says which, never how many.
+128. Do not ask anything of a stopped or archived item. Nothing about it is going to be used, and
+     a shelf that nags about finished packs teaches people to ignore the list that matters. The
+     route enforces it in SQL as well as the domain, because filtering after paging returns short
+     pages that read as the end of the list.
+129. Do not render `personal_care_category` raw. It is a closed vocabulary in migration `0004`,
+     and `BODY_CLEANSER` beside a bottle in somebody's bathroom is a field value, not a phrase. A
+     CHECK constraint caught this in a fixture, not review.
+130. Do not render a medicine's fields and a personal-care item's fields as one list with blanks.
+     A medicine with an empty "kind of product" row reads as one somebody failed to fill in, which
+     is exactly the reduction to a generic note Phase 2.1's first exit criterion forbids.
+131. Do not put written directions in Kynviora's voice. `04` Phase 4.1 preserves the source text
+     and `09` forbids Kynviora saying how to take a medicine; `ItemField.quoted` is what keeps a
+     prescription instruction rendered as somebody else's words.
+132. Do not let an unrecognised filter value through as "no filter". A silently widened result set
+     and a silently narrowed one are both the failure a list about somebody's medicines cannot
+     have - the same rule the safety inbox already keeps (trap 79).

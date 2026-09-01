@@ -74,20 +74,42 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 
 | Phase | Title                      | Status        |
 | ----- | -------------------------- | ------------- |
-| 2.1   | Shared Shelf framework     | `IN_PROGRESS` |
+| 2.1   | Shared Shelf framework     | `COMPLETE`    |
 | 2.2   | Manual medicine entry      | `NOT_STARTED` |
 | 2.3   | Manual personal-care entry | `NOT_STARTED` |
 | 2.4   | Product Trust Passport v1  | `COMPLETE`    |
 
-- **2.1**: reconciled 2026-09-01, and `NOT_STARTED` was stale. Migration `0004` **is** written:
-  `owned_item` carries the lifecycle state, the three verification axes and the first-used /
-  stopped / last-reviewed / last-checked timestamps that this phase asks for. `GET /v1/items`
-  returns them and the Shelf screen renders the three axes as three separate chips, so the first
-  exit criterion - medicine and personal-care items coexist without one being a generic note - is
-  met by typed records on both sides. What is missing is the rest of the expected output: an
-  **item detail route**, and the profile / category / verification / attention **filters**. The
-  second exit criterion, "a user can understand which items need verification or review", is
-  reachable today only through the Today inbox rather than from the Shelf itself.
+- **2.1**: complete as of 2026-09-02. Migration `0004` already carried the lifecycle state, the
+  three verification axes and the timestamps; `GET /v1/items` returned them and the Shelf rendered
+  three separate chips. What was outstanding was the item detail route and the verification and
+  attention filters, and with them the second exit criterion.
+
+  **Exit criterion 1** - medicines and personal-care items coexist without either being reduced to
+  a generic note - is now _which fields exist_. `GET /v1/items/:itemId` gives a medicine its
+  strength, dosage form and written directions and a personal-care item its category, and the
+  group the other category has is absent rather than rendered empty: a medicine with a blank "kind
+  of product" row reads as one somebody failed to fill in, which is the reduction the criterion
+  forbids. Directions are passed through untouched and marked as quoted, so a screen renders a
+  prescription instruction as somebody else's words (`04` Phase 4.1, `09`).
+
+  **Exit criterion 2** - a user can understand which items need verification or review - is on the
+  row rather than behind the filter. A filter alone meets the words and not the sentence: a list
+  where that is visible only to somebody who already knew to filter for it lets nobody understand
+  anything. `attentionReasons` in `@kynviora/domain` derives eight named reasons, each from one
+  stored value being one of a stated set, and every shelf row carries its own. There is no count
+  and no ordering - `02` forbids the aggregate, and which of two people's medicines matters more
+  is not a judgement this list makes.
+
+  Deliberately absent: any "reviewed too long ago" reason. That needs an interval and `BLK-008`
+  records that every numeric threshold here is unset; an invented ninety days would be a threshold
+  arriving through the back door on the screen a household reads most. `NEVER_REVIEWED` is the
+  absence of a timestamp rather than a judgement about its age, and that is the statement this
+  build can make honestly.
+
+  71 tests across the domain (17), presentation (22), contracts (8) and API (24) suites, the last
+  against real PostgreSQL including the `03` group H boundary - a caregiver holding `VIEW_SAFETY`
+  and not `VIEW_MEDICINES` reads an alert about a medicine and gets a not-found for the medicine.
+
 - **2.2 / 2.3**: unchanged and accurate. There is no manual-entry surface for either category.
 
 The Trust Passport's underlying data - identity/formulation/batch verification kept separate,
@@ -569,21 +591,24 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
-1. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
-   dispatch, its authorization and now its delivery policy all exist; nothing calls them with a
-   real occurrence.
+1. Phases 2.2 and 2.3: manual medicine and personal-care entry. Nothing creates an `owned_item`
+   from a user surface, so every shelf in this build was seeded. The schema, the verification
+   axes and now the detail and the filters are all in place; what is missing is the write path
+   and the screens.
 2. The notification settings screen. The route reports quiet hours, the urgency-to-channel table
    and the copy that explains both; no client renders any of it, so a person cannot set a window
    they can already be governed by.
-3. Stage 9.2's release gates that do not need a threshold nobody has set (`BLK-008`).
+3. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
+   dispatch, its authorization and now its delivery policy all exist; nothing calls them with a
+   real occurrence.
 
 Done since this list was last written: the staff reviewer console and the API surface split
-(`DEV-016`, `DEV-017`), Phase 7.3, Phase 7.4's regulatory half, Phase 7.6 end to end, and Phase
-7.5 including the dispatcher that acts on it.
+(`DEV-016`, `DEV-017`), Phase 7.3, Phase 7.4's regulatory half, Phase 7.6 end to end, Phase 7.5
+including the dispatcher that acts on it, and Phase 2.1's item detail and filters.
 
 ## What "complete" means here, and what it does not
 
-Twenty-seven phases are marked `COMPLETE` above. In every case that means the logic is
+Twenty-eight phases are marked `COMPLETE` above. In every case that means the logic is
 implemented, tested, documented and committed - and in most cases the tests execute against a real
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
@@ -592,7 +617,7 @@ device, a credential, a labelled dataset, human participants, or a qualified hum
 those are marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even
 where all buildable work is finished. `BLOCKERS.md` records what each one needs.
 
-The counts above are the tables' own, recounted whenever a status changes: 27 `COMPLETE`, 9
+The counts above are the tables' own, recounted whenever a status changes: 28 `COMPLETE`, 8
 `IN_PROGRESS`, 6 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
 `04` defines. A prose count that drifts from the table it describes is the quiet way a status
 document stops being one - and the first version of this paragraph drifted immediately, because it

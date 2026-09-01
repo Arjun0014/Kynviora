@@ -2029,3 +2029,61 @@ format all clean via `npm run verify`, exit 0. 87 new tests across four suites.
 Stage 7's buildable work is finished. 7.1, 7.4, 7.5 and 7.6 are `COMPLETE`; 7.2 and 7.3 are
 `BLOCKED_EXTERNAL` on usability participants nobody here can convene, with every item of their
 expected output built and tested.
+
+### Phase 2.1 - the item detail and the shelf filters
+
+Stage 7's buildable work finished, so this went back for the oldest outstanding gap rather than
+forward into Stage 9. Phase 2.1's second exit criterion - "a user can understand which items need
+verification or review" - was reachable only through the Today inbox, which is to say not from the
+Shelf the criterion is about.
+
+**The criterion is not a filter.** A filter meets the words: a person who selects "needs
+verification" gets the items that do. It does not meet the sentence, because somebody who does not
+already know to filter learns nothing, and the criterion is about understanding rather than about
+querying. So every row carries its own reasons and the filter only narrows. That is one design
+decision and it drove the rest of the phase.
+
+**Every reason is a column, never a judgement.** Eight members, each decided by one stored value
+being one of a stated set. Nothing derived from how long ago something happened, how many axes are
+unconfirmed, or what kind of item it is. Six of the eight are one facet in one unsettled state -
+merging them into a single `NEEDS_VERIFICATION` would be the aggregate `02` forbids with the
+number left off, and it would lose the distinction between "two sources disagreed about what this
+is" and "nobody has checked", which call for different actions.
+
+**The reason that is deliberately missing.** "Reviewed too long ago" is the obvious ninth member
+and it needs an interval. `BLK-008` records that every numeric threshold in this build is unset
+pending real data, and an invented ninety days would be a threshold arriving through the back door
+on the screen a household reads most often. `NEVER_REVIEWED` is the absence of a timestamp - a
+different statement, and the one this build can make honestly.
+
+**A stopped item is asked nothing.** Unverified in every way, never reviewed, and flagged by
+nothing. A shelf that kept nagging about packs somebody has finished with is the alarm
+optimisation `02` refuses, and worse, it teaches people to ignore the list that matters. The route
+enforces the same rule in SQL rather than filtering the page afterwards, because post-filtering a
+paged query returns short pages that read as the end of the list.
+
+**Exit criterion 1 turned out to be about which fields exist.** Not about having both categories
+on one screen - that was already true - but about a medicine's detail not carrying an empty "kind
+of product" row. A blank field of the other category's shape reads as a record somebody failed to
+fill in, which is precisely the reduction to a generic note. So the two groups are typed
+separately and the one that does not apply is not rendered at all.
+
+**A constraint caught what review had not.** `personal_care_category` is a closed vocabulary in
+migration `0004`, and the first draft rendered it straight through - `BODY_CLEANSER` beside a
+bottle in somebody's bathroom. The fixture failed on the CHECK, which is the only reason anybody
+looked. It now renders as a phrase, and a category this build has no phrase for reads as "Not
+recorded" rather than as its code.
+
+**Written directions are quoted.** `04` Phase 4.1 preserves the source text and `09` forbids
+Kynviora saying how to take a medicine. Passing the text through is not enough on a screen: it has
+to be visibly somebody else's words, or the rule fails in the rendering rather than in the data.
+`ItemField.quoted` carries that, and the detail screen sets those lines apart.
+
+### State
+
+2891 tests passing across 95 files, up from 2820 across 91. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 71 new tests across four suites.
+
+Phase 2.1 is `COMPLETE`. The honest remainder is one layer down: nothing in this build creates an
+`owned_item` from a user surface, so every shelf so far has been seeded. That is Phases 2.2 and
+2.3, and it is the next thing worth doing.
