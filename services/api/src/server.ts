@@ -40,6 +40,7 @@ import { registerReviewInboxRoutes } from './reviewInbox.js';
 import { registerReconciliationRoutes } from './reconciliation.js';
 import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
 import { registerOperationsRoutes } from './operations.js';
+import { registerSafetyInboxRoutes } from './safetyInbox.js';
 import { registerShadowModeRoutes } from './shadowMode.js';
 
 /**
@@ -729,6 +730,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
 
   registerReviewerConsoleRoutes(app, { contextFor, fail });
   registerOperationsRoutes(app, { contextFor, fail });
+  registerSafetyInboxRoutes(app, { contextFor, fail });
 
   // -------------------------------------------------------------------------
   // Shadow-run and replay routes (spec 04 Phase 6.7)

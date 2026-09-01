@@ -20,3 +20,4 @@ export * from './reviewInbox.js';
 export * from './reconciliation.js';
 export * from './reviewerConsole.js';
 export * from './observability.js';
+export * from './safetyInbox.js';

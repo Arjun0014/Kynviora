@@ -22,6 +22,7 @@
 
 import {
   NOTIFICATION_DETAIL_LEVELS,
+  PRODUCT_SAFETY_STATES,
   REVIEW_TASK_KINDS,
   isActionUrgency,
   isCaregiverCapability,
@@ -36,11 +37,13 @@ import {
   type CaregiverCapability,
   type MatchConfidence,
   type NotificationDetailLevel,
+  type ProductSafetyState,
   type ReviewTaskKind,
 } from '@kynviora/domain';
 import {
   describeAuditAction,
   presentEvidenceLevel,
+  presentSafetyState,
   presentMatchConfidence,
   presentUrgency,
   presentVerification,
@@ -50,6 +53,7 @@ import type {
   AlertSummary,
   CaregiverAuditEvent,
   CaregiverGrant,
+  SafetyInboxLineResponse,
   PendingInvitation,
   ReviewTask,
   ShelfItem,
@@ -208,6 +212,90 @@ export function safetyView(alerts: readonly AlertSummary[]): SafetyView {
     alerts: alerts.map(alertView),
     // Shown whether or not there are alerts. An absence of findings is not a finding of absence,
     // and the sentence saying so has to be on screen in both cases.
+    coverageStatement: SAFETY_EMPTY_COVERAGE,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The Safety Watch inbox
+// ---------------------------------------------------------------------------
+
+/**
+ * Narrow a product safety state, defaulting to the one that claims least.
+ *
+ * `INSUFFICIENT_DATA` rather than `NO_CURRENT_MATCHED_ALERT`, and the difference is the whole
+ * point: a state this client cannot read is not evidence that a check ran and came back clear.
+ * `23` D-014 forbids an absence rendering as approval, and an unrecognised value is an absence of
+ * a different kind.
+ */
+export function asProductSafetyState(raw: string): ProductSafetyState {
+  return (PRODUCT_SAFETY_STATES as readonly string[]).includes(raw)
+    ? (raw as ProductSafetyState)
+    : 'INSUFFICIENT_DATA';
+}
+
+export interface SafetyInboxLineView {
+  readonly ownedItemId: string;
+  readonly displayName: string;
+  /**
+   * Three separate presentations, never merged.
+   *
+   * `23` D-005 forbids combining evidence level and urgency, and Phase 7.1 requires them visibly
+   * separate. `urgency` and `evidence` are `null` together on a line with no live alert, because
+   * an item nobody has alerted on has neither - not `INFORMATIONAL` and not `U`.
+   */
+  readonly state: StatusPresentation;
+  readonly urgency: StatusPresentation | null;
+  readonly evidence: StatusPresentation | null;
+  /** When Kynviora last assessed this item, or `null`. Rendered as an absence, not hidden. */
+  readonly lastAssessedAt: string | null;
+}
+
+export interface SafetyInboxView {
+  readonly lines: readonly SafetyInboxLineView[];
+  /** How many items the shelf holds before filtering. Never a count of anything urgent. */
+  readonly totalItems: number;
+  /** Whether the list on screen is a subset. Lets a screen say so without computing a count. */
+  readonly filtered: boolean;
+  /**
+   * The coverage statement, on screen in every state.
+   *
+   * `09` requires it to accompany the result rather than being inferred from its absence, and an
+   * inbox where every line reads "nothing matched" is exactly where somebody would conclude the
+   * shelf had been cleared.
+   */
+  readonly coverageStatement: string;
+}
+
+/**
+ * The inbox a person reads.
+ *
+ * The order is the server's - the shelf's own - and is not re-sorted here. "Most urgent first" is
+ * a judgement about which of two people's medicines matters more, and `02` refuses the
+ * alarm-optimising product that comes from making it.
+ */
+export function safetyInboxView(response: {
+  readonly lines: readonly SafetyInboxLineResponse[];
+  readonly totalItems: number;
+}): SafetyInboxView {
+  const lines = response.lines.map((line) => ({
+    ownedItemId: line.ownedItemId,
+    displayName: line.displayName,
+    state: presentSafetyState(asProductSafetyState(line.state)),
+    // Null together. A line with no live alert has no urgency and no evidence level, and
+    // substituting a default for either would put a chip on screen that nobody assigned.
+    urgency: line.urgency === null ? null : presentUrgency(asActionUrgency(line.urgency)),
+    evidence:
+      line.evidenceLevel === null
+        ? null
+        : presentEvidenceLevel(asEvidenceLevel(line.evidenceLevel)),
+    lastAssessedAt: line.lastAssessedAt,
+  }));
+
+  return {
+    lines,
+    totalItems: response.totalItems,
+    filtered: lines.length !== response.totalItems,
     coverageStatement: SAFETY_EMPTY_COVERAGE,
   };
 }

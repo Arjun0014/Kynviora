@@ -224,7 +224,7 @@ there is still no staff interface (`DEV-016`).
 
 | Phase | Title                           | Status        |
 | ----- | ------------------------------- | ------------- |
-| 7.1   | Assessment states and inbox     | `NOT_STARTED` |
+| 7.1   | Assessment states and inbox     | `COMPLETE`    |
 | 7.2   | Global Regulatory Lens          | `IN_PROGRESS` |
 | 7.3   | Alert detail and explainability | `NOT_STARTED` |
 | 7.4   | Evidence and Regulatory Diff    | `IN_PROGRESS` |
@@ -434,15 +434,14 @@ that does and does not cover.
 
 ## Immediate next work
 
-1. Phase 7.1: assessment states and the profile inbox. The shadow and replay machinery supports
-   it and nothing external blocks it.
-2. A staff reviewer console interface (`DEV-016`), on its own origin and session policy. The
+1. A staff reviewer console interface (`DEV-016`), on its own origin and session policy. The
    console backend and the operational projection both exist with no interface in front of them.
+2. Phase 7.3: alert detail and explainability, which now has a list to open a detail from.
 3. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch and its authorization already exist; nothing calls them with a real occurrence.
 
 Done since this list was last written: revocation and the rest of `DEV-007`, caregiver delegation
-(`DEV-026`), Phase 4.3, and the observability projections (`20`) - review-queue age for both
+(`DEV-026`), Phase 4.3, Phase 7.1, and the observability projections (`20`) - review-queue age for both
 queues, source freshness against each source's own declared cadence, extraction outcomes and
 catalog conflicts, with no verdict anywhere in the output.
 

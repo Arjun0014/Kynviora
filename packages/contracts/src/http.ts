@@ -58,6 +58,18 @@ export function buildUrl(
   baseUrl: string,
   path: string,
   query: Readonly<Record<string, QueryValue>> = {},
+  /**
+   * Parameters that may appear more than once.
+   *
+   * A filter over an enum is a list, and the two ways to send one are `?state=A&state=B` and
+   * `?state=A,B`. The first is used because the second is one parsing mistake away from a filter
+   * that silently matches nothing - and on the Safety Watch inbox a silently empty list is the
+   * exact failure the screen exists to prevent.
+   *
+   * Values go through the same credential guard as the single-valued ones. Splitting the two
+   * shapes without splitting the guard is how a rule like that stops applying to half the calls.
+   */
+  repeatedQuery: Readonly<Record<string, readonly QueryValue[]>> = {},
 ): string {
   if (!path.startsWith('/')) {
     throw new UnsafeRequest(`Path must start with "/": ${JSON.stringify(path)}.`);
@@ -65,9 +77,7 @@ export function buildUrl(
 
   const url = new URL(baseUrl + path);
 
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined) continue;
-
+  const refuseIfCredential = (key: string): void => {
     const lowered = key.toLowerCase();
     const offending = FORBIDDEN_QUERY_FIELDS.find((field) => lowered.includes(field));
     if (offending !== undefined) {
@@ -77,8 +87,20 @@ export function buildUrl(
           'in a POST body.',
       );
     }
+  };
 
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined) continue;
+    refuseIfCredential(key);
     url.searchParams.set(key, String(value));
+  }
+
+  for (const [key, values] of Object.entries(repeatedQuery)) {
+    refuseIfCredential(key);
+    for (const value of values) {
+      if (value === undefined) continue;
+      url.searchParams.append(key, String(value));
+    }
   }
 
   return url.toString();
@@ -98,6 +120,8 @@ export interface RequestOptions {
   readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   readonly path: string;
   readonly query?: Readonly<Record<string, QueryValue>>;
+  /** Filters that may repeat. See {@link buildUrl}. */
+  readonly repeatedQuery?: Readonly<Record<string, readonly QueryValue[]>>;
   readonly body?: unknown;
   /**
    * `13`: "Idempotency key on mutations that can be retried."
@@ -122,7 +146,7 @@ export async function request<T>(
 
   // Both throw. They are mistakes in the calling code, not conditions a screen renders.
   assertSessionAllowed(session, config.baseUrl);
-  const url = buildUrl(config.baseUrl, options.path, options.query);
+  const url = buildUrl(config.baseUrl, options.path, options.query, options.repeatedQuery);
 
   const doFetch = transport.fetch ?? ((input, init) => fetch(input, init));
 

@@ -31,7 +31,9 @@ import {
   revocationMessage,
   MAX_DOSE_NOTE_LENGTH,
   reviewInboxView,
+  safetyInboxView,
   safetyView,
+  SAFETY_EMPTY_COVERAGE,
   selectableCapabilities,
   shelfView,
   type DigestFn,
@@ -1456,5 +1458,151 @@ describe('recording what happened, end to end', () => {
     const after = await asCaregiver.doseEvents({ ownedItemId: itemId });
     if (after.kind !== 'OK') return;
     expect(after.value.events).toEqual([]);
+  });
+});
+
+describe('the Safety Watch inbox, end to end', () => {
+  /**
+   * Phase 7.1's first exit criterion, exercised through the code the app runs.
+   *
+   * "No state implies guaranteed safety" is not a wording rule - it is what the screen does with
+   * an item nobody has checked. The seed publishes no safety content at all (`BLK-006`, DEC-016),
+   * so every line here comes back as the state that claims least, and that is the assertion: not
+   * that the screen is empty, but that it is full of honest lines.
+   */
+  it('gives every item on the shelf a line, not only the ones with alerts', async () => {
+    // The reason this route exists. `GET /v1/alerts` returns nothing for this profile, and a
+    // screen built on it would show an empty page that a person reads as "all clear".
+    const [alerts, inbox, items] = await Promise.all([
+      owner.listAlerts(),
+      owner.safetyInbox(SEED.profileId),
+      owner.listItems({ profileId: SEED.profileId }),
+    ]);
+    expect(alerts.kind).toBe('OK');
+    expect(inbox.kind).toBe('OK');
+    expect(items.kind).toBe('OK');
+    if (alerts.kind !== 'OK' || inbox.kind !== 'OK' || items.kind !== 'OK') return;
+
+    expect(alerts.value.alerts).toEqual([]);
+    expect(inbox.value.lines.length).toBe(items.value.items.length);
+    expect(inbox.value.lines.length).toBeGreaterThan(0);
+  });
+
+  it('never reads an unassessed item as one that came back clear', async () => {
+    // `23` D-014. Nothing has been assessed against this seed, so "nothing matched" would be a
+    // reassurance nobody earned.
+    const inbox = await owner.safetyInbox(SEED.profileId);
+    if (inbox.kind !== 'OK') return;
+
+    for (const line of inbox.value.lines) {
+      expect(line.state).toBe('INSUFFICIENT_DATA');
+      expect(line.lastAssessedAt).toBeNull();
+    }
+
+    const view = safetyInboxView(inbox.value);
+    for (const rendered of view.lines) {
+      expect(rendered.state.label).not.toMatch(/nothing matched|safe|clear/i);
+      // And no urgency or evidence chip, because there is no alert to have either.
+      expect(rendered.urgency).toBeNull();
+      expect(rendered.evidence).toBeNull();
+    }
+  });
+
+  it('puts the coverage statement on screen even with a full list', async () => {
+    // `09` requires it to accompany the result. An inbox of "not enough information" lines is
+    // exactly where somebody would conclude Kynviora had checked and found nothing.
+    const inbox = await owner.safetyInbox(SEED.profileId);
+    if (inbox.kind !== 'OK') return;
+    const view = safetyInboxView(inbox.value);
+    expect(view.lines.length).toBeGreaterThan(0);
+    expect(view.coverageStatement).toBe(SAFETY_EMPTY_COVERAGE);
+  });
+
+  it('filters by state, and says the list is a subset', async () => {
+    // Phase 7.1 names filters by profile, urgency and status. Profile is the scope; these two
+    // narrow within it.
+    const all = await owner.safetyInbox(SEED.profileId);
+    const matching = await owner.safetyInbox(SEED.profileId, { states: ['INSUFFICIENT_DATA'] });
+    const none = await owner.safetyInbox(SEED.profileId, { states: ['ACTION_REQUIRED'] });
+    if (all.kind !== 'OK' || matching.kind !== 'OK' || none.kind !== 'OK') return;
+
+    expect(matching.value.lines.length).toBe(all.value.lines.length);
+    expect(none.value.lines).toEqual([]);
+    // The shelf size is unchanged by the filter, which is what lets a screen say what it is a
+    // subset of without counting anything urgent.
+    expect(none.value.totalItems).toBe(all.value.totalItems);
+    expect(safetyInboxView(none.value).filtered).toBe(true);
+  });
+
+  it('excludes lines with no alert from an urgency filter', async () => {
+    // Asking for CRITICAL and being shown items with no alert at all would make the filter
+    // meaningless.
+    const outcome = await owner.safetyInbox(SEED.profileId, { urgencies: ['CRITICAL'] });
+    expect(outcome.kind).toBe('OK');
+    if (outcome.kind !== 'OK') return;
+    expect(outcome.value.lines).toEqual([]);
+  });
+
+  it('refuses a filter value it does not recognise, rather than ignoring it', async () => {
+    // A silently-dropped filter shows more than was asked for, which on this screen is the wrong
+    // direction to fail in.
+    const outcome = await owner.safetyInbox(SEED.profileId, { states: ['DEFINITELY_FINE'] });
+    expect(outcome.kind).toBe('REFUSED');
+  });
+
+  it('shows a stranger nothing, without confirming the profile exists', async () => {
+    // Row-level security decides; the profile ID narrows. An empty list rather than a refusal is
+    // the same answer the shelf gives (`13`, DEC-039).
+    const outcome = await stranger.safetyInbox(SEED.profileId);
+    expect(outcome.kind).toBe('OK');
+    if (outcome.kind !== 'OK') return;
+    expect(outcome.value.lines).toEqual([]);
+    expect(outcome.value.totalItems).toBe(0);
+  });
+
+  it('shows a caregiver what their grant admits and stops when it is removed', async () => {
+    // `16`: a caregiver gets exactly what they were granted, and `15` A2 makes the removal
+    // immediate. The inbox follows `owned_item`, so it inherits both rather than restating them.
+    const draft = buildInvitation({
+      profileId: SEED.profileId,
+      authority: { kind: 'OWNER' },
+      selected: ['VIEW_MEDICINES', 'VIEW_SHELF'],
+      invitedEmail: 'caregiver@example.test',
+    });
+    if (!draft.ok || draft.body === null) return;
+
+    const elevated = createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(SEED.userId, { stepUp: true }),
+    });
+    const created = await elevated.createInvitation(draft.body, crypto.randomUUID());
+    if (created.kind !== 'OK') return;
+
+    const accepted = await fetch(`${server.url}/v1/caregiver-invitations/accept`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-kynviora-dev-user': SEED.caregiverUserId,
+        'Idempotency-Key': crypto.randomUUID(),
+      },
+      body: JSON.stringify({ token: created.value.token }),
+    });
+    const grantId = ((await accepted.json()) as { grantId?: string }).grantId ?? '';
+    expect(grantId).not.toBe('');
+
+    const asCaregiver = createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(SEED.caregiverUserId),
+    });
+
+    const before = await asCaregiver.safetyInbox(SEED.profileId);
+    if (before.kind !== 'OK') return;
+    expect(before.value.lines.length).toBeGreaterThan(0);
+
+    await elevated.revokeGrant(grantId);
+
+    const after = await asCaregiver.safetyInbox(SEED.profileId);
+    if (after.kind !== 'OK') return;
+    expect(after.value.lines).toEqual([]);
   });
 });

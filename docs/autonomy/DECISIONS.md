@@ -1696,3 +1696,61 @@ snapshot contains no user content at all - counts, ages, and the public identity
 its own existence.
 
 **Sources.** `13`; `14`; `20`; DEC-032; `DEV-016`.
+
+## DEC-062 - An item nobody has checked is INSUFFICIENT_DATA, never NO_CURRENT_MATCHED_ALERT
+
+**Context.** Phase 7.1 needed the five product states actually derived. `PRODUCT_SAFETY_STATES` had
+existed in the vocabulary since Stage 0 and had been presented since the presentation layer was
+written; nothing computed it. The Safety screen listed published alerts, so an item with no alert
+was simply absent - and a person reading that screen could not tell "checked, nothing matched" from
+"never checked".
+
+**Options.** (a) Keep listing alerts. (b) Give every item a line, and call an unassessed item
+`NO_CURRENT_MATCHED_ALERT`. (c) Give every item a line, and call an unassessed item
+`INSUFFICIENT_DATA`.
+
+**Decision.** (c).
+
+**Rationale.** (a) is `23` D-014 arriving by omission: an absence rendering as approval, with the
+absence being the row itself. It is the quietest possible version of the failure, because there is
+no wrong label to review. (b) fixes the omission and reintroduces the claim: "no current matched
+alert" means a check ran within current coverage and found nothing, which for an unassessed item is
+a reassurance nobody earned. `INSUFFICIENT_DATA` claims only that Kynviora cannot check it yet,
+which is true - and its shipped description already says exactly that.
+
+**The rest of the derivation is `09` read literally.** "Action required - approved action wording
+based on urgency" gives CRITICAL and HIGH; "review - user should confirm item/context or discuss"
+gives MEDIUM and LOW; "information - relevant update without immediate action" gives INFORMATIONAL;
+"insufficient data - item/context cannot be matched reliably" gives `UNCONFIRMED` and `NOT_MATCHED`.
+`STATE_FOR_URGENCY` is a total record, so a new urgency is a decision somebody makes rather than one
+a fallthrough makes for them.
+
+**A withdrawn alert falls back rather than persisting.** The assessment behind a withdrawn alert
+still says the rule matched, so anything reading assessments alone would keep the item on
+ACTION_REQUIRED. `19` treats a withdrawn alert resurfacing as release-blocking; the join filters on
+the publication state, and a database test with a real withdrawn row is what proves it.
+
+**Sources.** `04` Phase 7.1; `09`; `19`; `23` D-005 and D-014; DEC-034.
+
+## DEC-063 - The inbox filters narrow and never rank, and carry no count of any state
+
+**Context.** Phase 7.1 names filters by profile, urgency and status. The obvious companion is a
+count per state, or "most urgent first".
+
+**Decision.** Filters narrow. There is no sort by urgency, no count per state, and no badge.
+`totalItems` is the size of the shelf, so a filtered screen can say what it is a subset of.
+
+**Rationale.** `02` names alarm-optimised design as an anti-feature, and ranking is a judgement
+about which of two people's medicines matters more. A count per state is the same product with a
+number instead of an order. Tests enumerate the response keys, the view keys and the module's
+exported function names, because both are one line to add and hard to notice afterwards.
+
+**A line with no urgency is excluded by an urgency filter rather than included by default.** Asking
+for CRITICAL and being shown items with no alert at all would make the filter meaningless.
+
+**The filter values repeat rather than being comma-separated.** `?state=A&state=B`, because a list
+parsed out of one string is a mistake away from a filter that silently matches nothing - and on
+this screen a silently empty list is the failure the whole route exists to prevent. An unrecognised
+value is refused rather than dropped, for the same reason in the other direction.
+
+**Sources.** `04` Phase 7.1; `02`; `23` D-005; `13`.

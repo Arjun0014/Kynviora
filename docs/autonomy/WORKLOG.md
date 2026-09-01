@@ -1497,3 +1497,57 @@ to see a snapshot through the dev authenticator at all - which is DEC-038 workin
 format all clean via `npm run verify`, exit 0. 31 new tests: 20 on the projection and 11 on the
 route against a real PostgreSQL engine, including the three source-freshness cases and the four
 ways the staff boundary can be approached.
+
+### Phase 7.1 - the Safety Watch inbox, and the row that was not there
+
+The five product states had existed in the vocabulary since Stage 0 and had been presented since
+the presentation layer was written. Nothing computed them. The Safety screen listed published
+alerts, which meant an item with no alert did not appear at all - and a person reading that screen
+could not tell "checked, nothing matched" from "never checked".
+
+That is `23` D-014 arriving by omission. It is the quietest possible version of the failure, because
+there is no wrong label for anybody to review: the screen is simply empty, and an empty safety
+screen reads as good news. Fixing it by giving every item a line and calling the unassessed ones
+"nothing matched" would have replaced a quiet claim with a loud one, so an item nobody has checked
+is `INSUFFICIENT_DATA` - which claims only that Kynviora cannot check it yet, and whose shipped
+description already said exactly that (DEC-062).
+
+**The rest of the derivation is `09` read literally**, and it is worth saying that the spec had
+already made every one of these decisions: "action required - approved action wording based on
+urgency", "review - user should confirm item/context or discuss appropriately", "information -
+relevant update without immediate action", "insufficient data - item/context cannot be matched
+reliably". `STATE_FOR_URGENCY` is a total record, so a new urgency is a decision somebody makes
+rather than one a fallthrough makes for them.
+
+**The test that needed a database.** The assessment behind a withdrawn alert still says the rule
+matched, so anything reading assessments alone keeps the item on "action needed". `19` treats a
+withdrawn alert resurfacing as a release-blocking defect, and `state = 'PUBLISHED'` in a join is
+exactly the kind of clause that reads correct and is not. There is now a real withdrawn row in a
+real PostgreSQL engine asserting the item falls back to what its assessment actually found.
+
+**Filters narrow; they never rank.** No sort by urgency, no count per state, no badge - `02` names
+alarm-optimised design as an anti-feature, and ranking is a judgement about which of two people's
+medicines matters more. `totalItems` is the size of the shelf, so a filtered screen can say what it
+is a subset of without counting anything urgent (DEC-063). The values repeat in the query string
+rather than being comma-separated, because a list parsed out of one string is a mistake away from a
+filter that silently matches nothing - and on this screen a silently empty list is the failure the
+whole route exists to prevent. That needed one small transport change, and the credential guard was
+extended to the repeated shape rather than duplicated beside it.
+
+**What the screen now says against the seed.** Three items, all "not enough information", the
+coverage statement underneath, and no urgency or evidence chip anywhere - because there is no alert
+to have either. That is `BLK-006` and DEC-016 working, and it now says so on the screen instead of
+by being blank.
+
+**One false alarm worth recording.** Dogfooding returned a 500 on the first attempt. The cause was
+an orphaned `tsx watch` process from an earlier run still holding port 3000 and pointing at a data
+directory that had since been deleted - not a defect. The new server had failed to bind with
+`EADDRINUSE` and the old one answered. Killing by port rather than by command line is the reliable
+way to clear it.
+
+### State
+
+2317 tests passing across 71 files, up from 2270 across 69. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 47 new tests: 17 on the derivation and the filters,
+8 on the view model, 14 against a real PostgreSQL engine with real published and withdrawn alerts,
+and 8 end to end against a live server process.

@@ -89,6 +89,36 @@ export interface AlertsResponse {
   readonly serverTime: string;
 }
 
+/**
+ * One item on the shelf, and what Kynviora can say about it.
+ *
+ * `urgency` and `evidenceLevel` are separate fields and are `null` together, because a line with
+ * no live alert has neither. `23` D-005 forbids combining them and Phase 7.1 requires them to be
+ * visibly separate; a response carrying one merged value would make that impossible to honour.
+ */
+export interface SafetyInboxLineResponse {
+  readonly ownedItemId: string;
+  readonly displayName: string;
+  readonly state: string;
+  readonly urgency: string | null;
+  readonly evidenceLevel: string | null;
+  /** When Kynviora last assessed this item, or `null` for never. The absence is the point. */
+  readonly lastAssessedAt: string | null;
+}
+
+export interface SafetyInboxResponse {
+  readonly profileId: string;
+  readonly lines: readonly SafetyInboxLineResponse[];
+  /**
+   * How many items the shelf holds before filtering.
+   *
+   * Not a count of anything urgent. `02` refuses the badge; this exists so a filtered screen can
+   * say what it is a subset of rather than looking like the whole shelf.
+   */
+  readonly totalItems: number;
+  readonly serverTime: string;
+}
+
 export interface ProfileAlertLine {
   readonly alertId: string;
   readonly state: string;
@@ -531,6 +561,19 @@ export interface KynvioraClient {
    */
   caregiverAudit(profileId: string): Promise<ApiOutcome<CaregiverAuditResponse>>;
 
+  /**
+   * Every item on a profile's shelf with its safety state.
+   *
+   * Distinct from {@link KynvioraClient.listAlerts}, which lists alerts: an item with no alert is
+   * absent from that and present here, saying which of "checked, nothing matched" and "never
+   * checked" it is. `23` D-014 is about an absence rendering as approval, and an omission is the
+   * quietest way to do it.
+   */
+  safetyInbox(
+    profileId: string,
+    filter?: { readonly states?: readonly string[]; readonly urgencies?: readonly string[] },
+  ): Promise<ApiOutcome<SafetyInboxResponse>>;
+
   profileAlerts(profileId: string): Promise<ApiOutcome<ProfileAlertsResponse>>;
   notificationSettings(profileId: string): Promise<ApiOutcome<NotificationSettingsResponse>>;
   setNotificationPreference(
@@ -669,6 +712,19 @@ export function createClient(options: ClientOptions): KynvioraClient {
 
     caregiverAudit: (profileId) =>
       get<CaregiverAuditResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/caregiver-audit`),
+
+    // The filters are repeated parameters rather than one comma-separated value: a list parsed
+    // out of one string is a mistake away from a filter that silently matches nothing, and a
+    // safety screen showing an empty list for that reason is the failure this route prevents.
+    safetyInbox: (profileId, filter) =>
+      request<SafetyInboxResponse>(transport, {
+        method: 'GET',
+        path: `/v1/profiles/${encodeURIComponent(profileId)}/safety-inbox`,
+        repeatedQuery: {
+          state: filter?.states ?? [],
+          urgency: filter?.urgencies ?? [],
+        },
+      }),
 
     profileAlerts: (profileId) =>
       get<ProfileAlertsResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/alerts`),

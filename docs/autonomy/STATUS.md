@@ -13,14 +13,14 @@ Last updated: 2026-09-01
 | ------------------ | ---------------------------------------------- |
 | **Current stage**  | Stage 6 (governance), after completing Stage 8 |
 | **Current phase**  | Stage 6 governance surfaces; `DEV-007` closed  |
-| **Last completed** | Observability projections (`20`)               |
+| **Last completed** | Phase 7.1 - the Safety Watch inbox             |
 | **Branch**         | `master`                                       |
-| **Latest commit**  | `feat(ops): the operational projection`        |
+| **Latest commit**  | `feat(safety): the Safety Watch inbox`         |
 | **Baseline tag**   | `baseline-spec-only`                           |
 
 ## Verification state
 
-- **2270 tests passing**, 0 failing, across 69 files.
+- **2317 tests passing**, 0 failing, across 71 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -108,10 +108,12 @@ metrics `20` names, with one row per registered source, and no verdict anywhere 
 
 Next, in order of how self-contained each is:
 
-1. **Phase 7.1** - assessment states and the profile inbox. The shadow and replay machinery
-   supports it and nothing external blocks it.
-2. **A staff reviewer console interface** (`DEV-016`), on its own origin and session policy. The
-   backend and now the operational projection both exist with no interface in front of them.
+Phase 7.1 is done too: every item on a profile's shelf now carries a safety state, so "checked and
+nothing matched" and "never checked" are different lines instead of the same absence.
+
+1. **A staff reviewer console interface** (`DEV-016`), on its own origin and session policy. The
+   console backend and the operational projection both exist with no interface in front of them.
+2. **Phase 7.3** - alert detail and explainability, which now has a list to open a detail from.
 3. **A missed-dose scheduler** (`DEV-011`), once the grace window is a decided product question.
    The dispatch and its authorization already exist; nothing calls them with a real occurrence.
 
@@ -263,6 +265,12 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 - **DEC-048** - the Visit Pack client hashes the candidates it **displayed** and never re-fetches
   before hashing. `canonicalizeSelection` and `toNoteEntries` come from the domain so both sides
   build the same string. An entry this client cannot canonicalise is refused, never coerced.
+
+- **DEC-062** - an item nobody has assessed is `INSUFFICIENT_DATA`, never
+  `NO_CURRENT_MATCHED_ALERT`. The second claims a check ran and found nothing. Listing only alerts
+  was the same claim made by omission, which is `23` D-014's quietest form.
+- **DEC-063** - the safety inbox filters narrow and never rank, and carry no count of any state.
+  `totalItems` is the size of the shelf, so a filtered screen can say what it is a subset of.
 
 - **DEC-059** - an operational metric is a key from a closed vocabulary, a number and a unit.
   There is nowhere in the type for a profile, a medicine or a sentence, which is how `20`'s
@@ -535,3 +543,18 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 74. Do not narrow `/v1/reviewer/operations` to `SOURCE_OPERATIONS_OWNER`. Source freshness is a
     safety metric a clinical lead needs, and the snapshot carries no user content (DEC-061). What
     must not be relaxed is the role coming from a stored row rather than a client claim.
+75. Do not report an unassessed item as `NO_CURRENT_MATCHED_ALERT`, and do not go back to listing
+    only alerts on the Safety screen. Both say a check ran and found nothing; one says it in a
+    label and the other by leaving the row out (DEC-062, `23` D-014).
+76. Do not read a withdrawn alert's assessment as a live state. The assessment still says the rule
+    matched, so the publication state is what the join must filter on - a withdrawn alert leaving
+    an item on ACTION_REQUIRED is `19`'s release-blocking defect class.
+77. Do not add a count per safety state, a badge, or a sort by urgency to the safety inbox. `02`
+    names alarm-optimised design as an anti-feature and ranking is a judgement about which of two
+    people's medicines matters more (DEC-063).
+78. Do not give a safety line a default urgency or evidence level. They are `null` together on a
+    line with no live alert, and a substituted `INFORMATIONAL` or `U` is a chip nobody assigned.
+79. Do not turn the inbox filters into one comma-separated parameter, and do not drop an
+    unrecognised filter value. A silently empty list and a silently wider one are both the failure
+    this screen exists to prevent; `buildUrl` takes repeated values and applies the same credential
+    guard to them.

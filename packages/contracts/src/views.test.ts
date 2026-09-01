@@ -16,6 +16,8 @@ import {
   asItemKind,
   asItemVerification,
   asMatchConfidence,
+  asProductSafetyState,
+  safetyInboxView,
   safetyView,
   shelfItemView,
   shelfView,
@@ -394,5 +396,105 @@ describe('the access history', () => {
 
   it('is empty rather than absent when nothing has happened', () => {
     expect(accessHistory([])).toEqual({ lines: [], unreadableCount: 0 });
+  });
+});
+
+describe('the Safety Watch inbox a person reads', () => {
+  const line = (over: Record<string, unknown> = {}) => ({
+    ownedItemId: 'i1',
+    displayName: 'Synthetic Tablet A',
+    state: 'INSUFFICIENT_DATA',
+    urgency: null,
+    evidenceLevel: null,
+    lastAssessedAt: null,
+    ...over,
+  });
+
+  it('reads an unknown state as the one that claims least', () => {
+    // `23` D-014: an absence of a matched rule must never render as approval, and a state this
+    // client cannot read is an absence of a different kind. It is not evidence that a check ran
+    // and came back clear.
+    expect(asProductSafetyState('SOMETHING_NEWER')).toBe('INSUFFICIENT_DATA');
+    expect(asProductSafetyState('')).toBe('INSUFFICIENT_DATA');
+    expect(asProductSafetyState('NO_CURRENT_MATCHED_ALERT')).toBe('NO_CURRENT_MATCHED_ALERT');
+  });
+
+  it('never says "nothing matched" for a value it could not read', () => {
+    const view = safetyInboxView({ lines: [line({ state: 'CLEARED' })], totalItems: 1 });
+    expect(view.lines[0]?.state.label).not.toMatch(/nothing matched/i);
+  });
+
+  it('keeps state, urgency and evidence as three separate presentations', () => {
+    // `23` D-005 and Phase 7.1's second exit criterion. Three chips, never one.
+    const view = safetyInboxView({
+      lines: [line({ state: 'ACTION_REQUIRED', urgency: 'CRITICAL', evidenceLevel: 'A' })],
+      totalItems: 1,
+    });
+    const row = view.lines[0];
+    expect(row?.state.label).toBe('Action needed');
+    expect(row?.urgency).not.toBeNull();
+    expect(row?.evidence).not.toBeNull();
+    expect(row?.urgency?.label).not.toBe(row?.evidence?.label);
+  });
+
+  it('shows neither urgency nor evidence on a line with no live alert', () => {
+    // A default chip here would be a claim nobody made: not INFORMATIONAL, and not evidence U.
+    const view = safetyInboxView({
+      lines: [line({ state: 'NO_CURRENT_MATCHED_ALERT' })],
+      totalItems: 1,
+    });
+    expect(view.lines[0]?.urgency).toBeNull();
+    expect(view.lines[0]?.evidence).toBeNull();
+  });
+
+  it('carries the coverage statement whether or not anything is on the list', () => {
+    // `09` requires it to accompany the result rather than being inferred from its absence, and
+    // an inbox where every line reads "nothing matched" is exactly where somebody would conclude
+    // the shelf had been cleared.
+    expect(safetyInboxView({ lines: [], totalItems: 0 }).coverageStatement).toBe(
+      SAFETY_EMPTY_COVERAGE,
+    );
+    expect(safetyInboxView({ lines: [line()], totalItems: 1 }).coverageStatement).toBe(
+      SAFETY_EMPTY_COVERAGE,
+    );
+  });
+
+  it('says when the list is a subset, without counting anything urgent', () => {
+    expect(safetyInboxView({ lines: [line()], totalItems: 4 }).filtered).toBe(true);
+    expect(safetyInboxView({ lines: [line()], totalItems: 1 }).filtered).toBe(false);
+  });
+
+  it('carries no count of any state and no ranking', () => {
+    // `02` refuses the alarm-optimising product a badge on this screen produces, and the order is
+    // the shelf's own.
+    const view = safetyInboxView({
+      lines: [
+        line({
+          ownedItemId: 'a',
+          state: 'ACTION_REQUIRED',
+          urgency: 'CRITICAL',
+          evidenceLevel: 'A',
+        }),
+        line({ ownedItemId: 'b' }),
+      ],
+      totalItems: 2,
+    });
+    expect(Object.keys(view).sort()).toEqual([
+      'coverageStatement',
+      'filtered',
+      'lines',
+      'totalItems',
+    ]);
+    expect(view.lines.map((l) => l.ownedItemId)).toEqual(['a', 'b']);
+  });
+
+  it('reports never assessed as an absence rather than a date', () => {
+    expect(safetyInboxView({ lines: [line()], totalItems: 1 }).lines[0]?.lastAssessedAt).toBeNull();
+    expect(
+      safetyInboxView({
+        lines: [line({ lastAssessedAt: '2026-09-01T09:00:00.000Z' })],
+        totalItems: 1,
+      }).lines[0]?.lastAssessedAt,
+    ).toBe('2026-09-01T09:00:00.000Z');
   });
 });
