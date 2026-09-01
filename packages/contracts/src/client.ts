@@ -191,6 +191,42 @@ export interface VisitPackCandidatesResponse {
   readonly serverTime: string;
 }
 
+export interface MedicationLine {
+  /** How this line is identified within the list. Stable across a retry of the same intent. */
+  readonly matchKey: string;
+  readonly displayName: string;
+  readonly strengthText?: string | null;
+  readonly dosageForm?: string | null;
+  /**
+   * Reproduced verbatim.
+   *
+   * `04` Phase 4.1 forbids rewriting a prescription instruction, so nothing on this path trims,
+   * normalises or sentence-cases it.
+   */
+  readonly directionsText?: string | null;
+}
+
+export interface StartReconciliation {
+  readonly profileId: string;
+  readonly sourceKind?: 'VISIT' | 'DISCHARGE' | 'PHARMACY' | 'OTHER';
+  readonly sourceNote?: string;
+  /** The list the person is holding. Kynviora has no other source for it. */
+  readonly currentList: readonly MedicationLine[];
+}
+
+/**
+ * What starting a reconciliation returns.
+ *
+ * Just the ID: the differences are read back with {@link KynvioraClient.reconciliation}, because
+ * the derivation is the server's and the caller must see what it actually produced rather than a
+ * copy assembled on the way out.
+ */
+export interface ReconciliationStarted {
+  readonly reconciliationId: string;
+  readonly profileId: string;
+  readonly serverTime: string;
+}
+
 export interface ReconciliationDifference {
   readonly differenceId: string;
   readonly kind: string;
@@ -402,6 +438,14 @@ export interface KynvioraClient {
     idempotencyKey: string,
   ): Promise<ApiOutcome<Record<string, unknown>>>;
 
+  /**
+   * Start a reconciliation against a list the person is holding.
+   *
+   * The list is typed in because Kynviora has no other source for it - a discharge summary is a
+   * piece of paper. Nothing here rewrites what was typed.
+   */
+  startReconciliation(body: StartReconciliation): Promise<ApiOutcome<ReconciliationStarted>>;
+
   reconciliation(id: string): Promise<ApiOutcome<ReconciliationResponse>>;
   resolveDifference(
     reconciliationId: string,
@@ -521,6 +565,8 @@ export function createClient(options: ClientOptions): KynvioraClient {
 
     createVisitPack: (body, idempotencyKey) =>
       send<Record<string, unknown>>('POST', '/v1/visit-packs', body, idempotencyKey),
+
+    startReconciliation: (body) => send<ReconciliationStarted>('POST', '/v1/reconciliations', body),
 
     reconciliation: (id) =>
       get<ReconciliationResponse>(`/v1/reconciliations/${encodeURIComponent(id)}`),

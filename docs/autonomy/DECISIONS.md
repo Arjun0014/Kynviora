@@ -1364,3 +1364,37 @@ sends the same stale digest and a person pressing "try again" three times deserv
 three identical refusals.
 
 **Sources.** `04` Phase 8.4; `06` Journey 8; `14`; DEC-022; DEC-023.
+
+---
+
+## DEC-049 - Settling a difference is two questions, and the screen asks both
+
+**Context.** `ReconciliationReview` offered the six resolution options and called back with one:
+`onChooseResolution(differenceId, resolution)`. That is half an answer. `evaluateResolution`
+refuses a settling resolution with no side, so every one of those callbacks would have produced a
+server error - and the obvious way to "fix" it is the one Phase 8.5 forbids.
+
+**Options.** (a) Infer the side from the resolution, defaulting a confirmation to the current
+list because it is newer. (b) Send with no side and surface the server's refusal. (c) A second
+step that asks which value stands, for every settling resolution.
+
+**Decision.** (c). `ResolutionPrompt` renders both values through `presentSide`, collects the side
+and, where the option requires one, the name of who confirmed it.
+
+**Rationale.** (a) is exactly the judgement `04` Phase 8.5 forbids: a pharmacist may confirm the
+older dose, so "a pharmacist confirmed it" does not say which value they confirmed. The option's
+own `fixedSide` is `null` for all three confirmations precisely because the answer is not knowable
+from the choice. (b) makes the rule visible only as an error, after the user believed they had
+answered.
+
+**What the prompt does not do.** No option is pre-selected for a confirmation and neither side is
+styled as primary; both come from `presentSide`, which returns the same tone and
+`emphasised: false` for each, rendered from one style object. Two styles that happen to match today
+are two styles that can drift apart tomorrow, and the drift is the exit criterion (trap 21).
+
+**Consequences.** `USER_KEPT_PREVIOUS` and `USER_ADOPTED_CURRENT` carry their own side, so the
+prompt does not ask - it would be asking a question the person already answered by choosing. The
+same builder decides whether the button is enabled and what gets sent, so a control cannot enable
+something the builder would refuse.
+
+**Sources.** `04` Phase 8.5; `09`; `18`; DEC-029; DEC-030.

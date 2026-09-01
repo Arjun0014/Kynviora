@@ -42,6 +42,7 @@ import { ResourceState } from '@/components/ScreenState';
 import { ReviewInbox } from '@/features/reviewInbox/ReviewInbox';
 import { ReviewTaskEditor } from '@/features/reviewInbox/ReviewTaskEditor';
 import { VisitPackFlow } from '@/features/visitPack/VisitPackFlow';
+import { ReconciliationFlow } from '@/features/reconciliation/ReconciliationFlow';
 import { PrimaryButton } from '@/components/PrimaryButton';
 
 export default function TodayScreen() {
@@ -52,6 +53,9 @@ export default function TodayScreen() {
   // `06` Journey 8 lives here because Today is where an appointment belongs - the screen's own
   // introduction has always said "due medicines, appointments and anything that needs review".
   const [preparingPack, setPreparingPack] = useState(false);
+  // `04` Phase 8.5. Someone comes home from a hospital stay holding a list, and this is where
+  // they compare it with what is on the shelf.
+  const [reconciling, setReconciling] = useState(false);
   const [saving, setSaving] = useState<ScreenStateKind | null>(null);
   const [savingMessage, setSavingMessage] = useState<string | null>(null);
 
@@ -143,6 +147,12 @@ export default function TodayScreen() {
             setPreparingPack(false);
           }}
         />
+      ) : reconciling ? (
+        <ReconciliationFlow
+          onClose={() => {
+            setReconciling(false);
+          }}
+        />
       ) : editing !== null ? (
         <ReviewTaskEditor
           kind={editing.kind}
@@ -165,15 +175,25 @@ export default function TodayScreen() {
         <ResourceState resource={resource} onRetry={onRetry} />
       )}
 
-      {preparingPack || editing !== null ? null : (
-        <PrimaryButton
-          label="Prepare a summary for an appointment"
-          variant="secondary"
-          accessibilityHint="Choose what to share with a health professional. Nothing is included until you choose it."
-          onPress={() => {
-            setPreparingPack(true);
-          }}
-        />
+      {preparingPack || reconciling || editing !== null ? null : (
+        <>
+          <PrimaryButton
+            label="Prepare a summary for an appointment"
+            variant="secondary"
+            accessibilityHint="Choose what to share with a health professional. Nothing is included until you choose it."
+            onPress={() => {
+              setPreparingPack(true);
+            }}
+          />
+          <PrimaryButton
+            label="Check a list against my shelf"
+            variant="secondary"
+            accessibilityHint="Compare a list you were given with what Kynviora has. It shows both and chooses neither."
+            onPress={() => {
+              setReconciling(true);
+            }}
+          />
+        </>
       )}
 
       {/* `06` requires a partial result to be visible as one. A silently shorter list is the

@@ -1213,3 +1213,51 @@ end against a real server process.
 
 One `DEV-007` write flow remains - the reconciliation difference resolution - plus revocation,
 which now has the step-up seam it needs.
+
+### Reconciliation - the last write flow
+
+Three steps: type in the list somebody handed you, see the differences, settle each one. The list
+is typed because Kynviora has no other source for it - a discharge summary is a piece of paper -
+and nothing on this path trims, normalises or sentence-cases what was entered. `04` Phase 4.1
+forbids rewriting a prescription instruction, and "tidying" a direction is rewriting it.
+
+**Settling a difference turned out to be two questions.** The existing review component offered the
+six options and called back with one, which is half an answer: `evaluateResolution` refuses a
+settling resolution that names no side, so every one of those callbacks would have produced a
+server error. The obvious fix - infer the side, defaulting a confirmation to the newer list - is
+precisely the judgement Phase 8.5 forbids. A pharmacist may confirm the older dose, and the
+option's own `fixedSide` is `null` for all three confirmations because the answer is not knowable
+from the choice. So there is a second step that asks, and every settling resolution goes through it
+(DEC-049).
+
+The prompt renders both values through `presentSide` from one style object. Neither is pre-selected
+and neither is styled as primary: two styles that happen to match today are two styles that can
+drift apart tomorrow, and the drift is the exit criterion.
+
+**A shape mismatch found by running it.** `POST /v1/reconciliations` returns only the ID - the
+differences are read back separately, because the derivation is the server's and the caller must
+see what it actually produced rather than a copy assembled on the way out. The client had typed the
+response as the full record, which typechecked and failed at runtime the first time an end-to-end
+test read `differences[0]`.
+
+**Nothing is applied locally.** The server records the resolution and writes the one medicine change
+through row-level security, so the reconciliation cannot change what the caller could not have
+changed on the medicine screen itself. The list is re-read afterwards rather than patched: what
+happened is the server's answer, not the client's guess.
+
+### `DEV-007` after five units
+
+Five primary destinations read real data, and four write flows are wired end to end - completing a
+review task, inviting a caregiver, generating a Visit Pack, and resolving a reconciliation
+difference. Each is exercised against a real server process, and each of those tests found
+something no unit test on either side could have: a 500 on the shelf after any review, a missing
+idempotency key that made every Visit Pack fail before its digest was compared, a Care screen that
+showed nothing after an invitation, and this response-shape mismatch.
+
+Revocation remains, and it now has the step-up seam the invitation flow introduced.
+
+### State
+
+2123 tests passing across 64 files, up from 2104 across 63. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 19 new tests: 15 for the resolution builder and 4
+end to end against a real server process.

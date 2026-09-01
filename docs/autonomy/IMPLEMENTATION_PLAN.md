@@ -422,7 +422,10 @@ and outstanding invitations now visible on the Care screen (DEC-046).
 The **Visit Pack** is built: selection, a review step whose displayed content is what gets hashed,
 and a digest a live server accepts (DEC-048).
 
-Still to build (`DEV-022`): the reconciliation difference resolution, and revocation.
+**Reconciliation** is built: a typed list, the differences the server derived, and a prompt that
+asks which value stands for every settling resolution (DEC-049).
+
+Still to build (`DEV-022`): revocation, the one caregiver action without a screen.
 
 `DEV-021` records that screen behaviour is tested in the packages rather than in the app, and what
 that does and does not cover.
@@ -431,10 +434,8 @@ that does and does not cover.
 
 ## Immediate next work
 
-1. Finish `DEV-007`: the reconciliation difference resolution, then revocation. Reconciliation is
-   the last write flow and the one with the sharpest rule - which value now stands is stated by a
-   person and never inferred from recency, and a professional confirmation carries no side of its
-   own (DEC-030).
+1. Revocation, the last `DEV-007` surface. It has the step-up seam the invitation flow introduced
+   and needs a confirmation that never applies the change locally (`12`, `14`).
 2. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
    cache-hit rate, assessment recomputation throughput. The review-queue age becomes measurable
    once inbox derivation moves behind a scheduler (`DEV-013`).

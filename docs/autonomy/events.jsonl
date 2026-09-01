@@ -153,3 +153,8 @@
 {"ts": "2026-09-01T14:32:00Z", "type": "decision_recorded", "detail": "DEC-048 the client hashes what it displayed; the canonical form has one definition; an unrecognised entry is refused rather than coerced"}
 {"ts": "2026-09-01T14:35:00Z", "type": "verified", "detail": "the client digest is accepted by a live server, and a digest of anything else is refused with EXPORT_CONTENT_CHANGED"}
 {"ts": "2026-09-01T14:36:00Z", "type": "milestone", "detail": "Visit Pack selection, review and generation end to end; 2104 tests across 63 files, verify exit 0"}
+{"ts": "2026-09-01T14:39:00Z", "type": "work_started", "detail": "DEV-007 write flow 4: reconciliation, the last one"}
+{"ts": "2026-09-01T14:41:00Z", "type": "code_added", "detail": "resolution builder enforcing that every settling resolution names a side; a prompt that asks which value stands"}
+{"ts": "2026-09-01T14:43:00Z", "type": "bug_found", "detail": "POST /v1/reconciliations returns only the ID; the client had typed it as the full record and failed at runtime reading differences[0]"}
+{"ts": "2026-09-01T14:44:00Z", "type": "decision_recorded", "detail": "DEC-049 settling a difference is two questions and the screen asks both"}
+{"ts": "2026-09-01T14:45:00Z", "type": "milestone", "detail": "all four DEV-007 write flows wired end to end; 2123 tests across 64 files, verify exit 0"}

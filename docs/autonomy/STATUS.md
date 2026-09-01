@@ -102,12 +102,16 @@ documented configuration requirements.
 the shared client, and the only writes are the notification preference and a dose event. Five
 flows remain, and each needs a screen rather than a button (`DEV-022`):
 
-1. The **reconciliation** difference resolution, where the side is stated by a person and never
-   inferred from recency (DEC-030). The last of the write flows.
-2. **Revocation**, which now has the step-up seam the invitation flow introduced and needs a
-   confirmation that never applies the change locally (`12`).
+1. **Revocation**, the one caregiver action still without a screen. It has the step-up seam the
+   invitation flow introduced and needs a confirmation that never applies the change locally
+   (`12`, `14`).
+2. **Phase 4.3** (dose events and adherence history). The client already records a dose event and
+   the route is idempotent; nothing calls it.
+3. Return the caller's own capabilities per profile from the API, which is the one input missing
+   before a caregiver can delegate anything (`DEV-026`).
 
-Done: the **Visit Pack** (selection, review, and a digest the live server accepts), the
+Done: **reconciliation** (a typed list, both values shown, and the side stated by a person), the
+**Visit Pack** (selection, review, and a digest the live server accepts), the
 **review task editor** (five of seven kinds; `BATCH_MISSING` and
 `FORMULA_NEEDS_CONFIRMATION` wait on guided capture, `DEV-024`) and the **caregiver invitation**
 (capability selection limited to what the inviter may delegate, a step-up-scoped request, and a
@@ -252,6 +256,10 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 - **DEC-048** - the Visit Pack client hashes the candidates it **displayed** and never re-fetches
   before hashing. `canonicalizeSelection` and `toNoteEntries` come from the domain so both sides
   build the same string. An entry this client cannot canonicalise is refused, never coerced.
+
+- **DEC-049** - settling a reconciliation difference is **two** questions. Choosing a resolution
+  does not say which value stands, and inferring it - defaulting a confirmation to the newer list -
+  is the judgement Phase 8.5 forbids. Every settling resolution goes through `ResolutionPrompt`.
 
 ## Traps to avoid on resume
 
@@ -413,3 +421,11 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
     idempotency key as a **parameter**. A key generated inside the client is regenerated on retry,
     which is a second write rather than a replay. `createVisitPack` shipped without one and every
     generation failed with `VALIDATION_FAILED` until an end-to-end test posted a real request.
+55. Do not infer which side a reconciliation resolution settles on. `fixedSide` is `null` for all
+    three professional confirmations because a pharmacist may confirm the older dose, and
+    defaulting to the newer list is exactly what Phase 8.5 forbids (DEC-049).
+56. Do not trim, normalise or sentence-case a typed direction on the reconciliation path. `04`
+    Phase 4.1 forbids rewriting a prescription instruction, and tidying one is rewriting it.
+57. `POST /v1/reconciliations` returns the ID only. Read the differences back rather than
+    assembling them from the create response - the derivation is the server's, and typing the
+    response as the full record typechecks and fails at runtime.

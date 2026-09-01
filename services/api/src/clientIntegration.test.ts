@@ -13,6 +13,7 @@ import {
   resourceFor,
   buildCompletion,
   buildInvitation,
+  buildResolution,
   buildUrl,
   buildVisitPack,
   contentChanged,
@@ -573,6 +574,137 @@ describe('the Visit Pack, end to end', () => {
       expect(candidates.value.candidates).toEqual([]);
     } else {
       expect(candidates.kind).toBe('UNAVAILABLE');
+    }
+  });
+});
+
+describe('reconciliation, end to end', () => {
+  /**
+   * Phase 8.5's exit criterion: Kynviora never chooses which conflicting instruction is medically
+   * correct. Checked here as a property of the round trip - what the client can send, what the
+   * server refuses, and what comes back on the difference.
+   */
+  it('finds a difference and shows both values without naming one', async () => {
+    const start = await owner.startReconciliation({
+      profileId: SEED.profileId,
+      sourceKind: 'DISCHARGE',
+      currentList: [
+        {
+          matchKey: 'typed:0',
+          displayName: 'Synthetic Tablet A',
+          strengthText: '250 mg',
+          directionsText: 'One tablet each morning',
+        },
+      ],
+    });
+    expect(start.kind).toBe('OK');
+    if (start.kind !== 'OK') return;
+
+    const read = await owner.reconciliation(start.value.reconciliationId);
+    expect(read.kind).toBe('OK');
+    if (read.kind !== 'OK') return;
+
+    const difference = read.value.differences[0];
+    expect(difference).toBeDefined();
+    if (difference === undefined) return;
+
+    // Both sides, and no field naming a preferred one. Trap 19: the absence is the exit
+    // criterion, not a gap somebody forgot to fill.
+    expect(Object.keys(difference)).toEqual(
+      expect.not.arrayContaining(['suggestedValue', 'preferred', 'confidence', 'score']),
+    );
+    // And the difference vocabulary names a fact about the two lists, never a change to the
+    // medicine - there is no ADDED, REMOVED or CHANGED (DEC-029).
+    expect(difference.kind).not.toMatch(/^(ADDED|REMOVED|CHANGED)$/);
+  });
+
+  it('refuses a settling resolution that names no side', async () => {
+    const start = await owner.startReconciliation({
+      profileId: SEED.profileId,
+      currentList: [
+        { matchKey: 'typed:0', displayName: 'Synthetic Capsule B', strengthText: '40 mg' },
+      ],
+    });
+    if (start.kind !== 'OK') return;
+    const read = await owner.reconciliation(start.value.reconciliationId);
+    if (read.kind !== 'OK') return;
+    const difference = read.value.differences[0];
+    if (difference === undefined) return;
+
+    // The client refuses to build one, so this checks the server's own rule independently. The
+    // two exist for different reasons and both must hold (DEC-030).
+    expect(
+      buildResolution({ resolution: 'CONFIRMED_WITH_PHARMACIST', confirmedBy: 'A. Pharmacist' }).ok,
+    ).toBe(false);
+
+    const outcome = await owner.resolveDifference(
+      start.value.reconciliationId,
+      difference.differenceId,
+      { resolution: 'CONFIRMED_WITH_PHARMACIST', adopt: null, confirmedBy: 'A. Pharmacist' },
+    );
+    expect(outcome.kind).toBe('REFUSED');
+    if (outcome.kind !== 'REFUSED') return;
+    expect(outcome.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('records the side a person stated, on either side', async () => {
+    // The case the rule is about: a pharmacist may confirm the older dose. If the server only
+    // accepted the current list, the screen would be making the judgement Phase 8.5 forbids.
+    const start = await owner.startReconciliation({
+      profileId: SEED.profileId,
+      currentList: [
+        {
+          matchKey: 'typed:0',
+          displayName: 'Synthetic Tablet A',
+          strengthText: '750 mg',
+          directionsText: 'Two tablets at night',
+        },
+      ],
+    });
+    if (start.kind !== 'OK') return;
+    const read = await owner.reconciliation(start.value.reconciliationId);
+    if (read.kind !== 'OK') return;
+    const difference = read.value.differences[0];
+    if (difference === undefined) return;
+
+    const draft = buildResolution({
+      resolution: 'CONFIRMED_WITH_PHARMACIST',
+      // The older value. The one a system inferring from recency would never pick.
+      adopt: 'PREVIOUS',
+      confirmedBy: 'A. Pharmacist',
+    });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+
+    const recorded = await owner.resolveDifference(
+      start.value.reconciliationId,
+      difference.differenceId,
+      draft.body,
+    );
+    expect(recorded.kind).toBe('OK');
+
+    const after = await owner.reconciliation(start.value.reconciliationId);
+    expect(after.kind).toBe('OK');
+    if (after.kind !== 'OK') return;
+    const settled = after.value.differences.find(
+      (entry) => entry.differenceId === difference.differenceId,
+    );
+    expect(settled?.resolution).toBe('CONFIRMED_WITH_PHARMACIST');
+    expect(settled?.confirmedBy).toBe('A. Pharmacist');
+  });
+
+  it('shows a stranger nothing', async () => {
+    const start = await stranger.startReconciliation({
+      profileId: SEED.profileId,
+      currentList: [{ matchKey: 'typed:0', displayName: 'Synthetic Tablet A' }],
+    });
+    // Either refused, or started against nothing the stranger can see - and neither answer
+    // confirms the profile exists.
+    if (start.kind === 'OK') {
+      const read = await stranger.reconciliation(start.value.reconciliationId);
+      if (read.kind === 'OK') expect(read.value.differences).toEqual([]);
+    } else {
+      expect(['UNAVAILABLE', 'REFUSED']).toContain(start.kind);
     }
   });
 });
