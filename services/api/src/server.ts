@@ -39,6 +39,7 @@ import { registerAlertDeliveryRoutes } from './alertDelivery.js';
 import { registerReviewInboxRoutes } from './reviewInbox.js';
 import { registerReconciliationRoutes } from './reconciliation.js';
 import { registerAlertDetailRoutes } from './alertDetail.js';
+import { registerSafetyReceiptRoutes } from './safetyReceipt.js';
 import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
 import { registerOperationsRoutes } from './operations.js';
 import { registerSafetyInboxRoutes } from './safetyInbox.js';
@@ -806,6 +807,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
         return [...jurisdictions].sort();
       },
     });
+
+    // -------------------------------------------------------------------------
+    // Resolution and the Safety Receipt (spec 04 Phase 7.6)
+    // -------------------------------------------------------------------------
+    // Recording a resolution writes one row into `safety_receipt` and touches nothing else, which
+    // is Phase 7.6's first exit criterion as a shape rather than as a rule. The receipt read shows
+    // corrections beside what a person recorded rather than instead of it, which is the second.
+
+    registerSafetyReceiptRoutes(app, { contextFor, fail });
 
     // -------------------------------------------------------------------------
     // Safety Watch inbox route (spec 04 Phase 7.1)

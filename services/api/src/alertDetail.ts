@@ -32,6 +32,7 @@ import { z } from 'zod';
 import { domainError, type DomainError } from '@kynviora/domain';
 import { alertDetailView, type AlertDetailInput } from '@kynviora/presentation';
 import type { RequestContext } from './context.js';
+import { recordSafetyResolution } from './safetyReceipt.js';
 
 const paramsSchema = z.object({ alertId: z.string().uuid() });
 
@@ -290,49 +291,28 @@ export function registerAlertDetailRoutes(app: FastifyInstance, deps: AlertDetai
       const row = await loadDetail(ctx, params.data.alertId);
       if (row === null) return fail(reply, noSuchAlert, ctx.correlationId);
 
-      if (row.reported_incorrect) {
-        // Idempotent by nature rather than by key: there is one destination state and a repeat is
-        // the same request. Saying so beats a second row that would double-count the feedback.
+      // A receipt, not a change to the alert or the assessment. `04` Phase 7.6 requires that
+      // resolution never erases historical assessment, and the row this writes references both
+      // rather than replacing either.
+      //
+      // Through Phase 7.6's writer rather than an INSERT of its own. `safety_receipt` admits one
+      // row per alert (`receipt_publication_idx`), so a household that had already recorded a
+      // resolution here used to meet the unique index and get a 500 - on the screen whose whole
+      // subject is that Kynviora keeps what happened. It is idempotent for the same reason it was
+      // before: there is one destination state and a repeat is the same request.
+      const outcome = await recordSafetyResolution(
+        ctx,
+        { alertId: row.alert_id, assessmentId: row.assessment_id, profileId: row.profile_id },
+        REPORT_INCORRECT,
+        body.data.note ?? null,
+        'alert.reported_incorrect',
+      );
+
+      if (outcome.alreadyRecorded) {
         return reply
           .status(200)
           .send({ recorded: true, alreadyReported: true, serverTime: ctx.now });
       }
-
-      await ctx.privileged('SAFETY_RECEIPT', async (db) => {
-        await db.query(
-          // A receipt, not a change to the alert or the assessment. `04` Phase 7.6 requires that
-          // resolution never erases historical assessment, and the row this writes references
-          // both rather than replacing either.
-          `INSERT INTO safety_receipt
-             (profile_id, alert_publication_id, assessment_id, resolution, resolution_note,
-              resolved_at, resolved_by_user_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            row.profile_id,
-            row.alert_id,
-            row.assessment_id,
-            REPORT_INCORRECT,
-            body.data.note ?? null,
-            ctx.now,
-            ctx.principal.userId,
-          ],
-        );
-
-        await db.query(
-          `INSERT INTO audit_event
-             (actor_user_id, actor_role, action, target_kind, target_id, correlation_id, detail)
-           VALUES ($1, 'kynviora_app', 'alert.reported_incorrect', 'alert_publication', $2, $3,
-                   $4::jsonb)`,
-          [
-            ctx.principal.userId,
-            row.alert_id,
-            ctx.correlationId,
-            // No note text in the audit detail. `14` forbids sensitive content in a log and a
-            // free-text note about somebody's medicine is exactly that.
-            JSON.stringify({ note_recorded: body.data.note !== undefined }),
-          ],
-        );
-      });
 
       return reply
         .status(201)

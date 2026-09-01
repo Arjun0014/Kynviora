@@ -624,3 +624,34 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   and frozen like every other field on that row. It is a migration, a change to the `Assessment`
   type, and a change to every fixture that builds one; it is not a read-path change, and it must
   not become one.
+
+---
+
+## DEV-029 - The receipt table holds one row, so "versioned" is answered by the audit log
+
+- **Affected specification**: `04` Phase 7.6 asks for "a versioned Safety Receipt carrying the
+  alert, the source and rule version, the action and later corrections".
+- **Expected behaviour**: read literally, a receipt is a versioned record - each thing a person
+  recorded readable as its own version of the receipt, from the receipt table.
+- **Implemented behaviour**: `safety_receipt` has a UNIQUE index on `alert_publication_id`
+  (migration `0006`), so it holds one row per alert carrying the resolution that currently stands.
+  Every write emits an append-only `audit_event`, and `GET /v1/alerts/:alertId/receipt` replays
+  those into the receipt's `history` - so the chain is on the receipt as read, and it is not in
+  the receipt as stored.
+- **Reason**: the constraint predates Phase 7.6 by six migrations and the grant beside it says the
+  same thing twice - the app role holds UPDATE and no INSERT, which only makes sense for a row that
+  is resolved in place. Rewriting the schema to append would have been a migration, an RLS
+  rewrite, and a new policy for a table whose current policy set is tested against threats A1-A3,
+  in exchange for a property the audit log already provides more strongly: `audit_event` is
+  refused to every role by a trigger, where an append-only receipt table would still be editable
+  by whoever holds UPDATE on it. See DEC-075.
+- **Temporary or permanent**: temporary, and possibly permanent. It becomes a real gap only if
+  something other than the receipt route needs the chain.
+- **Risk**: low. The history is on the surface a person reads, it cannot be rewritten, and the
+  current answer is the one the schema was built to hold. The visible consequence is that a
+  consumer reading `safety_receipt` directly - an export, a reviewer tool, a future projection -
+  sees only what stands, and would have to join the audit log to see the rest.
+- **Required future work**: if a second consumer needs the chain, add `safety_receipt_entry`
+  (receipt ID, resolution, note, recorded at, actor) written in the same transaction as the audit
+  row, with `safety_receipt` keeping the current answer as a denormalised head. That is additive:
+  no existing policy, grant or index changes, and the route keeps one writer.

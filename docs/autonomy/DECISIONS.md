@@ -2025,3 +2025,68 @@ regulator can narrow a limit without altering what a household should do about a
 own.
 
 **Sources.** `04` Phase 7.4; `07`; `09`; DEC-007; DEC-030; DEC-065.
+
+---
+
+## DEC-075 - The receipt is one row, and the sequence lives in the audit log
+
+**Date:** 2026-09-02
+**Phase:** 7.6
+**Status:** Accepted
+
+`04` Phase 7.6 asks for a "versioned Safety Receipt". The first implementation read that as an
+append-only stack of resolutions and was written that way; migration `0006` disagrees. It puts a
+UNIQUE index on `safety_receipt (alert_publication_id)` and grants the app role SELECT and UPDATE
+and no INSERT. Two designs met on a constraint that had been in the schema since Stage 2, and the
+schema won.
+
+**One receipt per alert, holding what currently stands.** A person who marked an alert reviewed and
+has since set the pack aside has one current answer, not two competing ones. The row is updated in
+place and a later resolution replaces the one before it.
+
+**The sequence is not lost, and is not off the screen.** Every write emits an `audit_event`, which
+`14` requires and which no role may update or delete - a trigger refuses it to the service role and
+to the owner role alike, and a test asserts that. The receipt read replays those rows into
+`history`, so "versioned" is answered by the log rather than by the table: what stands is one row,
+what happened is a chain nobody can rewrite, and both are on the receipt.
+
+**This is a better answer than the stack would have been, not a worse one accepted under duress.**
+An append-only receipt table is editable by whoever holds UPDATE on it; the audit log is editable
+by nobody. The history a household reads is now the same history a regulator would be shown.
+
+**What it costs.** The row itself carries no chain, so a reader of `safety_receipt` alone sees only
+the current answer. `DEV-029` records that and what closing it would take.
+
+**One writer follows from it.** Two routes record a resolution - Phase 7.3's report-incorrect and
+7.6's resolutions route - and both now go through `recordSafetyResolution`. Two independent INSERT
+statements against a table that admits one row is a 500 the first time a household uses both
+screens, and it was a real defect in the committed 7.3 code rather than a hypothetical one.
+
+**Sources.** `04` Phase 7.6; `14`; migration `0006`; DEC-013; `DEV-029`.
+
+---
+
+## DEC-076 - A receipt says what was done, never who did it
+
+**Date:** 2026-09-02
+**Phase:** 7.6
+**Status:** Accepted
+
+The receipt's history is replayed from `audit_event`, whose rows carry `actor_user_id`. It would
+have cost nothing to render it, and the screen deliberately does not.
+
+**Identity has a screen already.** `03` group H puts audit visibility on the caregiver-audit
+surface, where an owner is looking at who holds access to a profile and what they did with it. A
+Safety Receipt is a record about an alert, and a household member reading one is asking what was
+decided about a pack of medicine.
+
+**"Your daughter marked this reviewed" is a different disclosure.** A caregiver holding
+`VIEW_SAFETY` can currently read a receipt. Naming the actor on it would let every such caregiver
+see which household member responded to which alert and when, on a surface nobody added that
+permission for. The `ReceiptHistoryEntry` type has no actor field, so it cannot be leaked by a
+later change to a query, and a test asserts no user identifier appears in the response.
+
+**The fact is not lost.** `safety_receipt.resolved_by_user_id` and the audit row both hold it, and
+a reviewer or an operator with the right access can read either. It is not on this screen.
+
+**Sources.** `03` group H; `14`; DEC-026; DEC-072.

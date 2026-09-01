@@ -20,3 +20,4 @@ export * from './reviewTaskEditor.js';
 export * from './doseEvents.js';
 export * from './alertDetail.js';
 export * from './regulatoryDiff.js';
+export * from './safetyReceipt.js';
