@@ -210,6 +210,82 @@ export interface IncorrectMatchReported {
   readonly serverTime: string;
 }
 
+export interface ReceiptEntryResponse {
+  readonly label: string;
+  readonly description: string;
+  readonly recordedAt: string;
+  readonly note: string | null;
+}
+
+export interface ReceiptHistoryResponse {
+  readonly label: string;
+  readonly recordedAt: string;
+  readonly replacedPreviousNote: string | null;
+}
+
+export interface ReceiptBasisResponse {
+  readonly heading: string;
+  readonly assessedOn: string;
+  readonly alertRaisedOn: string;
+  /** `null` where the rule behind this alert is no longer published. The identifier survives. */
+  readonly rule: string | null;
+  readonly ruleUnavailableNote: string | null;
+  readonly ruleVersionId: string;
+  readonly regulatoryRuleVersionId: string | null;
+  readonly evidenceLabel: string;
+  readonly evidenceDescription: string;
+  readonly urgencyLabel: string;
+  readonly confidenceLabel: string;
+  readonly confidenceDescription: string;
+  readonly normalizationVersion: string;
+  readonly note: string;
+}
+
+export interface ReceiptCorrectionResponse {
+  readonly heading: string;
+  readonly reason: string;
+  readonly recordedAt: string;
+  readonly reviewerId: string | null;
+}
+
+/**
+ * The Safety Receipt (`04` Phase 7.6).
+ *
+ * Composed on the server like the alert detail, for the same reason: the licence gate on a source
+ * reference is a `25` obligation, and a client trusted to hide a value it was sent is not a gate.
+ * There is no actor on any row here, and that is deliberate (DEC-076).
+ */
+export interface SafetyReceiptResponse {
+  readonly alertPublicationId: string;
+  readonly assessmentId: string;
+  /** What stands, as a code. `null` where the person has recorded nothing. */
+  readonly currentResolution: string | null;
+  readonly current: ReceiptEntryResponse | null;
+  readonly undescribedResolutionNote: string | null;
+  readonly history: readonly ReceiptHistoryResponse[];
+  readonly undescribedHistoryCount: number;
+  readonly basis: ReceiptBasisResponse;
+  readonly source: AlertDetailResponse['source'];
+  readonly corrections: readonly ReceiptCorrectionResponse[];
+  readonly correctedSinceNotice: string | null;
+  /** What this receipt does not settle, as sentences. Empty is a legitimate answer. */
+  readonly uncertainties: readonly string[];
+  /** The same list as codes, so a client can reason about them without parsing prose. */
+  readonly uncertaintyCodes: readonly string[];
+  readonly emptyMessage: string;
+  readonly permanenceNote: string;
+  readonly serverTime: string;
+}
+
+export interface ResolutionRecorded {
+  readonly recorded: boolean;
+  /** True where the same resolution already stood. Nothing was written. */
+  readonly alreadyRecorded: boolean;
+  /** True where a different resolution stood and this replaced it. */
+  readonly replaced: boolean;
+  readonly serverTime: string;
+}
+
 export interface SafetyInboxResponse {
   readonly profileId: string;
   readonly lines: readonly SafetyInboxLineResponse[];
@@ -751,6 +827,19 @@ export interface KynvioraClient {
     alertId: string,
     body?: { readonly note?: string },
   ): Promise<ApiOutcome<IncorrectMatchReported>>;
+  /** Everything recorded about one alert, and everything that changed since (`04` Phase 7.6). */
+  safetyReceipt(alertId: string): Promise<ApiOutcome<SafetyReceiptResponse>>;
+  /**
+   * Record what a person did about an alert.
+   *
+   * A record, not a state change: it writes one row and alters neither the alert nor the
+   * assessment behind it. There is one receipt per alert, so this replaces what stood rather than
+   * adding to it - the chain of what was recorded is on the receipt read (DEC-075).
+   */
+  recordResolution(
+    alertId: string,
+    body: { readonly resolution: string; readonly note?: string },
+  ): Promise<ApiOutcome<ResolutionRecorded>>;
   notificationSettings(profileId: string): Promise<ApiOutcome<NotificationSettingsResponse>>;
   setNotificationPreference(
     profileId: string,
@@ -914,6 +1003,19 @@ export function createClient(options: ClientOptions): KynvioraClient {
         method: 'POST',
         path: `/v1/alerts/${encodeURIComponent(alertId)}/report-incorrect`,
         body: body ?? {},
+      }),
+
+    safetyReceipt: (alertId) =>
+      get<SafetyReceiptResponse>(`/v1/alerts/${encodeURIComponent(alertId)}/receipt`),
+
+    // No idempotency key, for the same reason report-incorrect has none: there is one destination
+    // state per resolution and the server answers a repeat with `alreadyRecorded`, so a retry is
+    // the same request rather than a second record.
+    recordResolution: (alertId, body) =>
+      request<ResolutionRecorded>(transport, {
+        method: 'POST',
+        path: `/v1/alerts/${encodeURIComponent(alertId)}/resolutions`,
+        body,
       }),
 
     notificationSettings: (profileId) =>

@@ -48,8 +48,10 @@ import {
   presentMatchConfidence,
   presentUrgency,
   presentVerification,
+  resolutionOptions,
   type StatusPresentation,
 } from '@kynviora/presentation';
+import { isSafetyResolution } from '@kynviora/domain';
 import type {
   AlertDetailResponse,
   StatusPresentationResponse,
@@ -57,6 +59,7 @@ import type {
   CaregiverAuditEvent,
   CaregiverGrant,
   SafetyInboxLineResponse,
+  SafetyReceiptResponse,
   PendingInvitation,
   ReviewTask,
   ShelfItem,
@@ -742,5 +745,97 @@ export function alertDetailScreenView(response: AlertDetailResponse): AlertDetai
     inferredCount: response.inferredCount,
     actions: response.actions,
     actionsUnavailableBecause: response.actionsUnavailableBecause,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The Safety Receipt (`04` Phase 7.6)
+// ---------------------------------------------------------------------------
+
+export interface ReceiptOptionView {
+  readonly resolution: string;
+  readonly label: string;
+  readonly description: string;
+  readonly accessibilityLabel: string;
+  readonly isFeedback: boolean;
+}
+
+export interface SafetyReceiptScreenView {
+  readonly alertPublicationId: string;
+  readonly current: SafetyReceiptResponse['current'];
+  readonly undescribedResolutionNote: string | null;
+  readonly history: SafetyReceiptResponse['history'];
+  readonly undescribedHistoryNote: string | null;
+  readonly basis: SafetyReceiptResponse['basis'];
+  readonly source: {
+    readonly summary: string;
+    readonly reference: string | null;
+    readonly referenceWithheldBecause: string | null;
+    readonly attribution: string | null;
+  };
+  readonly corrections: SafetyReceiptResponse['corrections'];
+  readonly correctedSinceNotice: string | null;
+  readonly uncertainties: readonly string[];
+  readonly emptyMessage: string;
+  readonly permanenceNote: string;
+  /**
+   * What the person may record now, in the vocabulary's order.
+   *
+   * Two groups, actions first. The one that currently stands is not offered: choosing it again
+   * writes nothing, and a control that does nothing reads as one that failed.
+   */
+  readonly actionOptions: readonly ReceiptOptionView[];
+  readonly feedbackOptions: readonly ReceiptOptionView[];
+}
+
+/**
+ * The receipt, as a screen renders it.
+ *
+ * Almost a pass-through, for the same reason the alert detail is: `11` puts safety composition on
+ * the server, and a client that rebuilt any of this would carry approved wording in every shipped
+ * build. The options are the exception - they are a control list rather than a statement about
+ * this person's alert, so they come from `@kynviora/presentation` and never from the response.
+ *
+ * The server sends `currentResolution` as a code for exactly this: the client needs to know which
+ * control to withhold without parsing the label it was sent.
+ */
+export function safetyReceiptScreenView(response: SafetyReceiptResponse): SafetyReceiptScreenView {
+  const standing = isSafetyResolution(response.currentResolution)
+    ? [response.currentResolution]
+    : [];
+  const options = resolutionOptions(standing).map((option) => ({
+    resolution: option.resolution,
+    label: option.presentation.label,
+    description: option.presentation.description,
+    accessibilityLabel: option.presentation.accessibilityLabel,
+    isFeedback: option.presentation.isFeedback,
+  }));
+
+  return {
+    alertPublicationId: response.alertPublicationId,
+    current: response.current,
+    undescribedResolutionNote: response.undescribedResolutionNote,
+    history: response.history,
+    // Counted rather than silent, the same choice made for an unlabelled fact on the detail.
+    undescribedHistoryNote:
+      response.undescribedHistoryCount === 0
+        ? null
+        : `Kynviora holds ${String(response.undescribedHistoryCount)} further ${
+            response.undescribedHistoryCount === 1 ? 'record' : 'records'
+          } about this alert that this version has no wording for. They are still kept.`,
+    basis: response.basis,
+    source: {
+      summary: response.source.summary,
+      reference: response.source.reference,
+      referenceWithheldBecause: response.source.referenceWithheldBecause,
+      attribution: response.source.attribution,
+    },
+    corrections: response.corrections,
+    correctedSinceNotice: response.correctedSinceNotice,
+    uncertainties: response.uncertainties,
+    emptyMessage: response.emptyMessage,
+    permanenceNote: response.permanenceNote,
+    actionOptions: options.filter((option) => !option.isFeedback),
+    feedbackOptions: options.filter((option) => option.isFeedback),
   };
 }

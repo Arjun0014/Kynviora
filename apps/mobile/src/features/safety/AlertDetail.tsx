@@ -46,6 +46,8 @@ export interface AlertDetailProps {
   readonly onReportIncorrect: (() => void) | null;
   readonly reporting: boolean;
   readonly reportMessage: string | null;
+  /** Opens the Safety Receipt (`04` Phase 7.6) for this alert. */
+  readonly onOpenReceipt: () => void;
   readonly onClose: () => void;
 }
 
@@ -55,6 +57,7 @@ export function AlertDetail({
   onReportIncorrect,
   reporting,
   reportMessage,
+  onOpenReceipt,
   onClose,
 }: AlertDetailProps) {
   return (
@@ -191,6 +194,22 @@ export function AlertDetail({
             <Text style={styles.caption}>{view.actionsUnavailableBecause}</Text>
           )}
           {reportMessage === null ? null : <Text style={styles.notice}>{reportMessage}</Text>}
+
+          {/* Phase 7.6 opens from here rather than from the inbox. What somebody did about an
+              alert is a fact about that alert, and a separate list of receipts would be a second
+              place to look for the same thing. Always offered, including where nothing has been
+              recorded: the receipt is also where the versions and the limits live. */}
+          <View style={styles.block}>
+            <Text style={styles.caption}>
+              What you have recorded about this alert, what Kynviora has corrected since, and the
+              versions it used.
+            </Text>
+            <PrimaryButton
+              label="What you did about this"
+              variant="secondary"
+              onPress={onOpenReceipt}
+            />
+          </View>
         </>
       )}
 

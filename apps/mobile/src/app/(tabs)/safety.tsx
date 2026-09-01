@@ -49,10 +49,12 @@ import {
   alertDetailScreenView,
   lensView,
   safetyInboxView,
+  safetyReceiptScreenView,
   screenStateForFailure,
   type AlertDetailScreenView,
   type LensView,
   type SafetyInboxLineView,
+  type SafetyReceiptScreenView,
 } from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
 import { useProfiles } from '@/api/ProfileProvider';
@@ -63,6 +65,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { StatusChip } from '@/components/StatusChip';
 import { RegulatoryLens } from '@/features/lens/RegulatoryLens';
 import { AlertDetail } from '@/features/safety/AlertDetail';
+import { SafetyReceipt } from '@/features/safety/SafetyReceipt';
 
 const EMPTY = { lines: [], totalItems: 0 } as const;
 
@@ -100,6 +103,17 @@ export default function SafetyScreen() {
   const [alertFor, setAlertFor] = useState<string | null>(null);
   const [reporting, setReporting] = useState(false);
   const [reportMessage, setReportMessage] = useState<string | null>(null);
+
+  /**
+   * The alert whose receipt is open, or `null`.
+   *
+   * Opened from the detail rather than from the inbox, and held separately from `alertFor` so
+   * closing the receipt returns to the alert it is about rather than to the list. A receipt read
+   * without the alert beside it is a resolution with nothing to resolve.
+   */
+  const [receiptFor, setReceiptFor] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordMessage, setRecordMessage] = useState<string | null>(null);
 
   const load = useMemo(
     () =>
@@ -154,6 +168,58 @@ export default function SafetyScreen() {
     [alertResource.value],
   );
 
+  const loadReceipt = useMemo(
+    () => (client === null || receiptFor === null ? null : () => client.safetyReceipt(receiptFor)),
+    [client, receiptFor],
+  );
+
+  const { resource: receiptResource, reload: reloadReceipt } = useResource(loadReceipt, {
+    enabled: receiptFor !== null,
+  });
+
+  const receiptView: SafetyReceiptScreenView | null = useMemo(
+    () => (receiptResource.value === null ? null : safetyReceiptScreenView(receiptResource.value)),
+    [receiptResource.value],
+  );
+
+  /**
+   * Record what the person did.
+   *
+   * The outcome union is destructured for the same reason report-incorrect's is: somebody
+   * believing they recorded that a pack was thrown away when nothing was written is the failure
+   * this screen exists to prevent. Success reloads the receipt rather than patching state
+   * locally, because what stands after a write is the server's answer (DEC-075) and a client that
+   * guessed it would show a history the log does not have.
+   */
+  const onRecordResolution = useCallback(
+    (resolution: string) => {
+      if (client === null || receiptFor === null) return;
+      setRecording(true);
+      setRecordMessage(null);
+      void client.recordResolution(receiptFor, { resolution }).then((outcome) => {
+        setRecording(false);
+        if (outcome.kind === 'OK') {
+          setRecordMessage(
+            outcome.value.alreadyRecorded
+              ? 'That was already what stood, so nothing changed.'
+              : outcome.value.replaced
+                ? 'Recorded. It replaced what you had recorded before, which is still listed above.'
+                : 'Recorded. The alert and what Kynviora assessed have not changed.',
+          );
+          reloadReceipt();
+          return;
+        }
+        setRecordMessage(
+          outcome.kind === 'OFFLINE'
+            ? 'Kynviora could not reach the server, so nothing was recorded. Try again later.'
+            : 'Kynviora could not record that. Nothing has changed.',
+        );
+        void screenStateForFailure(outcome);
+      });
+    },
+    [client, receiptFor, reloadReceipt],
+  );
+
   /**
    * Tell the server the match is wrong.
    *
@@ -192,6 +258,27 @@ export default function SafetyScreen() {
     reload();
   }, [reload]);
 
+  if (receiptFor !== null) {
+    return (
+      <Screen title="Safety" intro="What you recorded, and what Kynviora cannot settle.">
+        <SafetyReceipt
+          view={receiptView}
+          state={receiptResource.state}
+          onRecord={onRecordResolution}
+          recording={recording}
+          recordMessage={recordMessage}
+          onClose={() => {
+            setReceiptFor(null);
+            setRecordMessage(null);
+            // The detail carries a "reported incorrect" state the receipt can change, so it is
+            // re-read rather than left as it was when the receipt opened.
+            reloadAlert();
+          }}
+        />
+      </Screen>
+    );
+  }
+
   if (alertFor !== null) {
     return (
       <Screen title="Safety" intro="What this alert rests on, and what Kynviora worked out.">
@@ -201,6 +288,9 @@ export default function SafetyScreen() {
           onReportIncorrect={onReportIncorrect}
           reporting={reporting}
           reportMessage={reportMessage}
+          onOpenReceipt={() => {
+            setReceiptFor(alertFor);
+          }}
           onClose={() => {
             setAlertFor(null);
             setReportMessage(null);

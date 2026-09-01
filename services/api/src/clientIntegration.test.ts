@@ -1657,6 +1657,58 @@ describe('the alert detail, end to end', () => {
   });
 });
 
+describe('the Safety Receipt, end to end', () => {
+  /**
+   * Phase 7.6 over a real connection.
+   *
+   * The seed publishes no alert (`BLK-006`, DEC-016), so what a live server can prove here is the
+   * boundary rather than the happy path: a receipt is reachable only through an alert the caller
+   * can already see, and the refusal is indistinguishable from absence all the way to the client.
+   */
+  const UNREACHABLE = '00000000-0000-4000-8000-0000000000aa';
+
+  it('answers a receipt nobody may see as absence', async () => {
+    const outcome = await owner.safetyReceipt(UNREACHABLE);
+    // The client has no outcome meaning "you are not allowed" (DEC-039), and the API answers
+    // PERMISSION_DENIED and NOT_FOUND identically. This is that all the way through.
+    expect(outcome.kind).toBe('UNAVAILABLE');
+  });
+
+  it('answers a malformed alert identifier the same way', async () => {
+    const outcome = await owner.safetyReceipt('not-a-uuid');
+    expect(outcome.kind).toBe('UNAVAILABLE');
+  });
+
+  it('shows a stranger the same absence', async () => {
+    const outcome = await stranger.safetyReceipt(UNREACHABLE);
+    expect(outcome.kind).toBe('UNAVAILABLE');
+  });
+
+  it('refuses an unauthenticated read', async () => {
+    const outcome = await anonymous.safetyReceipt(UNREACHABLE);
+    expect(outcome.kind).toBe('UNAUTHENTICATED');
+  });
+
+  it('will not record a resolution against an alert the caller cannot reach', async () => {
+    const outcome = await owner.recordResolution(UNREACHABLE, { resolution: 'REVIEWED' });
+    expect(outcome.kind).toBe('UNAVAILABLE');
+  });
+
+  it('refuses a resolution outside the vocabulary before it reaches the receipt', async () => {
+    // `09` has no word for stopping a medicine, so neither has the schema, the domain, or the
+    // route's body schema. Over the wire that is a validation refusal rather than a not-found.
+    const outcome = await owner.recordResolution(UNREACHABLE, {
+      resolution: 'STOPPED_MEDICINE',
+    });
+    expect(outcome.kind).not.toBe('OK');
+  });
+
+  it('refuses an unauthenticated write', async () => {
+    const outcome = await anonymous.recordResolution(UNREACHABLE, { resolution: 'REVIEWED' });
+    expect(outcome.kind).toBe('UNAUTHENTICATED');
+  });
+});
+
 describe('the Global Regulatory Lens, end to end', () => {
   /**
    * Phase 7.2's UI half, against the server the app talks to.
