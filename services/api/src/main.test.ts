@@ -40,6 +40,7 @@ async function startServer(overrides: Partial<MainConfig> = {}): Promise<Started
   const server = await start(
     {
       port: 0,
+      staffPort: null,
       host: '127.0.0.1',
       dataDir,
       devAuth: true,
@@ -121,12 +122,65 @@ describe('the authorization boundary, against a real engine', () => {
     expect(profiles.body.profiles).toEqual([]);
   });
 
-  it('gives the seeded owner no staff access at all', async () => {
-    // The property that makes the development authenticator acceptable. A header is a client
-    // claim, `14` says reviewer roles are not inferred from one, and the reviewer console requires
-    // a row in `reviewer` that the seed deliberately does not create.
+  it('serves no staff route on the household origin at all', async () => {
+    // This used to be the test that the development authenticator grants no reviewer role, and
+    // it no longer is: the household surface does not register these paths, so the 404 arrives
+    // before any authorization runs. That is the stronger property and the weaker test - the
+    // role check is now asserted on the staff origin below, where it can actually fail.
     expect((await get(shared, '/v1/reviewer/queue', SEED.userId)).status).toBe(404);
+    expect((await get(shared, '/v1/reviewer/operations', SEED.userId)).status).toBe(404);
     expect((await get(shared, '/v1/reviewer/queue', STRANGER)).status).toBe(404);
+  });
+});
+
+describe('the staff origin, against a real process', () => {
+  /** A process serving both surfaces, each on its own port, over one database (DEC-037). */
+  let both: StartedServer;
+
+  beforeAll(async () => {
+    both = await startServer({ staffPort: 0 });
+  });
+
+  async function getFrom(origin: string, path: string, userId?: string) {
+    const headers = userId === undefined ? {} : { [DEV_USER_HEADER]: userId };
+    const response = await fetch(`${origin}${path}`, { headers });
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  }
+
+  it('binds a second origin and says so', () => {
+    expect(both.staffUrl).not.toBeNull();
+    // Different ports, so different origins - which is what scopes a cookie and a CORS policy.
+    expect(both.staffUrl).not.toBe(both.url);
+  });
+
+  it('answers a health check on both origins', async () => {
+    expect((await fetch(`${both.url}/health`)).status).toBe(200);
+    expect((await fetch(`${String(both.staffUrl)}/health`)).status).toBe(200);
+  });
+
+  it('serves the shelf on the household origin and not on the staff one', async () => {
+    const path = `/v1/items?profileId=${SEED.profileId}`;
+    expect((await getFrom(both.url, path, SEED.userId)).status).toBe(200);
+    expect((await getFrom(String(both.staffUrl), path, SEED.userId)).status).toBe(404);
+  });
+
+  it('still refuses the seeded owner on the staff origin, because they hold no reviewer row', async () => {
+    // Here the route exists and the refusal is a decision. `14`: a staff role is a stored row,
+    // never a client claim, and the development seed creates none - so the header that makes
+    // this caller the household owner makes them nobody here.
+    const queue = await getFrom(String(both.staffUrl), '/v1/reviewer/queue', SEED.userId);
+    expect(queue.status).toBe(404);
+    expect((queue.body.error as { code: string }).code).toBe('PERMISSION_DENIED');
+  });
+
+  it('rejects an unauthenticated request to the staff origin', async () => {
+    expect((await getFrom(String(both.staffUrl), '/v1/reviewer/queue')).status).toBe(401);
+  });
+
+  it('serves no staff origin unless one was asked for', () => {
+    // Deny by default. `shared` was started without `staffPort`, so the internal API has no
+    // origin at all in that process - not an origin that refuses, an origin that is not listening.
+    expect(shared.staffUrl).toBeNull();
   });
 });
 
@@ -139,6 +193,7 @@ describe('the development seed', () => {
 
     const config: MainConfig = {
       port: 0,
+      staffPort: null,
       host: '127.0.0.1',
       dataDir,
       devAuth: true,

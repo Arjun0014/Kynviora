@@ -98,6 +98,7 @@ beforeAll(async () => {
   );
 
   app = createServer({
+    surface: 'STAFF',
     pool,
     logger: noopLogger(),
     authenticate: (_request: FastifyRequest) => Promise.resolve(currentPrincipal),

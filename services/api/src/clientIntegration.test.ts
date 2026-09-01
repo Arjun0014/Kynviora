@@ -78,6 +78,7 @@ beforeAll(async () => {
   server = await start(
     {
       port: 0,
+      staffPort: null,
       host: '127.0.0.1',
       dataDir,
       devAuth: true,

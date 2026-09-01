@@ -79,6 +79,7 @@ beforeAll(async () => {
   );
 
   app = createServer({
+    surface: 'HOUSEHOLD',
     pool,
     logger: noopLogger(),
     authenticate: (_request: FastifyRequest) => Promise.resolve(currentPrincipal),

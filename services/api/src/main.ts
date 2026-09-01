@@ -29,6 +29,7 @@ import {
 } from '@kynviora/domain';
 import { ALL_FIXTURE_SOURCES } from '@kynviora/fixtures';
 import type { SourceRegistryEntry } from '@kynviora/regulatory';
+import type { FastifyInstance } from 'fastify';
 import { createServer } from './server.js';
 import type { DatabasePool, Principal } from './context.js';
 import { DevAuthRefused, createDevAuthenticator } from './devAuth.js';
@@ -39,6 +40,14 @@ import { DevAuthRefused, createDevAuthenticator } from './devAuth.js';
 
 export interface MainConfig {
   readonly port: number;
+  /**
+   * Port for the staff surface, or `null` to serve no staff routes at all.
+   *
+   * Deny by default. `13` keeps internal APIs off the user API, and a staff origin that appears
+   * because a default said so is one nobody decided to expose. Set `KYNVIORA_STAFF_PORT` to open
+   * it; the reviewer console needs it and nothing else does.
+   */
+  readonly staffPort: number | null;
   readonly host: string;
   readonly dataDir: string | undefined;
   readonly devAuth: boolean;
@@ -56,9 +65,17 @@ function readNumber(name: string, fallback: number): number {
   return value;
 }
 
+/** An optional positive-integer port. Absent means the surface is not served. */
+function readOptionalPort(name: string): number | null {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return null;
+  return readNumber(name, 0);
+}
+
 export function readConfig(): MainConfig {
   return {
     port: readNumber('KYNVIORA_API_PORT', 3000),
+    staffPort: readOptionalPort('KYNVIORA_STAFF_PORT'),
     // Loopback by default. A development server that binds every interface is one that ends up
     // reachable from a network somebody did not think about.
     host: process.env.KYNVIORA_API_HOST ?? '127.0.0.1',
@@ -134,6 +151,14 @@ function loadSources(): Promise<ReadonlyMap<string, SourceRegistryEntry>> {
 
 export interface StartedServer {
   readonly url: string;
+  /**
+   * Origin of the staff surface, or `null` when none was started.
+   *
+   * A separate origin rather than a path prefix, because that is what `13` asks for and what a
+   * browser enforces: cookies, CORS and the console's own session are all scoped by origin, and
+   * a staff path prefix on the household origin would share every one of them.
+   */
+  readonly staffUrl: string | null;
   stop(): Promise<void>;
 }
 
@@ -191,6 +216,7 @@ export async function start(
   }
 
   const app = createServer({
+    surface: 'HOUSEHOLD',
     pool: poolFor(db),
     logger,
     authenticate: authenticate ?? ((): Promise<Principal | null> => Promise.resolve(null)),
@@ -212,9 +238,53 @@ export async function start(
     persisted: config.dataDir !== undefined,
   });
 
+  // -------------------------------------------------------------------------
+  // The staff surface
+  // -------------------------------------------------------------------------
+  // A second Fastify instance on a second port, sharing this process and this database.
+  //
+  // Two processes would be the deployment shape, and they cannot be the development shape here:
+  // PGlite is a single writer (DEC-037), so a separate staff process pointed at the same data
+  // directory does not share its state and the last one to exit overwrites the other. That has
+  // already failed silently once. Two listeners in one process is the honest version of the same
+  // boundary in this environment - the origin a phone talks to has no reviewer handler on it -
+  // and it becomes two deployments unchanged when `BLK-001` clears and the store is a real
+  // Postgres that more than one process can open.
+
+  let staffApp: FastifyInstance | null = null;
+  let staffUrl: string | null = null;
+
+  if (config.staffPort !== null) {
+    staffApp = createServer({
+      surface: 'STAFF',
+      pool: poolFor(db),
+      logger,
+      authenticate: authenticate ?? ((): Promise<Principal | null> => Promise.resolve(null)),
+      now,
+      loadSources,
+    });
+
+    await staffApp.listen({ port: config.staffPort, host: config.host });
+
+    const staffAddress = staffApp.server.address();
+    const staffBoundPort =
+      typeof staffAddress === 'object' && staffAddress !== null
+        ? staffAddress.port
+        : config.staffPort;
+
+    staffUrl = `http://${config.host}:${String(staffBoundPort)}`;
+
+    // Worth a line of its own. An operator reading the log should be able to see that a staff
+    // origin exists and on which port, because the whole point of the split is that its presence
+    // is a decision rather than an accident.
+    logger.info('staff_api.started', { port: staffBoundPort, dev_auth: config.devAuth });
+  }
+
   return {
     url: `http://${config.host}:${String(boundPort)}`,
+    staffUrl,
     stop: async () => {
+      if (staffApp !== null) await staffApp.close();
       await app.close();
       await db.close();
     },
@@ -252,6 +322,9 @@ if (isEntryPoint) {
       process.on('SIGINT', shutdown);
       process.on('SIGTERM', shutdown);
       process.stdout.write(`Kynviora API listening on ${server.url}\n`);
+      if (server.staffUrl !== null) {
+        process.stdout.write(`Kynviora staff API listening on ${server.staffUrl}\n`);
+      }
     },
     (error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
