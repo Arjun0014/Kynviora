@@ -64,6 +64,56 @@ export interface ShelfItem {
   readonly batchVerification: string;
   readonly lastReviewedAt: string | null;
   readonly lastSafetyCheckedAt: string | null;
+  /**
+   * What is not settled about this item (`04` Phase 2.1).
+   *
+   * On every row rather than behind the filter: the exit criterion is that a person *can
+   * understand* which items need something, and a list where that is visible only to somebody who
+   * already knew to filter for it does not meet it.
+   */
+  readonly attentionReasons: readonly string[];
+}
+
+export interface ItemFieldResponse {
+  readonly label: string;
+  readonly value: string | null;
+  readonly absentNote: string | null;
+  /** True for text somebody else wrote - written directions, and the household's own notes. */
+  readonly quoted: boolean;
+}
+
+/**
+ * One item, composed on the server (`04` Phase 2.1).
+ *
+ * The category fields differ by category and the group the other category has is absent rather
+ * than empty, which is exit criterion 1 in the shape of the response.
+ */
+export interface ItemDetailResponse {
+  readonly id: string;
+  readonly displayName: string;
+  readonly brand: string | null;
+  readonly itemKind: 'MEDICINE' | 'PERSONAL_CARE';
+  readonly lifecycleState: string;
+  readonly lifecycleNote: string | null;
+  readonly identity: StatusPresentationResponse;
+  readonly formulation: StatusPresentationResponse;
+  readonly batch: StatusPresentationResponse;
+  readonly verificationNote: string;
+  readonly categoryHeading: string;
+  readonly categoryFields: readonly ItemFieldResponse[];
+  readonly sharedFields: readonly ItemFieldResponse[];
+  readonly attention: {
+    readonly reasons: readonly {
+      readonly reason: string;
+      readonly label: string;
+      readonly nextStep: string;
+    }[];
+    readonly undescribedCount: number;
+    readonly undescribedNote: string | null;
+    readonly settledNote: string | null;
+  };
+  readonly attentionReasonCodes: readonly string[];
+  readonly serverTime: string;
 }
 
 export interface ItemsResponse {
@@ -614,6 +664,10 @@ export interface ItemsQuery {
   readonly profileId: string;
   readonly itemKind?: 'MEDICINE' | 'PERSONAL_CARE';
   readonly lifecycleState?: 'ACTIVE' | 'STOPPED' | 'ARCHIVED';
+  /** Any facet in this state (`04` Phase 2.1). The three axes are not merged (`08`). */
+  readonly verification?: 'CONFIRMED' | 'PROBABLE' | 'PARTIAL' | 'CONFLICTING' | 'UNVERIFIED';
+  /** Items with something outstanding. A filter, never a ranking or a count. */
+  readonly attention?: 'NEEDS_VERIFICATION' | 'NEEDS_REVIEW' | 'ANY';
   readonly cursor?: string;
   readonly limit?: number;
 }
@@ -706,6 +760,8 @@ export interface KynvioraClient {
 
   listProfiles(): Promise<ApiOutcome<ProfilesResponse>>;
   listItems(query: ItemsQuery): Promise<ApiOutcome<ItemsResponse>>;
+  /** One item and what is not settled about it (`04` Phase 2.1). */
+  itemDetail(itemId: string): Promise<ApiOutcome<ItemDetailResponse>>;
   listAlerts(): Promise<ApiOutcome<AlertsResponse>>;
   /**
    * How supported jurisdictions treat one substance.
@@ -922,9 +978,13 @@ export function createClient(options: ClientOptions): KynvioraClient {
         profileId: query.profileId,
         itemKind: query.itemKind,
         lifecycleState: query.lifecycleState,
+        verification: query.verification,
+        attention: query.attention,
         cursor: query.cursor,
         limit: query.limit,
       }),
+
+    itemDetail: (itemId) => get<ItemDetailResponse>(`/v1/items/${encodeURIComponent(itemId)}`),
 
     // No profile parameter: the route returns what row-level security admits, which is `13`'s
     // "never trust a profile ID in the request as proof of access" applied by construction.

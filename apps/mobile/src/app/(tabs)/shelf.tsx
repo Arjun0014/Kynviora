@@ -23,20 +23,23 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import {
   LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
+  MIN_TOUCH_TARGET_DP,
   type ScreenState as ScreenStateKind,
 } from '@kynviora/presentation';
 import type { DoseEventKind } from '@kynviora/domain';
 import {
   doseHistory,
+  itemDetailScreenView,
   screenStateForFailure,
   shelfView,
   type DoseHistoryView,
+  type ItemDetailScreenView,
   type ShelfItemView,
 } from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
@@ -47,6 +50,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { ResourceState } from '@/components/ScreenState';
 import { StatusChip } from '@/components/StatusChip';
 import { RecordDose } from '@/features/doses/RecordDose';
+import { ItemDetail } from '@/features/shelf/ItemDetail';
 
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
 
@@ -59,12 +63,33 @@ export default function ShelfScreen() {
   const [recordMessage, setRecordMessage] = useState<string | null>(null);
   const [recorded, setRecorded] = useState(false);
 
+  /**
+   * The item whose detail is open, or `null`.
+   *
+   * `04` Phase 2.1's detail is reached from the row rather than being its own destination, for
+   * the reason the Lens and the alert detail are: an item detail with its own tab would be a
+   * second list of the same things.
+   */
+  const [detailFor, setDetailFor] = useState<ShelfItemView | null>(null);
+
+  /**
+   * The filter, as the two questions it actually is.
+   *
+   * `null` is unfiltered, and that is what a person lands on. A shelf that opened pre-filtered
+   * would hide items without saying it had - the Safety screen's rule, for the same reason.
+   */
+  const [attention, setAttention] = useState<'NEEDS_VERIFICATION' | 'NEEDS_REVIEW' | null>(null);
+
   const load = useMemo(
     () =>
       client === null || activeProfileId === null
         ? null
-        : () => client.listItems({ profileId: activeProfileId }),
-    [client, activeProfileId],
+        : () =>
+            client.listItems({
+              profileId: activeProfileId,
+              ...(attention === null ? {} : { attention }),
+            }),
+    [client, activeProfileId, attention],
   );
 
   const { resource, reload, refreshing } = useResource(load, {
@@ -85,6 +110,18 @@ export default function ShelfScreen() {
    * loading and the history not is a real state, and folding them together would take the whole
    * screen down when one list did not arrive.
    */
+  const loadDetail = useMemo(
+    () => (client === null || detailFor === null ? null : () => client.itemDetail(detailFor.id)),
+    [client, detailFor],
+  );
+
+  const { resource: detailResource } = useResource(loadDetail, { enabled: detailFor !== null });
+
+  const detailView: ItemDetailScreenView | null = useMemo(
+    () => (detailResource.value === null ? null : itemDetailScreenView(detailResource.value)),
+    [detailResource.value],
+  );
+
   const loadHistory = useMemo(
     () =>
       client === null || recording === null
@@ -155,6 +192,20 @@ export default function ShelfScreen() {
     setRecorded(false);
   }, []);
 
+  if (detailFor !== null) {
+    return (
+      <Screen title="Shelf" intro="What Kynviora has for this item, and what is still missing.">
+        <ItemDetail
+          view={detailView}
+          state={detailResource.state}
+          onClose={() => {
+            setDetailFor(null);
+          }}
+        />
+      </Screen>
+    );
+  }
+
   if (recording !== null) {
     return (
       <Screen title="Shelf" intro={recording.displayName}>
@@ -183,12 +234,51 @@ export default function ShelfScreen() {
     >
       <ResourceState resource={resource} onRetry={onRetry} />
 
+      {/* Two filters, each named as the question it asks. They narrow and they do not rank -
+          which of two people's medicines matters more is not a judgement this screen makes. */}
+      <View style={styles.filters}>
+        {(
+          [
+            ['NEEDS_VERIFICATION', 'Not yet confirmed'],
+            ['NEEDS_REVIEW', 'Not yet looked at'],
+          ] as const
+        ).map(([value, label]) => {
+          const active = attention === value;
+          return (
+            <Pressable
+              key={value}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={
+                active ? `${label} filter, on. Press to show everything.` : `${label} filter, off.`
+              }
+              onPress={() => {
+                setAttention(active ? null : value);
+              }}
+              style={[styles.filter, active ? styles.filterOn : null]}
+            >
+              {/* The state is in the label as well as in the styling. `18` forbids meaning
+                  carried by colour alone. */}
+              <Text style={styles.filterLabel}>{active ? `${label} - on` : label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {attention === null ? null : (
+        <Text style={styles.note}>
+          This is a filtered list. Items Kynviora has nothing outstanding about are not shown.
+        </Text>
+      )}
+
       {view === null
         ? null
         : view.items.map((item) => (
             <ShelfRow
               key={item.id}
               item={item}
+              onOpen={() => {
+                setDetailFor(item);
+              }}
               onRecord={() => {
                 setRecording(item);
               }}
@@ -206,9 +296,11 @@ export default function ShelfScreen() {
 
 function ShelfRow({
   item,
+  onOpen,
   onRecord,
 }: {
   readonly item: ShelfItemView;
+  readonly onOpen: () => void;
   readonly onRecord: () => void;
 }) {
   return (
@@ -225,6 +317,21 @@ function ShelfRow({
         <StatusChip presentation={item.formulation} />
         <StatusChip presentation={item.batch} />
       </View>
+
+      {/* `04` Phase 2.1's second exit criterion, on the row. A person has to be able to see
+          which items need something without knowing to filter for it, so the reasons are here
+          rather than only behind the control above. No count and no badge (`02`). */}
+      {item.attention.length === 0 ? null : (
+        <View style={styles.attention}>
+          {item.attention.map((line, index) => (
+            <Text key={`attention-${String(index)}`} style={styles.note}>
+              {line}
+            </Text>
+          ))}
+        </View>
+      )}
+
+      <PrimaryButton label="Open this item" variant="secondary" onPress={onOpen} />
 
       {/* Medicines only, and absent rather than disabled for everything else - a greyed-out
           control here would say a dose of shampoo is a thing Kynviora expects you to record. */}
@@ -254,6 +361,25 @@ const styles = StyleSheet.create({
     color: LIGHT_THEME.surfaceMuted.foreground,
   },
   chips: { gap: SPACING.xs },
+  attention: { gap: 2 },
+  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
+  filter: {
+    minHeight: MIN_TOUCH_TARGET_DP,
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.md,
+    borderWidth: 1,
+    borderRadius: SPACING.sm,
+    borderColor: LIGHT_THEME.surface.border,
+    backgroundColor: LIGHT_THEME.surface.background,
+  },
+  filterOn: {
+    borderColor: LIGHT_THEME.informational.border,
+    backgroundColor: LIGHT_THEME.informational.background,
+  },
+  filterLabel: {
+    fontSize: FONT_SIZE.caption,
+    color: LIGHT_THEME.surface.foreground,
+  },
   note: {
     fontSize: FONT_SIZE.caption,
     lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,

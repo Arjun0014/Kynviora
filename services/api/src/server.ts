@@ -21,14 +21,18 @@ import Fastify, {
 } from 'fastify';
 import { z } from 'zod';
 import {
+  attentionReasons,
   domainError,
   isErr,
+  isItemVerification,
   type DomainError,
   type Instant,
   type InviteTokenService,
+  type ItemVerification,
   type Logger,
   type UserId,
 } from '@kynviora/domain';
+import { itemDetailView } from '@kynviora/presentation';
 import { projectLens, type SourceRegistryEntry } from '@kynviora/regulatory';
 import type { DatabasePool, Principal, RequestContext } from './context.js';
 import { createRequestContext } from './context.js';
@@ -57,6 +61,17 @@ import { registerShadowModeRoutes } from './shadowMode.js';
  * an end-to-end test completed a review task and then re-read the shelf, which is the only order
  * of operations that produces a non-null value.
  */
+/** Unknown means unverified. Never `CONFIRMED` - the reassuring member is never the fallback. */
+function asItemVerification(raw: string): ItemVerification {
+  return isItemVerification(raw) ? raw : 'UNVERIFIED';
+}
+
+/** A `date` column, rendered as the date it is rather than as an instant. */
+function dateOrNull(value: Date | string | null | undefined): string | null {
+  const rendered = isoOrNull(value);
+  return rendered === null ? null : (rendered.slice(0, 10) ?? null);
+}
+
 function isoOrNull(value: Date | string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   return value instanceof Date ? value.toISOString() : value;
@@ -138,7 +153,22 @@ const shelfQuerySchema = cursorQuerySchema.extend({
   profileId: uuidSchema,
   itemKind: z.enum(['MEDICINE', 'PERSONAL_CARE']).optional(),
   lifecycleState: z.enum(['ACTIVE', 'STOPPED', 'ARCHIVED']).optional(),
+  /**
+   * `04` Phase 2.1's verification and attention filters.
+   *
+   * Two parameters rather than one, because they answer different questions: `verification`
+   * narrows by what Kynviora knows about the *product*, `attention` by whether anybody has looked
+   * at the *record*. An unrecognised value is a validation failure rather than a silently ignored
+   * one - a filter that quietly widened its own result set is the failure a safety-adjacent list
+   * cannot have (trap 79).
+   */
+  verification: z
+    .enum(['CONFIRMED', 'PROBABLE', 'PARTIAL', 'CONFLICTING', 'UNVERIFIED'])
+    .optional(),
+  attention: z.enum(['NEEDS_VERIFICATION', 'NEEDS_REVIEW', 'ANY']).optional(),
 });
+
+const itemParamsSchema = z.object({ itemId: uuidSchema });
 
 const lensQuerySchema = z.object({
   substanceKey: z.string().min(1).max(128),
@@ -182,6 +212,14 @@ const shelfItemSchema = z.object({
   batchVerification: z.string(),
   lastReviewedAt: z.string().nullable(),
   lastSafetyCheckedAt: z.string().nullable(),
+  /**
+   * What is not settled about this item (`04` Phase 2.1).
+   *
+   * On every row rather than behind the filter, because the exit criterion is that a person *can
+   * understand* which items need something - and a list where that is only visible to somebody
+   * who already knew to filter for it does not meet it.
+   */
+  attentionReasons: z.array(z.string()),
 });
 
 export type ShelfItem = z.infer<typeof shelfItemSchema>;
@@ -352,7 +390,8 @@ export function createServer(options: ServerOptions): FastifyInstance {
         );
       }
 
-      const { profileId, itemKind, lifecycleState, limit, cursor } = parsed.data;
+      const { profileId, itemKind, lifecycleState, verification, attention, limit, cursor } =
+        parsed.data;
 
       // The profile ID narrows the result set; it does not grant access. If the user cannot see
       // that profile, RLS returns nothing and the response is an empty page - the same as a
@@ -367,6 +406,39 @@ export function createServer(options: ServerOptions): FastifyInstance {
       if (lifecycleState) {
         params.push(lifecycleState);
         conditions.push(`lifecycle_state = $${params.length}`);
+      }
+      if (verification) {
+        // Any of the three axes in that state. `08` keeps them separate and this filter does not
+        // merge them - it asks "is any facet of this item in this state", which is the question a
+        // person filtering for CONFLICTING is actually asking.
+        params.push(verification);
+        const p = `$${params.length}`;
+        conditions.push(
+          `(identity_verification = ${p} OR formulation_verification = ${p} ` +
+            `OR batch_verification = ${p})`,
+        );
+      }
+      if (attention) {
+        // Exactly the domain's rule, in SQL, because filtering in the page after paging would
+        // return short pages that look like the end of the list. The two agree by construction:
+        // both read the same columns against the same UNSETTLED_VERIFICATIONS, and a test asserts
+        // the route and `attentionReasons` classify the same rows.
+        const unsettled = `('CONFLICTING','UNVERIFIED')`;
+        const needsVerification =
+          `(identity_verification IN ${unsettled} ` +
+          `OR formulation_verification IN ${unsettled} ` +
+          `OR batch_verification IN ${unsettled})`;
+        const needsReview = `(last_reviewed_at IS NULL OR last_safety_checked_at IS NULL)`;
+        const clause =
+          attention === 'NEEDS_VERIFICATION'
+            ? needsVerification
+            : attention === 'NEEDS_REVIEW'
+              ? needsReview
+              : `(${needsVerification} OR ${needsReview})`;
+        // A stopped or archived item is never asked to be verified, matching the domain: nothing
+        // about it is going to be used, and nagging about finished packs teaches people to ignore
+        // the list that matters.
+        conditions.push(`(lifecycle_state = 'ACTIVE' AND ${clause})`);
       }
       if (cursor) {
         params.push(cursor);
@@ -418,6 +490,19 @@ export function createServer(options: ServerOptions): FastifyInstance {
         batchVerification: row.batch_verification,
         lastReviewedAt: isoOrNull(row.last_reviewed_at),
         lastSafetyCheckedAt: isoOrNull(row.last_safety_checked_at),
+        // `04` Phase 2.1's second exit criterion, on the list rather than behind a filter. A
+        // person has to be able to see which items need something without knowing to filter for
+        // it, so every row carries its own reasons and the filter only narrows.
+        attentionReasons: [
+          ...attentionReasons({
+            identityVerification: asItemVerification(row.identity_verification),
+            formulationVerification: asItemVerification(row.formulation_verification),
+            batchVerification: asItemVerification(row.batch_verification),
+            lastReviewedAt: isoOrNull(row.last_reviewed_at),
+            lastSafetyCheckedAt: isoOrNull(row.last_safety_checked_at),
+            lifecycleState: row.lifecycle_state,
+          }),
+        ],
       }));
 
       // `13`: validate the response too, so a schema drift fails here and not in a client.
@@ -434,6 +519,100 @@ export function createServer(options: ServerOptions): FastifyInstance {
       return reply.send({
         items: validated.data,
         nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
+        serverTime: ctx.now,
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // GET /v1/items/:itemId  (`04` Phase 2.1 item detail)
+    // -------------------------------------------------------------------------
+    // One item, composed on the server for the same reason the alert detail is (`11`): the
+    // copy that says what is not settled and what would settle it is approved wording, and a
+    // client that assembled it would carry it in every shipped build.
+    //
+    // Row-level security is the whole authorization. `owned_item`'s policy requires
+    // `VIEW_MEDICINES` or ownership, so an item belonging to somebody else and one that does not
+    // exist are the same not-found and this route is not an oracle.
+
+    app.get<{ Params: { itemId: string } }>('/v1/items/:itemId', async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      const noSuchItem = domainError('NOT_FOUND', 'No such item.');
+
+      const params = itemParamsSchema.safeParse(request.params);
+      // A malformed identifier answers exactly as an unknown one does.
+      if (!params.success) return fail(reply, noSuchItem, ctx.correlationId);
+
+      const result = await ctx.db((db) =>
+        db.query<{
+          id: string;
+          item_kind: string;
+          display_name: string;
+          brand: string | null;
+          market: string | null;
+          lifecycle_state: string;
+          identity_verification: string;
+          formulation_verification: string;
+          batch_verification: string;
+          strength_text: string | null;
+          dosage_form: string | null;
+          directions_text: string | null;
+          personal_care_category: string | null;
+          started_on: Date | string | null;
+          stopped_on: Date | string | null;
+          expires_on: Date | string | null;
+          last_reviewed_at: Date | string | null;
+          last_safety_checked_at: Date | string | null;
+          notes: string | null;
+        }>(
+          `SELECT id, item_kind, display_name, brand, market, lifecycle_state,
+                  identity_verification, formulation_verification, batch_verification,
+                  strength_text, dosage_form, directions_text, personal_care_category,
+                  started_on, stopped_on, expires_on, last_reviewed_at, last_safety_checked_at,
+                  notes
+             FROM owned_item
+            WHERE id = $1 AND deleted_at IS NULL`,
+          [params.data.itemId],
+        ),
+      );
+
+      const row = result.rows[0];
+      if (row === undefined) return fail(reply, noSuchItem, ctx.correlationId);
+
+      const reasons = attentionReasons({
+        identityVerification: asItemVerification(row.identity_verification),
+        formulationVerification: asItemVerification(row.formulation_verification),
+        batchVerification: asItemVerification(row.batch_verification),
+        lastReviewedAt: isoOrNull(row.last_reviewed_at),
+        lastSafetyCheckedAt: isoOrNull(row.last_safety_checked_at),
+        lifecycleState: row.lifecycle_state,
+      });
+
+      return reply.status(200).send({
+        ...itemDetailView({
+          id: row.id,
+          itemKind: row.item_kind,
+          displayName: row.display_name,
+          brand: row.brand,
+          market: row.market,
+          lifecycleState: row.lifecycle_state,
+          identityVerification: row.identity_verification,
+          formulationVerification: row.formulation_verification,
+          batchVerification: row.batch_verification,
+          strengthText: row.strength_text,
+          dosageForm: row.dosage_form,
+          directionsText: row.directions_text,
+          personalCareCategory: row.personal_care_category,
+          startedOn: dateOrNull(row.started_on),
+          stoppedOn: dateOrNull(row.stopped_on),
+          expiresOn: dateOrNull(row.expires_on),
+          lastReviewedAt: isoOrNull(row.last_reviewed_at),
+          lastSafetyCheckedAt: isoOrNull(row.last_safety_checked_at),
+          notes: row.notes,
+          attentionReasons: reasons,
+        }),
+        attentionReasonCodes: reasons,
         serverTime: ctx.now,
       });
     });

@@ -49,6 +49,7 @@ import {
   presentUrgency,
   presentVerification,
   resolutionOptions,
+  attentionListView,
   type StatusPresentation,
 } from '@kynviora/presentation';
 import { isSafetyResolution } from '@kynviora/domain';
@@ -58,6 +59,7 @@ import type {
   AlertSummary,
   CaregiverAuditEvent,
   CaregiverGrant,
+  ItemDetailResponse,
   SafetyInboxLineResponse,
   SafetyReceiptResponse,
   PendingInvitation,
@@ -123,6 +125,17 @@ export interface ShelfItemView {
   readonly identity: StatusPresentation;
   readonly formulation: StatusPresentation;
   readonly batch: StatusPresentation;
+  /**
+   * What is not settled about this item, as sentences (`04` Phase 2.1).
+   *
+   * On the row rather than behind the filter, which is the exit criterion: a person has to be
+   * able to see which items need something without knowing to filter for it. Not a count and not
+   * an ordering - `02` forbids the aggregate, and which of two people's medicines matters more is
+   * not a judgement this list makes (trap 77).
+   */
+  readonly attention: readonly string[];
+  /** Reasons this build has no wording for. Dropped from the list above and counted here. */
+  readonly undescribedAttentionCount: number;
 }
 
 export function shelfItemView(item: ShelfItem): ShelfItemView {
@@ -138,6 +151,10 @@ export function shelfItemView(item: ShelfItem): ShelfItemView {
       'formulation',
     ),
     batch: presentVerification(asItemVerification(item.batchVerification), 'batch'),
+    // Composed from the domain's reason codes rather than from the item's own fields, so the list
+    // and the detail cannot disagree about what is outstanding.
+    attention: attentionListView(item.attentionReasons).reasons.map((entry) => entry.label),
+    undescribedAttentionCount: attentionListView(item.attentionReasons).undescribedCount,
   };
 }
 
@@ -153,8 +170,9 @@ export function shelfView(items: readonly ShelfItem[], nextCursor: string | null
   const views = items.map(shelfItemView);
   return {
     items: views,
-    // Counts of what is on the shelf. Not a score, not a rating, and not a count of anything
-    // "needing attention" - `02` forbids the aggregate and Phase 8.3 forbids the badge.
+    // Counts of what is on the shelf, by category. Not a score, not a rating, and deliberately
+    // not a count of anything "needing attention" - `02` forbids the aggregate and Phase 8.3
+    // forbids the badge. Phase 2.1 added a per-item reason list and did not add a total.
     medicineCount: views.filter((view) => view.itemKind === 'MEDICINE').length,
     personalCareCount: views.filter((view) => view.itemKind === 'PERSONAL_CARE').length,
     hasMore: nextCursor !== null,
@@ -837,5 +855,52 @@ export function safetyReceiptScreenView(response: SafetyReceiptResponse): Safety
     permanenceNote: response.permanenceNote,
     actionOptions: options.filter((option) => !option.isFeedback),
     feedbackOptions: options.filter((option) => option.isFeedback),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Item detail (`04` Phase 2.1)
+// ---------------------------------------------------------------------------
+
+export interface ItemDetailScreenView {
+  readonly id: string;
+  readonly displayName: string;
+  readonly brand: string | null;
+  readonly itemKind: ItemKind;
+  readonly lifecycleNote: string | null;
+  /** Narrowed. A presentation the client could not read is absent rather than rendered blank. */
+  readonly identity: StatusPresentation | null;
+  readonly formulation: StatusPresentation | null;
+  readonly batch: StatusPresentation | null;
+  readonly verificationNote: string;
+  readonly categoryHeading: string;
+  readonly categoryFields: ItemDetailResponse['categoryFields'];
+  readonly sharedFields: ItemDetailResponse['sharedFields'];
+  readonly attention: ItemDetailResponse['attention'];
+}
+
+/**
+ * The item detail, as a screen renders it.
+ *
+ * A pass-through except for the three chips, which are narrowed rather than trusted: a
+ * half-formed presentation would render as a chip with a blank label, and on a screen whose
+ * subject is how well Kynviora knows something, a blank label reads as a state nobody assigned.
+ * The same choice the alert detail makes.
+ */
+export function itemDetailScreenView(response: ItemDetailResponse): ItemDetailScreenView {
+  return {
+    id: response.id,
+    displayName: response.displayName,
+    brand: response.brand,
+    itemKind: asItemKind(response.itemKind),
+    lifecycleNote: response.lifecycleNote,
+    identity: asStatusPresentation(response.identity),
+    formulation: asStatusPresentation(response.formulation),
+    batch: asStatusPresentation(response.batch),
+    verificationNote: response.verificationNote,
+    categoryHeading: response.categoryHeading,
+    categoryFields: response.categoryFields,
+    sharedFields: response.sharedFields,
+    attention: response.attention,
   };
 }

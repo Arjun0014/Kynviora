@@ -37,6 +37,7 @@ const ITEM: ShelfItem = {
   batchVerification: 'UNVERIFIED',
   lastReviewedAt: null,
   lastSafetyCheckedAt: null,
+  attentionReasons: [],
 };
 
 const ALERT: AlertSummary = {
