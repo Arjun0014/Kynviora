@@ -1599,3 +1599,39 @@ now says so in six sentences instead of by being blank.
 2341 tests passing across 72 files, up from 2317 across 71. Typecheck, mobile typecheck, lint and
 format all clean via `npm run verify`, exit 0. 24 new tests: 18 on the view model and its copy, and
 6 end to end against a real server process.
+
+## 2026-09-01 - Session resumed
+
+### Reconciling the plan against the repository
+
+Before any new work, the phase statuses in `IMPLEMENTATION_PLAN.md` were checked against what the
+repository actually contains rather than against what the last session remembered writing. Four
+entries had gone stale, and one of them was stale in the direction that matters.
+
+**Phase 2.1 was marked `NOT_STARTED` and is not.** The note under the Stage 2 table said the phase
+"depends on the owned-item schema (migration `0004`, not yet written)". Migration `0004` has been
+written since Stage 2 was first planned: `owned_item` carries the lifecycle state, the three
+verification axes and the four timestamps the phase asks for, `GET /v1/items` returns them, and the
+Shelf screen renders the axes as three separate chips. The first exit criterion - medicine and
+personal-care items coexisting without one being a generic note - is met. What is genuinely absent
+is the item **detail** route and the four filters, so the phase is `IN_PROGRESS`. This is the
+direction of drift worth catching: a phase recorded as not started is a phase nobody looks at
+again, and half of this one was already shipped.
+
+**`DEV-007` was headed "partly done" and is closed.** The section still listed revocation as "the
+one caregiver action without a screen"; revocation shipped in `f13fe45` and delegation in `f182357`.
+
+**The prose count disagreed with the tables it described.** The plan said nineteen phases were
+`COMPLETE` and nine blocked. Counting the rows gives 25 `COMPLETE`, 8 `IN_PROGRESS`, 10
+`NOT_STARTED`, 7 `BLOCKED_EXTERNAL` and 1 `BLOCKED_TECHNICAL` across the 51 phases `04` defines.
+The paragraph now says where the numbers come from, because a count kept by hand is one that drifts
+again.
+
+Nothing was promoted. No phase moved to `COMPLETE` in this pass, and 2.1 moved to the weaker of the
+two honest answers available to it.
+
+### Baseline confirmed
+
+`npm run verify` exit 0: 2341 tests across 72 files, typecheck, mobile typecheck, lint and format
+all clean. That matches the recorded baseline exactly, so the tree resumed from is the tree the last
+session committed.

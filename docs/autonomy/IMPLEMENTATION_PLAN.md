@@ -74,12 +74,22 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 
 | Phase | Title                      | Status        |
 | ----- | -------------------------- | ------------- |
-| 2.1   | Shared Shelf framework     | `NOT_STARTED` |
+| 2.1   | Shared Shelf framework     | `IN_PROGRESS` |
 | 2.2   | Manual medicine entry      | `NOT_STARTED` |
 | 2.3   | Manual personal-care entry | `NOT_STARTED` |
 | 2.4   | Product Trust Passport v1  | `COMPLETE`    |
 
-Depends on the owned-item schema (migration `0004`, not yet written) and the mobile shell (0.3).
+- **2.1**: reconciled 2026-09-01, and `NOT_STARTED` was stale. Migration `0004` **is** written:
+  `owned_item` carries the lifecycle state, the three verification axes and the first-used /
+  stopped / last-reviewed / last-checked timestamps that this phase asks for. `GET /v1/items`
+  returns them and the Shelf screen renders the three axes as three separate chips, so the first
+  exit criterion - medicine and personal-care items coexist without one being a generic note - is
+  met by typed records on both sides. What is missing is the rest of the expected output: an
+  **item detail route**, and the profile / category / verification / attention **filters**. The
+  second exit criterion, "a user can understand which items need verification or review", is
+  reachable today only through the Today inbox rather than from the Shelf itself.
+- **2.2 / 2.3**: unchanged and accurate. There is no manual-entry surface for either category.
+
 The Trust Passport's underlying data - identity/formulation/batch verification kept separate,
 corroboration state, coverage statement - already exists in the domain and catalog layers.
 
@@ -398,7 +408,7 @@ header-based development identity that fails closed three ways and grants no sta
 
 ---
 
-## Wiring the screens (`DEV-007`, partly done)
+## Wiring the screens (`DEV-007`, closed)
 
 A new `@kynviora/contracts` package holds the client every surface shares: configuration, the
 session, the transport, the outcome union, the resource model and the view models. The five
@@ -427,7 +437,15 @@ and a digest a live server accepts (DEC-048).
 **Reconciliation** is built: a typed list, the differences the server derived, and a prompt that
 asks which value stands for every settling resolution (DEC-049).
 
-Still to build (`DEV-022`): revocation, the one caregiver action without a screen.
+**Revocation** is built, and with it `DEV-022` and `DEV-007` are closed: a confirmation that
+names what stops and what starting again would take, the right route for a grant or an invitation,
+an idempotent request, and the access history that shows the removal happened. **Delegation** is
+built too (`DEV-026`), so a caregiver holding `MANAGE_CAREGIVERS` can pass on a subset of what they
+hold and never more.
+
+Every read destination is wired and every write flow has a screen. What remains unwired is not a
+household surface at all: it is the staff console (`DEV-016`), which is deliberately not the Expo
+app.
 
 `DEV-021` records that screen behaviour is tested in the packages rather than in the app, and what
 that does and does not cover.
@@ -451,14 +469,19 @@ catalog conflicts, with no verdict anywhere in the output.
 
 ## What "complete" means here, and what it does not
 
-Nineteen phases are marked `COMPLETE` above. In every case that means the logic is implemented,
-tested, documented and committed - and in most cases the tests execute against a real PostgreSQL
-engine or the real Expo toolchain rather than a mock.
+Twenty-five phases are marked `COMPLETE` above. In every case that means the logic is
+implemented, tested, documented and committed - and in most cases the tests execute against a real
+PostgreSQL engine or the real Expo toolchain rather than a mock.
 
-It does **not** mean the phase is releasable. Nine phases carry exit criteria that depend on a
+It does **not** mean the phase is releasable. Eight phases carry exit criteria that depend on a
 device, a credential, a labelled dataset, or a qualified human reviewer, and those are marked
-`BLOCKED_EXTERNAL` or `BLOCKED_TECHNICAL` rather than complete even where all buildable work is
-finished. `BLOCKERS.md` records what each one needs.
+`BLOCKED_EXTERNAL` (seven) or `BLOCKED_TECHNICAL` (one) rather than complete even where all
+buildable work is finished. `BLOCKERS.md` records what each one needs.
+
+The counts above are the tables' own, recomputed on 2026-09-01 rather than remembered: 25
+`COMPLETE`, 8 `IN_PROGRESS`, 10 `NOT_STARTED`, 7 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over
+the 51 phases `04` defines. A prose count that drifts from the table it describes is the quiet way
+a status document stops being one, so it is derived by counting the rows.
 
 The MVP is complete at the end of Stage 9. It is not close to that, and the largest remaining
 gaps are the ones no amount of engineering closes on its own: clinical and regulatory review
