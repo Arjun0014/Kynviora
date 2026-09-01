@@ -104,6 +104,20 @@ export interface SafetyInboxLineResponse {
   readonly evidenceLevel: string | null;
   /** When Kynviora last assessed this item, or `null` for never. The absence is the point. */
   readonly lastAssessedAt: string | null;
+  /**
+   * Substances the Global Regulatory Lens can be asked about for this item.
+   *
+   * Only ingredients whose mapping to a canonical concept is exact. An ambiguous one would send
+   * the Lens a substance nobody confirmed is in the pack, and the Lens answers about whatever it
+   * is given. Empty until guided capture lands (`DEV-024`, `BLK-007`), which is why a screen must
+   * offer no control rather than an empty one.
+   */
+  readonly substances: readonly {
+    readonly substanceKey: string;
+    readonly preferredName: string;
+    /** Recorded only where the package actually discloses it. `null` is the common case (`09`). */
+    readonly disclosedConcentrationPercent: number | null;
+  }[];
 }
 
 export interface SafetyInboxResponse {
@@ -368,8 +382,61 @@ export interface ReconciliationResponse {
   readonly serverTime: string;
 }
 
+/**
+ * One jurisdiction's answer, as the wire carries it.
+ *
+ * Declared rather than imported from `@kynviora/regulatory`, for the same reason every other
+ * response shape here is: `13` requires a stable contract, and a shape imported from the producing
+ * package would make a breaking change to it invisible until runtime.
+ *
+ * `statuses` is a list and stays one. `07` forbids collapsing several applicable statuses into a
+ * single verdict, and a screen handed one string could not have shown two.
+ */
+export interface LensEntryResponse {
+  readonly jurisdiction: string;
+  readonly statuses: readonly string[];
+  /** A separate axis from status (DEC-007). There is no `NON_COMPLIANT` outcome anywhere. */
+  readonly applicability: string;
+  readonly conditions: Readonly<Record<string, unknown>> | null;
+  /** The exact conditions that could not be evaluated, so a screen can ask for the right datum. */
+  readonly unresolvedConditions: readonly string[];
+  readonly authority: string | null;
+  readonly legalInstrument: string | null;
+  readonly legalReference: string | null;
+  readonly publicationDate: string | null;
+  readonly effectiveDate: string | null;
+  readonly lastVerifiedAt: string | null;
+  /** `09` requires this alongside an absence. Never omitted, never inferred from an empty list. */
+  readonly coverageStatement: string;
+  /** What the entry does not mean. `09` requires every displayed status to carry its limits. */
+  readonly limitations: readonly string[];
+  /** Kept separate from law (`09`). An opinion is not a legal status however authoritative. */
+  readonly scientificOpinions: readonly {
+    readonly committee: string;
+    readonly reference: string;
+    readonly summary: string;
+    readonly publicationDate: string | null;
+    readonly hasImplementingLaw: boolean;
+  }[];
+  readonly productActions: readonly {
+    readonly actionKind: string;
+    readonly authority: string;
+    readonly summary: string;
+    readonly effectiveDate: string | null;
+  }[];
+  readonly ruleVersionId: string | null;
+}
+
+export interface LensSnapshotResponse {
+  readonly substanceCanonicalKey: string;
+  readonly entries: readonly LensEntryResponse[];
+  readonly generatedAt: string;
+  /** Requested jurisdictions Kynviora does not monitor at all. Reported, never quietly omitted. */
+  readonly unmonitoredJurisdictions: readonly string[];
+}
+
 export interface LensResponse {
-  readonly lens: unknown;
+  readonly lens: LensSnapshotResponse;
   readonly serverTime: string;
 }
 
@@ -474,6 +541,13 @@ export interface KynvioraClient {
   listProfiles(): Promise<ApiOutcome<ProfilesResponse>>;
   listItems(query: ItemsQuery): Promise<ApiOutcome<ItemsResponse>>;
   listAlerts(): Promise<ApiOutcome<AlertsResponse>>;
+  /**
+   * How supported jurisdictions treat one substance.
+   *
+   * Beside the safety state, never substituted for it (`09`). A regulatory status is a statement
+   * about the law in a place; a safety state is a statement about this person's item, and the two
+   * answer different questions.
+   */
   regulatoryLens(query: {
     readonly substanceKey: string;
     readonly productUseType?: string;

@@ -579,3 +579,71 @@ export function presentApplicability(applicability: RegulatoryApplicability): St
       };
   }
 }
+
+// ---------------------------------------------------------------------------
+// What the package did not say
+// ---------------------------------------------------------------------------
+
+/**
+ * The datum a `CONDITION_UNKNOWN` result is missing, in a sentence.
+ *
+ * `09` requires the limitation copy to name the *actual* missing thing: a rule with both a
+ * concentration limit and an age condition must not report "the concentration is not disclosed"
+ * when the concentration is printed and the intended age is what nobody knows.
+ *
+ * A total record over the vocabulary, so a new unresolved condition fails to compile here until
+ * somebody writes the sentence. Each says what is missing and, where there is one, what would
+ * resolve it - because "we could not tell" without a next step is a dead end on the one screen
+ * `09` requires to be precise.
+ */
+export const UNRESOLVED_CONDITION_COPY: Readonly<Record<string, string>> = Object.freeze({
+  CONCENTRATION:
+    'The pack does not state how much of this substance it contains, and the rule depends on that.',
+  PRODUCT_USE:
+    'The rule depends on how the product is used, and that is not recorded for this item.',
+  INTENDED_AGE:
+    'The rule depends on who the product is intended for, and no age range is recorded.',
+  ROUTE: 'The rule depends on how the product is applied or taken, and that is not recorded.',
+});
+
+/**
+ * Describe an unresolved condition, or refuse it.
+ *
+ * `null` rather than a fallback sentence: an unresolved condition this build cannot name has no
+ * words anybody wrote, and a generic "some information is missing" would be worse than saying
+ * nothing - it reads as a complete answer.
+ */
+export function describeUnresolvedCondition(condition: string): string | null {
+  return UNRESOLVED_CONDITION_COPY[condition] ?? null;
+}
+
+/**
+ * Fixed copy for the Global Regulatory Lens screen.
+ *
+ * `18` keeps user-visible words out of components, and the Lens is where that rule earns most:
+ * every sentence here is about the law in a place, and a phrase drifting between two screens is
+ * how "restricted" quietly becomes "banned".
+ */
+export const LENS_COPY = Object.freeze({
+  heading: 'How this is treated elsewhere',
+  unmonitoredPrefix: 'Kynviora does not monitor',
+  opinionHeading: 'Scientific opinion, not law',
+  opinionImplemented: 'A law implements this opinion.',
+  opinionNotImplemented: 'No law implements this opinion.',
+  actionsHeading: 'Official actions',
+  backLabel: 'Back',
+});
+
+/**
+ * How many statuses this build cannot describe, in a sentence.
+ *
+ * `null` where there are none. Counted rather than hidden: a jurisdiction card that quietly
+ * dropped a published status would understate what a regulator has said, which is the one
+ * direction `09` cannot tolerate on this screen.
+ */
+export function undescribedStatusNote(count: number): string | null {
+  if (count <= 0) return null;
+  return count === 1
+    ? 'One further status was published. This version of the app cannot describe it.'
+    : `${count} further statuses were published. This version of the app cannot describe them.`;
+}

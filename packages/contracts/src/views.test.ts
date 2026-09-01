@@ -407,6 +407,7 @@ describe('the Safety Watch inbox a person reads', () => {
     urgency: null,
     evidenceLevel: null,
     lastAssessedAt: null,
+    substances: [],
     ...over,
   });
 

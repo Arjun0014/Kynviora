@@ -15,5 +15,6 @@ export * from './taskCompletion.js';
 export * from './invitation.js';
 export * from './revocation.js';
 export * from './doseEvents.js';
+export * from './lens.js';
 export * from './visitPack.js';
 export * from './reconciliation.js';

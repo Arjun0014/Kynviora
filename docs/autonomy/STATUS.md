@@ -13,14 +13,14 @@ Last updated: 2026-09-01
 | ------------------ | ---------------------------------------------- |
 | **Current stage**  | Stage 6 (governance), after completing Stage 8 |
 | **Current phase**  | Stage 6 governance surfaces; `DEV-007` closed  |
-| **Last completed** | Phase 7.1 - the Safety Watch inbox             |
+| **Last completed** | Phase 7.2 - the Regulatory Lens screen         |
 | **Branch**         | `master`                                       |
-| **Latest commit**  | `feat(safety): the Safety Watch inbox`         |
+| **Latest commit**  | `feat(safety): the Global Regulatory Lens`     |
 | **Baseline tag**   | `baseline-spec-only`                           |
 
 ## Verification state
 
-- **2317 tests passing**, 0 failing, across 71 files.
+- **2341 tests passing**, 0 failing, across 72 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -108,8 +108,10 @@ metrics `20` names, with one row per registered source, and no verdict anywhere 
 
 Next, in order of how self-contained each is:
 
-Phase 7.1 is done too: every item on a profile's shelf now carries a safety state, so "checked and
-nothing matched" and "never checked" are different lines instead of the same absence.
+Phase 7.1 is done too - every item on a profile's shelf now carries a safety state, so "checked and
+nothing matched" and "never checked" are different lines instead of the same absence - and so is
+Phase 7.2's UI: six jurisdiction cards, each with its own coverage statement and limitations, no
+verdict and no ordering by severity.
 
 1. **A staff reviewer console interface** (`DEV-016`), on its own origin and session policy. The
    console backend and the operational projection both exist with no interface in front of them.
@@ -265,6 +267,12 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 - **DEC-048** - the Visit Pack client hashes the candidates it **displayed** and never re-fetches
   before hashing. `canonicalizeSelection` and `toNoteEntries` come from the domain so both sides
   build the same string. An entry this client cannot canonicalise is refused, never coerced.
+
+- **DEC-064** - the Lens opens from a safety line, once per substance, and only for a substance
+  whose ingredient mapping is `EXACT`. It answers about whatever key it is given, and a confident
+  answer about the wrong substance is worse than none because it looks like one.
+- **DEC-065** - a Lens card carries no verdict and the cards are never ordered by severity. `09`
+  forbids "strict country" framing and a severity-sorted list is that framing without the words.
 
 - **DEC-062** - an item nobody has assessed is `INSUFFICIENT_DATA`, never
   `NO_CURRENT_MATCHED_ALERT`. The second claims a check ran and found nothing. Listing only alerts
@@ -558,3 +566,15 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
     unrecognised filter value. A silently empty list and a silently wider one are both the failure
     this screen exists to prevent; `buildUrl` takes repeated values and applies the same credential
     guard to them.
+80. Do not add an overall verdict to the Lens view, and do not sort the jurisdiction cards by how
+    prohibitive each answer is. `09` forbids "strict country" and "weak regulation" framing, and a
+    severity-ordered list is that framing with the words left out (DEC-065).
+81. Do not render a regulatory status this build cannot describe as a bare code, and do not hide
+    it. It is dropped and counted, because a card that quietly lost a published status would
+    understate what a regulator said.
+82. Do not open the Lens on a substance whose ingredient mapping is not `EXACT`. The Lens answers
+    about whatever key it is given, and an `AMBIGUOUS` mapping means nobody confirmed that
+    substance is in the pack (DEC-064).
+83. Backticks are still fatal inside a SQL template literal, and trap 18 fired again while writing
+    the safety-inbox query. A `` `09` `` in a SQL comment surfaced as "decimals with leading zeros
+    are not allowed" forty characters away. Write "spec 09" in SQL.

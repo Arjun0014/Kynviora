@@ -1754,3 +1754,51 @@ this screen a silently empty list is the failure the whole route exists to preve
 value is refused rather than dropped, for the same reason in the other direction.
 
 **Sources.** `04` Phase 7.1; `02`; `23` D-005; `13`.
+
+## DEC-064 - The Lens opens from an item, and only for a substance confirmed to be in it
+
+**Context.** Phase 7.2's UI needed somewhere to live. `09` says a regulatory status is shown
+"beside, not substituted for" the safety state, which rules out a destination of its own and points
+at the safety line.
+
+**Decision.** One control per substance on a safety line, and none where the item has none. The
+substances offered are only those whose ingredient mapping is `EXACT`.
+
+**Rationale.** The Lens answers about whatever key it is given. An `AMBIGUOUS` mapping means nobody
+has confirmed that substance is in the pack, so opening the Lens on it would produce a confident,
+sourced, entirely applicable-looking answer about the wrong substance - which is worse than no
+answer, because it looks like one. `EXACT` is the only mapping state that says somebody resolved it.
+
+**Absent rather than disabled.** Nothing in the shipped seed has an exact mapping, so no control
+appears anywhere today. That is DEC-045's reasoning again: a greyed-out control would say a Lens
+answer exists and is being withheld.
+
+**The request carries the context, not just the key.** `09` makes the answer depend on the
+disclosed concentration, so asking about a substance without the concentration it was found at
+would give a less applicable answer than the item deserves - and `CONDITION_UNKNOWN` exists
+precisely to say when that context is missing.
+
+**Sources.** `04` Phase 7.2; `09`; DEC-007; DEC-045; `DEV-024`; `BLK-007`.
+
+## DEC-065 - A Lens card never carries a verdict, and the cards are never ordered by severity
+
+**Context.** Six jurisdiction cards invite two summaries: an overall answer, and an order that puts
+the strictest first.
+
+**Decision.** Neither. `lensView` has no verdict field, the card order is the projection's own, and
+the module exports no function whose name suggests a comparison. Tests assert all three.
+
+**Rationale.** `09` forbids value judgements such as "strict country" or "weak regulation", and a
+list sorted by how prohibitive each answer is expresses exactly that judgement without using the
+words. An overall verdict is the same thing collapsed to one line, and would have to decide what
+six different legal systems jointly mean - which nobody has the standing to do.
+
+**Statuses stay a list.** `07` forbids collapsing several applicable statuses into one, so a card
+renders one presentation per status. A status this build cannot describe is dropped and counted
+rather than rendered as a bare code: the presentation layer holds one description per status and no
+default, and inventing one would put a legal claim on screen that no reviewer approved.
+
+**An empty card says why it is empty.** `LENS_NO_STATUS` is on any card with no describable status,
+because an empty box reads as "fine here" - `23` D-014 drawn rather than written.
+
+**Sources.** `04` Phase 7.2; `07`; `09`; `23` D-014; trap 2.

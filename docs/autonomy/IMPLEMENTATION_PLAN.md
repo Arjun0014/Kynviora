@@ -222,18 +222,20 @@ there is still no staff interface (`DEV-016`).
 
 ## Stage 7 - Safety Watch and Global Regulatory Lens Experience
 
-| Phase | Title                           | Status        |
-| ----- | ------------------------------- | ------------- |
-| 7.1   | Assessment states and inbox     | `COMPLETE`    |
-| 7.2   | Global Regulatory Lens          | `IN_PROGRESS` |
-| 7.3   | Alert detail and explainability | `NOT_STARTED` |
-| 7.4   | Evidence and Regulatory Diff    | `IN_PROGRESS` |
-| 7.5   | Notification policy             | `NOT_STARTED` |
-| 7.6   | Resolution and Safety Receipt   | `NOT_STARTED` |
+| Phase | Title                           | Status             |
+| ----- | ------------------------------- | ------------------ |
+| 7.1   | Assessment states and inbox     | `COMPLETE`         |
+| 7.2   | Global Regulatory Lens          | `BLOCKED_EXTERNAL` |
+| 7.3   | Alert detail and explainability | `NOT_STARTED`      |
+| 7.4   | Evidence and Regulatory Diff    | `IN_PROGRESS`      |
+| 7.5   | Notification policy             | `NOT_STARTED`      |
+| 7.6   | Resolution and Safety Receipt   | `NOT_STARTED`      |
 
-- **7.2**: the projection and all four hard guarantees are implemented and tested. The UI is
-  outstanding. Its exit criterion ("A user can distinguish banned from restricted under
-  conditions in usability testing") additionally requires human participants.
+- **7.2**: the projection, all four hard guarantees, and the UI are implemented and tested. What
+  remains is its exit criterion - "a user can distinguish banned from restricted under conditions
+  in usability testing" - which requires human participants (`BLK-008`-shaped: an evaluation
+  nobody here can run). The Lens is also unreachable from the shelf until an item has a substance
+  with an `EXACT` ingredient mapping, which needs guided capture (`DEV-024`, `BLK-007`).
 - **7.4**: `diffIngredients` provides the formulation half; the regulatory-version diff is
   outstanding.
 
@@ -436,12 +438,14 @@ that does and does not cover.
 
 1. A staff reviewer console interface (`DEV-016`), on its own origin and session policy. The
    console backend and the operational projection both exist with no interface in front of them.
-2. Phase 7.3: alert detail and explainability, which now has a list to open a detail from.
+2. Phase 7.3: alert detail and explainability, which now has a list to open a detail from. The
+   approved message templates already exist in `@kynviora/presentation`; what is missing is the
+   route that assembles one alert's full context and the screen that renders it.
 3. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch and its authorization already exist; nothing calls them with a real occurrence.
 
 Done since this list was last written: revocation and the rest of `DEV-007`, caregiver delegation
-(`DEV-026`), Phase 4.3, Phase 7.1, and the observability projections (`20`) - review-queue age for both
+(`DEV-026`), Phase 4.3, Phase 7.1, Phase 7.2's UI, and the observability projections (`20`) - review-queue age for both
 queues, source freshness against each source's own declared cadence, extraction outcomes and
 catalog conflicts, with no verdict anywhere in the output.
 

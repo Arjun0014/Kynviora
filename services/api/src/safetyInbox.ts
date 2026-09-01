@@ -82,6 +82,7 @@ function isoOrNull(value: Date | string | null | undefined): string | null {
 interface InboxRow {
   owned_item_id: string;
   display_name: string;
+  substances: { key: string; name: string; concentration: string | number | null }[] | null;
   alert_urgency: string | null;
   alert_evidence_level: string | null;
   alert_match_confidence: string | null;
@@ -129,6 +130,18 @@ export function registerSafetyInboxRoutes(app: FastifyInstance, deps: SafetyInbo
           // and it is worth being explicit about rather than inherited.
           `SELECT i.id            AS owned_item_id,
                   i.display_name  AS display_name,
+                  -- The substances the Global Regulatory Lens can be asked about for this item.
+                  -- Only ingredients whose mapping to a canonical concept is EXACT: an AMBIGUOUS
+                  -- one would send the Lens a substance nobody confirmed is in the pack, and the
+                  -- Lens answers about whatever it is given (spec 09, DEC-016).
+                  (SELECT jsonb_agg(DISTINCT jsonb_build_object(
+                            'key', ns.canonical_key,
+                            'name', ns.preferred_name,
+                            'concentration', fi.disclosed_concentration_percent))
+                     FROM formulation_ingredient fi
+                     JOIN normalized_substance ns ON ns.id = fi.substance_id
+                    WHERE fi.formulation_id = i.formulation_id
+                      AND fi.mapping_state = 'EXACT') AS substances,
                   pa_alert.urgency          AS alert_urgency,
                   pa_alert.evidence_level   AS alert_evidence_level,
                   pa_alert.match_confidence AS alert_match_confidence,
@@ -160,7 +173,13 @@ export function registerSafetyInboxRoutes(app: FastifyInstance, deps: SafetyInbo
         ),
       );
 
-      const lines: SafetyInboxLine[] = result.rows.map((row) => {
+      const lines: (SafetyInboxLine & {
+        readonly substances: readonly {
+          readonly substanceKey: string;
+          readonly preferredName: string;
+          readonly disclosedConcentrationPercent: number | null;
+        }[];
+      })[] = result.rows.map((row) => {
         const derived = deriveItemSafetyState({
           publishedAlert:
             row.alert_urgency === null
@@ -178,7 +197,20 @@ export function registerSafetyInboxRoutes(app: FastifyInstance, deps: SafetyInbo
                   evaluatedAt: (isoOrNull(row.assessment_evaluated_at) ?? ctx.now) as Instant,
                 },
         });
-        return { ownedItemId: row.owned_item_id, displayName: row.display_name, ...derived };
+        return {
+          ownedItemId: row.owned_item_id,
+          displayName: row.display_name,
+          // Empty rather than absent where the item has no confirmed ingredient mapping, which
+          // is every item until guided capture lands (`DEV-024`, `BLK-007`). A screen offers no
+          // Lens control for an empty list, which is absent rather than disabled (DEC-045).
+          substances: (row.substances ?? []).map((substance) => ({
+            substanceKey: substance.key,
+            preferredName: substance.name,
+            disclosedConcentrationPercent:
+              substance.concentration === null ? null : Number(substance.concentration),
+          })),
+          ...derived,
+        };
       });
 
       const filtered = filterSafetyInbox(lines, {

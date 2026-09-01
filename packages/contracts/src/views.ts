@@ -249,6 +249,17 @@ export interface SafetyInboxLineView {
   readonly evidence: StatusPresentation | null;
   /** When Kynviora last assessed this item, or `null`. Rendered as an absence, not hidden. */
   readonly lastAssessedAt: string | null;
+  /**
+   * What the Lens can be asked about for this item.
+   *
+   * Empty for every item until guided capture lands, so a screen offers no control rather than
+   * one that opens an empty answer - absent rather than disabled, as DEC-045 has it.
+   */
+  readonly substances: readonly {
+    readonly substanceKey: string;
+    readonly preferredName: string;
+    readonly disclosedConcentrationPercent: number | null;
+  }[];
 }
 
 export interface SafetyInboxView {
@@ -290,6 +301,7 @@ export function safetyInboxView(response: {
         ? null
         : presentEvidenceLevel(asEvidenceLevel(line.evidenceLevel)),
     lastAssessedAt: line.lastAssessedAt,
+    substances: line.substances ?? [],
   }));
 
   return {

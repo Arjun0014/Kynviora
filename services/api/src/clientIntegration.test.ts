@@ -26,6 +26,7 @@ import {
   doseHistory,
   heldCapabilities,
   inviterAuthority,
+  lensView,
   mayInvite,
   refreshedResource,
   revocationMessage,
@@ -1604,5 +1605,93 @@ describe('the Safety Watch inbox, end to end', () => {
     const after = await asCaregiver.safetyInbox(SEED.profileId);
     if (after.kind !== 'OK') return;
     expect(after.value.lines).toEqual([]);
+  });
+});
+
+describe('the Global Regulatory Lens, end to end', () => {
+  /**
+   * Phase 7.2's UI half, against the server the app talks to.
+   *
+   * The projection and its four hard guarantees are tested in `@kynviora/regulatory`. What only a
+   * live server proves is that they survive the wire: DEC-016 rejects every shipped fixture at the
+   * Citation Gate, so the answer is an absence - and an absence is exactly the answer this screen
+   * has to get right.
+   */
+  it('answers with an absence that says what it is not', async () => {
+    // `09`: "no matched rule within coverage" is not approval, and the coverage statement travels
+    // with it. `23` D-014 is the rule this asserts.
+    const outcome = await owner.regulatoryLens({ substanceKey: 'substance.nothing.published' });
+    expect(outcome.kind).toBe('OK');
+    if (outcome.kind !== 'OK') return;
+
+    const view = lensView(outcome.value.lens);
+    expect(view.cards.length).toBeGreaterThan(0);
+
+    for (const card of view.cards) {
+      // Every card carries its own coverage statement and its own limitations, on the card
+      // rather than once at the foot of the screen.
+      expect(card.coverageStatement.length).toBeGreaterThan(0);
+      expect(card.limitations.length).toBeGreaterThan(0);
+      // And nothing on it reads as permission.
+      const rendered = [
+        ...card.statuses.map((s) => s.label),
+        ...card.statuses.map((s) => s.description),
+        card.noStatusNote ?? '',
+      ].join(' ');
+      expect(rendered).not.toMatch(/\ballowed\b|\bpermitted\b|\bsafe\b|\bapproved\b/i);
+    }
+  });
+
+  it('gives GB and NI separate cards', async () => {
+    // Trap 2: they are separate jurisdictions by design, and a single "UK" card would answer one
+    // question with the other's law.
+    const outcome = await owner.regulatoryLens({ substanceKey: 'substance.nothing.published' });
+    if (outcome.kind !== 'OK') return;
+    const jurisdictions = lensView(outcome.value.lens).cards.map((card) => card.jurisdiction);
+    expect(jurisdictions).toContain('GB');
+    expect(jurisdictions).toContain('NI');
+    expect(jurisdictions).not.toContain('UK');
+  });
+
+  it('keeps the requested jurisdiction order rather than ranking them', async () => {
+    // `09` forbids "strict country" framing, and a list sorted by how prohibitive each answer is
+    // would be that framing with the words left out.
+    const outcome = await owner.regulatoryLens({ substanceKey: 'substance.nothing.published' });
+    if (outcome.kind !== 'OK') return;
+    const view = lensView(outcome.value.lens);
+    expect(view.cards.map((card) => card.jurisdiction)).toEqual(
+      outcome.value.lens.entries.map((entry) => entry.jurisdiction),
+    );
+  });
+
+  it('carries an applicability on every card, separate from the statuses', async () => {
+    // DEC-007. The two axes stay two on the wire as well as in the projection, and there is no
+    // combined verdict field anywhere in the response.
+    const outcome = await owner.regulatoryLens({ substanceKey: 'substance.nothing.published' });
+    if (outcome.kind !== 'OK') return;
+    for (const entry of outcome.value.lens.entries) {
+      expect(typeof entry.applicability).toBe('string');
+      expect(Object.keys(entry)).toEqual(
+        expect.not.arrayContaining(['compliant', 'verdict', 'severity', 'score', 'rank']),
+      );
+    }
+    for (const card of lensView(outcome.value.lens).cards) {
+      expect(card.applicability.label.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('offers the shelf no substance to ask about yet, rather than a wrong one', async () => {
+    // The control on a safety line appears per confirmed substance. Nothing in the seed has an
+    // exact ingredient mapping, so nothing is offered - `DEV-024` and `BLK-007`, visible on the
+    // screen as an absent control rather than one that opens an answer about the wrong substance.
+    const inbox = await owner.safetyInbox(SEED.profileId);
+    if (inbox.kind !== 'OK') return;
+    for (const line of inbox.value.lines) expect(line.substances).toEqual([]);
+  });
+
+  it('refuses to put a substance key where a credential must not go', () => {
+    // The transport guard applies to the repeated query shape as well as the single-valued one,
+    // which is the whole reason the guard was extended rather than duplicated.
+    expect(() => buildUrlForTest('/v1/regulatory-lens', { token: 'abc' })).toThrow();
   });
 });

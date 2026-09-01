@@ -20,6 +20,14 @@
  * answer, and the coverage statement is on screen in every state - because "Kynviora found
  * nothing" and "there is nothing to find" are different sentences and only the first is true.
  *
+ * THE LENS OPENS FROM AN ITEM, WHERE THE SUBSTANCE IS
+ * `09` shows a regulatory status "beside, not substituted for" the safety state, so the Lens is
+ * reached from a line rather than being its own destination. The control appears only where the
+ * item has a substance whose mapping to a canonical concept is exact - absent rather than
+ * disabled, because a Lens opened on a substance nobody confirmed is in the pack would answer
+ * about whatever it was given. Until guided capture lands (`DEV-024`) that is every item, so the
+ * control appears nowhere and says nothing false while it does.
+ *
  * NO COUNT, NO BADGE, NO RANKING
  * The filters narrow; they do not rank. There is no "3 items need action" anywhere on this screen
  * and no code path in this app that could compute a severity: the rule engine is server-side
@@ -37,13 +45,20 @@ import {
   presentSafetyState,
 } from '@kynviora/presentation';
 import { PRODUCT_SAFETY_STATES, type ProductSafetyState } from '@kynviora/domain';
-import { safetyInboxView, type SafetyInboxLineView } from '@kynviora/contracts';
+import {
+  lensView,
+  safetyInboxView,
+  type LensView,
+  type SafetyInboxLineView,
+} from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
 import { useProfiles } from '@/api/ProfileProvider';
 import { useResource } from '@/api/useResource';
 import { Screen } from '@/components/Screen';
 import { ResourceState } from '@/components/ScreenState';
+import { PrimaryButton } from '@/components/PrimaryButton';
 import { StatusChip } from '@/components/StatusChip';
+import { RegulatoryLens } from '@/features/lens/RegulatoryLens';
 
 const EMPTY = { lines: [], totalItems: 0 } as const;
 
@@ -58,6 +73,18 @@ export default function SafetyScreen() {
    * A safety screen that opened pre-filtered would hide items without saying it had.
    */
   const [states, setStates] = useState<readonly ProductSafetyState[]>([]);
+
+  /**
+   * The substance whose Lens is open, or `null`.
+   *
+   * The whole request, not just the key: `09` makes the answer depend on the disclosed
+   * concentration and the use type, so asking about a substance without the context it was found
+   * in would produce a different - and less applicable - answer than the item deserves.
+   */
+  const [lensFor, setLensFor] = useState<{
+    readonly substanceKey: string;
+    readonly disclosedConcentrationPercent: number | null;
+  } | null>(null);
 
   const load = useMemo(
     () =>
@@ -77,9 +104,45 @@ export default function SafetyScreen() {
 
   const view = useMemo(() => safetyInboxView(resource.value ?? EMPTY), [resource.value]);
 
+  const loadLens = useMemo(
+    () =>
+      client === null || lensFor === null
+        ? null
+        : () =>
+            client.regulatoryLens({
+              substanceKey: lensFor.substanceKey,
+              ...(lensFor.disclosedConcentrationPercent === null
+                ? {}
+                : { disclosedConcentrationPercent: lensFor.disclosedConcentrationPercent }),
+            }),
+    [client, lensFor],
+  );
+
+  const { resource: lensResource } = useResource(loadLens, { enabled: lensFor !== null });
+
+  const lens: LensView | null = useMemo(
+    () => (lensResource.value === null ? null : lensView(lensResource.value.lens)),
+    [lensResource.value],
+  );
+
   const onRetry = useCallback(() => {
     reload();
   }, [reload]);
+
+  if (lensFor !== null) {
+    return (
+      <Screen title="Safety" intro="How supported jurisdictions treat this substance.">
+        <RegulatoryLens
+          substanceKey={lensFor.substanceKey}
+          view={lens}
+          state={lensResource.state}
+          onClose={() => {
+            setLensFor(null);
+          }}
+        />
+      </Screen>
+    );
+  }
 
   return (
     <Screen
@@ -138,7 +201,7 @@ export default function SafetyScreen() {
       ) : null}
 
       {view.lines.map((line) => (
-        <SafetyRow key={line.ownedItemId} line={line} />
+        <SafetyRow key={line.ownedItemId} line={line} onOpenLens={setLensFor} />
       ))}
 
       {/* Rendered in every state, including the empty one. `09` requires the coverage statement
@@ -148,7 +211,16 @@ export default function SafetyScreen() {
   );
 }
 
-function SafetyRow({ line }: { readonly line: SafetyInboxLineView }) {
+function SafetyRow({
+  line,
+  onOpenLens,
+}: {
+  readonly line: SafetyInboxLineView;
+  readonly onOpenLens: (substance: {
+    readonly substanceKey: string;
+    readonly disclosedConcentrationPercent: number | null;
+  }) => void;
+}) {
   return (
     <View style={styles.alert}>
       <Text accessibilityRole="header" style={styles.name}>
@@ -169,6 +241,23 @@ function SafetyRow({ line }: { readonly line: SafetyInboxLineView }) {
           ? 'Kynviora has not assessed this item.'
           : `Last assessed ${line.lastAssessedAt.slice(0, 10)}.`}
       </Text>
+
+      {/* Beside the safety state, never substituted for it (`09`). One control per confirmed
+          substance, and none at all where there are none - a Lens opened on a substance nobody
+          confirmed is in the pack would answer about whatever it was given. */}
+      {line.substances.map((substance) => (
+        <PrimaryButton
+          key={substance.substanceKey}
+          label={`How ${substance.preferredName} is treated elsewhere`}
+          variant="secondary"
+          onPress={() => {
+            onOpenLens({
+              substanceKey: substance.substanceKey,
+              disclosedConcentrationPercent: substance.disclosedConcentrationPercent,
+            });
+          }}
+        />
+      ))}
     </View>
   );
 }

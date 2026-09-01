@@ -1551,3 +1551,51 @@ way to clear it.
 format all clean via `npm run verify`, exit 0. 47 new tests: 17 on the derivation and the filters,
 8 on the view model, 14 against a real PostgreSQL engine with real published and withdrawn alerts,
 and 8 end to end against a live server process.
+
+### Phase 7.2's UI - six cards, no verdict, no order
+
+The projection and its four hard guarantees had been done for some time; the plan recorded the UI
+as the outstanding half. Typing the response was the first step and the largest: `LensResponse`
+carried `lens: unknown`, which meant every guarantee the projection makes was invisible to the
+client and to the compiler.
+
+**The two summaries that are not there.** Six jurisdiction cards invite an overall answer and an
+order that puts the strictest first. `09` forbids value judgements such as "strict country" or
+"weak regulation", and a list sorted by how prohibitive each answer is expresses that judgement
+without using the words. An overall verdict is the same thing collapsed to a line, and it would
+have to decide what six different legal systems jointly mean. So the card order is the
+projection's, there is no verdict field, and a test asserts the module exports no function whose
+name suggests a comparison (DEC-065).
+
+**A status this build cannot describe is dropped and counted.** The presentation layer holds one
+description per status and no default, so an unknown one has no sentence anybody wrote about what
+it permits or forbids - and a bare `POSITIVE_LIST_ONLY` on a screen is worse than an omission the
+card admits to. The count is shown, because a card that quietly dropped a published status would
+understate what a regulator said, which is the one direction this screen cannot fail in.
+
+**An empty card says why it is empty.** `23` D-014 is usually read as a labelling rule; on a
+jurisdiction card it is a layout one, because an empty box reads as "fine here".
+
+**Where it opens from.** `09` says a regulatory status is shown "beside, not substituted for" the
+safety state, which rules out a destination of its own. So it opens from a safety line, once per
+substance, and only for substances whose ingredient mapping is `EXACT`: the Lens answers about
+whatever key it is given, and an `AMBIGUOUS` mapping means nobody has confirmed that substance is
+in the pack. A confident, sourced, applicable-looking answer about the wrong substance is worse
+than no answer, because it looks like one (DEC-064). Nothing in the seed has an exact mapping, so
+the control appears nowhere - absent rather than disabled, which is DEC-045 again.
+
+**Trap 18 arrived exactly as recorded.** A backtick in a SQL comment - `` `09` `` - terminated the
+template literal and surfaced as "decimals with leading zeros are not allowed" forty characters
+away. The trap list said to write "spec 09" in SQL, and that is the fix.
+
+**What the live server says.** Six cards, GB and NI separate, each carrying its own coverage
+statement and two or three limitations, all reporting no matched rule within coverage. That is
+DEC-016 and `BLK-004` working: every shipped fixture is rejected at the Citation Gate because the
+research behind it came from search summaries rather than retrieved official documents. The screen
+now says so in six sentences instead of by being blank.
+
+### State
+
+2341 tests passing across 72 files, up from 2317 across 71. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 24 new tests: 18 on the view model and its copy, and
+6 end to end against a real server process.
