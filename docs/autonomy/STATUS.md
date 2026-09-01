@@ -13,14 +13,14 @@ Last updated: 2026-09-01
 | ------------------ | ---------------------------------------------- |
 | **Current stage**  | Stage 6 (governance), after completing Stage 8 |
 | **Current phase**  | Wiring the Expo screens to the API (DEV-007)   |
-| **Last completed** | Removing a caregiver's access, end to end      |
+| **Last completed** | Caregiver delegation (`DEV-026` closed)        |
 | **Branch**         | `master`                                       |
-| **Latest commit**  | `feat(mobile): the revocation flow`            |
+| **Latest commit**  | `feat(mobile): a caregiver can delegate`       |
 | **Baseline tag**   | `baseline-spec-only`                           |
 
 ## Verification state
 
-- **2185 tests passing**, 0 failing, across 65 files.
+- **2203 tests passing**, 0 failing, across 65 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -56,7 +56,7 @@ purpose - `BLK-006` and DEC-016, not a configuration mistake.
 | Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                                  |
 | API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                                   |
 | Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                                   |
-| Caregiver invitation, acceptance, revocation, audit        | Complete, 191 tests                                  |
+| Caregiver invitation, acceptance, revocation, audit        | Complete, 214 tests                                  |
 | Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                                  |
 | Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009)          |
 | Household Review Inbox, record-writing completion          | Complete, 95 tests                                   |
@@ -98,15 +98,13 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Finish the `DEV-007` write flows.** Every caregiver action now has a screen. Two things remain:
+**Phase 4.3 - dose events and adherence history.** The whole caregiver surface is now wired:
+invite, accept, delegate, remove, and the access history. `DEV-026` is closed. What remains under
+`DEV-007` is Phase 4.3: the client already records a dose event and the route is idempotent, but
+only the single control on Today calls it and there is no history to read back.
 
-1. **Close `DEV-026`.** `GET /v1/caregiver-grants` now returns `isSelf` per row (DEC-052), which is
-   exactly the field that deviation named as its required future work. The Care screen still
-   passes `ownCapabilities: []`, so an administering caregiver is offered nothing to delegate.
-   Reading their own grant off the listing by `isSelf` and passing its capabilities into
-   `inviterAuthority` closes it; `selectableCapabilities` needs no change.
-2. **Phase 4.3** (dose events and adherence history). The client already records a dose event and
-   the route is idempotent; only the single control on Today calls it, and there is no history.
+After that, the three planned tasks below - observability projections, the staff reviewer console
+interface, and Phase 7.1 assessment states.
 
 Done: **reconciliation** (a typed list, both values shown, and the side stated by a person), the
 **Visit Pack** (selection, review, and a digest the live server accepts), the
@@ -256,6 +254,14 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 - **DEC-048** - the Visit Pack client hashes the candidates it **displayed** and never re-fetches
   before hashing. `canonicalizeSelection` and `toNoteEntries` come from the domain so both sides
   build the same string. An entry this client cannot canonicalise is refused, never coerced.
+
+- **DEC-055** - `heldCapabilities` unions the caller's own active, unexpired grants, which is what
+  `has_capability` does in SQL. An expired grant contributes nothing even where its stored status
+  still says `ACTIVE`, compared against the response's own `serverTime`. Not an authorization
+  predicate, so DEC-024 does not apply - it only stops the screen offering a refused control.
+- **DEC-056** - a caregiver who may delegate nothing is not offered the invite control at all.
+  DEC-045 one level up, and two conditions rather than one: holding only `MANAGE_CAREGIVERS`
+  passes the server's authority check and still leaves nothing to offer (DEC-020).
 
 - **DEC-050** - a failed refresh keeps content on screen only where the server said nothing about
   this caller's access: `OFFLINE` and `SERVER_ERROR` and nothing else. Every other failure is an
@@ -470,3 +476,12 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 64. Do not record a revocation audit event with an empty capability list. It reads as "a grant with
     no capabilities was removed" rather than as "nobody wrote them down", on the one screen an
     owner has nothing else to check against. Found by running the flow, not by a test.
+65. Do not hand `inviterAuthority` an empty `ownCapabilities` again, and do not derive the caller's
+    own grant by matching a user ID read back out of the session. `isSelf` is on the row for this
+    (DEC-052, DEC-055). The empty list is what made `DEV-026` a rule that was correct, tested, and
+    reachable by nobody.
+66. Do not count an expired grant toward what a caregiver may delegate on the strength of its
+    `status` column. `status` and `expires_at` are separate and `has_capability` checks both.
+67. Do not re-add "Invite someone" for a caregiver who may delegate nothing, and do not render it
+    disabled. Its only reachable outcome is a 404 after a form has been filled in, and a disabled
+    control states that the action exists and that this person is not trusted with it (DEC-056).

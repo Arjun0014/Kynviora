@@ -37,7 +37,9 @@ import {
   accessHistory,
   accessList,
   buildRevocation,
+  heldCapabilities,
   inviterAuthority,
+  mayInvite,
   revocationMessage,
   screenStateForFailure,
   type InvitationCreated,
@@ -105,6 +107,9 @@ export default function CareScreen() {
                 invitations: invitations.kind === 'OK' ? invitations.value.invitations : [],
                 invitationsLoaded: invitations.kind === 'OK',
                 history: audit.kind === 'OK' ? audit.value.events : [],
+                // The clock that produced these rows, used to discount an expired grant when
+                // working out what this caller may delegate. Never the device's.
+                serverTime: grants.value.serverTime,
               },
             };
           },
@@ -137,12 +142,15 @@ export default function CareScreen() {
         // The server's own answer, not an inference. `isManaged` is about the person the profile
         // is for and says nothing about who administers it.
         isOwner: activeProfile?.isOwner ?? false,
-        // A caregiver's own capabilities are not on this response. Until they are, a non-owner is
-        // offered nothing rather than something that might be refused - the safe direction, and
-        // visible rather than silent.
-        ownCapabilities: [],
+        // The union across the caller's own active grants, which is what `has_capability` does in
+        // SQL. Their own grants are the ones the server marked `isSelf` (DEC-052); matching on a
+        // user ID read back out of the session is the mistake `13` exists to prevent.
+        ownCapabilities: heldCapabilities(
+          resource.value?.grants ?? [],
+          resource.value?.serverTime ?? '',
+        ),
       }),
-    [activeProfile],
+    [activeProfile, resource.value],
   );
 
   const onRetry = useCallback(() => {
@@ -338,9 +346,16 @@ export default function CareScreen() {
           }
           rows={rows}
           onRetry={onRetry}
-          onInvite={() => {
-            setInviting(true);
-          }}
+          // DEC-045 one level up: a caregiver who may delegate nothing is not offered the
+          // control, rather than being asked to fill in a form whose only outcome is a refusal.
+          // The server decides again either way.
+          onInvite={
+            mayInvite(authority)
+              ? () => {
+                  setInviting(true);
+                }
+              : null
+          }
           // Never applied locally. `12` forbids optimistic authorization changes, and a row
           // that vanishes on a failed request misstates who can read this profile - so this
           // opens a confirmation, and the list only changes when the server says it has.

@@ -25,6 +25,7 @@ import {
   isCaregiverCapability,
   type CaregiverCapability,
 } from '@kynviora/domain';
+import type { CaregiverGrant } from './client.js';
 
 /**
  * What the inviter may grant.
@@ -59,6 +60,66 @@ export function selectableCapabilities(
   const held = new Set(authority.capabilities);
   return CAREGIVER_CAPABILITIES.filter(
     (capability) => capability !== 'MANAGE_CAREGIVERS' && held.has(capability),
+  );
+}
+
+/**
+ * What the caller holds on this profile, from the grants the server returned.
+ *
+ * The union across their own active grants, which is what `kynviora.has_capability` does in SQL -
+ * and the reason a merge of two grants for one pair is refused by a unique index rather than
+ * being tidied up (trap 10).
+ *
+ * Their own grants are the ones the server marked `isSelf` (DEC-052). Matching on the grantee's
+ * user ID instead would mean reading an identity back out of the session to decide what to put on
+ * screen, which in development is a header - a client claim.
+ *
+ * An expired grant contributes nothing even where its stored status still says `ACTIVE`, because
+ * `has_capability` checks `expires_at` separately and a checkbox this screen offered would be
+ * refused. `asOf` is the `serverTime` from the response the grants came in, so the comparison uses
+ * the clock that produced the rows rather than the device's. This is not an authorization
+ * decision - the server decides again on the request - so DEC-024 does not apply; it only keeps
+ * the screen from offering a control whose sole outcome is a refusal.
+ */
+export function heldCapabilities(
+  grants: readonly CaregiverGrant[],
+  asOf: string,
+): readonly CaregiverCapability[] {
+  const held = new Set<CaregiverCapability>();
+
+  for (const grant of grants) {
+    if (grant.isSelf !== true) continue;
+    if (grant.status !== 'ACTIVE') continue;
+    if (grant.revokedAt !== null) continue;
+    if (grant.expiresAt !== null && grant.expiresAt <= asOf) continue;
+    for (const capability of grant.capabilities) {
+      if (isCaregiverCapability(capability)) held.add(capability);
+    }
+  }
+
+  // The vocabulary's own order, so two screens listing the same grant list it the same way.
+  return CAREGIVER_CAPABILITIES.filter((capability) => held.has(capability));
+}
+
+/**
+ * Whether this inviter may send an invitation at all.
+ *
+ * DEC-045 says a capability this inviter cannot delegate is **absent** from the screen rather than
+ * present and disabled, because a greyed-out control states that the capability exists and that
+ * this person is not trusted with it. The same reasoning one level up: a caregiver who may
+ * delegate nothing should not be offered an invite control whose only reachable outcome is a
+ * refusal, having first been asked to fill in a form.
+ *
+ * A usability decision, not a security one - `authorityOver` decides again server-side, and
+ * answers `PERMISSION_DENIED` as a 404. The two conditions are separate on purpose: a caregiver
+ * holding only `MANAGE_CAREGIVERS` passes the server's authority check and still has nothing to
+ * offer, because DEC-020 forbids them delegating caregiver administration itself.
+ */
+export function mayInvite(authority: InviterAuthority): boolean {
+  if (authority.kind === 'OWNER') return true;
+  return (
+    authority.capabilities.includes('MANAGE_CAREGIVERS') &&
+    selectableCapabilities(authority).length > 0
   );
 }
 

@@ -22,10 +22,14 @@ import {
   accessHistory,
   accessList,
   buildRevocation,
+  heldCapabilities,
+  inviterAuthority,
+  mayInvite,
   refreshedResource,
   revocationMessage,
   reviewInboxView,
   safetyView,
+  selectableCapabilities,
   shelfView,
   type DigestFn,
   type KynvioraClient,
@@ -1094,5 +1098,174 @@ describe('removing access, end to end', () => {
     // Scoped by the same authority as the rest of the surface, and a refusal arrives as absence
     // rather than as a statement that the profile exists.
     expect((await stranger.caregiverAudit(SEED.profileId)).kind).toBe('UNAVAILABLE');
+  });
+});
+
+describe('a caregiver delegating what they hold, end to end', () => {
+  /**
+   * `DEV-026` closed, exercised through the code the app runs.
+   *
+   * The rule itself - a caregiver may pass on only what they hold, and never caregiver
+   * administration - has been implemented and tested since Phase 8.1. What it had never been
+   * given is its input: the Care screen passed an empty list, so a caregiver holding
+   * `MANAGE_CAREGIVERS` was offered nothing and could invite nobody. Only a real grants response
+   * proves the derivation and the server's own check agree about what this person holds.
+   */
+  const stepUp = (userId: string) =>
+    createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(userId, { stepUp: true }),
+    });
+
+  const CAREGIVER = SEED.caregiverUserId;
+  const caregiver = () =>
+    createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(CAREGIVER),
+    });
+
+  async function acceptAs(userId: string, token: string): Promise<string> {
+    const response = await fetch(`${server.url}/v1/caregiver-invitations/accept`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-kynviora-dev-user': userId,
+        'Idempotency-Key': crypto.randomUUID(),
+      },
+      body: JSON.stringify({ token }),
+    });
+    const body = (await response.json()) as { grantId?: string };
+    return body.grantId ?? '';
+  }
+
+  /** Give the seeded caregiver administration plus one thing to pass on, and accept it. */
+  async function makeAdministrator(): Promise<string> {
+    const draft = buildInvitation({
+      profileId: SEED.profileId,
+      authority: { kind: 'OWNER' },
+      selected: ['MANAGE_CAREGIVERS', 'VIEW_SHELF'],
+      invitedEmail: 'caregiver@example.test',
+    });
+    if (!draft.ok || draft.body === null) throw new Error('the invitation draft was refused');
+    const created = await stepUp(SEED.userId).createInvitation(draft.body, crypto.randomUUID());
+    if (created.kind !== 'OK') throw new Error(`the invitation failed: ${created.kind}`);
+    const grantId = await acceptAs(CAREGIVER, created.value.token);
+    if (grantId === '') throw new Error('the invitation was not accepted');
+    return grantId;
+  }
+
+  it('offers exactly what they hold, minus administration itself', async () => {
+    const grantId = await makeAdministrator();
+
+    const grants = await caregiver().listCaregiverGrants({ profileId: SEED.profileId });
+    expect(grants.kind).toBe('OK');
+    if (grants.kind !== 'OK') return;
+
+    const held = heldCapabilities(grants.value.grants, grants.value.serverTime);
+    expect(held.slice().sort()).toEqual(['MANAGE_CAREGIVERS', 'VIEW_SHELF']);
+
+    const authority = inviterAuthority({ isOwner: false, ownCapabilities: held });
+    // DEC-020: never caregiver administration, whatever they hold themselves.
+    expect(selectableCapabilities(authority)).toEqual(['VIEW_SHELF']);
+    expect(mayInvite(authority)).toBe(true);
+
+    await stepUp(SEED.userId).revokeGrant(grantId);
+  });
+
+  it('sends an invitation the server accepts, for what the screen offered', async () => {
+    // The assertion that matters: the client's derivation and the server's own delegation check
+    // agree. Before this, the screen offered nothing and the flow could not be reached at all.
+    const grantId = await makeAdministrator();
+
+    const grants = await caregiver().listCaregiverGrants({ profileId: SEED.profileId });
+    if (grants.kind !== 'OK') return;
+    const authority = inviterAuthority({
+      isOwner: false,
+      ownCapabilities: heldCapabilities(grants.value.grants, grants.value.serverTime),
+    });
+
+    const draft = buildInvitation({
+      profileId: SEED.profileId,
+      authority,
+      selected: [...selectableCapabilities(authority)],
+    });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok || draft.body === null) return;
+
+    const created = await stepUp(CAREGIVER).createInvitation(draft.body, crypto.randomUUID());
+    expect(created.kind).toBe('OK');
+    if (created.kind !== 'OK') return;
+    expect(created.value.capabilities).toEqual(['VIEW_SHELF']);
+
+    await stepUp(CAREGIVER).revokeInvitation(created.value.invitationId);
+    await stepUp(SEED.userId).revokeGrant(grantId);
+  });
+
+  it('is refused by the server if the screen is bypassed', async () => {
+    // The client's rule is a usability decision, not the security boundary. `canDelegateCapabilities`
+    // runs server-side on every request and answers CAPABILITY_ESCALATION regardless of what any
+    // screen offered (DEC-020).
+    const grantId = await makeAdministrator();
+
+    const escalation = await stepUp(CAREGIVER).createInvitation(
+      { profileId: SEED.profileId, capabilities: ['MANAGE_CAREGIVERS'] },
+      crypto.randomUUID(),
+    );
+    expect(escalation.kind).toBe('REFUSED');
+    if (escalation.kind === 'REFUSED') expect(escalation.code).toBe('CAPABILITY_ESCALATION');
+
+    const beyond = await stepUp(CAREGIVER).createInvitation(
+      { profileId: SEED.profileId, capabilities: ['MANAGE_MEDICINES'] },
+      crypto.randomUUID(),
+    );
+    expect(beyond.kind).toBe('REFUSED');
+
+    await stepUp(SEED.userId).revokeGrant(grantId);
+  });
+
+  it('offers a caregiver who does not administer access no invite control at all', async () => {
+    // Not a greyed-out button. The only reachable outcome would be a 404, after they had filled
+    // in a form (DEC-045 one level up).
+    const draft = buildInvitation({
+      profileId: SEED.profileId,
+      authority: { kind: 'OWNER' },
+      selected: ['VIEW_SHELF'],
+      invitedEmail: 'caregiver@example.test',
+    });
+    if (!draft.ok || draft.body === null) return;
+    const created = await stepUp(SEED.userId).createInvitation(draft.body, crypto.randomUUID());
+    if (created.kind !== 'OK') return;
+    const grantId = await acceptAs(CAREGIVER, created.value.token);
+
+    const grants = await caregiver().listCaregiverGrants({ profileId: SEED.profileId });
+    if (grants.kind !== 'OK') return;
+    const authority = inviterAuthority({
+      isOwner: false,
+      ownCapabilities: heldCapabilities(grants.value.grants, grants.value.serverTime),
+    });
+    expect(mayInvite(authority)).toBe(false);
+
+    // And the server agrees, which is what makes withholding the control honest rather than
+    // merely tidy.
+    const attempt = await stepUp(CAREGIVER).createInvitation(
+      { profileId: SEED.profileId, capabilities: ['VIEW_SHELF'] },
+      crypto.randomUUID(),
+    );
+    expect(attempt.kind).toBe('UNAVAILABLE');
+
+    await stepUp(SEED.userId).revokeGrant(grantId);
+  });
+
+  it('stops offering anything the moment the grant is removed', async () => {
+    // The delegation input is derived from live grants rather than held, so it follows `15` A2
+    // with nothing extra to remember.
+    const grantId = await makeAdministrator();
+    await stepUp(SEED.userId).revokeGrant(grantId);
+
+    const grants = await caregiver().listCaregiverGrants({ profileId: SEED.profileId });
+    if (grants.kind !== 'OK') return;
+    const held = heldCapabilities(grants.value.grants, grants.value.serverTime);
+    expect(held).toEqual([]);
+    expect(mayInvite(inviterAuthority({ isOwner: false, ownCapabilities: held }))).toBe(false);
   });
 });

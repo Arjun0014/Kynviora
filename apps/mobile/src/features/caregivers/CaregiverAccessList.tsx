@@ -62,7 +62,14 @@ export interface CaregiverAccessListProps {
   readonly rows: readonly CaregiverAccessRow[];
   /** Invoked for a revoke. The caller performs the step-up prompt and the request. */
   readonly onRevoke: (id: string) => void;
-  readonly onInvite: () => void;
+  /**
+   * Open the invitation flow, or `null` where this caller may invite nobody.
+   *
+   * Absent rather than disabled, for the same reason a capability they cannot delegate is absent
+   * from the invite screen (DEC-045): a greyed-out control states that the action exists and that
+   * this person is not trusted with it.
+   */
+  readonly onInvite: (() => void) | null;
   readonly onRetry?: () => void;
   /** `03` group H: what happened to access, which the current list cannot show. */
   readonly history?: AccessHistoryView;
@@ -95,7 +102,7 @@ export function CaregiverAccessList({
         rows.map((row) => <CaregiverRow key={row.id} row={row} onRevoke={onRevoke} />)
       )}
 
-      <PrimaryButton label="Invite someone" onPress={onInvite} />
+      {onInvite === null ? null : <PrimaryButton label="Invite someone" onPress={onInvite} />}
 
       {/* After a removal the list is one row shorter, which is the least informative possible
           confirmation. The history is where the removal itself is visible (`03` group H). */}

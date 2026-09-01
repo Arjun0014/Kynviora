@@ -533,24 +533,27 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Required future work**: Phase 1.1, then `elevate()` performs the real re-authentication.
   Delete the header path at the same time as `devAuth.ts` rather than leaving both available.
 
-## DEV-026 - A caregiver is offered no capabilities to delegate
+## DEV-026 - A caregiver is offered no capabilities to delegate (CLOSED)
 
 - **Affected specification**: `04` Phase 8.1, `16` (a caregiver may pass on only what they hold).
 - **Expected behaviour**: a caregiver holding `MANAGE_CAREGIVERS` can invite someone else and offer
   any capability they hold themselves, except caregiver administration (DEC-020).
-- **Status**: the API half is done. `GET /v1/caregiver-grants` now returns `isSelf` per row
-  (DEC-052), which is the field this deviation named as required future work.
-- **Implemented behaviour**: `selectableCapabilities` implements exactly that rule and is tested,
-  but the Care screen still passes `ownCapabilities: []`. A non-owner is therefore offered
-  nothing.
+- **Status**: CLOSED. `GET /v1/caregiver-grants` returns `isSelf` per row (DEC-052), and
+  `heldCapabilities` unions the caller's own active, unexpired grants into the input
+  `inviterAuthority` always wanted. `selectableCapabilities` is unchanged - it had implemented the
+  rule correctly the whole time and had never been handed anything but an empty list.
+- **Implemented behaviour** (was): the Care screen passed `ownCapabilities: []`, so a non-owner was
+  offered nothing.
 - **Reason**: the grants listing returns every grant the caller may see, which for an administering
   caregiver includes other people's. Picking out their own means matching on the grantee's user ID,
   and the client does not carry the authenticated user's ID as a first-class value - the session
   does, but reading identity out of a development session to make an authorization decision is the
   shape of mistake `13` exists to prevent.
-- **Temporary or permanent**: temporary.
-- **Risk**: low and in the safe direction. A caregiver who should be able to delegate sees an empty
-  list and cannot - visible, not silent, and it grants nobody anything. The opposite failure would
-  offer capabilities the server then refuses.
-- **Required future work**: read the caller's own grant off the listing by `isSelf` and pass its
-  capabilities into `inviterAuthority`. `selectableCapabilities` needs no change.
+- **Temporary or permanent**: temporary, and now resolved.
+- **Risk**: none remaining. The derivation is a usability decision and never the boundary:
+  `canDelegateCapabilities` runs server-side on every request, and an end-to-end test bypasses the
+  screen to confirm `CAPABILITY_ESCALATION` for a capability the caregiver does not hold.
+- **What closing it also changed**: a caregiver who may delegate nothing is no longer offered the
+  invite control at all. DEC-045 keeps a capability they cannot delegate absent rather than
+  disabled; the same reasoning one level up, because the only reachable outcome of that control
+  was a 404 after they had filled in a form.

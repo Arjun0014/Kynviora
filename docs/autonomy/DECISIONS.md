@@ -1527,3 +1527,57 @@ missing on the wire is wording, and both sentences make the same claim - only on
 to do next.
 
 **Sources.** `12`; `13`; `14`; `18`; DEC-039.
+
+## DEC-055 - What a caregiver may delegate is the union of their own active grants
+
+**Context.** `selectableCapabilities` had implemented "only what they hold, and never caregiver
+administration" since Phase 8.1, correctly and with its own tests, and had never been handed
+anything but an empty list. `DEV-026` recorded why: picking the caller's own grant out of a listing
+that includes other people's meant matching on a user ID the client should not be reasoning about.
+DEC-052 removed that obstacle.
+
+**Decision.** `heldCapabilities(grants, asOf)` unions the capabilities across the grants the server
+marked `isSelf`, discounting any that is not `ACTIVE`, is revoked, or has expired.
+
+**Rationale for the union.** It is what `kynviora.has_capability` does in SQL, and the reason a
+merge of two grants for one pair is refused by a partial unique index rather than tidied up
+(trap 10). Picking one row would disagree with the server about what this person holds.
+
+**An expired grant contributes nothing even where its status still says `ACTIVE`.** `status` and
+`expires_at` are separate columns and `has_capability` checks both, so the stored status is not on
+its own evidence that a grant still carries anything.
+
+**The clock is the response's `serverTime`, not the device's.** DEC-024 reserves the real clock for
+authorization predicates, and this is not one - the server decides again on the request. Using the
+clock that produced the rows keeps the screen consistent with the answer it is rendering, and the
+worst case of getting it wrong is a control the server refuses rather than an access decision.
+
+**This is not the boundary.** `canDelegateCapabilities` runs server-side on every request. An
+end-to-end test bypasses the screen and confirms `CAPABILITY_ESCALATION`.
+
+**Sources.** `04` Phase 8.1; `16`; DEC-020; DEC-024; DEC-052; `DEV-026`; trap 10.
+
+## DEC-056 - A caregiver who may delegate nothing is offered no invite control
+
+**Context.** The Care screen showed "Invite someone" to every caller. For a caregiver with no
+administrative authority the only reachable outcome was a 404 - after they had chosen capabilities
+and typed an address.
+
+**Options.** (a) Leave it and let the server refuse. (b) Show it disabled. (c) Withhold it.
+
+**Decision.** (c). `mayInvite` returns true for the profile owner, and for a caregiver only where
+they hold `MANAGE_CAREGIVERS` **and** have something left to offer.
+
+**Rationale.** This is DEC-045's reasoning one level up: a greyed-out control states that the action
+exists and that this person is not trusted with it, which is a fact about the permission model they
+did not need. (a) spends a form on a refusal.
+
+**Two conditions, not one.** A caregiver holding only `MANAGE_CAREGIVERS` passes the server's
+authority check and still has nothing to offer, because DEC-020 forbids them delegating caregiver
+administration itself. Collapsing the two would show them a screen with no capabilities on it.
+
+**Still a usability decision.** `authorityOver` answers `PERMISSION_DENIED` as a 404 regardless, and
+a test asserts that the server refuses the request the withheld control would have made - which is
+what makes hiding it honest rather than merely tidy.
+
+**Sources.** `04` Phase 8.1; `12`; `16`; DEC-020; DEC-045; DEC-055.

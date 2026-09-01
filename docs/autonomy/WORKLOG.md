@@ -1355,3 +1355,43 @@ for the revocation builder and its wording, 5 for the access history view, 6 on 
 that the withdrawn invitation's token stops working, that a repeat reports `alreadyRevoked` rather
 than an error, that a stranger cannot tell a real grant from an invented one, and that a caregiver
 can renounce their own access holding no administrative capability at all.
+
+### Giving the delegation rule its input - `DEV-026` closed
+
+The rule had been right since Phase 8.1 and had never been handed anything. `selectableCapabilities`
+implements "a caregiver may offer only what they hold, and never caregiver administration" exactly,
+with its own tests, and the Care screen passed `ownCapabilities: []` to it - so every non-owner was
+offered nothing and could invite nobody. The blocker was named in the deviation itself: picking the
+caller's own grant out of a listing that includes other people's meant matching on a user ID the
+client should not be reasoning about.
+
+`isSelf` (DEC-052) removed that, so this is one function and its wiring. `heldCapabilities` unions
+the capabilities across the caller's own active grants, which is what `kynviora.has_capability` does
+in SQL - and the reason a merge of two grants for one pair is refused by a unique index rather than
+tidied up (trap 10).
+
+**An expired grant contributes nothing even where its status still says `ACTIVE`.** The two are
+separate columns and `has_capability` checks both, so a stored status is not on its own evidence
+that a grant still carries anything. The comparison uses the `serverTime` from the response the
+grants arrived in, not the device clock. DEC-024 does not apply here - that rule is about an
+authorization predicate, and this is a screen deciding which checkbox to draw.
+
+**The control itself, not only its contents.** A caregiver who may delegate nothing was still shown
+"Invite someone", and the only reachable outcome was a 404 after they had filled in a form.
+`mayInvite` withholds the control instead, which is DEC-045's reasoning one level up: a greyed-out
+control states that the action exists and that this person is not trusted with it. Two conditions
+rather than one, on purpose - a caregiver holding only `MANAGE_CAREGIVERS` passes the server's
+authority check and still has nothing to offer, because DEC-020 forbids them delegating caregiver
+administration itself.
+
+**None of it is the boundary.** `canDelegateCapabilities` runs server-side on every request. An
+end-to-end test bypasses the screen entirely and confirms `CAPABILITY_ESCALATION` for a capability
+the caregiver does not hold, and `UNAVAILABLE` for a caregiver with no administrative authority at
+all - which is what makes withholding a control honest rather than merely tidy.
+
+### State
+
+2203 tests passing across 65 files, up from 2185. Typecheck, mobile typecheck, lint and format all
+clean via `npm run verify`, exit 0. 18 new tests: 13 on the derivation and the control, and 5 end to
+end against a real server process - including a caregiver actually sending an invitation, which was
+unreachable before this.
