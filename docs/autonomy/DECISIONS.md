@@ -1398,3 +1398,132 @@ same builder decides whether the button is enabled and what gets sent, so a cont
 something the builder would refuse.
 
 **Sources.** `04` Phase 8.5; `09`; `18`; DEC-029; DEC-030.
+
+## DEC-050 - A failed refresh keeps content only where the server said nothing about access
+
+**Context.** `useResource` returned `STALE` with the previous content for **any** failed refresh.
+Designing revocation exposed what that means: `15` A2 requires a revoked caregiver to lose access
+on their very next authenticated access, and the server does exactly that. The client undid it. The
+person whose access had just been removed carried on reading the medicine list, under a label
+saying it was not up to date.
+
+**Options.** (a) Clear the content on every failure. (b) Keep the rule and special-case the
+caregiver screens. (c) Decide by what the failure _says_.
+
+**Decision.** (c). `retainsPreviousContent` returns true for `OFFLINE` and `SERVER_ERROR` only.
+`refreshedResource` holds the whole decision and the hook makes none of its own.
+
+**Rationale.** The question is not "did the request fail" but "did the server answer about this
+caller's access". `OFFLINE` and `SERVER_ERROR` did not answer, so the content is genuinely older
+than it looks and DEC-041's label is the honest response. Every other failure is an answer, and the
+answer is no. (a) would take a medicine list away because a refresh timed out, which DEC-041
+already rejected. (b) puts the security property on the screens somebody remembered.
+
+**`UNAVAILABLE` is the shape revocation actually arrives in.** `PERMISSION_DENIED` is answered with
+404 so the API is not an existence oracle (DEC-039), so the outcome that means "your access ended"
+is the same one that means "there is nothing here". Both must clear the screen, which they now do.
+Note the two shapes a revoked caller meets: an RLS-filtered list route answers `OK` with nothing,
+and a profile-scoped route answers 404. A rule handling only the first would leave the caregiver's
+notification settings on screen.
+
+**`REFUSED` retains nothing either, for a different reason.** It is the one failure carrying a
+message the server wrote for this user to act on, and stale content on top of it hides the only
+thing that would tell them what to do.
+
+**Consequences.** An empty success now clears the retained value too, so a later offline refresh
+cannot resurrect a list the server has already said is gone.
+
+**Sources.** `15` A2; `12`; `18`; DEC-039; DEC-041.
+
+## DEC-051 - The access list tags each row with the record it came from
+
+**Context.** The Care screen deliberately shows accepted grants and outstanding invitations
+together, because they answer one question: who can read this profile. They are two records with
+two revocation routes, and `onRevoke(id)` carried only an ID.
+
+**Options.** (a) Try the grant route and fall back to the invitation route. (b) Guess from the
+row's state. (c) Carry the record kind on the row.
+
+**Decision.** (c). `CaregiverAccessRowView.subject` is `GRANT` or `INVITATION`, and
+`buildRevocation` reads it from the row the person is looking at.
+
+**Rationale.** The failure mode of getting this wrong is quiet. The wrong route answers 404, the
+client correctly renders a 404 as absence (DEC-039), and the screen would have looked like the row
+vanishing rather than like a bug - on the one screen where a row disappearing is a statement about
+who can read someone's health data. (a) sends an authenticated write to a record the caller did not
+name. (b) works today only because no grant is ever `INVITED` and no invitation is ever `ACTIVE`,
+which is a coincidence of the current status vocabulary.
+
+**Sources.** `04` Phase 8.1; `12`; DEC-039; trap 14.
+
+## DEC-052 - Whose grant it is comes from the server, not from the session
+
+**Context.** Removing your own access and removing somebody else's are different sentences, and an
+administering caregiver sees both kinds of row in one list. The screen needed to know which.
+
+**Options.** (a) Compare `granteeUserId` against the identity in the client session. (b) Ask the
+API. (c) Write copy that works for both.
+
+**Decision.** (b). `GET /v1/caregiver-grants` returns `isSelf` per row, exactly as
+`GET /v1/profiles` returns `isOwner` (DEC-047).
+
+**Rationale.** (a) reads identity back out of a session to decide what to put on screen, which is
+the shape `13` and `DEV-026` both warn about - and in development that identity is a header, which
+is a client claim. (c) is not achievable honestly: "they will stop seeing this profile" in front of
+someone removing their own access is not a wording problem, it is a statement about a different
+person.
+
+**Deny by default applies to the narrowing too.** A response with no `isSelf` produces `false`, so
+an older server cannot make the screen say "remove your own access" to somebody removing another
+person's.
+
+**Consequences.** This is also the field `DEV-026` names as required future work: an administering
+caregiver's own capabilities can now be picked out of the grants listing without matching on a
+user ID the client should not be reasoning about.
+
+**Sources.** `04` Phase 8.1; `13`; `16`; DEC-047; `DEV-026`.
+
+## DEC-053 - Revocation takes no idempotency key, and a repeat reports success
+
+**Context.** Every other caregiver mutation carries an idempotency key. Revocation does not.
+
+**Decision.** No key, and a repeated revocation returns `200` with `alreadyRevoked: true`.
+
+**Rationale.** A key exists because a retry could commit a second write. Creating an invitation
+mints a credential, so a key regenerated on retry mints a second live token for one intent.
+Revocation has one destination state: arriving at it twice is arriving at it once, and there is no
+second thing for a key to prevent. The domain already made the repeat succeed rather than fail
+(`evaluateGrantRevocation`), because someone removing another person's access who is answered with
+an error has been given a reason to doubt whether it worked.
+
+**The two are still different sentences.** `alreadyRevoked` is reported, and the screen says "this
+access had already ended" rather than crediting the person with a change they did not make.
+
+**Sources.** `13`; `15` A2; `04` Phase 8.1.
+
+## DEC-054 - The removal screen supplies the wording for one refusal code
+
+**Context.** Withdrawing an invitation that has already been accepted is refused. The route writes
+"This invitation was accepted. Revoke the caregiver access instead." - and `errors.ts` replaces it
+on the wire with the client-safe message for `INVITATION_ALREADY_RESOLVED`, which is shared with
+the acceptance path: "This invitation has already been used." True, and a dead end for an owner who
+is looking at the list and wants the access gone. Found by an end-to-end test asserting the
+specific message and getting the generic one.
+
+**Options.** (a) Make the wire message specific. (b) Show the generic message. (c) Supply the
+wording on the screen, for this code only.
+
+**Decision.** (c). `revocationMessage` returns the server's own message for every outcome except
+`INVITATION_ALREADY_RESOLVED`, where it returns `REVOCATION_COPY.alreadyAccepted`.
+
+**Rationale.** (a) changes what an acceptance failure tells a stranger holding a link, where the
+message is generic on purpose - the same code covers expired, declined and revoked, and the
+recipient must not learn which. (b) leaves the owner told only that something is spent.
+
+**This is not the client inventing a reason.** The rule is that the client never supplies a reason
+the server withheld, and the server withheld nothing here: it sent the code, and its `detail`
+carries `reason_code: already_accepted` because a 409 is not one of the suppressed classes. What is
+missing on the wire is wording, and both sentences make the same claim - only one of them says what
+to do next.
+
+**Sources.** `12`; `13`; `14`; `18`; DEC-039.

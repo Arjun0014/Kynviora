@@ -445,10 +445,11 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   reconciliation), `06` Journeys.
 - **Expected behaviour**: each feature's screen performs that feature's whole workflow.
 - **Implemented behaviour**: the five primary destinations are wired to real reads - profiles,
-  shelf, alerts, review tasks, caregiver grants, notification settings - and the only writes are
-  the notification preference and the recording of a dose event. Inviting a caregiver, revoking a
-  grant, completing a review task, generating a Visit Pack and resolving a reconciliation
-  difference all exist on the client and are exercised by tests; none has a screen yet.
+  shelf, alerts, review tasks, caregiver grants, notification settings - and five write flows now
+  have screens: completing a review task, inviting a caregiver, generating a Visit Pack, resolving
+  a reconciliation difference, and removing a caregiver's access. Two writes still have no screen
+  of their own: recording a dose event beyond the single control on Today (Phase 4.3), and
+  delegating capabilities as a caregiver rather than as the owner (`DEV-026`, now unblocked).
 - **Reason**: each of those writes needs a screen of its own with a real interaction behind it. An
   invitation returns a token shown once and unrecoverable afterwards (DEC-018); a revocation is
   behind step-up (`14`); completing a review task writes to the authoritative record and so needs
@@ -456,11 +457,10 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   reviewed (DEC-023). Wiring a button to each without those screens would produce controls that
   fail in ways the user cannot act on.
 - **Temporary or permanent**: temporary.
-- **Risk**: low, and one part worth naming: the invite and revoke controls are present and do
-  nothing, which teaches a user they are broken. They were already present before this work; the
-  handlers now carry comments saying what each is waiting for.
-- **Required future work**: an invitation screen (token shown once, never logged), a step-up
-  prompt, a per-record-kind task editor, and the Visit Pack selection and review flow.
+- **Risk**: low. The invite and revoke controls used to be present and do nothing, which teaches a
+  user they are broken; both now perform their flow.
+- **Required future work**: Phase 4.3 dose events and adherence history. The invitation screen,
+  step-up prompt, per-record-kind task editor, Visit Pack flow and removal confirmation are done.
 
 ## DEV-023 - The task editor offers only the RESOLVED outcome
 
@@ -538,10 +538,11 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Affected specification**: `04` Phase 8.1, `16` (a caregiver may pass on only what they hold).
 - **Expected behaviour**: a caregiver holding `MANAGE_CAREGIVERS` can invite someone else and offer
   any capability they hold themselves, except caregiver administration (DEC-020).
+- **Status**: the API half is done. `GET /v1/caregiver-grants` now returns `isSelf` per row
+  (DEC-052), which is the field this deviation named as required future work.
 - **Implemented behaviour**: `selectableCapabilities` implements exactly that rule and is tested,
-  but the Care screen passes `ownCapabilities: []` because `GET /v1/caregiver-grants` does not
-  return the caller's own capabilities in a form the screen can identify as theirs. A non-owner is
-  therefore offered nothing.
+  but the Care screen still passes `ownCapabilities: []`. A non-owner is therefore offered
+  nothing.
 - **Reason**: the grants listing returns every grant the caller may see, which for an administering
   caregiver includes other people's. Picking out their own means matching on the grantee's user ID,
   and the client does not carry the authenticated user's ID as a first-class value - the session
@@ -551,6 +552,5 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Risk**: low and in the safe direction. A caregiver who should be able to delegate sees an empty
   list and cannot - visible, not silent, and it grants nobody anything. The opposite failure would
   offer capabilities the server then refuses.
-- **Required future work**: return the caller's own capabilities per profile from the API - the
-  notification-settings route already computes a `relationship` for the caller, so the shape exists
-  - then pass them into `inviterAuthority`. `selectableCapabilities` needs no change.
+- **Required future work**: read the caller's own grant off the listing by `isSelf` and pass its
+  capabilities into `inviterAuthority`. `selectableCapabilities` needs no change.

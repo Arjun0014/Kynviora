@@ -13,4 +13,7 @@ Thumbs.db
 .turbo/
 
 # Local development database (BLK-001 workaround; PGlite persisted to disk).
+# Any directory, not just the default: a dogfooding run with its own
+# KYNVIORA_LOCAL_DB_DIR once put 1,277 PGlite pages into a commit.
 .kynviora-data/
+.kynviora-*/

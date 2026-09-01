@@ -6,6 +6,7 @@ import {
   asChosenDetailLevel,
   asNotificationDetailLevel,
   asReviewTaskKind,
+  accessHistory,
   accessList,
   caregiverAccessRows,
   invitationAccessRows,
@@ -234,6 +235,7 @@ describe('caregiver access states fail towards no access', () => {
         acceptedAt: null,
         expiresAt: null,
         revokedAt: null,
+        isSelf: false,
       },
     ]);
     expect(rows[0]?.capabilities).toEqual(['VIEW_SHELF']);
@@ -254,6 +256,7 @@ describe('caregiver access states fail towards no access', () => {
         acceptedAt: null,
         expiresAt: null,
         revokedAt: null,
+        isSelf: false,
       },
     ]);
     expect(rows[0]?.displayName).toBe('user-2');
@@ -303,6 +306,7 @@ describe('the access list shows invitations as well as grants', () => {
     acceptedAt: '2026-08-02T00:00:00.000Z',
     expiresAt: null,
     revokedAt: null,
+    isSelf: false,
   };
 
   it('reads a pending invitation as invited, never as access', () => {
@@ -335,5 +339,60 @@ describe('the access list shows invitations as well as grants', () => {
 
   it('is just the grants when there are no invitations', () => {
     expect(accessList([grant])).toEqual(caregiverAccessRows([grant]));
+  });
+});
+
+describe('the access history', () => {
+  const event = (over: Record<string, unknown> = {}) => ({
+    id: 'e1',
+    occurredAt: '2026-09-01T09:30:00.000Z',
+    actorUserId: 'u1',
+    action: 'caregiver.grant.revoked',
+    targetKind: 'caregiver_grant',
+    targetId: 'g1',
+    detail: { capability_count: 2, reason_code: 'administrator' },
+    ...over,
+  });
+
+  it('turns an action code into a sentence', () => {
+    // `03` group H requires audit event visibility, and a log a person cannot read does not
+    // provide it.
+    const view = accessHistory([event()]);
+    expect(view.lines[0]?.description).toBe('Access was removed.');
+    expect(view.unreadableCount).toBe(0);
+  });
+
+  it('counts an action it cannot describe rather than guessing at one', () => {
+    // The same rule as an unrecognised review task kind: there is no default sentence, and
+    // inventing one would put a statement about who could read a person's records next to a
+    // timestamp that makes it look checked.
+    const view = accessHistory([
+      event(),
+      event({ id: 'e2', action: 'caregiver.grant.teleported' }),
+    ]);
+    expect(view.lines).toHaveLength(1);
+    expect(view.unreadableCount).toBe(1);
+  });
+
+  it('renders nothing from the detail', () => {
+    // `20`: an audit log answers who did what and must not become a copy of health content. The
+    // detail is capability codes and counts, and this screen shows none of it.
+    const view = accessHistory([event({ detail: { medicine_name: 'Synthetic Tablet A' } })]);
+    expect(JSON.stringify(view)).not.toContain('Synthetic');
+    expect(Object.keys(view.lines[0] ?? {}).sort()).toEqual(['description', 'id', 'occurredAt']);
+  });
+
+  it('keeps the order the route returned', () => {
+    // Newest first is the route's decision. Re-sorting here would make two screens disagree
+    // about what happened most recently.
+    const view = accessHistory([
+      event({ id: 'e1', action: 'caregiver.grant.revoked' }),
+      event({ id: 'e2', action: 'caregiver.grant.created' }),
+    ]);
+    expect(view.lines.map((line) => line.id)).toEqual(['e1', 'e2']);
+  });
+
+  it('is empty rather than absent when nothing has happened', () => {
+    expect(accessHistory([])).toEqual({ lines: [], unreadableCount: 0 });
   });
 });

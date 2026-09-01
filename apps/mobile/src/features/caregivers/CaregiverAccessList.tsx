@@ -26,6 +26,8 @@ import {
   type CaregiverAccessState,
 } from '@kynviora/presentation';
 import type { CaregiverCapability } from '@kynviora/domain';
+import { isRemovable, type AccessHistoryView } from '@kynviora/contracts';
+import { AccessHistory } from './AccessHistory';
 import { StatusChip } from '@/components/StatusChip';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
@@ -34,6 +36,13 @@ import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
 /** One row, as the API returns it. */
 export interface CaregiverAccessRow {
   readonly id: string;
+  /**
+   * Which record this row is.
+   *
+   * Carried through to the remove control, because the ID alone does not say which route
+   * withdraws it and the wrong one answers 404 - which reads on screen as the row vanishing.
+   */
+  readonly subject: 'GRANT' | 'INVITATION';
   readonly state: CaregiverAccessState;
   readonly capabilities: readonly CaregiverCapability[];
   /**
@@ -44,6 +53,8 @@ export interface CaregiverAccessRow {
    */
   readonly displayName: string;
   readonly expiresAt: string | null;
+  /** Whether this row is the caller's own access. From the server, never inferred here. */
+  readonly isSelf: boolean;
 }
 
 export interface CaregiverAccessListProps {
@@ -53,6 +64,8 @@ export interface CaregiverAccessListProps {
   readonly onRevoke: (id: string) => void;
   readonly onInvite: () => void;
   readonly onRetry?: () => void;
+  /** `03` group H: what happened to access, which the current list cannot show. */
+  readonly history?: AccessHistoryView;
 }
 
 export function CaregiverAccessList({
@@ -61,6 +74,7 @@ export function CaregiverAccessList({
   onRevoke,
   onInvite,
   onRetry,
+  history,
 }: CaregiverAccessListProps) {
   if (state !== 'READY') {
     // Every non-success state is rendered explicitly. `06` treats a screen with only a success
@@ -82,6 +96,10 @@ export function CaregiverAccessList({
       )}
 
       <PrimaryButton label="Invite someone" onPress={onInvite} />
+
+      {/* After a removal the list is one row shorter, which is the least informative possible
+          confirmation. The history is where the removal itself is visible (`03` group H). */}
+      {history === undefined ? null : <AccessHistory history={history} />}
     </ScrollView>
   );
 }
@@ -95,7 +113,9 @@ function CaregiverRow({
 }) {
   const presentation = presentCaregiverAccess(row.state);
   const summary = summarizeAccess(row.capabilities);
-  const canRevoke = row.state === 'ACTIVE' || row.state === 'INVITED';
+  // The same predicate the confirmation uses. Two independent conditions is how a control
+  // appears on a row whose builder then refuses it.
+  const canRevoke = isRemovable(row);
 
   return (
     <View style={styles.row}>

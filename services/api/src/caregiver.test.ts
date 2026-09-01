@@ -867,6 +867,28 @@ describe('listing grants', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json<{ grants: unknown[] }>().grants).toEqual([]);
   });
+
+  it('says whose grant each row is, rather than making the screen work it out', async () => {
+    // The same decision as `isOwner` on the profiles route. An administering caregiver sees
+    // their own grant beside the ones they administer, and a screen that had to match the
+    // grantee against an identity read back off the session would be deriving authority from a
+    // client claim to decide what to say. "You will stop seeing this profile" and "they will
+    // stop seeing this profile" are different statements about different people.
+    const { token } = await createInvitation();
+    await acceptAs(CAREGIVER, token);
+
+    const asCaregiver = await request(principalFor(CAREGIVER), {
+      method: 'GET',
+      url: '/v1/caregiver-grants',
+    });
+    expect(asCaregiver.json<{ grants: { isSelf: boolean }[] }>().grants[0]?.isSelf).toBe(true);
+
+    const asOwner = await request(principalFor(OWNER), {
+      method: 'GET',
+      url: '/v1/caregiver-grants',
+    });
+    expect(asOwner.json<{ grants: { isSelf: boolean }[] }>().grants[0]?.isSelf).toBe(false);
+  });
 });
 
 describe('audit history', () => {

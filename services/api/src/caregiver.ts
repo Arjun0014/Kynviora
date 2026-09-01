@@ -40,6 +40,7 @@ import {
   inviteToken,
   inviteTokenHash,
   invitationExpiryFor,
+  isCaregiverCapability,
   isErr,
   requiresStepUp,
   unsafeId,
@@ -926,6 +927,13 @@ export function registerCaregiverRoutes(app: FastifyInstance, deps: CaregiverRou
         acceptedAt: row.accepted_at,
         expiresAt: row.expires_at,
         revokedAt: row.revoked_at,
+        // Whose grant this is, answered by the side that knows. The same decision as `isOwner`
+        // on the profiles route (DEC-047): an administering caregiver sees other people's grants
+        // alongside their own, and a screen that had to work out which row was the caller's
+        // would be deriving identity from a session to decide what to say - the shape `13`
+        // exists to prevent. Removing your own access and removing somebody else's are different
+        // sentences, and this is what lets the confirmation use the right one.
+        isSelf: row.grantee_user_id === ctx.principal.userId,
       })),
       serverTime: ctx.now,
     });
@@ -956,9 +964,15 @@ export function registerCaregiverRoutes(app: FastifyInstance, deps: CaregiverRou
           profile_id: string;
           grantee_user_id: string;
           status: string;
-        }>(`SELECT id, profile_id, grantee_user_id, status FROM caregiver_grant WHERE id = $1`, [
-          id.data,
-        ]),
+          capabilities: string[];
+        }>(
+          // The capabilities are read for the audit record, not for a decision. `03` group H
+          // wants the history to say what happened, and "access was removed" without naming what
+          // was removed is the one entry an owner cannot check anything against.
+          `SELECT id, profile_id, grantee_user_id, status, capabilities
+           FROM caregiver_grant WHERE id = $1`,
+          [id.data],
+        ),
       );
       const row = found.rows[0];
       if (!row) {
@@ -997,7 +1011,10 @@ export function registerCaregiverRoutes(app: FastifyInstance, deps: CaregiverRou
             targetId: row.id,
             correlationId: ctx.correlationId,
             detail: caregiverAuditDetail({
-              capabilities: [],
+              // What was actually removed. Recording an empty list here read as "a grant with no
+              // capabilities was removed" rather than as "nobody wrote them down", which is the
+              // worse of the two on the one screen an owner checks after the fact.
+              capabilities: row.capabilities.filter(isCaregiverCapability),
               emailBound: false,
               expires: false,
               reasonCode: ctx.principal.userId === row.grantee_user_id ? 'self' : 'administrator',

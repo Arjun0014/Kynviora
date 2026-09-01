@@ -6,7 +6,9 @@ import {
   CAREGIVER_ACCESS_PRESENTATION,
   CAREGIVER_ACCESS_STATES,
   CAREGIVER_COPY,
+  REVOCATION_COPY,
   describeCapability,
+  describeRevocation,
   invitationExpiryNote,
   presentCaregiverAccess,
   summarizeAccess,
@@ -217,5 +219,64 @@ describe('presentation stays in step with the domain', () => {
     expect(Object.keys(CAREGIVER_ACCESS_PRESENTATION).sort()).toEqual(
       [...CAREGIVER_ACCESS_STATES].sort(),
     );
+  });
+});
+
+describe('removal copy', () => {
+  it('says when it happens, on every variant', () => {
+    // Spec 15 A2 is the behaviour and this is the sentence that matches it. A person who thinks
+    // removal takes effect "at some point" has been given a reason to also change a password.
+    for (const subject of ['GRANT', 'INVITATION'] as const) {
+      for (const isSelf of [true, false]) {
+        expect(describeRevocation({ subject, isSelf }).immediate).toMatch(/straight away/i);
+      }
+    }
+  });
+
+  it('says what starting again would take, rather than warning about risk', () => {
+    // Spec 15 wants removing access to be easy. The thing a person actually needs to know is
+    // that the old link cannot be reissued (DEC-018), not that this is dangerous.
+    expect(REVOCATION_COPY.noUndo).toMatch(/send a new invitation/i);
+    expect(REVOCATION_COPY.invitationNoUndo).toMatch(/old link/i);
+    for (const text of [REVOCATION_COPY.noUndo, REVOCATION_COPY.invitationNoUndo]) {
+      expect(text).not.toMatch(/\b(danger|dangerous|warning|careful|risk)\b/i);
+    }
+  });
+
+  it('does not tell someone removing their own access that "they" will lose it', () => {
+    // The wrong pronoun here is not a wording problem. It is a statement about a different
+    // person, on the screen that asks for a confirmation.
+    const self = describeRevocation({ subject: 'GRANT', isSelf: true });
+    for (const text of [self.heading, self.immediate, ...self.consequences, self.seeingHeading]) {
+      expect(text).not.toMatch(/\bthey\b/i);
+    }
+    expect(self.immediate).toMatch(/^you\b/i);
+  });
+
+  it('speaks about the other person when the access is theirs', () => {
+    const other = describeRevocation({ subject: 'GRANT', isSelf: false });
+    expect(other.heading).toMatch(/their/i);
+    expect(other.seeingHeading).toMatch(/^they\b/i);
+  });
+
+  it('treats an invitation as a link rather than as access', () => {
+    // An invitation grants nothing yet. Saying "they will stop seeing" about someone who never
+    // could would misdescribe what the owner is doing.
+    const invitation = describeRevocation({ subject: 'INVITATION', isSelf: false });
+    expect(invitation.heading).toMatch(/invitation/i);
+    expect(invitation.immediate).toMatch(/link/i);
+    expect(invitation.confirmLabel).toMatch(/withdraw/i);
+  });
+
+  it('sends the owner to the right record when the invitation was already accepted', () => {
+    // The access has moved into a grant. Closing the invitation would leave it in place while
+    // saying it had been removed.
+    expect(REVOCATION_COPY.alreadyAccepted).toMatch(/already accepted/i);
+    expect(REVOCATION_COPY.alreadyAccepted).toMatch(/instead/i);
+  });
+
+  it('offers a way out that does not read as a mistake', () => {
+    // "Cancel" next to "Remove access" is ambiguous about which thing is being cancelled.
+    expect(REVOCATION_COPY.cancelLabel).toMatch(/keep access/i);
   });
 });

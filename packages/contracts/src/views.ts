@@ -39,6 +39,7 @@ import {
   type ReviewTaskKind,
 } from '@kynviora/domain';
 import {
+  describeAuditAction,
   presentEvidenceLevel,
   presentMatchConfidence,
   presentUrgency,
@@ -47,6 +48,7 @@ import {
 } from '@kynviora/presentation';
 import type {
   AlertSummary,
+  CaregiverAuditEvent,
   CaregiverGrant,
   PendingInvitation,
   ReviewTask,
@@ -308,10 +310,28 @@ export function asCaregiverAccessState(status: string): CaregiverAccessState {
 
 export interface CaregiverAccessRowView {
   readonly id: string;
+  /**
+   * Which record this row is.
+   *
+   * The list shows grants and outstanding invitations together because they answer one question,
+   * but they are two records with two revocation routes, and the ID alone does not say which. A
+   * row carrying only an ID makes "remove this" undecidable at the point it is pressed - and the
+   * wrong route answers 404, which the client correctly renders as absence, so the failure would
+   * have looked like the row disappearing rather than like a bug.
+   */
+  readonly subject: 'GRANT' | 'INVITATION';
   readonly state: CaregiverAccessState;
   readonly capabilities: readonly CaregiverCapability[];
   readonly displayName: string;
   readonly expiresAt: string | null;
+  /**
+   * Whether this row is the caller's own access.
+   *
+   * From the server (`isSelf`), never inferred here. An administering caregiver sees their own
+   * grant in the same list as the ones they administer, and "they will stop seeing this profile"
+   * is the wrong sentence to put in front of someone removing their own.
+   */
+  readonly isSelf: boolean;
 }
 
 /**
@@ -332,10 +352,15 @@ export function caregiverAccessRows(
 ): readonly CaregiverAccessRowView[] {
   return grants.map((grant) => ({
     id: grant.id,
+    subject: 'GRANT' as const,
     state: asCaregiverAccessState(grant.status),
     capabilities: grant.capabilities.filter(isCaregiverCapability),
     displayName: displayNames[grant.granteeUserId] ?? grant.granteeUserId,
     expiresAt: grant.expiresAt,
+    // Absent means not the caller's. Deny by default applied to a claim about identity: an older
+    // server that does not send the field must not produce "remove your own access" copy in
+    // front of someone removing somebody else's.
+    isSelf: grant.isSelf === true,
   }));
 }
 
@@ -385,11 +410,62 @@ export function invitationAccessRows(
 ): readonly CaregiverAccessRowView[] {
   return invitations.map((invitation) => ({
     id: invitation.id,
+    subject: 'INVITATION' as const,
     state: 'INVITED' as const,
     capabilities: invitation.capabilities.filter(isCaregiverCapability),
     displayName: invitation.boundToAddress ? 'Invited by email' : 'Invitation link',
     expiresAt: invitation.grantExpiresAt,
+    // An invitation is never the caller's own access: the route admits the owner and an
+    // administering caregiver, and deliberately not the intended recipient before acceptance.
+    isSelf: false,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// The access history
+// ---------------------------------------------------------------------------
+
+export interface AccessHistoryLineView {
+  readonly id: string;
+  readonly occurredAt: string;
+  /** The sentence a person reads. Never the raw action code. */
+  readonly description: string;
+}
+
+export interface AccessHistoryView {
+  readonly lines: readonly AccessHistoryLineView[];
+  /**
+   * Events dropped because this build has no sentence for the action.
+   *
+   * Counted rather than hidden, for the same reason an unrecognised review task kind is: `03`
+   * group H is about the owner being able to see what happened, and a history that silently
+   * omitted rows would answer that question wrongly while looking complete.
+   */
+  readonly unreadableCount: number;
+}
+
+/**
+ * Lines for the access history, newest first as the route returns them.
+ *
+ * The detail is deliberately not rendered. It carries capability codes, counts and booleans
+ * (`20`, and the caregiver audit detail is scalars only), and turning those into prose on this
+ * screen would be a second description of a grant that the access list already describes - three
+ * screens describing one grant three ways is how a person ends up unsure what they approved.
+ */
+export function accessHistory(events: readonly CaregiverAuditEvent[]): AccessHistoryView {
+  const lines: AccessHistoryLineView[] = [];
+  let unreadableCount = 0;
+
+  for (const event of events) {
+    const description = describeAuditAction(event.action);
+    if (description === null) {
+      unreadableCount += 1;
+      continue;
+    }
+    lines.push({ id: event.id, occurredAt: event.occurredAt, description });
+  }
+
+  return { lines, unreadableCount };
 }
 
 /**

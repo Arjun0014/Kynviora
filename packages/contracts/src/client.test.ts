@@ -178,3 +178,106 @@ describe('completing a review task writes to the record', () => {
     expect(body.changes).toHaveLength(1);
   });
 });
+
+describe('removing access', () => {
+  it('sends no idempotency key, because a repeat is the same request', async () => {
+    // The difference from creating an invitation. Creation mints a credential and a key
+    // regenerated on retry would mint a second; revocation has one destination state, and
+    // arriving at it twice is arriving at it once.
+    const { client, calls } = recordingClient(200, {
+      status: 'REVOKED',
+      alreadyRevoked: false,
+      serverTime: '2026-09-01T00:00:00.000Z',
+    });
+    await client.revokeGrant('grant-1');
+    expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.url).toBe('http://127.0.0.1:3000/v1/caregiver-grants/grant-1/revoke');
+    expect(Object.keys(calls[0]?.headers ?? {})).not.toContain('Idempotency-Key');
+  });
+
+  it('uses a different route for an invitation than for a grant', async () => {
+    // Two records. The wrong route is a 404, which the client renders as absence - so the bug
+    // would look like the row disappearing rather than like a bug.
+    const { client, calls } = recordingClient(200, {
+      status: 'REVOKED',
+      serverTime: '2026-09-01T00:00:00.000Z',
+    });
+    await client.revokeInvitation('inv-1');
+    expect(calls[0]?.url).toBe('http://127.0.0.1:3000/v1/caregiver-invitations/inv-1/revoke');
+  });
+
+  it('escapes an identifier rather than pasting it into the path', async () => {
+    const { client, calls } = recordingClient(200, { status: 'REVOKED' });
+    await client.revokeGrant('a/../b');
+    expect(calls[0]?.url).toContain('a%2F..%2Fb');
+  });
+
+  it('reports an already-removed grant as done rather than as a failure', async () => {
+    // Someone removing another person's access who is answered with an error has been given a
+    // reason to doubt whether it worked.
+    const { client } = recordingClient(200, {
+      status: 'REVOKED',
+      alreadyRevoked: true,
+      serverTime: '2026-09-01T00:00:00.000Z',
+    });
+    const outcome = await client.revokeGrant('grant-1');
+    expect(outcome.kind).toBe('OK');
+    if (outcome.kind !== 'OK') return;
+    expect(outcome.value.alreadyRevoked).toBe(true);
+  });
+
+  it('turns a missing grant into absence, never into a refusal', async () => {
+    // Trap 14 and DEC-039: PERMISSION_DENIED is answered with 404 so the API is not an existence
+    // oracle, and there is no client outcome meaning "you are not allowed".
+    const { client } = recordingClient(404, {
+      error: {
+        code: 'PERMISSION_DENIED',
+        message: 'No such grant.',
+        retryable: false,
+        correlationId: 'c',
+      },
+    });
+    const outcome = await client.revokeGrant('grant-1');
+    expect(outcome.kind).toBe('UNAVAILABLE');
+  });
+
+  it('surfaces the step-up requirement as its own outcome', async () => {
+    // 403 belongs to STEP_UP_REQUIRED alone (trap 14), and the screen has a state for it.
+    const { client } = recordingClient(403, {
+      error: {
+        code: 'STEP_UP_REQUIRED',
+        message: 'Confirm it is you.',
+        retryable: false,
+        correlationId: 'c',
+      },
+    });
+    expect((await client.revokeGrant('grant-1')).kind).toBe('STEP_UP_REQUIRED');
+  });
+
+  it('keeps the accepted-invitation refusal actionable', async () => {
+    // The access has moved into a grant. The server says so with a message the screen shows,
+    // because "not found" here would be wrong: the record exists and the owner can act on it.
+    const { client } = recordingClient(409, {
+      error: {
+        code: 'INVITATION_ALREADY_RESOLVED',
+        message: 'This invitation was accepted. Revoke the caregiver access instead.',
+        detail: { reason_code: 'already_accepted' },
+        retryable: false,
+        correlationId: 'c',
+      },
+    });
+    const outcome = await client.revokeInvitation('inv-1');
+    expect(outcome.kind).toBe('REFUSED');
+    if (outcome.kind !== 'REFUSED') return;
+    expect(outcome.code).toBe('INVITATION_ALREADY_RESOLVED');
+  });
+
+  it('reads the access history without asking for a body of health content', async () => {
+    // `20`: an audit log answers who did what, and must not become a verbose copy of health
+    // content. The route is a plain GET on the profile.
+    const { client, calls } = recordingClient(200, { events: [], serverTime: 't' });
+    await client.caregiverAudit(PROFILE);
+    expect(calls[0]?.method).toBe('GET');
+    expect(calls[0]?.url).toBe(`http://127.0.0.1:3000/v1/profiles/${PROFILE}/caregiver-audit`);
+  });
+});

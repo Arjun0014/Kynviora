@@ -149,6 +149,15 @@ export interface CaregiverGrant {
   readonly acceptedAt: string | null;
   readonly expiresAt: string | null;
   readonly revokedAt: string | null;
+  /**
+   * Whether this grant is the caller's own.
+   *
+   * Answered by the server, like `isOwner` on a profile (DEC-047), rather than worked out here by
+   * comparing the grantee against an identity read out of the session. Removing your own access
+   * and removing somebody else's are different sentences on the confirmation, and an
+   * administering caregiver sees both kinds of row in one list.
+   */
+  readonly isSelf: boolean;
 }
 
 export interface CaregiverGrantsResponse {
@@ -171,6 +180,49 @@ export interface PendingInvitation {
 
 export interface InvitationsResponse {
   readonly invitations: readonly PendingInvitation[];
+  readonly serverTime: string;
+}
+
+/**
+ * What removing a caregiver's access returns.
+ *
+ * `alreadyRevoked` is not an error. Someone removing another person's access who is answered with
+ * a failure has been given a reason to doubt whether it worked, so a repeat succeeds and reports
+ * that there was nothing left to do - which is a different sentence, not a different outcome.
+ */
+export interface GrantRevoked {
+  readonly status: string;
+  readonly alreadyRevoked: boolean;
+  readonly serverTime: string;
+}
+
+/** What withdrawing an unaccepted invitation returns. There is no already-revoked case: the
+ * server's update is conditional on the invitation still being pending, and an accepted one is
+ * refused with `INVITATION_ALREADY_RESOLVED` rather than quietly succeeding. */
+export interface InvitationRevoked {
+  readonly status: string;
+  readonly serverTime: string;
+}
+
+/**
+ * One line of the access history.
+ *
+ * `20` requires an audit log to answer who performed a sensitive action, and forbids it becoming
+ * a verbose copy of health content. `detail` is therefore scalars only - capability codes, counts
+ * and booleans - and carries no name, address or token.
+ */
+export interface CaregiverAuditEvent {
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly actorUserId: string | null;
+  readonly action: string;
+  readonly targetKind: string;
+  readonly targetId: string | null;
+  readonly detail: Readonly<Record<string, unknown>>;
+}
+
+export interface CaregiverAuditResponse {
+  readonly events: readonly CaregiverAuditEvent[];
   readonly serverTime: string;
 }
 
@@ -408,6 +460,40 @@ export interface KynvioraClient {
     readonly profileId?: string;
   }): Promise<ApiOutcome<InvitationsResponse>>;
 
+  /**
+   * Remove a caregiver's access, immediately.
+   *
+   * Requires step-up (`14`) and takes no idempotency key, which is the difference between this
+   * and creating an invitation: creation mints a credential and a repeated key would mint a
+   * second, whereas revocation has one destination state and arriving at it twice is arriving at
+   * it once. `15` A2 makes the effect immediate - the server re-evaluates the grant on every
+   * request, so nothing here has a cache to purge or a session to refresh.
+   *
+   * Never applied locally. `12` forbids the client holding authorization logic, and a row removed
+   * before the server agreed is a false statement about who can read a person's health data.
+   */
+  revokeGrant(grantId: string): Promise<ApiOutcome<GrantRevoked>>;
+
+  /**
+   * Withdraw an invitation nobody has accepted.
+   *
+   * A separate record and a separate route from a grant, because they are separate things: the
+   * invitation is a live token and the grant is the access it becomes. Withdrawing an accepted
+   * invitation is refused - the access now lives in the grant, and closing the invitation would
+   * be theatre.
+   */
+  revokeInvitation(invitationId: string): Promise<ApiOutcome<InvitationRevoked>>;
+
+  /**
+   * The access history for a profile.
+   *
+   * `03` group H requires audit event visibility and `06` Journey 6 step 5 requires the owner to
+   * see that access changed. Read through the API rather than derived from the list, because a
+   * removed grant leaves the list and the record of its removal is the thing the owner is looking
+   * for afterwards.
+   */
+  caregiverAudit(profileId: string): Promise<ApiOutcome<CaregiverAuditResponse>>;
+
   profileAlerts(profileId: string): Promise<ApiOutcome<ProfileAlertsResponse>>;
   notificationSettings(profileId: string): Promise<ApiOutcome<NotificationSettingsResponse>>;
   setNotificationPreference(
@@ -525,6 +611,21 @@ export function createClient(options: ClientOptions): KynvioraClient {
 
     listInvitations: (query) =>
       get<InvitationsResponse>('/v1/caregiver-invitations', { profileId: query?.profileId }),
+
+    // No idempotency key and no body. Revocation has one destination state, so a retry is the
+    // same request rather than a second one.
+    revokeGrant: (grantId) =>
+      send<GrantRevoked>('POST', `/v1/caregiver-grants/${encodeURIComponent(grantId)}/revoke`, {}),
+
+    revokeInvitation: (invitationId) =>
+      send<InvitationRevoked>(
+        'POST',
+        `/v1/caregiver-invitations/${encodeURIComponent(invitationId)}/revoke`,
+        {},
+      ),
+
+    caregiverAudit: (profileId) =>
+      get<CaregiverAuditResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/caregiver-audit`),
 
     profileAlerts: (profileId) =>
       get<ProfileAlertsResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/alerts`),

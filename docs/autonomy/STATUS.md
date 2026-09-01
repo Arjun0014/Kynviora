@@ -13,14 +13,14 @@ Last updated: 2026-09-01
 | ------------------ | ---------------------------------------------- |
 | **Current stage**  | Stage 6 (governance), after completing Stage 8 |
 | **Current phase**  | Wiring the Expo screens to the API (DEV-007)   |
-| **Last completed** | Making the stack runnable (not a spec phase)   |
+| **Last completed** | Removing a caregiver's access, end to end      |
 | **Branch**         | `master`                                       |
-| **Latest commit**  | `feat(dev): a runnable local stack`            |
+| **Latest commit**  | `feat(mobile): the revocation flow`            |
 | **Baseline tag**   | `baseline-spec-only`                           |
 
 ## Verification state
 
-- **1902 tests passing**, 0 failing, across 50 files.
+- **2185 tests passing**, 0 failing, across 65 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -56,7 +56,7 @@ purpose - `BLK-006` and DEC-016, not a configuration mistake.
 | Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                                  |
 | API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                                   |
 | Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                                   |
-| Caregiver invitation, acceptance, revocation, audit        | Complete, 150 tests                                  |
+| Caregiver invitation, acceptance, revocation, audit        | Complete, 191 tests                                  |
 | Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                                  |
 | Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009)          |
 | Household Review Inbox, record-writing completion          | Complete, 95 tests                                   |
@@ -65,7 +65,7 @@ purpose - `BLK-006` and DEC-016, not a configuration mistake.
 | Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                   |
 | End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                   |
 | Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                  |
-| Caregiver, export, notification, inbox, reconciliation UI  | Typecheck; **not wired** (`DEV-007`)                 |
+| Caregiver, export, notification, inbox, reconciliation UI  | Wired; **not device-verified** (`DEV-007`)           |
 | CI pipeline                                                | Written; not yet run on a real runner                |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
@@ -98,24 +98,24 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Finish the `DEV-007` write flows.** Today, Shelf, Safety, Care and You now read real data through
-the shared client, and the only writes are the notification preference and a dose event. Five
-flows remain, and each needs a screen rather than a button (`DEV-022`):
+**Finish the `DEV-007` write flows.** Every caregiver action now has a screen. Two things remain:
 
-1. **Revocation**, the one caregiver action still without a screen. It has the step-up seam the
-   invitation flow introduced and needs a confirmation that never applies the change locally
-   (`12`, `14`).
+1. **Close `DEV-026`.** `GET /v1/caregiver-grants` now returns `isSelf` per row (DEC-052), which is
+   exactly the field that deviation named as its required future work. The Care screen still
+   passes `ownCapabilities: []`, so an administering caregiver is offered nothing to delegate.
+   Reading their own grant off the listing by `isSelf` and passing its capabilities into
+   `inviterAuthority` closes it; `selectableCapabilities` needs no change.
 2. **Phase 4.3** (dose events and adherence history). The client already records a dose event and
-   the route is idempotent; nothing calls it.
-3. Return the caller's own capabilities per profile from the API, which is the one input missing
-   before a caregiver can delegate anything (`DEV-026`).
+   the route is idempotent; only the single control on Today calls it, and there is no history.
 
 Done: **reconciliation** (a typed list, both values shown, and the side stated by a person), the
 **Visit Pack** (selection, review, and a digest the live server accepts), the
 **review task editor** (five of seven kinds; `BATCH_MISSING` and
-`FORMULA_NEEDS_CONFIRMATION` wait on guided capture, `DEV-024`) and the **caregiver invitation**
+`FORMULA_NEEDS_CONFIRMATION` wait on guided capture, `DEV-024`), the **caregiver invitation**
 (capability selection limited to what the inviter may delegate, a step-up-scoped request, and a
-token emitted once and never held anywhere).
+token emitted once and never held anywhere) and **removing access** (a confirmation that names what
+stops and what starting again would take, the right route for a grant or an invitation, an
+idempotent request, and the access history that shows the removal happened).
 
 Alternatively **Phase 4.3** (dose events and adherence history) or **Phase 7.1** (assessment states
 and inbox), both fully implementable with no external dependency.
@@ -256,6 +256,21 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 - **DEC-048** - the Visit Pack client hashes the candidates it **displayed** and never re-fetches
   before hashing. `canonicalizeSelection` and `toNoteEntries` come from the domain so both sides
   build the same string. An entry this client cannot canonicalise is refused, never coerced.
+
+- **DEC-050** - a failed refresh keeps content on screen only where the server said nothing about
+  this caller's access: `OFFLINE` and `SERVER_ERROR` and nothing else. Every other failure is an
+  answer, and the answer is no. `UNAVAILABLE` is the shape a revocation arrives in.
+- **DEC-051** - an access-list row carries `subject` (`GRANT` or `INVITATION`), because the two
+  have separate revocation routes and the wrong one answers 404 - which reads on screen as the row
+  vanishing rather than as a bug.
+- **DEC-052** - `GET /v1/caregiver-grants` returns `isSelf` per row, for the same reason
+  `GET /v1/profiles` returns `isOwner`. Removing your own access and removing somebody else's are
+  different sentences, and the alternative is reading identity back out of a session.
+- **DEC-053** - revocation takes no idempotency key: it has one destination state, so a retry is
+  the same request. A repeat returns 200 with `alreadyRevoked: true`.
+- **DEC-054** - `revocationMessage` supplies the wording for `INVITATION_ALREADY_RESOLVED` and for
+  no other code. Its client-safe message is shared with the acceptance path, where being specific
+  would tell a stranger holding a link which of expired, declined or revoked applies.
 
 - **DEC-049** - settling a reconciliation difference is **two** questions. Choosing a resolution
   does not say which value stands, and inferring it - defaulting a confirmation to the newer list -
@@ -433,3 +448,25 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
     person says it is the same medicine. With a positional key nothing can correspond and every
     difference is `ONLY_IN_*` - the feature runs, passes, and compares nothing. Never match by
     name: two packs of one medicine at different strengths are two real records.
+59. Do not drop `subject` from an access-list row, or route a removal by the row's state. Grants
+    and invitations share the list and have separate routes; the wrong one answers 404, the client
+    renders a 404 as absence (DEC-039), and the bug presents as the row quietly disappearing on
+    the one screen where that is a statement about who can read someone's health data.
+60. Do not make `refreshedResource` keep content for an authorization failure to "avoid a jarring
+    empty screen". `UNAVAILABLE`, `AUTHORIZATION_LOST` and `UNAUTHENTICATED` are the server saying
+    the content is not this caller's, and keeping it under a `STALE` label is `15` A2 reintroduced
+    one layer above the database (DEC-050). Tests enumerate the failure union.
+61. Do not add an idempotency key to either revoke route, and do not make a repeated revocation an
+    error. Someone removing another person's access who is answered with a failure has been given
+    a reason to doubt whether it worked (DEC-053).
+62. Do not style the removal confirmation as a warning, and do not add a "this is dangerous" line.
+    `15` wants removing access to be easy; copy that treats it as risky discourages the thing the
+    threat model depends on. `CAREGIVER_ACCESS_PRESENTATION.REVOKED` is neutral for the same
+    reason, and a test asserts the copy carries no risk word.
+63. Do not "fix" `revocationMessage` by making the wire message for `INVITATION_ALREADY_RESOLVED`
+    specific. The code is shared with acceptance, where the generic message is what stops a link
+    that reached the wrong person from revealing whether it was expired, declined or revoked
+    (DEC-054).
+64. Do not record a revocation audit event with an empty capability list. It reads as "a grant with
+    no capabilities was removed" rather than as "nobody wrote them down", on the one screen an
+    owner has nothing else to check against. Found by running the flow, not by a test.

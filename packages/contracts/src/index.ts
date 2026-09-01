@@ -13,5 +13,6 @@ export * from './client.js';
 export * from './views.js';
 export * from './taskCompletion.js';
 export * from './invitation.js';
+export * from './revocation.js';
 export * from './visitPack.js';
 export * from './reconciliation.js';

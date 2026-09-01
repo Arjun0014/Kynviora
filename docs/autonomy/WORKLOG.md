@@ -1288,3 +1288,70 @@ was asked, the tests passed, and the feature was useless. Only running it end to
 the output showed that.
 
 2129 tests across 64 files, verify exit 0.
+
+### Removing access - the last caregiver action without a screen
+
+The server side had been finished since Phase 8.1: both revoke routes exist, both are behind
+step-up, both write audit events, and both are idempotent. What was missing was everything between
+the button and the request - and one thing nobody had noticed on either side of it.
+
+**The client was undoing A2.** `useResource` kept the previous content on screen for _any_ failed
+refresh and labelled it `STALE`. Revocation is the case that makes that wrong: `15` A2 requires a
+removed caregiver to lose access on their very next authenticated access, the server does exactly
+that, and the app carried on showing them the medicine list under a caption saying it was not up to
+date. The rule is not "did the request fail" but "did the server say something about this caller's
+access" - `OFFLINE` and `SERVER_ERROR` did not, everything else did (DEC-050). It went in as its
+own commit, because it is a security fix rather than part of a feature.
+
+Worth recording that this was found by _designing_ the next feature rather than by testing the last
+one. Nothing was failing.
+
+**A row that could not say which record it was.** The Care screen shows grants and outstanding
+invitations together, on purpose - they answer one question. They are two records with two routes,
+and `onRevoke(id)` carried only an ID. The wrong route answers 404, the client correctly renders a
+404 as absence, and the whole failure would have presented as the row quietly disappearing (DEC-051,
+trap 47). `subject` now travels on the row and `buildRevocation` reads it.
+
+**Two people, two sentences.** An administering caregiver sees their own grant beside the ones they
+administer, and "they will stop seeing this profile" put in front of someone removing their own
+access is not a wording problem - it is a statement about a different person. The alternative to
+asking the server was comparing the grantee against an identity read back out of the session, which
+in development is a header. `isSelf` now comes from the API for the same reason `isOwner` does
+(DEC-052), and it is also the field `DEV-026` had named as its own required future work.
+
+**Two dogfooding findings.** Driving the flow against a live server showed the removal audit event
+recording `capability_count: 0` and an empty capability list, because the route passed `[]` rather
+than reading the grant's own. On the history screen that reads as "a grant with no capabilities was
+removed" rather than as "nobody wrote them down" - and it is the one entry an owner has nothing
+else to check against. The route now selects `capabilities` for the audit record.
+
+The second came from an end-to-end test asserting the message the screen would show. The route
+writes "This invitation was accepted. Revoke the caregiver access instead," and `errors.ts` replaces
+it on the wire with the client-safe message for `INVITATION_ALREADY_RESOLVED` - which is shared with
+the acceptance path and says only that the invitation has been used. True, and a dead end for the
+owner. Making the wire message specific would change what a stranger holding a link learns, so the
+wording is supplied on the screen for that one code and nowhere else (DEC-054).
+
+**What the confirmation says, and what it does not.** What stops, when, and what starting again
+would take - the third being the surprise, because the invitation token was stored only as a hash
+and cannot be reissued (DEC-018), so restoring access means sending a new invitation and having it
+accepted. The tone is deliberately not a warning: `15` wants removing access to be easy, and copy
+that treats it as dangerous discourages the thing the threat model relies on. That is the same
+reason `CAREGIVER_ACCESS_PRESENTATION.REVOKED` is neutral.
+
+**The access history is part of the flow, not a separate feature.** After a removal the list is
+exactly one row shorter, which is the least informative possible confirmation: the row the owner
+was looking at is gone and nothing says it was them. `03` group H requires audit event visibility,
+and `GET /v1/profiles/:profileId/caregiver-audit` had existed since Phase 8.1 with no client method
+and no screen. It reads alongside the list; a caller with no administrative authority gets a 404,
+which drops the section rather than failing the screen.
+
+### State
+
+2185 tests passing across 65 files, up from 2129 across 64. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 56 new tests: 7 for the refresh-retention rule, 15
+for the revocation builder and its wording, 5 for the access history view, 6 on the removal copy,
+8 on the client surface, 1 on the API, and 14 end to end against a real server process - including
+that the withdrawn invitation's token stops working, that a repeat reports `alreadyRevoked` rather
+than an error, that a stranger cannot tell a real grant from an invented one, and that a caregiver
+can renounce their own access holding no administrative capability at all.

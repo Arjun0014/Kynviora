@@ -18,7 +18,7 @@
  * forbidden-claim detector.
  */
 
-import type { CaregiverCapability } from '@kynviora/domain';
+import type { CaregiverAuditAction, CaregiverCapability } from '@kynviora/domain';
 import type { StatusPresentation } from './status.js';
 
 // ---------------------------------------------------------------------------
@@ -288,11 +288,173 @@ export function invitationExpiryNote(days: number): string {
     : `The invitation stops working after ${days} days.`;
 }
 
+// ---------------------------------------------------------------------------
+// Removing access
+// ---------------------------------------------------------------------------
+
+/**
+ * Fixed copy for the removal flow.
+ *
+ * `18` requires a screen to say what it is about to do before it does it, and removing access is
+ * the one caregiver action with no undo: the invitation token was stored only as a hash and
+ * cannot be reissued (DEC-018), so restoring access means sending a new invitation and having it
+ * accepted again. That sentence is on the confirmation, not discovered afterwards.
+ *
+ * The tone is deliberately not a warning. `15` wants removing access to be easy, and copy that
+ * treats it as dangerous discourages the very thing the threat model relies on - which is why
+ * `CAREGIVER_ACCESS_PRESENTATION.REVOKED` is neutral too.
+ */
+export const REVOCATION_COPY = Object.freeze({
+  grantHeading: 'Remove their access',
+  selfHeading: 'Remove your own access',
+  invitationHeading: 'Withdraw this invitation',
+
+  /** Matches the behaviour: `has_capability` re-evaluates the grant on every request (`15` A2). */
+  immediate: 'This takes effect straight away.',
+  selfImmediate: 'You will stop seeing this profile straight away.',
+  invitationImmediate: 'The link stops working straight away.',
+
+  /** What is lost, stated once. Both of these are about needing to start again, not about risk. */
+  noUndo: 'You cannot undo this. To give access again, send a new invitation.',
+  invitationNoUndo: 'Anyone still holding the old link will not be able to use it.',
+  selfNoUndo: 'The person who owns this profile can invite you again.',
+
+  stopsSeeingHeading: 'They will stop being able to see',
+  stopsChangingHeading: 'They will stop being able to change',
+  selfStopsSeeingHeading: 'You will stop being able to see',
+  selfStopsChangingHeading: 'You will stop being able to change',
+
+  /** The one case where the record on screen is not the record that carries the access. */
+  alreadyAccepted:
+    'They have already accepted. Remove their access from the list instead of the invitation.',
+  nothingToRemove: 'This access has already ended. There is nothing to remove.',
+
+  confirmLabel: 'Remove access',
+  invitationConfirmLabel: 'Withdraw invitation',
+  cancelLabel: 'Keep access as it is',
+  doneLabel: 'Back to the list',
+  historyIntro: 'Every change to who can see this profile is recorded here.',
+});
+
+/**
+ * How many history entries this build cannot describe.
+ *
+ * `null` where there are none, so the screen has nothing to render rather than a sentence saying
+ * zero. A function rather than a fixed string because singular and plural must both read
+ * naturally, and because the count is the whole point: `03` group H is about the owner seeing
+ * what happened, and a history that silently omitted rows would look complete while answering
+ * the question wrongly.
+ */
+export function unreadableHistoryNote(count: number): string | null {
+  if (count <= 0) return null;
+  return count === 1
+    ? '1 more change was recorded. This version of the app cannot describe it.'
+    : `${count} more changes were recorded. This version of the app cannot describe them.`;
+}
+
+/** What a removal confirmation says, assembled once so no screen has to phrase it. */
+export interface RevocationDescription {
+  readonly heading: string;
+  /** When it happens. Always present, because immediacy is the fact people get wrong. */
+  readonly immediate: string;
+  /** What starting again would take. Two sentences at most. */
+  readonly consequences: readonly string[];
+  readonly seeingHeading: string;
+  readonly changingHeading: string;
+  readonly confirmLabel: string;
+}
+
+/**
+ * Describe a removal in the words a person reads.
+ *
+ * `isSelf` changes every sentence rather than one, which is why this is a function and not a
+ * template with a substituted pronoun: "they will stop seeing this profile" put in front of
+ * someone removing their own access is not a wording problem, it is the wrong statement.
+ */
+export function describeRevocation(input: {
+  readonly subject: 'GRANT' | 'INVITATION';
+  readonly isSelf: boolean;
+}): RevocationDescription {
+  if (input.subject === 'INVITATION') {
+    return {
+      heading: REVOCATION_COPY.invitationHeading,
+      immediate: REVOCATION_COPY.invitationImmediate,
+      consequences: [REVOCATION_COPY.invitationNoUndo],
+      seeingHeading: REVOCATION_COPY.stopsSeeingHeading,
+      changingHeading: REVOCATION_COPY.stopsChangingHeading,
+      confirmLabel: REVOCATION_COPY.invitationConfirmLabel,
+    };
+  }
+
+  if (input.isSelf) {
+    return {
+      heading: REVOCATION_COPY.selfHeading,
+      immediate: REVOCATION_COPY.selfImmediate,
+      consequences: [REVOCATION_COPY.selfNoUndo],
+      seeingHeading: REVOCATION_COPY.selfStopsSeeingHeading,
+      changingHeading: REVOCATION_COPY.selfStopsChangingHeading,
+      confirmLabel: REVOCATION_COPY.confirmLabel,
+    };
+  }
+
+  return {
+    heading: REVOCATION_COPY.grantHeading,
+    immediate: REVOCATION_COPY.immediate,
+    consequences: [REVOCATION_COPY.noUndo],
+    seeingHeading: REVOCATION_COPY.stopsSeeingHeading,
+    changingHeading: REVOCATION_COPY.stopsChangingHeading,
+    confirmLabel: REVOCATION_COPY.confirmLabel,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The access history
+// ---------------------------------------------------------------------------
+
+/**
+ * Each audit action as a person reads it.
+ *
+ * `03` group H requires audit event visibility, and an audit log a person cannot read does not
+ * provide it. A total record over the domain's vocabulary rather than a lookup with a fallback:
+ * a new caregiver audit action fails to compile here until somebody writes the sentence.
+ *
+ * Every line is about the access, never about the person. `20` forbids an audit log becoming a
+ * verbose copy of health content, and the same reasoning applies to the screen that renders it.
+ */
+export const CAREGIVER_AUDIT_DESCRIPTIONS: Readonly<Record<CaregiverAuditAction, string>> =
+  Object.freeze({
+    'caregiver.invitation.created': 'An invitation was sent.',
+    'caregiver.invitation.accepted': 'An invitation was accepted.',
+    'caregiver.invitation.declined': 'An invitation was declined.',
+    'caregiver.invitation.revoked': 'An invitation was withdrawn.',
+    'caregiver.invitation.rejected': 'An invitation link was used and refused.',
+    'caregiver.grant.created': 'Access was given.',
+    'caregiver.grant.revoked': 'Access was removed.',
+  });
+
+/**
+ * Describe an audit action, or refuse it.
+ *
+ * `null` rather than a fallback sentence, for the same reason a review task kind has none: an
+ * action this build does not know about has no words anyone wrote, and inventing them would put
+ * a statement about who could read a person's records next to a timestamp that makes it look
+ * checked.
+ */
+export function describeAuditAction(action: string): string | null {
+  return action in CAREGIVER_AUDIT_DESCRIPTIONS
+    ? CAREGIVER_AUDIT_DESCRIPTIONS[action as CaregiverAuditAction]
+    : null;
+}
+
 /** Every fixed string in this module, for the forbidden-claim test. */
 export const ALL_CAREGIVER_STRINGS: readonly string[] = Object.freeze([
   ...Object.values(CAREGIVER_COPY),
+  ...Object.values(REVOCATION_COPY),
+  ...Object.values(CAREGIVER_AUDIT_DESCRIPTIONS),
   invitationExpiryNote(1),
   invitationExpiryNote(7),
+  unreadableHistoryNote(1) ?? '',
+  unreadableHistoryNote(4) ?? '',
   ...Object.values(CAPABILITY_DESCRIPTIONS).flatMap((d) => [d.label, d.meaning]),
   ...Object.values(CAREGIVER_ACCESS_PRESENTATION).flatMap((p) => [
     p.label,

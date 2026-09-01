@@ -19,8 +19,13 @@
  * back is handed straight to the component that displays it and is never stored, logged or put in
  * a URL (DEC-018, trap 11).
  *
- * Revocation is a server operation behind step-up and is never applied optimistically (`12`,
- * `14`). A row that disappears on a failed request is the same false statement again.
+ * REMOVING ACCESS IS THE SAME SHAPE, WITH ONE DIFFERENCE
+ * It is a server operation behind step-up and is never applied optimistically (`12`, `14`) - a
+ * row that disappears on a failed request is the same false statement again. The difference is
+ * that the list holds two kinds of record, and the route depends on which. `buildRevocation`
+ * makes that choice from the row the user is actually looking at, because a control handed only
+ * an ID cannot: the wrong route answers 404, the client correctly renders that as absence, and
+ * the bug would have looked like the row quietly vanishing.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -28,10 +33,15 @@ import { StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LIGHT_THEME, SPACING, type ScreenState as ScreenStateKind } from '@kynviora/presentation';
 import {
+  ALREADY_ACCEPTED_CODE,
+  accessHistory,
   accessList,
+  buildRevocation,
   inviterAuthority,
+  revocationMessage,
   screenStateForFailure,
   type InvitationCreated,
+  type RevocationTarget,
 } from '@kynviora/contracts';
 import type { CaregiverCapability } from '@kynviora/domain';
 import { useApi } from '@/api/ApiProvider';
@@ -39,6 +49,7 @@ import { useProfiles } from '@/api/ProfileProvider';
 import { useResource } from '@/api/useResource';
 import { CaregiverAccessList } from '@/features/caregivers/CaregiverAccessList';
 import { InviteCaregiver } from '@/features/caregivers/InviteCaregiver';
+import { RemoveCaregiverAccess } from '@/features/caregivers/RemoveCaregiverAccess';
 
 /** Matches `DEFAULT_INVITATION_TTL_DAYS` on the server. Shown, not sent. */
 const INVITATION_TTL_DAYS = 7;
@@ -53,6 +64,17 @@ export default function CareScreen() {
   const [sendMessage, setSendMessage] = useState<string | null>(null);
 
   /**
+   * The removal in progress.
+   *
+   * A target rather than an ID, because the target carries which record it is - and so which
+   * route answers. Cleared on close; nothing about a removal survives leaving the screen.
+   */
+  const [removing, setRemoving] = useState<RevocationTarget | null>(null);
+  const [removeState, setRemoveState] = useState<ScreenStateKind | null>(null);
+  const [removeMessage, setRemoveMessage] = useState<string | null>(null);
+  const [removed, setRemoved] = useState<{ readonly alreadyRemoved: boolean } | null>(null);
+
+  /**
    * Grants and outstanding invitations, together.
    *
    * Two requests because they are two records - a grant does not exist until acceptance - and one
@@ -65,9 +87,14 @@ export default function CareScreen() {
       client === null || activeProfileId === null
         ? null
         : async () => {
-            const [grants, invitations] = await Promise.all([
+            const [grants, invitations, audit] = await Promise.all([
               client.listCaregiverGrants({ profileId: activeProfileId }),
               client.listInvitations({ profileId: activeProfileId }),
+              // `03` group H. Read alongside the list rather than behind a control, because
+              // after a removal the list is exactly one row shorter and the history is the only
+              // place the removal itself is visible. A caller with no administrative authority
+              // gets 404 here, which drops the section rather than failing the screen.
+              client.caregiverAudit(activeProfileId),
             ]);
             if (grants.kind !== 'OK') return grants;
             return {
@@ -77,6 +104,7 @@ export default function CareScreen() {
                 grants: grants.value.grants,
                 invitations: invitations.kind === 'OK' ? invitations.value.invitations : [],
                 invitationsLoaded: invitations.kind === 'OK',
+                history: audit.kind === 'OK' ? audit.value.events : [],
               },
             };
           },
@@ -93,6 +121,8 @@ export default function CareScreen() {
     () => accessList(resource.value?.grants ?? [], resource.value?.invitations ?? []),
     [resource.value],
   );
+
+  const history = useMemo(() => accessHistory(resource.value?.history ?? []), [resource.value]);
 
   /**
    * What this caller may delegate.
@@ -171,9 +201,117 @@ export default function CareScreen() {
     setSendMessage(null);
   }, []);
 
+  /**
+   * Open the confirmation for a row.
+   *
+   * The row, not the ID. `buildRevocation` reads the subject and the state off the thing the
+   * person is looking at, so a list that has moved on since it loaded produces a refusal here
+   * rather than a request against the wrong record.
+   */
+  const onRevoke = useCallback(
+    (id: string) => {
+      const row = rows.find((candidate) => candidate.id === id);
+      if (row === undefined) return;
+
+      const draft = buildRevocation(row);
+      if (!draft.ok || draft.target === null) {
+        // Nothing to remove. Reload rather than explain: the row on screen is out of date, and
+        // the accurate list is a better answer than a sentence about the stale one.
+        reload();
+        return;
+      }
+      setRemoved(null);
+      setRemoveState(null);
+      setRemoveMessage(null);
+      setRemoving(draft.target);
+    },
+    [rows, reload],
+  );
+
+  /**
+   * Perform the removal.
+   *
+   * Elevated for this one request and discarded, exactly as the invitation is (`14`). No
+   * idempotency key: revocation has one destination state, so a retry is the same request rather
+   * than a second one. Nothing is applied locally - the list is re-read, because what happened is
+   * the server's answer and not this screen's guess (`12`).
+   */
+  const onConfirmRemoval = useCallback(
+    (target: RevocationTarget) => {
+      const elevated = elevate();
+      if (elevated === null) {
+        setRemoveState('STEP_UP_REQUIRED');
+        return;
+      }
+
+      setRemoveState('LOADING');
+      setRemoveMessage(null);
+
+      const request =
+        target.subject === 'GRANT'
+          ? elevated
+              .revokeGrant(target.id)
+              .then((outcome) =>
+                outcome.kind === 'OK'
+                  ? ({ kind: 'OK', alreadyRemoved: outcome.value.alreadyRevoked === true } as const)
+                  : ({ kind: 'FAILED', outcome } as const),
+              )
+          : elevated.revokeInvitation(target.id).then((outcome) =>
+              outcome.kind === 'OK'
+                ? // An invitation has no already-revoked case: the update is conditional on it
+                  // still being pending, and an accepted one is refused rather than succeeding.
+                  ({ kind: 'OK', alreadyRemoved: false } as const)
+                : ({ kind: 'FAILED', outcome } as const),
+            );
+
+      void request.then(
+        (result) => {
+          if (result.kind === 'OK') {
+            setRemoveState(null);
+            setRemoved({ alreadyRemoved: result.alreadyRemoved });
+            reload();
+            return;
+          }
+          setRemoveState(screenStateForFailure(result.outcome));
+          // The server's own message, except for the one code whose client-safe wording is
+          // shared with the acceptance path and so cannot name what to do next.
+          setRemoveMessage(revocationMessage(result.outcome));
+          // The one refusal where the list itself is the correction: the invitation was accepted
+          // and the access now lives in a grant, so the row to act on is a different row.
+          if (result.outcome.kind === 'REFUSED' && result.outcome.code === ALREADY_ACCEPTED_CODE) {
+            reload();
+          }
+        },
+        () => {
+          setRemoveState('RECOVERABLE_ERROR');
+          setRemoveMessage(null);
+        },
+      );
+    },
+    [elevate, reload],
+  );
+
+  const onCloseRemoval = useCallback(() => {
+    setRemoving(null);
+    setRemoveState(null);
+    setRemoveMessage(null);
+    setRemoved(null);
+  }, []);
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-      {inviting && activeProfileId !== null ? (
+      {removing !== null ? (
+        <View style={styles.sheet}>
+          <RemoveCaregiverAccess
+            target={removing}
+            onConfirm={onConfirmRemoval}
+            onCancel={onCloseRemoval}
+            state={removeState}
+            stateMessage={removeMessage}
+            removed={removed}
+          />
+        </View>
+      ) : inviting && activeProfileId !== null ? (
         <View style={styles.sheet}>
           <InviteCaregiver
             profileId={activeProfileId}
@@ -203,11 +341,11 @@ export default function CareScreen() {
           onInvite={() => {
             setInviting(true);
           }}
-          onRevoke={() => {
-            // Never applied locally. `12` forbids optimistic authorization changes, and a row
-            // that vanishes on a failed request misstates who can read this profile. The
-            // revocation screen is the remaining work here.
-          }}
+          // Never applied locally. `12` forbids optimistic authorization changes, and a row
+          // that vanishes on a failed request misstates who can read this profile - so this
+          // opens a confirmation, and the list only changes when the server says it has.
+          onRevoke={onRevoke}
+          history={history}
         />
       )}
     </SafeAreaView>

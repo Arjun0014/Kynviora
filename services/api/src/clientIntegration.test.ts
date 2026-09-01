@@ -7,6 +7,7 @@ import { start, type StartedServer } from './main.js';
 import { SEED } from '@kynviora/db';
 import { noopLogger } from '@kynviora/domain';
 import {
+  ALREADY_ACCEPTED_CODE,
   ANONYMOUS,
   createClient,
   developmentSession,
@@ -18,14 +19,18 @@ import {
   buildVisitPack,
   medicationLine,
   contentChanged,
+  accessHistory,
   accessList,
+  buildRevocation,
+  refreshedResource,
+  revocationMessage,
   reviewInboxView,
   safetyView,
   shelfView,
   type DigestFn,
   type KynvioraClient,
 } from '@kynviora/contracts';
-import { SCREEN_STATE_PRESENTATION } from '@kynviora/presentation';
+import { REVOCATION_COPY, SCREEN_STATE_PRESENTATION } from '@kynviora/presentation';
 
 /**
  * The client the app ships, driven against the server the app talks to.
@@ -770,5 +775,324 @@ describe('naming the shelf medicine is what makes a comparison useful', () => {
     const read = await owner.reconciliation(start.value.reconciliationId);
     if (read.kind !== 'OK') return;
     expect(read.value.differences.some((entry) => entry.kind === 'ONLY_IN_CURRENT')).toBe(true);
+  });
+});
+
+describe('removing access, end to end', () => {
+  /**
+   * The exit criterion of `15` A2, exercised through the code the app runs.
+   *
+   * "Revocation takes effect on the next authenticated access" is a property of the whole path,
+   * not of the database policy alone. The policy is already tested; what no test on either side
+   * proves is that the client the app ships stops showing the content afterwards. A screen that
+   * kept the medicine list up under a "not up to date" label would satisfy every server-side
+   * assertion and still leave the removed person reading it.
+   */
+  const stepUp = (userId: string) =>
+    createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(userId, { stepUp: true }),
+    });
+
+  /** The seeded second account, which has a verified address the invitation can bind to. */
+  const CAREGIVER = SEED.caregiverUserId;
+  const caregiver = () =>
+    createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(CAREGIVER),
+    });
+
+  /**
+   * Acceptance is the caregiver's own onboarding rather than a Care screen action, so it has no
+   * client method. Driven with a plain request here, which is honest about what is being set up.
+   */
+  async function accept(token: string): Promise<string> {
+    const response = await fetch(`${server.url}/v1/caregiver-invitations/accept`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-kynviora-dev-user': CAREGIVER,
+        'Idempotency-Key': crypto.randomUUID(),
+      },
+      body: JSON.stringify({ token }),
+    });
+    const body = (await response.json()) as { grantId?: string };
+    return body.grantId ?? '';
+  }
+
+  async function inviteAndAccept(
+    capabilities: readonly string[] = ['VIEW_SHELF', 'VIEW_MEDICINES'],
+  ): Promise<string> {
+    const draft = buildInvitation({
+      profileId: SEED.profileId,
+      authority: { kind: 'OWNER' },
+      selected: capabilities,
+      invitedEmail: 'caregiver@example.test',
+    });
+    if (!draft.ok || draft.body === null) throw new Error('the invitation draft was refused');
+    const created = await stepUp(SEED.userId).createInvitation(draft.body, crypto.randomUUID());
+    if (created.kind !== 'OK') throw new Error(`the invitation failed: ${created.kind}`);
+    const grantId = await accept(created.value.token);
+    if (grantId === '') throw new Error('the invitation was not accepted');
+    return grantId;
+  }
+
+  it('refuses without step-up', async () => {
+    // `14`: caregiver administration needs re-authentication, and a merely-valid session is
+    // explicitly not sufficient. 403 maps to STEP_UP_REQUIRED and to nothing else (trap 14).
+    const grantId = await inviteAndAccept();
+    const outcome = await owner.revokeGrant(grantId);
+    expect(outcome.kind).toBe('STEP_UP_REQUIRED');
+
+    // And it genuinely did not happen. A refusal that had already applied the change would be
+    // the worst of both.
+    const grants = await owner.listCaregiverGrants({ profileId: SEED.profileId });
+    if (grants.kind !== 'OK') return;
+    expect(grants.value.grants.some((g) => g.id === grantId && g.status === 'ACTIVE')).toBe(true);
+
+    await stepUp(SEED.userId).revokeGrant(grantId);
+  });
+
+  it('stops the caregiver seeing anything, on their very next request', async () => {
+    // Phase 8.1's exit criterion and `15` A2, through the client rather than through SQL. No
+    // sync, no token refresh and no cache purge happens between these two reads.
+    const grantId = await inviteAndAccept();
+
+    const before = await caregiver().listProfiles();
+    expect(before.kind).toBe('OK');
+    if (before.kind !== 'OK') return;
+    expect(before.value.profiles.some((p) => p.id === SEED.profileId)).toBe(true);
+
+    const revoked = await stepUp(SEED.userId).revokeGrant(grantId);
+    expect(revoked.kind).toBe('OK');
+    if (revoked.kind !== 'OK') return;
+    expect(revoked.value.alreadyRevoked).toBe(false);
+
+    const after = await caregiver().listProfiles();
+    if (after.kind !== 'OK') return;
+    expect(after.value.profiles.some((p) => p.id === SEED.profileId)).toBe(false);
+  });
+
+  it('takes the content off the screen rather than labelling it', async () => {
+    // The client half of A2, and the reason `refreshedResource` exists. The caregiver's screen
+    // had a medicine list; after revocation the same call must leave nothing on it.
+    const grantId = await inviteAndAccept();
+    const isEmpty = (value: { readonly items: readonly unknown[] }) => value.items.length === 0;
+
+    const loaded = await caregiver().listItems({ profileId: SEED.profileId });
+    const displayed = refreshedResource(loaded, null, { isEmpty });
+    expect(displayed.value?.items.length ?? 0).toBeGreaterThan(0);
+
+    await stepUp(SEED.userId).revokeGrant(grantId);
+
+    const refreshed = await caregiver().listItems({ profileId: SEED.profileId });
+    const after = refreshedResource(refreshed, displayed.value, { isEmpty });
+    expect(after.value).toBeNull();
+    expect(after.state).not.toBe('STALE');
+  });
+
+  it('clears a profile-scoped screen too, where the answer is a 404 rather than an empty list', async () => {
+    // Which shape a screen meets is a routing detail, and both have to clear it. The shelf is
+    // filtered by row-level security and comes back empty; the notification settings route
+    // refuses outright and comes back as absence (DEC-039). A rule that only handled the first
+    // would leave the caregiver's settings screen showing the profile's dials.
+    const grantId = await inviteAndAccept(['VIEW_SHELF', 'VIEW_SAFETY']);
+
+    const loaded = await caregiver().notificationSettings(SEED.profileId);
+    expect(loaded.kind).toBe('OK');
+    if (loaded.kind !== 'OK') return;
+
+    await stepUp(SEED.userId).revokeGrant(grantId);
+
+    const refreshed = await caregiver().notificationSettings(SEED.profileId);
+    expect(refreshed.kind).toBe('UNAVAILABLE');
+    expect(refreshedResource(refreshed, loaded.value).value).toBeNull();
+    expect(refreshedResource(refreshed, loaded.value).state).not.toBe('STALE');
+  });
+
+  it('reports a repeat as done rather than as a failure', async () => {
+    // Someone removing another person's access who is answered with an error has been given a
+    // reason to doubt whether it worked. The second call says there was nothing left to do.
+    const grantId = await inviteAndAccept();
+    const first = await stepUp(SEED.userId).revokeGrant(grantId);
+    const second = await stepUp(SEED.userId).revokeGrant(grantId);
+
+    expect(first.kind).toBe('OK');
+    expect(second.kind).toBe('OK');
+    if (first.kind !== 'OK' || second.kind !== 'OK') return;
+    expect(first.value.alreadyRevoked).toBe(false);
+    expect(second.value.alreadyRevoked).toBe(true);
+  });
+
+  it('is not an existence oracle for a grant somebody else holds', async () => {
+    // Trap 14 and DEC-039. A stranger gets the same answer for a real grant as for an invented
+    // one, and the client has no outcome meaning "you are not allowed".
+    const grantId = await inviteAndAccept();
+    const real = await stepUp(STRANGER).revokeGrant(grantId);
+    const invented = await stepUp(STRANGER).revokeGrant('00000000-0000-4000-8000-0000000000ff');
+    expect(real.kind).toBe('UNAVAILABLE');
+    expect(invented.kind).toBe(real.kind);
+
+    // And it did not happen.
+    const grants = await owner.listCaregiverGrants({ profileId: SEED.profileId });
+    if (grants.kind !== 'OK') return;
+    expect(grants.value.grants.some((g) => g.id === grantId && g.status === 'ACTIVE')).toBe(true);
+    await stepUp(SEED.userId).revokeGrant(grantId);
+  });
+
+  it('lets a caregiver renounce their own access without administering anything', async () => {
+    // Access someone no longer wants is retained access, which is the A2 failure in a slower
+    // form. This grant carries no MANAGE_CAREGIVERS and the caregiver still removes it.
+    const grantId = await inviteAndAccept(['VIEW_SHELF']);
+
+    const own = await caregiver().listCaregiverGrants({ profileId: SEED.profileId });
+    expect(own.kind).toBe('OK');
+    if (own.kind !== 'OK') return;
+
+    // The server says whose grant it is, so the confirmation does not have to work it out from
+    // an identity read back off the session (DEC-047's reasoning, applied to a grant).
+    expect(own.value.grants.find((g) => g.id === grantId)?.isSelf).toBe(true);
+
+    const row = accessList(own.value.grants, []).find((candidate) => candidate.id === grantId);
+    expect(row).toBeDefined();
+    if (row === undefined) return;
+    const draft = buildRevocation(row);
+    expect(draft.target?.isSelf).toBe(true);
+    expect(draft.target?.subject).toBe('GRANT');
+
+    expect((await stepUp(CAREGIVER).revokeGrant(grantId)).kind).toBe('OK');
+
+    const after = await caregiver().listProfiles();
+    if (after.kind !== 'OK') return;
+    expect(after.value.profiles.some((p) => p.id === SEED.profileId)).toBe(false);
+  });
+
+  it('tells the owner a grant is not theirs, on the same list', async () => {
+    // The other half of `isSelf`. An administering caregiver sees both kinds of row at once, and
+    // "they will stop seeing this profile" is the wrong sentence for one of them.
+    const grantId = await inviteAndAccept(['VIEW_SHELF']);
+    const grants = await owner.listCaregiverGrants({ profileId: SEED.profileId });
+    if (grants.kind !== 'OK') return;
+    expect(grants.value.grants.find((g) => g.id === grantId)?.isSelf).toBe(false);
+    await stepUp(SEED.userId).revokeGrant(grantId);
+  });
+
+  it('withdraws an invitation through its own route, and the token stops working', async () => {
+    // Two records and two routes. Withdrawing the invitation is the only way to stop a live
+    // token being redeemed: it was stored as a hash and cannot be reissued (DEC-018), so it
+    // cannot be cancelled by replacing it either.
+    const draft = buildInvitation({
+      profileId: SEED.profileId,
+      authority: { kind: 'OWNER' },
+      selected: ['VIEW_SHELF'],
+      invitedEmail: 'caregiver@example.test',
+    });
+    if (!draft.ok || draft.body === null) return;
+    const created = await stepUp(SEED.userId).createInvitation(draft.body, crypto.randomUUID());
+    if (created.kind !== 'OK') return;
+
+    const invitations = await owner.listInvitations({ profileId: SEED.profileId });
+    if (invitations.kind !== 'OK') return;
+    const row = accessList([], invitations.value.invitations).find(
+      (candidate) => candidate.id === created.value.invitationId,
+    );
+    // The row the screen would offer, tagged with the record it came from. Without the tag the
+    // remove control would reach the grant route, which answers 404 - and the client renders a
+    // 404 as absence, so the bug would have looked like the row quietly vanishing.
+    expect(row?.subject).toBe('INVITATION');
+    expect(row?.state).toBe('INVITED');
+
+    const withdrawn = await stepUp(SEED.userId).revokeInvitation(created.value.invitationId);
+    expect(withdrawn.kind).toBe('OK');
+
+    // The live credential is dead. This is the assertion the whole flow exists for.
+    expect(await accept(created.value.token)).toBe('');
+
+    const after = await owner.listInvitations({ profileId: SEED.profileId });
+    if (after.kind !== 'OK') return;
+    expect(after.value.invitations.some((i) => i.id === created.value.invitationId)).toBe(false);
+  });
+
+  it('sends the owner to the grant when the invitation has already been accepted', async () => {
+    // Closing the invitation here would be theatre: the access lives in the grant, and a screen
+    // reporting success would say the access was removed while leaving it in place.
+    const draft = buildInvitation({
+      profileId: SEED.profileId,
+      authority: { kind: 'OWNER' },
+      selected: ['VIEW_SHELF'],
+      invitedEmail: 'caregiver@example.test',
+    });
+    if (!draft.ok || draft.body === null) return;
+    const created = await stepUp(SEED.userId).createInvitation(draft.body, crypto.randomUUID());
+    if (created.kind !== 'OK') return;
+    const grantId = await accept(created.value.token);
+    expect(grantId).not.toBe('');
+
+    const outcome = await stepUp(SEED.userId).revokeInvitation(created.value.invitationId);
+    expect(outcome.kind).toBe('REFUSED');
+    if (outcome.kind !== 'REFUSED') return;
+    expect(outcome.code).toBe(ALREADY_ACCEPTED_CODE);
+
+    // What the screen actually shows. The wire message for this code is shared with the
+    // acceptance path and so says only "this invitation has already been used" - true, and a
+    // dead end for an owner who is looking at the list and wants the access gone.
+    expect(revocationMessage(outcome)).toBe(REVOCATION_COPY.alreadyAccepted);
+    expect(revocationMessage(outcome)).toMatch(/instead/i);
+
+    await stepUp(SEED.userId).revokeGrant(grantId);
+  });
+
+  it('records who removed what, in words the owner can read', async () => {
+    // `03` group H requires audit event visibility, and `06` Journey 6 step 5 requires the owner
+    // to see that access changed. After a removal the list is one row shorter and nothing else
+    // on the screen says it happened.
+    const grantId = await inviteAndAccept(['VIEW_SHELF']);
+    await stepUp(SEED.userId).revokeGrant(grantId);
+
+    const audit = await owner.caregiverAudit(SEED.profileId);
+    expect(audit.kind).toBe('OK');
+    if (audit.kind !== 'OK') return;
+
+    const removal = audit.value.events.find(
+      (event) => event.action === 'caregiver.grant.revoked' && event.targetId === grantId,
+    );
+    expect(removal).toBeDefined();
+    expect(removal?.actorUserId).toBe(SEED.userId);
+    // `20`: the detail is scalars, and it records who acted rather than what they could see.
+    expect(removal?.detail['reason_code']).toBe('administrator');
+    // And *what* was removed. Found by running the flow: the removal event recorded an empty
+    // capability list, which on the history screen reads as "a grant with no capabilities was
+    // removed" rather than as "nobody wrote them down" - and it is the one entry an owner has
+    // nothing else to check against.
+    expect(removal?.detail['capability_count']).toBe(1);
+    expect(removal?.detail['capabilities']).toBe('VIEW_SHELF');
+
+    const history = accessHistory(audit.value.events);
+    expect(history.lines.some((line) => line.description === 'Access was removed.')).toBe(true);
+    expect(history.unreadableCount).toBe(0);
+    // No health content reaches this screen. `20` forbids the log becoming a copy of it.
+    expect(JSON.stringify(history)).not.toContain('Synthetic');
+  });
+
+  it('records a self-removal as a different reason from an administrator one', async () => {
+    // Not decoration: `15` treats a caregiver renouncing access and an owner withdrawing it as
+    // different events, and an audit trail that could not tell them apart would answer "who
+    // removed this" with a guess.
+    const grantId = await inviteAndAccept(['VIEW_SHELF']);
+    await stepUp(CAREGIVER).revokeGrant(grantId);
+
+    const audit = await owner.caregiverAudit(SEED.profileId);
+    if (audit.kind !== 'OK') return;
+    const removal = audit.value.events.find(
+      (event) => event.action === 'caregiver.grant.revoked' && event.targetId === grantId,
+    );
+    expect(removal?.detail['reason_code']).toBe('self');
+    expect(removal?.actorUserId).toBe(CAREGIVER);
+  });
+
+  it('shows a stranger no access history at all', async () => {
+    // Scoped by the same authority as the rest of the surface, and a refusal arrives as absence
+    // rather than as a statement that the profile exists.
+    expect((await stranger.caregiverAudit(SEED.profileId)).kind).toBe('UNAVAILABLE');
   });
 });
