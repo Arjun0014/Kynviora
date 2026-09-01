@@ -25,6 +25,7 @@
     "verify": "npm run typecheck && npm run typecheck:mobile && npm run lint && npm run format:check && npm test",
     "typecheck:mobile": "npm --prefix apps/mobile run typecheck",
     "dev": "npm --prefix services/api run dev",
+    "dev:console": "npm --prefix services/staff-web run dev",
     "migrate": "npm --prefix db run migrate"
   },
   "devDependencies": {

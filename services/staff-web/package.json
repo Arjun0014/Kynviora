@@ -1,0 +1,15 @@
+{
+  "name": "@kynviora/staff-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/main.ts"
+  },
+  "dependencies": {
+    "@kynviora/domain": "*",
+    "@kynviora/staff-console": "*",
+    "fastify": "^5.12.0"
+  }
+}

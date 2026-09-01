@@ -38,10 +38,14 @@
       "@kynviora/safety/*": ["packages/safety/src/*"],
       "@kynviora/ingestion": ["packages/ingestion/src/index.ts"],
       "@kynviora/ingestion/*": ["packages/ingestion/src/*"],
+      "@kynviora/staff-console": ["packages/staff-console/src/index.ts"],
+      "@kynviora/staff-console/*": ["packages/staff-console/src/*"],
       "@kynviora/presentation": ["packages/presentation/src/index.ts"],
       "@kynviora/presentation/*": ["packages/presentation/src/*"],
       "@kynviora/fixtures": ["packages/fixtures/src/index.ts"],
       "@kynviora/fixtures/*": ["packages/fixtures/src/*"],
+      "@kynviora/staff-web": ["services/staff-web/src/index.ts"],
+      "@kynviora/staff-web/*": ["services/staff-web/src/*"],
       "@kynviora/db": ["db/src/index.ts"],
       "@kynviora/db/*": ["db/src/*"]
     }
