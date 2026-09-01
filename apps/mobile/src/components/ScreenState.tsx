@@ -32,7 +32,7 @@ export interface ScreenStateProps {
    * Used for a server-supplied refusal message, which `errors.ts` has already made client-safe.
    * Never used to invent a reason the server withheld.
    */
-  readonly message?: string | null;
+  readonly message?: string | null | undefined;
   readonly onRetry?: () => void;
 }
 

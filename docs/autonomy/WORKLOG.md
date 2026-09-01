@@ -1015,3 +1015,72 @@ contracts package (configuration, transport, outcomes, resources, client surface
 `DEV-007` is not closed. Five destinations read real data; two things write. The invitation,
 revocation, task-completion, Visit Pack and reconciliation flows each need a screen of their own,
 and `DEV-022` records why each is a screen rather than a button.
+
+### The review task editor - the first write flow
+
+The first of the five `DEV-007` write flows, and the one worth doing first: it closes Phase 8.3's
+loop. A review task is completed by writing to the record it is about, and until now nothing in the
+app could do that - the Today screen listed tasks and its start handler was a comment.
+
+**Where the form lives.** `COMPLETABLE_FIELDS` in the domain already says which fields each kind
+may write. What it does not have is words: a label, a reason for asking, and what kind of control
+to draw. Those went in `@kynviora/presentation` keyed by the same column names, with a test that
+the two key sets are equal in both directions - a field added to a kind in the domain would
+otherwise become a task nobody can complete, and one removed a control that always errors, both
+silently (DEC-043). The payload builder went in `@kynviora/contracts`, and the same function that
+builds it decides whether the button is enabled, so the control cannot say yes to something the
+builder would refuse.
+
+**Two bugs, both found by running the completion end to end.**
+
+The first: the editor offered `batch_id` as a text box labelled "Batch or lot number". It is a
+`uuid` referencing `batch_or_lot`, the API casts it with `::uuid`, and a printed lot code is not
+one. The fix is not a better input - it is that finding or creating a batch record is guided
+capture's job, with the provenance and corroboration that come with it. Accepting a typed string
+would put a catalog record into the database with none of that on the way to closing a maintenance
+task. So `REFERENCE` is now an input kind the editor does not render, and the two kinds whose
+primary field is one show what they need instead of a form (DEC-044, `DEV-024`). Completing them by
+writing only the paired `*_verification` field was the tempting alternative and is worse: it closes
+a task called _add the batch number_ without one.
+
+The second is the more serious. Completing a task succeeded, and the **next read of the shelf
+returned 500**. The driver returns `timestamptz` as a `Date`; `13` validates the response before
+serialisation; `shelfItemSchema` requires a string. Every fixture in the repository had
+`last_reviewed_at` null, so nothing had ever read a shelf after a write - and Fastify would have
+serialised the `Date` to the same ISO string, so it looks like a no-op until you notice the
+validation runs first. Any user who had ever reviewed an item would have had a broken Shelf screen.
+Fixed with `isoOrNull`, and the row type now says `Date | string | null` rather than claiming a
+string it does not get, because claiming it is what hid this.
+
+**A seed change that is a dogfooding fix.** The derivation only produced `BATCH_MISSING` against
+the seed, because every seeded item was created moments earlier and none had been reviewed - so a
+developer opening Today saw exclusively work the app cannot yet do, and would reasonably conclude
+the screen was broken. One item is now seeded two hundred days old, past
+`ITEM_REVIEW_INTERVAL_DAYS`, which is ordinary synthetic household data and makes the completion
+path reachable by hand. The seed now takes the clock rather than leaving `created_at` to
+`DEFAULT now()`, which is what DEC-024 asks for anyway.
+
+**What is deliberately not there.** No "Done" button and no way to reach one. No `NOT_APPLICABLE`
+outcome, because what it should record differs per kind and most kinds have no field that expresses
+it - inventing one would be inventing a medical-record semantic (`DEV-023`). The safety-receipt
+resolution offers it as a value, which is where the vocabulary already had the word.
+
+### Things worth recording
+
+- The editor's `required` flag started out meaning "this field must be filled in" and was wrong:
+  several kinds offer alternatives rather than a set, and correcting any one of the four label
+  fields completes an unresolved-extraction task. It refused completions the server would have
+  accepted. Renamed to `primary`, meaning the field the form leads with and names when nothing has
+  been entered at all.
+- The safety resolution choices are asserted against the `receipt_resolution_valid` constraint, and
+  a separate test asserts none of them means stopping a medicine. `09` forbids Kynviora from
+  recording that it said so, and the absence of the word is what enforces it.
+
+### State
+
+2062 tests passing across 61 files, up from 2028 across 59. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 34 new tests: 15 for the form definitions, 16 for
+the payload builder, and 3 end to end against a real server process.
+
+Four `DEV-007` write flows remain: the caregiver invitation, the step-up prompt, the Visit Pack
+selection, and the reconciliation difference resolution.

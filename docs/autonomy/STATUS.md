@@ -102,14 +102,16 @@ documented configuration requirements.
 the shared client, and the only writes are the notification preference and a dose event. Five
 flows remain, and each needs a screen rather than a button (`DEV-022`):
 
-1. The **review task editor**, per record kind. Best first: it closes Phase 8.3's loop, and
-   completing a task writes to the authoritative record rather than ticking a box (DEC-027).
-2. The **caregiver invitation** screen. The token is shown once and is unrecoverable afterwards
+1. The **caregiver invitation** screen. The token is shown once and is unrecoverable afterwards
    (DEC-018), and it must never reach a URL, a log or an exception (trap 11).
-3. The **step-up prompt**, which revocation and export both need (`14`).
-4. The **Visit Pack** selection and review flow, which quotes a digest of exactly what the user
+2. The **step-up prompt**, which revocation and export both need (`14`).
+3. The **Visit Pack** selection and review flow, which quotes a digest of exactly what the user
    reviewed (DEC-023).
-5. The **reconciliation** difference resolution, where the side is stated by a person (DEC-030).
+4. The **reconciliation** difference resolution, where the side is stated by a person (DEC-030).
+
+The **review task editor** is done: five of the seven task kinds complete from the inbox and write
+to the record. `BATCH_MISSING` and `FORMULA_NEEDS_CONFIRMATION` wait on guided capture, because
+both write a `uuid` naming a catalog record that only capture can create (`DEV-024`).
 
 Alternatively **Phase 4.3** (dose events and adherence history) or **Phase 7.1** (assessment states
 and inbox), both fully implementable with no external dependency.
@@ -229,6 +231,14 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
   for a failed outcome, so a banner over discarded data is not expressible.
 - **DEC-042** - `KYNVIORA_LOCAL_DB_DIR` is resolved against the workspace root, not the working
   directory, because `npm run dev` runs from `services/api` and `npm run migrate` runs from `db`.
+
+- **DEC-043** - the editor's field table is keyed by column name and checked against
+  `COMPLETABLE_FIELDS` in both directions. Adding a completable field is a two-file change and the
+  suite says so.
+- **DEC-044** - `batch_id` and `formulation_id` are `uuid` references to catalog records, not
+  strings off a pack. They are `REFERENCE` inputs the editor does not render, and their task kinds
+  report `completableHere: false` and offer **no** fields - not even the paired `*_verification`,
+  which would close "add the batch number" without one.
 
 ## Traps to avoid on resume
 
@@ -354,3 +364,16 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 42. Do not read `process.env` at module scope in the Expo app. `EXPO_PUBLIC_*` values are inlined
     at build time and there is no `process.env` on a device; `ApiProvider` reads them once and
     hands the result down, which is also what makes the resolution testable.
+43. Do not offer `batch_id` or `formulation_id` as a text field. They are `uuid` foreign keys, the
+    API casts them, and a typed lot code fails - the control would error for every real user.
+    Creating the record from a typed string is worse: it puts a catalog row in with no provenance,
+    no corroboration and no quality gate (DEC-044).
+44. Do not let `BATCH_MISSING` be completed by writing `batch_verification` alone. It closes a task
+    called "add the batch number" without one, which is trap 16 arriving by a different route.
+45. A response schema validates **before** Fastify serialises, so a `Date` from the driver fails a
+    `z.string()` even though the wire format would have been identical. Type a timestamp row as
+    `Date | string | null` and pass it through `isoOrNull`. This shipped once as a 500 on the shelf
+    for any item that had ever been reviewed, hidden because every fixture had the column null.
+46. Do not "simplify" the seed by dropping the two-hundred-day-old item. Without it every derived
+    review task is a `BATCH_MISSING`, which needs guided capture - a developer opening Today would
+    see only work the app cannot do and would reasonably think the screen was broken.

@@ -461,3 +461,50 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   handlers now carry comments saying what each is waiting for.
 - **Required future work**: an invitation screen (token shown once, never logged), a step-up
   prompt, a per-record-kind task editor, and the Visit Pack selection and review flow.
+
+## DEV-023 - The task editor offers only the RESOLVED outcome
+
+- **Affected specification**: `04` Phase 8.3 (`REVIEW_OUTCOMES` contains `RESOLVED` and
+  `NOT_APPLICABLE`, and both write).
+- **Expected behaviour**: a user can close a review task either by fixing the record or by saying
+  the task does not apply to it.
+- **Implemented behaviour**: the editor sends `RESOLVED` always. The API and the domain accept
+  `NOT_APPLICABLE` and are unchanged.
+- **Reason**: "not applicable" still has to write something - deciding a task does not apply is
+  itself information about the record - and _what_ it writes differs per kind. For most kinds no
+  existing field expresses it: there is no `batch_verification` member meaning "checked, this pack
+  has no batch number printed on it". Adding one would be inventing a medical-record semantic,
+  which is a product decision rather than an implementation detail. The one kind whose vocabulary
+  already has the word offers it where it belongs: `NOT_APPLICABLE` is a value on a safety
+  receipt's `resolution` field, and the editor offers it there.
+- **Temporary or permanent**: temporary, and blocked on a product decision rather than on code.
+- **Risk**: low. A user who genuinely cannot act on a task leaves it open, and the inbox carries no
+  urgency, no count and no badge, so an open task exerts no pressure. The failure mode of the
+  alternative is worse: a "not applicable" button that writes an invented value would put a
+  statement about someone's medicine into the record that nobody chose.
+- **Required future work**: decide, per task kind, what "this does not apply" records. Then add the
+  outcome to the editor. `REVIEW_OUTCOMES` and the API need no change.
+
+## DEV-024 - Two task kinds cannot be completed from the inbox
+
+- **Affected specification**: `04` Phase 8.3 (a review task is completed by updating the relevant
+  authoritative record), Phase 3.2 (guided package capture).
+- **Expected behaviour**: every derived review task can be completed from the inbox.
+- **Implemented behaviour**: `BATCH_MISSING` and `FORMULA_NEEDS_CONFIRMATION` render what they need
+  and no form. The other five kinds complete normally. `taskForm` reports `completableHere: false`
+  for them and `buildCompletion` refuses them before reading any value.
+- **Reason**: both write a `uuid` naming another record - `batch_or_lot` and
+  `marketed_formulation`. Finding or creating one is guided capture's job, with its provenance,
+  corroboration and quality gate. Accepting a typed lot code and creating a batch row from it would
+  put a catalog record into the database with none of those, on the way to closing a maintenance
+  task. Completing them by writing only the paired `*_verification` field would be worse still: it
+  closes a task called "add the batch number" without a batch number, which is a mark-done path
+  under another name (trap 16).
+- **Temporary or permanent**: temporary. It needs the capture flow, not a decision.
+- **Risk**: two of the seven kinds accumulate in the inbox. Visible rather than hidden - the screen
+  says what they need - and the inbox is deliberately unranked and uncounted, so an accumulating
+  task does not become pressure. It was caught by running the completion end to end; a text box
+  there would have failed for every real user with a server error.
+- **Required future work**: Phase 3.2 capture, then a picker that resolves a scanned or typed code
+  to a `batch_or_lot` record. At that point set `input` back from `REFERENCE` for both fields and
+  the form becomes completable with no other change.

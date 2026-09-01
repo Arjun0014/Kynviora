@@ -42,6 +42,17 @@ export const SEED = Object.freeze({
   profileId: '00000000-0000-4000-8000-00000000d020',
 });
 
+/**
+ * How long ago the oldest seeded item was added.
+ *
+ * Past `ITEM_REVIEW_INTERVAL_DAYS` (180) on purpose. Without it every derived review task is a
+ * `BATCH_MISSING`, which needs guided capture and so cannot be completed from the inbox - a
+ * developer opening Today would see only work the app cannot yet do, and would reasonably
+ * conclude the screen was broken. One item added two hundred days ago is ordinary synthetic
+ * household data and it makes the completion path reachable by hand.
+ */
+const AGED_ITEM_DAYS = 200;
+
 const ITEMS = [
   {
     id: '00000000-0000-4000-8000-00000000d030',
@@ -50,6 +61,7 @@ const ITEMS = [
     strength: '500 mg',
     form: 'tablet',
     directions: 'One tablet twice a day',
+    ageDays: 0,
   },
   {
     id: '00000000-0000-4000-8000-00000000d031',
@@ -58,6 +70,7 @@ const ITEMS = [
     strength: '20 mg',
     form: 'capsule',
     directions: 'One capsule each morning',
+    ageDays: 0,
   },
   {
     id: '00000000-0000-4000-8000-00000000d032',
@@ -66,6 +79,7 @@ const ITEMS = [
     strength: null,
     form: null,
     directions: null,
+    ageDays: AGED_ITEM_DAYS,
   },
 ] as const;
 
@@ -82,8 +96,12 @@ export interface SeedResult {
  * Idempotent by the seeded user's ID, so a restart does not duplicate anything and does not fail.
  * Must be called on a **service-role** connection: it writes across households, which is precisely
  * what row-level security exists to stop an ordinary connection doing.
+ *
+ * `now` is passed in rather than left to `DEFAULT now()`, because one item is deliberately older
+ * than the review interval and its age has to be relative to the same clock everything else uses
+ * (DEC-024).
  */
-export async function seedDevelopmentData(db: SeedConnection): Promise<SeedResult> {
+export async function seedDevelopmentData(db: SeedConnection, now: string): Promise<SeedResult> {
   const existing = await db.query<{ id: string }>('SELECT id FROM app_user WHERE id = $1', [
     SEED.userId,
   ]);
@@ -118,13 +136,24 @@ export async function seedDevelopmentData(db: SeedConnection): Promise<SeedResul
     [SEED.profileId, SEED.householdId, SEED.userId],
   );
 
+  const nowMs = Date.parse(now);
   for (const item of ITEMS) {
+    const createdAt = new Date(nowMs - item.ageDays * 24 * 60 * 60 * 1000).toISOString();
     await db.query(
       `INSERT INTO owned_item
          (id, profile_id, item_kind, display_name, strength_text, dosage_form, directions_text,
-          lifecycle_state)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE')`,
-      [item.id, SEED.profileId, item.kind, item.name, item.strength, item.form, item.directions],
+          lifecycle_state, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE', $8)`,
+      [
+        item.id,
+        SEED.profileId,
+        item.kind,
+        item.name,
+        item.strength,
+        item.form,
+        item.directions,
+        createdAt,
+      ],
     );
   }
 

@@ -11,3 +11,4 @@ export * from './http.js';
 export * from './resource.js';
 export * from './client.js';
 export * from './views.js';
+export * from './taskCompletion.js';

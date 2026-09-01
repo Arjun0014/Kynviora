@@ -3,7 +3,7 @@
  *
  * Spec references: `06` (Today is a primary destination), `04` Phase 8.3 (the Review Inbox),
  * `03` group G (the alert experience this must not resemble), `18` (calm, no counts of anything
- * urgent).
+ * urgent), DEC-027.
  *
  * Today shows the household's review work: the things that would make what Kynviora can say a
  * little more exact. It deliberately does **not** carry a count badge, a ranking or a "needs
@@ -11,24 +11,44 @@
  * and no urgency in the presentation tones, and a badge on this screen would reintroduce one at
  * the only layer where nobody would notice (trap 17).
  *
+ * Starting a task opens the editor for that task's record kind, because completing one writes to
+ * the authoritative record. There is no mark-done path here and there is not one to add: the
+ * server refuses a completion with an empty change set, and a tick box on this screen would
+ * promise something it would then have to take back.
+ *
  * Dose reminders are not here because Phase 4.3 has not been built and Phase 4.2 needs a device
  * (`BLK-002`). An empty schedule strip would be a promise the app cannot keep.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Text, StyleSheet } from 'react-native';
-import { LIGHT_THEME, FONT_SIZE, LINE_HEIGHT_MULTIPLIER } from '@kynviora/presentation';
-import { reviewInboxView } from '@kynviora/contracts';
+import {
+  LIGHT_THEME,
+  FONT_SIZE,
+  LINE_HEIGHT_MULTIPLIER,
+  type ScreenState as ScreenStateKind,
+} from '@kynviora/presentation';
+import {
+  reviewInboxView,
+  screenStateForFailure,
+  type ReviewTaskCompletion,
+  type ReviewTaskView,
+} from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
 import { useProfiles } from '@/api/ProfileProvider';
 import { useResource } from '@/api/useResource';
 import { Screen } from '@/components/Screen';
 import { ResourceState } from '@/components/ScreenState';
 import { ReviewInbox } from '@/features/reviewInbox/ReviewInbox';
+import { ReviewTaskEditor } from '@/features/reviewInbox/ReviewTaskEditor';
 
 export default function TodayScreen() {
   const { client } = useApi();
   const { activeProfile, activeProfileId } = useProfiles();
+
+  const [editing, setEditing] = useState<ReviewTaskView | null>(null);
+  const [saving, setSaving] = useState<ScreenStateKind | null>(null);
+  const [savingMessage, setSavingMessage] = useState<string | null>(null);
 
   const load = useMemo(
     () =>
@@ -52,24 +72,84 @@ export default function TodayScreen() {
     reload();
   }, [reload]);
 
+  const onStartTask = useCallback(
+    (taskId: string) => {
+      setSaving(null);
+      setSavingMessage(null);
+      setEditing(inbox.tasks.find((task) => task.taskId === taskId) ?? null);
+    },
+    [inbox.tasks],
+  );
+
+  /**
+   * Send the completion, then reload from the server.
+   *
+   * Never applied optimistically. The record write happens first on the server and the task closes
+   * as a consequence (DEC-027), so a client that removed the row before hearing back would show a
+   * task as done that may not have been.
+   */
+  const onSubmit = useCallback(
+    (completion: ReviewTaskCompletion) => {
+      const task = editing;
+      if (client === null || task === null) return;
+
+      setSaving('LOADING');
+      setSavingMessage(null);
+
+      void client.completeReviewTask(task.taskId, completion).then(
+        (outcome) => {
+          if (outcome.kind === 'OK') {
+            setEditing(null);
+            setSaving(null);
+            reload();
+            return;
+          }
+          // The same mapping every read path uses, so a failed write reads the same as a failed
+          // read. The server's own words where it sent any; the state's copy otherwise - nothing
+          // is invented here, because `14` keeps the reason out of the authorization responses
+          // on purpose.
+          setSaving(screenStateForFailure(outcome));
+          setSavingMessage(outcome.kind === 'REFUSED' ? outcome.message : null);
+        },
+        () => {
+          setSaving('RECOVERABLE_ERROR');
+          setSavingMessage(null);
+        },
+      );
+    },
+    [client, editing, reload],
+  );
+
+  const onCancel = useCallback(() => {
+    setEditing(null);
+    setSaving(null);
+    setSavingMessage(null);
+  }, []);
+
   return (
     <Screen title="Today" onRefresh={onRetry} refreshing={refreshing}>
       {activeProfile === null ? null : (
         <Text style={styles.profile}>{activeProfile.displayName}</Text>
       )}
 
-      {resource.state === 'READY' || resource.state === 'EMPTY' ? (
+      {editing !== null ? (
+        <ReviewTaskEditor
+          kind={editing.kind}
+          subjectId={editing.subjectId}
+          subjectLabel={editing.subjectLabel}
+          // The server stamps the authoritative time; this is what the form records as the moment
+          // the user confirmed, and it comes from the last response rather than from the device.
+          now={resource.value?.serverTime ?? ''}
+          onSubmit={onSubmit}
+          onCancel={onCancel}
+          state={saving}
+          stateMessage={savingMessage}
+          onRetry={onCancel}
+        />
+      ) : resource.state === 'READY' || resource.state === 'EMPTY' ? (
         // The inbox renders its own empty state, which says something more useful than the
         // generic one: nothing needs attention *here*, which is not a statement about safety.
-        <ReviewInbox
-          state="READY"
-          tasks={inbox.tasks}
-          onStartTask={() => {
-            // Completing a task writes to the authoritative record (DEC-027). The editor for
-            // each record kind is the remaining work; there is deliberately no mark-done path
-            // to fall back on in the meantime.
-          }}
-        />
+        <ReviewInbox state="READY" tasks={inbox.tasks} onStartTask={onStartTask} />
       ) : (
         <ResourceState resource={resource} onRetry={onRetry} />
       )}

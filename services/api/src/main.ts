@@ -173,7 +173,7 @@ export async function start(
   // does not share its state, and the last process to exit overwrites the other. That failed
   // silently once, which is why it is no longer possible to do.
   if (config.seed) {
-    const result = await db.withService((conn) => seedDevelopmentData(conn));
+    const result = await db.withService((conn) => seedDevelopmentData(conn, now()));
     logger.info(result.seeded ? 'dev.seed.applied' : 'dev.seed.present', {
       items: result.itemCount,
     });

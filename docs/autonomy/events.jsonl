@@ -131,3 +131,11 @@
 {"ts": "2026-09-01T13:46:00Z", "type": "decision_recorded", "detail": "DEC-042 the local database directory is anchored at the workspace root"}
 {"ts": "2026-09-01T13:47:00Z", "type": "deviation_recorded", "detail": "DEV-021 screen behaviour is tested in a package not in the app; DEV-022 the screens read and write only two things"}
 {"ts": "2026-09-01T13:50:00Z", "type": "milestone", "detail": "five primary destinations read real data end to end; 2028 tests across 59 files, verify exit 0"}
+{"ts": "2026-09-01T13:55:00Z", "type": "work_started", "detail": "DEV-007 write flow 1: the review task editor, per record kind"}
+{"ts": "2026-09-01T13:57:00Z", "type": "code_added", "detail": "per-kind form definitions in presentation, payload builder in contracts, both checked against COMPLETABLE_FIELDS"}
+{"ts": "2026-09-01T13:59:00Z", "type": "bug_found", "detail": "batch_id and formulation_id are uuid references to catalog records, offered as text boxes that always failed the ::uuid cast"}
+{"ts": "2026-09-01T14:00:00Z", "type": "decision_recorded", "detail": "DEC-043 the field table is checked against the domain both ways; DEC-044 a field naming another record is not something to type"}
+{"ts": "2026-09-01T14:04:00Z", "type": "bug_found", "detail": "GET /v1/items returned 500 for any item with a non-null last_reviewed_at: the driver returns a Date and 13 validates the response before serialisation"}
+{"ts": "2026-09-01T14:05:00Z", "type": "code_changed", "detail": "seed ages one item past ITEM_REVIEW_INTERVAL_DAYS so at least one derived task is completable by hand; seed now takes the clock"}
+{"ts": "2026-09-01T14:06:00Z", "type": "deviation_recorded", "detail": "DEV-023 the editor offers only RESOLVED; DEV-024 two task kinds await guided capture"}
+{"ts": "2026-09-01T14:07:00Z", "type": "milestone", "detail": "completing a review task writes to the record end to end; 2062 tests across 61 files, verify exit 0"}

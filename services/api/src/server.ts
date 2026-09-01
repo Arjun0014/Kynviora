@@ -41,6 +41,23 @@ import { registerReconciliationRoutes } from './reconciliation.js';
 import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
 import { registerShadowModeRoutes } from './shadowMode.js';
 
+/**
+ * Normalise a timestamp column for the wire.
+ *
+ * The driver returns `timestamptz` as a `Date`, and the response schemas require a string because
+ * that is what the contract says. Fastify would serialise a `Date` to the same ISO string, so this
+ * looks redundant - it is not: `13` validates the response **before** serialisation, so a `Date`
+ * reaching a `z.string()` fails contract validation and the route answers 500.
+ *
+ * It stayed hidden because every fixture had `last_reviewed_at` null. It surfaced the first time
+ * an end-to-end test completed a review task and then re-read the shelf, which is the only order
+ * of operations that produces a non-null value.
+ */
+function isoOrNull(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  return value instanceof Date ? value.toISOString() : value;
+}
+
 /** Maximum request body. `13` requires body-size limits; 1MB is ample for JSON payloads. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
 
@@ -284,8 +301,10 @@ export function createServer(options: ServerOptions): FastifyInstance {
         identity_verification: string;
         formulation_verification: string;
         batch_verification: string;
-        last_reviewed_at: string | null;
-        last_safety_checked_at: string | null;
+        // Typed as they arrive from the driver, not as the contract states them. Claiming a
+        // `string` here is what hid the bug `isoOrNull` exists to fix.
+        last_reviewed_at: Date | string | null;
+        last_safety_checked_at: Date | string | null;
       }>(
         `SELECT id, profile_id, item_kind, display_name, brand, lifecycle_state,
                 identity_verification, formulation_verification, batch_verification,
@@ -311,8 +330,8 @@ export function createServer(options: ServerOptions): FastifyInstance {
       identityVerification: row.identity_verification,
       formulationVerification: row.formulation_verification,
       batchVerification: row.batch_verification,
-      lastReviewedAt: row.last_reviewed_at,
-      lastSafetyCheckedAt: row.last_safety_checked_at,
+      lastReviewedAt: isoOrNull(row.last_reviewed_at),
+      lastSafetyCheckedAt: isoOrNull(row.last_safety_checked_at),
     }));
 
     // `13`: validate the response too, so a schema drift fails here and not in a client.

@@ -224,6 +224,14 @@ export function asReviewTaskKind(raw: string): ReviewTaskKind | null {
 export interface ReviewTaskView {
   readonly taskId: string;
   readonly kind: ReviewTaskKind;
+  /**
+   * The record this task is about.
+   *
+   * Carried because completing a task writes to that record and the change has to name it
+   * (DEC-027). `evaluateCompletion` refuses a change targeting anything else, so a view without
+   * this could show a task nobody can complete.
+   */
+  readonly subjectId: string;
   readonly subjectLabel: string | null;
 }
 
@@ -248,7 +256,12 @@ export function reviewInboxView(tasks: readonly ReviewTask[]): ReviewInboxView {
       unrecognised += 1;
       continue;
     }
-    views.push({ taskId: task.taskId, kind, subjectLabel: task.subjectLabel });
+    views.push({
+      taskId: task.taskId,
+      kind,
+      subjectId: task.subjectId,
+      subjectLabel: task.subjectLabel,
+    });
   }
 
   return { tasks: views, unrecognisedCount: unrecognised };

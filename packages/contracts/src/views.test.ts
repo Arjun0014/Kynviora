@@ -180,6 +180,9 @@ describe('an unrecognised review task kind is dropped, not guessed', () => {
     expect(view.tasks).toHaveLength(1);
     expect(view.tasks[0]?.kind).toBe('BATCH_MISSING');
     expect(view.unrecognisedCount).toBe(1);
+    // The record the completion will write to. `evaluateCompletion` refuses a change targeting
+    // anything else, so a view without it would show a task nobody can complete (DEC-027).
+    expect(view.tasks[0]?.subjectId).toBe('i1');
   });
 
   it('reports zero dropped rows when everything was understood', () => {

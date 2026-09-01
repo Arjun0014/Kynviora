@@ -10,6 +10,7 @@ import {
   createClient,
   developmentSession,
   resourceFor,
+  buildCompletion,
   reviewInboxView,
   safetyView,
   shelfView,
@@ -30,6 +31,9 @@ import { SCREEN_STATE_PRESENTATION } from '@kynviora/presentation';
  */
 
 const STRANGER = '00000000-0000-4000-8000-0000000009ff';
+
+/** Only used where the builder is expected to refuse before the value could matter. */
+const NOW_UNUSED = '2026-09-01T00:00:00.000Z';
 
 let server: StartedServer;
 let dataDir: string;
@@ -264,5 +268,90 @@ describe('what the transport refuses to do against a real server', () => {
     expect(resource.state).toBe('OFFLINE');
     // And it does not claim to be showing something saved, because there is nothing saved.
     expect(SCREEN_STATE_PRESENTATION.OFFLINE.showsContent).toBe(false);
+  });
+});
+
+describe('completing a review task writes to the record, end to end', () => {
+  /**
+   * Phase 8.3's exit criterion, exercised through the code the app actually runs.
+   *
+   * The interesting part is not that the request succeeds - `reviewInbox.test.ts` proves that.
+   * It is that the form the screen renders produces a payload the server accepts, and that the
+   * record it names actually changes. A form built from the wrong field list, or naming the
+   * wrong record, would fail here and nowhere else.
+   */
+  it('turns a filled-in form into a change the server applies', async () => {
+    const tasks = await owner.reviewTasks(SEED.profileId);
+    expect(tasks.kind).toBe('OK');
+    if (tasks.kind !== 'OK') return;
+
+    const view = reviewInboxView(tasks.value.tasks);
+    // The seed's items have never been reviewed, so the derivation produces these.
+    const task = view.tasks.find((entry) => entry.kind === 'ITEM_NOT_REVIEWED_RECENTLY');
+    expect(task).toBeDefined();
+    if (task === undefined) return;
+
+    const built = buildCompletion(
+      { kind: task.kind, subjectId: task.subjectId },
+      { last_reviewed_at: '' },
+      tasks.value.serverTime,
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+
+    const completed = await owner.completeReviewTask(task.taskId, built.completion);
+    expect(completed.kind).toBe('OK');
+
+    // The record actually changed. This is the exit criterion: the task closed as a consequence
+    // of a write, not because anything marked it done (DEC-027, trap 16).
+    //
+    // It is also a regression test for a real defect this sequence found. The driver returns
+    // `timestamptz` as a `Date`, `13` validates the response *before* serialisation, and
+    // `shelfItemSchema` requires a string - so once `last_reviewed_at` was non-null the shelf
+    // answered 500. Every fixture had it null, so nothing before this read a shelf after a
+    // write. Any user who had ever reviewed an item would have hit it.
+    const items = await owner.listItems({ profileId: SEED.profileId });
+    expect(items.kind).toBe('OK');
+    if (items.kind !== 'OK') return;
+    const item = items.value.items.find((entry) => entry.id === task.subjectId);
+    expect(item?.lastReviewedAt).not.toBeNull();
+
+    const after = await owner.reviewTasks(SEED.profileId);
+    expect(after.kind).toBe('OK');
+    if (after.kind !== 'OK') return;
+    const stillThere = reviewInboxView(after.value.tasks).tasks.some(
+      (entry) => entry.taskId === task.taskId,
+    );
+    expect(stillThere).toBe(false);
+  });
+
+  it('refuses a completion the form would not have produced', async () => {
+    const tasks = await owner.reviewTasks(SEED.profileId);
+    if (tasks.kind !== 'OK') return;
+    const task = reviewInboxView(tasks.value.tasks).tasks[0];
+    if (task === undefined) return;
+
+    // An empty change set. The client refuses to build one, so this is the server's own rule
+    // being checked independently - the two exist for different reasons and both must hold.
+    expect(buildCompletion({ kind: task.kind, subjectId: task.subjectId }, {}, NOW_UNUSED).ok).toBe(
+      false,
+    );
+
+    const outcome = await owner.completeReviewTask(task.taskId, {
+      outcome: 'RESOLVED',
+      changes: [],
+    });
+    expect(outcome.kind).toBe('REFUSED');
+    if (outcome.kind !== 'REFUSED') return;
+    expect(outcome.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('shows a stranger nothing to complete', async () => {
+    const tasks = await stranger.reviewTasks(SEED.profileId);
+    if (tasks.kind === 'OK') {
+      expect(tasks.value.tasks).toEqual([]);
+    } else {
+      expect(tasks.kind).toBe('UNAVAILABLE');
+    }
   });
 });

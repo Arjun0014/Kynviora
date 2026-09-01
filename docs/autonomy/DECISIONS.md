@@ -1179,3 +1179,65 @@ that DEC-037 records, arriving by a different route: two things that look like o
 tests assert it, including that an absolute path is left alone.
 
 **Sources.** DEC-037; `21`; `BLK-001`.
+
+---
+
+## DEC-043 - The editor's field table is checked against the domain in both directions
+
+**Context.** Completing a review task writes to the record it is about, and `COMPLETABLE_FIELDS`
+names exactly which fields each kind may write. The editor needs a label, a reason and an input
+kind per field - none of which the domain has, because they are words rather than rules.
+
+**Options.** (a) Derive the form from the domain and label fields by prettifying the column name.
+(b) Write the form per kind by hand. (c) Key a table of labels by column name and check it against
+`COMPLETABLE_FIELDS` both ways.
+
+**Decision.** (c). `FIELD_DEFINITIONS` is keyed by the column the API expects, `taskForm` builds a
+kind's form by mapping over `COMPLETABLE_FIELDS[kind]`, and `everyCompletableFieldEditable`
+asserts the two key sets are equal.
+
+**Rationale.** (a) produces "Batch id" and "Directions text" as labels and no reason at all, and
+`18` requires the reason for a request to be stated rather than assumed. (b) drifts: a field added
+to a kind in the domain becomes a task nobody can complete, and one removed becomes a control that
+always errors - both silent. The two-way check turns either into a failing test.
+
+**Consequences.** Adding a completable field is a two-file change and the suite says so. The form
+also carries the completion note on every kind, because someone expecting a tick box needs to know
+why the screen is asking for something instead.
+
+**Sources.** `04` Phase 8.3; `18`; DEC-027.
+
+---
+
+## DEC-044 - A field that names another record is not something to type
+
+**Context.** The editor offered `batch_id` as a text box labelled "Batch or lot number". Running it
+end to end failed: `batch_id` is a `uuid` referencing `batch_or_lot`, the API casts the value with
+`::uuid`, and a printed lot code is not one. `formulation_id` is the same shape.
+
+**Options.** (a) Accept a lot code as text and have the API resolve or create the batch record.
+(b) Offer only the other field of the pair - complete `BATCH_MISSING` by setting
+`batch_verification` alone. (c) Model these as a `REFERENCE` input the editor does not render, and
+mark the whole kind as not completable here.
+
+**Decision.** (c). `FIELD_INPUTS` gains `REFERENCE`; `taskForm` reports `completableHere: false`
+when a kind's **primary** field is one, offers no fields at all in that case, and carries a
+sentence saying what is actually needed. `buildCompletion` refuses such a kind before it looks at
+any value.
+
+**Rationale.** (a) creates a catalog record from a typed string with no provenance, no
+corroboration and no quality gate - which is precisely what the catalog layer is built to prevent,
+and it would do it on the way to closing a maintenance task. (b) is worse than it looks: it lets
+someone record "I am not sure where this came from" and close a task called _add the batch
+number_. That is a mark-done path wearing a different label, and trap 16 exists because the
+temptation to add one recurs.
+
+Offering no fields rather than the non-primary ones is the part worth keeping. A form showing one
+control that cannot complete the task invites exactly the wrong completion.
+
+**Consequences.** Five of the seven task kinds are completable from the inbox; `BATCH_MISSING` and
+`FORMULA_NEEDS_CONFIRMATION` show what they need and wait for guided capture (`DEV-024`). The
+development seed now ages one item past the review interval, because otherwise every derived task
+was a `BATCH_MISSING` and a developer opening Today would see only work the app cannot do.
+
+**Sources.** `04` Phase 8.3 and Phase 3.2; `07`; `08`; DEC-027; trap 16.
