@@ -3,7 +3,7 @@
 **Resume checkpoint.** Read this first on any autonomous restart, then `git log`, then the tail
 of `WORKLOG.md`, then `BLOCKERS.md`.
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 ---
 
@@ -11,16 +11,16 @@ Last updated: 2026-09-01
 
 |                    |                                                  |
 | ------------------ | ------------------------------------------------ |
-| **Current stage**  | Stage 7 (Safety Watch), after the staff surface  |
-| **Current phase**  | Phase 7.4 next; DEV-007, DEV-016, DEV-017 closed |
-| **Last completed** | Phase 7.3 - alert detail and explainability      |
+| **Current stage**  | Stage 7 (Safety Watch), after the Safety Receipt |
+| **Current phase**  | Phase 7.5 next; DEV-007, DEV-016, DEV-017 closed |
+| **Last completed** | Phase 7.6 - resolution and the Safety Receipt    |
 | **Branch**         | `master`                                         |
-| **Latest commit**  | `feat(safety): why you are seeing this`          |
+| **Latest commit**  | `feat(safety): the receipt, on a screen`         |
 | **Baseline tag**   | `baseline-spec-only`                             |
 
 ## Verification state
 
-- **2629 tests passing**, 0 failing, across 82 files.
+- **2733 tests passing**, 0 failing, across 87 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -695,3 +695,39 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
 101. Do not `String()` an `unknown` that reaches a screen. A condition shape this build did not
      expect would render as `[object Object]` beside somebody's medicine; narrow to scalars and
      report anything else as absent.
+102. Do not add a resolution row to `safety_receipt`. `receipt_publication_idx` is UNIQUE on
+     `alert_publication_id` and the app role holds UPDATE and no INSERT - one receipt per alert,
+     resolved in place (DEC-075). An append-only design was half-written against this constraint
+     and had to be unwound; read the migration before designing against a table.
+103. Do not give a second route its own INSERT into `safety_receipt`. Phase 7.3's report-incorrect
+     had one, so a household that recorded any resolution and then said "this is not my product"
+     met the unique index and got a 500. Both routes go through `recordSafetyResolution`.
+104. Do not put the receipt's history anywhere but the audit log. `audit_event` is refused to
+     every role by a trigger - the service role and the owner role included, and a test asserts
+     both - which is a stronger guarantee than an append-only receipt table could give, because
+     that table would still be editable by whoever holds UPDATE on it.
+105. Do not `DELETE FROM audit_event` in a test fixture. It is append-only and the trigger refuses
+     even `asOwner`; scope audit assertions by target instead, since each test publishes its own
+     alert.
+106. Do not inner-join `assessment_rule_version` on a user read path. Its policy admits PUBLISHED
+     only, so an alert whose rule was later superseded would 404 - a person's own receipt
+     disappearing the day Kynviora revised the rule behind it, which is exit criterion 1 failing
+     by another route. LEFT join, and say the name is unavailable while showing the identifier.
+107. Do not put two role-scoped reads in one `Promise.all`. Each takes its own connection and sets
+     its own role, and DEC-037 records that the development engine is a single writer - the role
+     switches interleave rather than running in parallel, and the route 500s. Await them in turn.
+108. Do not name the actor on a Safety Receipt. The audit rows carry one and
+     `ReceiptHistoryEntry` deliberately has nowhere to put it: a caregiver holding `VIEW_SAFETY`
+     reading "your daughter marked this reviewed" is a disclosure nobody added that permission for
+     (DEC-076). Identity belongs on the caregiver-audit screen.
+109. Do not let a resolution's copy stop at what recording it does. `QUARANTINED` said only what
+     setting a pack aside means and not what it fails to do, and a test over the whole vocabulary
+     is what found it - not review. Every description says what it does **not** do.
+110. Do not put the uncertainty list at the foot of the receipt. A record of somebody having acted
+     reads as a record of the matter being closed, so `10`'s limits go above the controls.
+111. Do not have the client guess which control to withhold from a resolution code it does not
+     recognise. It can hide the wrong one; the server sends `currentResolution` as a code so the
+     client withholds by identity or withholds nothing.
+112. `approved_jurisdictions` must be non-empty on a `PUBLISHED` rule
+     (`rule_published_has_approved_scope`, migration `0012`). A fixture that publishes a rule
+     without it fails in `beforeAll`, and the suite reports `app.close()` on undefined instead.

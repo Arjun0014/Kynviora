@@ -247,7 +247,7 @@ shows its counts beside the checklist item that asks about them.
 | 7.3   | Alert detail and explainability | `BLOCKED_EXTERNAL` |
 | 7.4   | Evidence and Regulatory Diff    | `IN_PROGRESS`      |
 | 7.5   | Notification policy             | `NOT_STARTED`      |
-| 7.6   | Resolution and Safety Receipt   | `NOT_STARTED`      |
+| 7.6   | Resolution and Safety Receipt   | `COMPLETE`         |
 
 - **7.2**: the projection, all four hard guarantees, and the UI are implemented and tested. What
   remains is its exit criterion - "a user can distinguish banned from restricted under conditions
@@ -268,6 +268,40 @@ shows its counts beside the checklist item that asks about them.
   criterion - a regulator acting, the source correcting itself, Kynviora correcting itself, or
   nobody having recorded which (DEC-074). Every mechanism is implemented and tested against both
   halves of the vocabulary.
+- **7.6**: complete. Every item of expected output exists - the seven-member resolution
+  vocabulary, `POST /v1/alerts/:alertId/resolutions`, `GET /v1/alerts/:alertId/receipt`, the
+  contracts client, and the screen the receipt opens on from the alert detail - and both exit
+  criteria are met and tested against a real engine.
+
+  The phase turned on a design question the schema had already answered and nobody had read.
+  `safety_receipt` carries a UNIQUE index on `alert_publication_id` and grants the app role SELECT
+  and UPDATE with no INSERT: one receipt per alert, resolved in place. An append-only stack of
+  resolutions fought that constraint, and the constraint won (DEC-075). Nothing was lost by
+  following it - every write emits an `audit_event` that no role may update or delete, and the
+  receipt read replays those into its history, so `04`'s word "versioned" is answered by a log
+  nobody can rewrite rather than by a table whoever holds UPDATE could. `DEV-029` records what is
+  still only in the log.
+
+  **Exit criterion 1** is a shape rather than a rule: the only writes are into `safety_receipt`
+  and `audit_event`, and no type on the receipt has a field that could carry a change to the
+  assessment or the alert. A test compares the whole assessment row before and after seven
+  different resolutions; another asserts the app role holds no UPDATE on either table; a third
+  asserts the receipt's basis - rule version, regulatory version, evidence, urgency, confidence -
+  is byte-identical across all seven.
+
+  **Exit criterion 2** is the read: corrections appear beside what a person recorded, never
+  instead of it, and one that post-dates the resolution is said out loud rather than left to be
+  noticed. A correction whose kind this build does not recognise still gets a heading, which is
+  the opposite choice from an unrecognised resolution and deliberately so.
+
+  The phase also fixed a real defect in committed Phase 7.3 code: `report-incorrect` did its own
+  INSERT into the same one-row table, so a household that had recorded any resolution and then
+  said "this is not my product" met the unique index and got a 500. Both routes now share one
+  writer.
+
+  Beyond the criteria, the receipt answers `10`'s obligation to state limits where it states
+  findings: five uncertainties, each derived from a fact on a row, emitted in vocabulary order
+  rather than by how alarming each one is.
 
   **Outstanding, and why the phase is not complete.** There is no route and no screen, because
   neither can return anything: a version diff needs two published regulatory versions and the
@@ -501,23 +535,20 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
-1. Phase 7.3: alert detail and explainability, which now has a list to open a detail from. The
-   approved message templates already exist in `@kynviora/presentation`; what is missing is the
-   route that assembles one alert's full context and the screen that renders it.
-2. Phase 7.4's regulatory half: `diffIngredients` covers formulation, and the regulatory-version
-   diff - which changed, and whether it was a regulator acting or Kynviora correcting itself - is
-   outstanding.
-3. Phase 7.6: resolution and the Safety Receipt, which needs 7.3's detail to resolve from.
-4. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
+1. Phase 7.5: notification policy. `alertDelivery` already decides who may be told what and at
+   what detail level; what is missing is the policy layer above it - quiet hours, per-profile
+   thresholds, and the digest that `04` asks for. Real delivery stays blocked (`BLK-009`), and
+   the policy is testable without it.
+2. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch and its authorization already exist; nothing calls them with a real occurrence.
+3. Stage 9.2's release gates that do not need a threshold nobody has set (`BLK-008`).
 
-Done since this list was last written: revocation and the rest of `DEV-007`, caregiver delegation
-(`DEV-026`), Phase 4.3, Phase 7.1, Phase 7.2's UI, the observability projections (`20`), and the
-staff reviewer console with the API surface split behind it (`DEV-016`, `DEV-017`).
+Done since this list was last written: the staff reviewer console and the API surface split
+(`DEV-016`, `DEV-017`), Phase 7.3, Phase 7.4's regulatory half, and Phase 7.6 end to end.
 
 ## What "complete" means here, and what it does not
 
-Twenty-five phases are marked `COMPLETE` above. In every case that means the logic is
+Twenty-six phases are marked `COMPLETE` above. In every case that means the logic is
 implemented, tested, documented and committed - and in most cases the tests execute against a real
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
@@ -526,8 +557,8 @@ device, a credential, a labelled dataset, human participants, or a qualified hum
 those are marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even
 where all buildable work is finished. `BLOCKERS.md` records what each one needs.
 
-The counts above are the tables' own, recounted whenever a status changes: 25 `COMPLETE`, 9
-`IN_PROGRESS`, 8 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
+The counts above are the tables' own, recounted whenever a status changes: 26 `COMPLETE`, 9
+`IN_PROGRESS`, 7 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
 `04` defines. A prose count that drifts from the table it describes is the quiet way a status
 document stops being one - and the first version of this paragraph drifted immediately, because it
 was measured before the same commit moved 2.1. Count the rows:

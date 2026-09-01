@@ -1867,3 +1867,93 @@ record, and that is the next piece.
 2629 tests passing across 82 files, up from 2602 across 81. Typecheck, mobile typecheck, lint and
 format all clean via `npm run verify`, exit 0. 27 new tests, including every member of both
 vocabularies through the attribution and the cross-package pin.
+
+---
+
+## 2026-09-02 - Session resumed
+
+### Where this picked up
+
+Mid-refactor. The previous session ended inside Phase 7.6 with the domain, presentation and route
+rewritten to a one-receipt-per-alert model and the tests still written against the append-only one
+it replaced. `npm run verify` failed at typecheck with eight errors in a single file, so the
+repository was not green and `STATUS.md` was describing a state that no longer existed.
+
+Reconciling it took reading the four Phase 7.6 files rather than trusting the plan: domain,
+presentation and the API route had all been converted; the test file had not been touched; a stray
+debug edit was sitting in `console.test.ts` from a session before that, turning an assertion into a
+throw. That was reverted rather than kept.
+
+### Phase 7.6 - resolution and the Safety Receipt
+
+**The design mismatch was real and the schema was right.** `safety_receipt` has carried a UNIQUE
+index on `alert_publication_id` since migration `0006`, six migrations before this phase, and the
+grant beside it says the same thing twice: the app role holds SELECT and UPDATE and no INSERT,
+which only makes sense for a row resolved in place. `04` asks for a "versioned Safety Receipt" and
+the first implementation read that as an append-only stack. Two designs met on a constraint older
+than both, and the constraint won (DEC-075).
+
+**Following it cost nothing and gained something.** Every resolution already emitted an
+`audit_event`, and `audit_event` is append-only by trigger - refused to the service role and to
+the owner role alike, which a test now asserts in both directions. So the receipt read replays the
+log into a `history`, and `04`'s word "versioned" is answered by a record nobody can rewrite rather
+than by a table whoever holds UPDATE on it could. An append-only receipt table would have been the
+weaker guarantee. `DEV-029` records the one thing that is still only in the log: a consumer reading
+`safety_receipt` directly sees what stands and not the chain.
+
+**A real defect fell out of it.** Phase 7.3's `report-incorrect` - committed, green, in the
+repository for a day - did its own INSERT into the same one-row table. A household that recorded
+any resolution and then said "this is not my product" met the unique index and got a 500, on the
+screen whose entire subject is that Kynviora keeps what happened. Nothing caught it because the two
+phases had never been exercised against one alert. Both routes now go through
+`recordSafetyResolution`, and there are tests for the sequence in both directions.
+
+**A second one, from a join.** The receipt's first draft inner-joined `assessment_rule_version` to
+name the rule. That policy admits `PUBLISHED` only, so a rule Kynviora later superseded would have
+made a person's own receipt 404 - exit criterion 1 failing by the route nobody would look at. It is
+a LEFT join now: the version identifier is on the assessment and survives, the rule's name does
+not, and the receipt says which of the two happened rather than leaving a gap. There is a fixture
+rule in `SUPERSEDED` state whose only job is to hold that open.
+
+**A third, from concurrency.** Three role-scoped reads in one `Promise.all` - two under row-level
+security and one privileged - interleave their `SET ROLE` statements against a single-writer engine
+(DEC-037). Twenty tests failed with a 500 that looked like a query bug. They are awaited in turn.
+
+**What the receipt actually says.** Four sections, because a receipt loses one of them first: what
+the alert rested on, what the person did, what changed since, and what is still not settled. The
+fourth is the one that disappears, because a record of somebody having acted reads as a record of
+the matter being closed - so `10`'s limits sit above the controls rather than at the foot of the
+page. Five uncertainties, each derived from a fact on a row: an inexact match, a reference the
+licence review withholds, a correction since, a report nothing has come back on, a superseded
+assessment. Emitted in vocabulary order, because ranking them is ranking one person's doubts
+against another's.
+
+**Identity stayed off it (DEC-076).** The audit rows carry an actor and it would have cost nothing
+to render. `ReceiptHistoryEntry` has nowhere to put one, because a caregiver holding `VIEW_SAFETY`
+reading "your daughter marked this reviewed" is a disclosure nobody added that permission for. The
+fact is still on `resolved_by_user_id` and in the log; it is not on this screen, and tests on both
+the server and the client assert no user identifier appears.
+
+**A test found a copy gap review had missed.** Every resolution's description is supposed to say
+what recording it does _not_ do - that is where a person marking something "not applicable" learns
+it will not go away. `QUARANTINED` said only what setting a pack aside means. A loop over the whole
+vocabulary found it; nobody reading the file had.
+
+**The client half.** The receipt opens from the alert detail rather than from the inbox, because a
+separate list of receipts is a second place to look for the same thing. Seven controls, one weight,
+actions before feedback, nothing preselected, description above each control. The one that
+currently stands is withheld; an unrecognised code withholds nothing, because a client guessing
+which control to hide can hide the wrong one. Recording reloads rather than patching local state,
+since what stands after a write is the server's answer.
+
+### State
+
+2733 tests passing across 87 files, up from 2629 across 82. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 104 new tests across five suites - domain,
+presentation, contracts, API against real PostgreSQL, and the database schema itself - plus seven
+end-to-end over a real connection.
+
+Phase 7.6 is `COMPLETE` rather than blocked. Both exit criteria are structural and both are met;
+unlike 7.2 and 7.3 neither of them needs a human participant. The screen is unreachable in practice
+for the usual reason - `BLK-006` means nothing is publishable, so there is no alert to resolve -
+but that is a blocker on the data, not on the phase.
