@@ -24,7 +24,7 @@ import {
   type ReconciliationResolution,
 } from '@kynviora/domain';
 import { resolutionOption } from '@kynviora/presentation';
-import type { DifferenceResolution } from './client.js';
+import type { DifferenceResolution, MedicationLine } from './client.js';
 
 export type ResolutionRefusal =
   | { readonly reason: 'NEEDS_A_SIDE'; readonly message: string }
@@ -155,4 +155,64 @@ export function canResolve(input: {
 export function impliedSide(resolution: string): AdoptableSide | null {
   const narrowed = asResolution(resolution);
   return narrowed === null ? null : resolutionOption(narrowed).fixedSide;
+}
+
+// ---------------------------------------------------------------------------
+// Building the list that was handed to you
+// ---------------------------------------------------------------------------
+
+/**
+ * Prefix for a line that names no shelf medicine.
+ *
+ * Deliberately not a UUID shape, so it can never collide with a shelf item's own ID - which is
+ * what the shelf side of the comparison uses as its match key.
+ */
+export const UNMATCHED_KEY_PREFIX = 'typed:';
+
+/**
+ * Turn one typed row into a line the comparison can use.
+ *
+ * `matchedItemId` is how the person says "this line is the same medicine as that one on my shelf".
+ * The shelf side keys on the item's own ID, so supplying it is what lets the comparison produce a
+ * **field** difference - the strength or the directions disagree - rather than reporting the same
+ * medicine as present in one list and absent from the other.
+ *
+ * Without it every line is unmatched by construction and a reconciliation reports nothing more
+ * useful than "these two lists are different", which is the one thing the person already knew.
+ *
+ * A line with no match is not a mistake: a medicine genuinely new to the shelf belongs in exactly
+ * that state, and forcing a match would be inventing a correspondence nobody stated.
+ */
+export function medicationLine(input: {
+  readonly index: number;
+  readonly displayName: string;
+  readonly strengthText?: string | null;
+  readonly directionsText?: string | null;
+  readonly matchedItemId?: string | null;
+}): MedicationLine {
+  const matched = input.matchedItemId ?? null;
+  return {
+    matchKey: matched ?? `${UNMATCHED_KEY_PREFIX}${String(input.index)}`,
+    displayName: input.displayName.trim(),
+    strengthText: blankToNull(input.strengthText),
+    // Verbatim. `04` Phase 4.1 forbids rewriting a prescription instruction, so this is not
+    // trimmed of internal spacing, sentence-cased or normalised - only an entirely blank field
+    // becomes null, because "nothing typed" and "typed as empty" are the same statement.
+    directionsText:
+      input.directionsText === null ||
+      input.directionsText === undefined ||
+      input.directionsText.trim() === ''
+        ? null
+        : input.directionsText,
+  };
+}
+
+function blankToNull(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? '';
+  return trimmed === '' ? null : trimmed;
+}
+
+/** Whether a line was said to be the same medicine as something already on the shelf. */
+export function isMatched(line: MedicationLine): boolean {
+  return !line.matchKey.startsWith(UNMATCHED_KEY_PREFIX);
 }

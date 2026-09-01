@@ -16,6 +16,7 @@ import {
   buildResolution,
   buildUrl,
   buildVisitPack,
+  medicationLine,
   contentChanged,
   accessList,
   reviewInboxView,
@@ -706,5 +707,68 @@ describe('reconciliation, end to end', () => {
     } else {
       expect(['UNAVAILABLE', 'REFUSED']).toContain(start.kind);
     }
+  });
+});
+
+describe('naming the shelf medicine is what makes a comparison useful', () => {
+  /**
+   * Found by running the flow end to end.
+   *
+   * With a positional match key nothing on the typed list can ever correspond to a shelf item, so
+   * every difference comes back as `ONLY_IN_PREVIOUS` or `ONLY_IN_CURRENT` - the reconciliation
+   * reports that the two lists differ, which is the one thing the person already knew. A field
+   * difference is the whole point of the feature and it is only reachable when the person says
+   * which medicine a line is.
+   */
+  it('produces a field difference when the line names a shelf item', async () => {
+    const items = await owner.listItems({ profileId: SEED.profileId, itemKind: 'MEDICINE' });
+    expect(items.kind).toBe('OK');
+    if (items.kind !== 'OK') return;
+    const shelfItem = items.value.items[0];
+    expect(shelfItem).toBeDefined();
+    if (shelfItem === undefined) return;
+
+    const start = await owner.startReconciliation({
+      profileId: SEED.profileId,
+      sourceKind: 'DISCHARGE',
+      currentList: [
+        medicationLine({
+          index: 0,
+          displayName: shelfItem.displayName,
+          // A different strength from the one on the shelf.
+          strengthText: '999 mg',
+          matchedItemId: shelfItem.id,
+        }),
+      ],
+    });
+    expect(start.kind).toBe('OK');
+    if (start.kind !== 'OK') return;
+
+    const read = await owner.reconciliation(start.value.reconciliationId);
+    expect(read.kind).toBe('OK');
+    if (read.kind !== 'OK') return;
+
+    const field = read.value.differences.find((entry) => entry.kind === 'FIELD_DIFFERS');
+    expect(field).toBeDefined();
+    if (field === undefined) return;
+
+    // Both values on the row, and no field naming a preferred one.
+    expect(field.previousValue).not.toBe(field.currentValue);
+    expect(field.currentValue).toBe('999 mg');
+    expect(Object.keys(field)).toEqual(
+      expect.not.arrayContaining(['suggestedValue', 'preferred', 'confidence', 'score']),
+    );
+  });
+
+  it('reports an unmatched line as present in one list only', async () => {
+    // Not a failure: a medicine genuinely new to the shelf belongs in exactly that state.
+    const start = await owner.startReconciliation({
+      profileId: SEED.profileId,
+      currentList: [medicationLine({ index: 0, displayName: 'Synthetic Syrup D' })],
+    });
+    if (start.kind !== 'OK') return;
+    const read = await owner.reconciliation(start.value.reconciliationId);
+    if (read.kind !== 'OK') return;
+    expect(read.value.differences.some((entry) => entry.kind === 'ONLY_IN_CURRENT')).toBe(true);
   });
 });

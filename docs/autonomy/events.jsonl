@@ -158,3 +158,6 @@
 {"ts": "2026-09-01T14:43:00Z", "type": "bug_found", "detail": "POST /v1/reconciliations returns only the ID; the client had typed it as the full record and failed at runtime reading differences[0]"}
 {"ts": "2026-09-01T14:44:00Z", "type": "decision_recorded", "detail": "DEC-049 settling a difference is two questions and the screen asks both"}
 {"ts": "2026-09-01T14:45:00Z", "type": "milestone", "detail": "all four DEV-007 write flows wired end to end; 2123 tests across 64 files, verify exit 0"}
+{"ts": "2026-09-01T14:50:00Z", "type": "bug_found", "detail": "reconciliation produced only ONLY_IN_* differences: the typed list used positional match keys, so no line could correspond to a shelf item and FIELD_DIFFERS was unreachable"}
+{"ts": "2026-09-01T14:52:00Z", "type": "code_added", "detail": "medicationLine and a shelf picker per typed row, so a person can say which medicine a line is; field differences now reachable"}
+{"ts": "2026-09-01T14:53:00Z", "type": "verified", "detail": "full app driven against a live server: all four write flows, both step-up gates, and every authorization boundary behaving as designed"}

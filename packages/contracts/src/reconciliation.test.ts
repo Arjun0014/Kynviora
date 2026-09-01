@@ -8,6 +8,9 @@ import {
   buildResolution,
   canResolve,
   impliedSide,
+  isMatched,
+  medicationLine,
+  UNMATCHED_KEY_PREFIX,
 } from './reconciliation.js';
 import { RECONCILIATION_RESOLUTIONS } from '@kynviora/domain';
 import { RESOLUTION_OPTIONS, findForbiddenClaims } from '@kynviora/presentation';
@@ -199,5 +202,58 @@ describe('the words', () => {
         /you should|we recommend|the correct|the right (one|version)|take the/,
       );
     }
+  });
+});
+
+describe('naming which shelf medicine a typed line is', () => {
+  it('uses the shelf item’s own ID as the match key', () => {
+    // The shelf side of the comparison keys on the item's ID, so supplying it is what lets the
+    // comparison produce a *field* difference - the strength or the directions disagree - rather
+    // than reporting the same medicine as present in one list and absent from the other.
+    const line = medicationLine({
+      index: 0,
+      displayName: 'Synthetic Tablet A',
+      strengthText: '250 mg',
+      matchedItemId: '00000000-0000-4000-8000-00000000d030',
+    });
+    expect(line.matchKey).toBe('00000000-0000-4000-8000-00000000d030');
+    expect(isMatched(line)).toBe(true);
+  });
+
+  it('gives an unmatched line a key that cannot collide with an item ID', () => {
+    // A medicine genuinely new to the shelf belongs in exactly that state, and the key must not
+    // accidentally match a real record.
+    const line = medicationLine({ index: 3, displayName: 'Synthetic Syrup D' });
+    expect(line.matchKey).toBe(`${UNMATCHED_KEY_PREFIX}3`);
+    expect(isMatched(line)).toBe(false);
+    expect(line.matchKey).not.toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+  });
+
+  it('keeps two unmatched lines distinct', () => {
+    // Two rows of the same medicine at different strengths are two real lines and must not
+    // collapse into one.
+    expect(medicationLine({ index: 0, displayName: 'A' }).matchKey).not.toBe(
+      medicationLine({ index: 1, displayName: 'A' }).matchKey,
+    );
+  });
+
+  it('reproduces a direction verbatim', () => {
+    // `04` Phase 4.1 forbids rewriting a prescription instruction. Internal spacing and casing
+    // survive; only an entirely blank field becomes null, because "nothing typed" and "typed as
+    // empty" are the same statement.
+    const line = medicationLine({
+      index: 0,
+      displayName: '  Synthetic Tablet A  ',
+      strengthText: '  250 mg  ',
+      directionsText: '  ONE  tablet   twice a day  ',
+    });
+    expect(line.displayName).toBe('Synthetic Tablet A');
+    expect(line.strengthText).toBe('250 mg');
+    expect(line.directionsText).toBe('  ONE  tablet   twice a day  ');
+    expect(
+      medicationLine({ index: 0, displayName: 'A', directionsText: '   ' }).directionsText,
+    ).toBeNull();
   });
 });

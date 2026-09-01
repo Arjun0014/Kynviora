@@ -1261,3 +1261,30 @@ Revocation remains, and it now has the step-up seam the invitation flow introduc
 2123 tests passing across 64 files, up from 2104 across 63. Typecheck, mobile typecheck, lint and
 format all clean via `npm run verify`, exit 0. 19 new tests: 15 for the resolution builder and 4
 end to end against a real server process.
+
+### A reconciliation that compares nothing
+
+Found by driving the whole app against a live server after the flow was committed. Every difference
+came back as `ONLY_IN_PREVIOUS` or `ONLY_IN_CURRENT` and never as `FIELD_DIFFERS` - so the feature
+ran, passed its tests, and reported only that the two lists were different, which is the one thing
+the person already knew.
+
+The cause is the match key. The shelf side of the comparison keys on the item's own ID, and the
+screen was sending a positional `typed:0`, so nothing could ever correspond. The API's own comment
+says what was intended - "the caller can name exactly which one a current line corresponds to" -
+and the screen simply never asked.
+
+So each typed row now offers the medicines already on the shelf and a "this one is new to me"
+option. Never guessed from the name: two packs of the same medicine at different strengths are two
+real records, and matching them by text would be Kynviora deciding which one the person meant. An
+unmatched line is a real answer rather than an omission.
+
+`medicationLine` holds the key rule and is tested, including that an unmatched key cannot take the
+shape of a real item ID, and the end-to-end test now asserts that a matched line with a different
+strength produces a field difference carrying both values and nothing naming a preferred one.
+
+Worth recording as a kind of failure rather than a bug: nothing was broken. Every layer did what it
+was asked, the tests passed, and the feature was useless. Only running it end to end and reading
+the output showed that.
+
+2129 tests across 64 files, verify exit 0.

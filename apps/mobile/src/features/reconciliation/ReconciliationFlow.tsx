@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import {
   LIGHT_THEME,
   SPACING,
@@ -33,12 +33,15 @@ import {
 import type { DifferenceKind, ReconciliationResolution } from '@kynviora/domain';
 import {
   asResolution,
+  medicationLine,
   screenStateForFailure,
   type DifferenceResolution,
   type ReconciliationResponse,
+  type ShelfItem,
 } from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
 import { useProfiles } from '@/api/ProfileProvider';
+import { useResource } from '@/api/useResource';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import { ReconciliationReview } from './ReconciliationReview';
@@ -50,6 +53,15 @@ interface DraftLine {
   readonly displayName: string;
   readonly strengthText: string;
   readonly directionsText: string;
+  /**
+   * The shelf medicine this line is the same as, if the person said so.
+   *
+   * Null is a real answer - a medicine new to the shelf belongs in exactly that state - and it is
+   * also what makes the comparison useful when it is *not* null: the shelf side keys on the
+   * item's own ID, so naming it is what turns "present in one list only" into "the strength
+   * disagrees".
+   */
+  readonly matchedItemId: string | null;
 }
 
 const emptyLine = (index: number): DraftLine => ({
@@ -57,6 +69,7 @@ const emptyLine = (index: number): DraftLine => ({
   displayName: '',
   strengthText: '',
   directionsText: '',
+  matchedItemId: null,
 });
 
 export function ReconciliationFlow({ onClose }: { readonly onClose: () => void }) {
@@ -77,6 +90,23 @@ export function ReconciliationFlow({ onClose }: { readonly onClose: () => void }
 
   const filled = useMemo(() => lines.filter((line) => line.displayName.trim() !== ''), [lines]);
 
+  /**
+   * The medicines already on the shelf, so a line can name one.
+   *
+   * Loaded here rather than passed in, because the comparison is meaningless without it: with no
+   * way to say "this is the same medicine", every line is unmatched by construction and the
+   * reconciliation reports only that the two lists differ - which the person already knew.
+   */
+  const shelfLoad = useMemo(
+    () =>
+      client === null || activeProfileId === null
+        ? null
+        : () => client.listItems({ profileId: activeProfileId, itemKind: 'MEDICINE' }),
+    [client, activeProfileId],
+  );
+  const { resource: shelf } = useResource(shelfLoad, { enabled: activeProfileId !== null });
+  const shelfItems: readonly ShelfItem[] = shelf.value?.items ?? [];
+
   const onStart = useCallback(() => {
     if (client === null || activeProfileId === null || filled.length === 0) return;
 
@@ -87,16 +117,15 @@ export function ReconciliationFlow({ onClose }: { readonly onClose: () => void }
       .startReconciliation({
         profileId: activeProfileId,
         sourceKind: 'OTHER',
-        currentList: filled.map((line, index) => ({
-          // Positional, because two rows of the same medicine at different strengths are two
-          // real lines and must not collapse into one.
-          matchKey: `typed:${String(index)}`,
-          displayName: line.displayName.trim(),
-          strengthText: line.strengthText.trim() === '' ? null : line.strengthText.trim(),
-          // Verbatim. Not trimmed of internal spacing, not sentence-cased, not normalised -
-          // `04` Phase 4.1 forbids rewriting a prescription instruction.
-          directionsText: line.directionsText === '' ? null : line.directionsText,
-        })),
+        currentList: filled.map((line, index) =>
+          medicationLine({
+            index,
+            displayName: line.displayName,
+            strengthText: line.strengthText,
+            directionsText: line.directionsText,
+            matchedItemId: line.matchedItemId,
+          }),
+        ),
       })
       .then(
         (outcome) => {
@@ -294,6 +323,53 @@ export function ReconciliationFlow({ onClose }: { readonly onClose: () => void }
             multiline
             style={[styles.input, styles.multiline]}
           />
+
+          {/* Which shelf medicine this line is. Optional, and never guessed from the name: two
+              packs of the same medicine at different strengths are two real records, and matching
+              them by text would be Kynviora deciding which one the person meant. */}
+          {shelfItems.length === 0 ? null : (
+            <>
+              <Text style={styles.label}>Is this one you already have?</Text>
+              {[null, ...shelfItems.map((item) => item.id)].map((id) => {
+                const chosen = line.matchedItemId === id;
+                const label =
+                  id === null
+                    ? 'No - this one is new to me'
+                    : (shelfItems.find((item) => item.id === id)?.displayName ?? '');
+                return (
+                  <Pressable
+                    key={id ?? 'none'}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: chosen }}
+                    accessibilityLabel={label}
+                    onPress={() => {
+                      setLines((current) =>
+                        current.map((entry) =>
+                          entry.key === line.key ? { ...entry, matchedItemId: id } : entry,
+                        ),
+                      );
+                    }}
+                    style={[
+                      styles.match,
+                      {
+                        backgroundColor: chosen
+                          ? LIGHT_THEME.informational.background
+                          : LIGHT_THEME.surface.background,
+                        borderColor: chosen
+                          ? LIGHT_THEME.informational.border
+                          : LIGHT_THEME.surface.border,
+                      },
+                    ]}
+                  >
+                    <Text style={styles.matchLabel}>
+                      {chosen ? '●  ' : '○  '}
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </>
+          )}
         </View>
       ))}
 
@@ -363,6 +439,18 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET_DP * 1.5,
     paddingVertical: SPACING.sm,
     textAlignVertical: 'top',
+  },
+  match: {
+    minHeight: MIN_TOUCH_TARGET_DP,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  matchLabel: {
+    fontSize: FONT_SIZE.body,
+    color: LIGHT_THEME.surface.foreground,
   },
   actions: { gap: SPACING.sm },
 });

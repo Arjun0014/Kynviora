@@ -429,3 +429,7 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 57. `POST /v1/reconciliations` returns the ID only. Read the differences back rather than
     assembling them from the create response - the derivation is the server's, and typing the
     response as the full record typechecks and fails at runtime.
+58. A typed reconciliation line must carry the **shelf item's own ID** as its match key when the
+    person says it is the same medicine. With a positional key nothing can correspond and every
+    difference is `ONLY_IN_*` - the feature runs, passes, and compares nothing. Never match by
+    name: two packs of one medicine at different strengths are two real records.
