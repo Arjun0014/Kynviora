@@ -242,10 +242,14 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   a scheduler can call it unchanged.
 - **Risk**: low now, growing with profile size - the read does four queries over one profile.
   Acceptable at MVP scale and worth measuring before it is not.
-- **Required future work**: move derivation behind a scheduler when one exists, and emit the
-  queue-age metric `20` asks for. Until then a task is only ever raised when someone looks, so a
-  notification about review work is not possible - which is consistent with the inbox being
-  deliberately non-urgent.
+- **Required future work**: move derivation behind a scheduler when one exists. Until then a task
+  is only ever raised when someone looks, so a notification about review work is not possible -
+  which is consistent with the inbox being deliberately non-urgent.
+- **Partly addressed**: the queue-age metric `20` asks for now exists.
+  `GET /v1/reviewer/operations` reports `review_tasks_oldest_open_age_ms` alongside the reviewer
+  queue's own age (DEC-059). It measures a derived-on-read list rather than a scheduled one, which
+  makes it a lower bound: a task nobody has looked for has not been raised, so it cannot be old
+  yet. That is worth knowing before the number is read as an SLA.
 
 ## DEV-014 - Reconciliation matches two lists by a caller-supplied key, not by catalog identity
 

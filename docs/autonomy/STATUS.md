@@ -12,15 +12,15 @@ Last updated: 2026-09-01
 |                    |                                                |
 | ------------------ | ---------------------------------------------- |
 | **Current stage**  | Stage 6 (governance), after completing Stage 8 |
-| **Current phase**  | `DEV-007` complete; next is observability      |
-| **Last completed** | Phase 4.3 - dose events and history            |
+| **Current phase**  | Stage 6 governance surfaces; `DEV-007` closed  |
+| **Last completed** | Observability projections (`20`)               |
 | **Branch**         | `master`                                       |
-| **Latest commit**  | `feat(care): recording what happened`          |
+| **Latest commit**  | `feat(ops): the operational projection`        |
 | **Baseline tag**   | `baseline-spec-only`                           |
 
 ## Verification state
 
-- **2239 tests passing**, 0 failing, across 67 files.
+- **2270 tests passing**, 0 failing, across 69 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -103,8 +103,17 @@ completing a review task, inviting a caregiver, delegating as a caregiver, remov
 generating a Visit Pack, resolving a reconciliation difference, and recording a dose event with the
 history to read it back. `DEV-026` is closed and Phase 4.3 is complete.
 
-Next is the three planned tasks below - observability projections, the staff reviewer console
-interface, and Phase 7.1 assessment states - of which the first is the most self-contained.
+Observability projections are done too: `GET /v1/reviewer/operations` returns a snapshot of the
+metrics `20` names, with one row per registered source, and no verdict anywhere in it.
+
+Next, in order of how self-contained each is:
+
+1. **Phase 7.1** - assessment states and the profile inbox. The shadow and replay machinery
+   supports it and nothing external blocks it.
+2. **A staff reviewer console interface** (`DEV-016`), on its own origin and session policy. The
+   backend and now the operational projection both exist with no interface in front of them.
+3. **A missed-dose scheduler** (`DEV-011`), once the grace window is a decided product question.
+   The dispatch and its authorization already exist; nothing calls them with a real occurrence.
 
 Done: **reconciliation** (a typed list, both values shown, and the side stated by a person), the
 **Visit Pack** (selection, review, and a digest the live server accepts), the
@@ -254,6 +263,16 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 - **DEC-048** - the Visit Pack client hashes the candidates it **displayed** and never re-fetches
   before hashing. `canonicalizeSelection` and `toNoteEntries` come from the domain so both sides
   build the same string. An entry this client cannot canonicalise is refused, never coerced.
+
+- **DEC-059** - an operational metric is a key from a closed vocabulary, a number and a unit.
+  There is nowhere in the type for a profile, a medicine or a sentence, which is how `20`'s
+  "measure system behaviour, not sensitive content" survives being forgotten.
+- **DEC-060** - the projection reaches no verdict: no status, severity, health score or threshold
+  breach. `20` requires exact thresholds to be documented before production and `BLK-008` records
+  that none are. A source being past its own declared refresh cadence is the one comparison that
+  is arithmetic rather than a new judgement.
+- **DEC-061** - any ACTIVE reviewer may read the projection, not one role. Source freshness is a
+  safety metric, and the snapshot carries no user content at all.
 
 - **DEC-057** - the dose history is a list and carries no count, rate, streak or total of anything
   a person did. Enforced at the route as well as the view, because a `takenCount` on the response
@@ -503,3 +522,16 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
     are one weight and all four kinds one neutral tone; the icons carry the distinction and a test
     asserts they differ (DEC-058). Praise is the other half of shame - the copy scan rejects
     "well done" and "keep it up" as well as the reproaches.
+71. Do not add a `subject`, `label`, `profileId` or free-text field to a `MetricReading`, and do not
+    report which profile holds the oldest open review task. `20` keeps medicine names and subjects
+    out of operator output, and the type having nowhere to put one is what keeps it out (DEC-059).
+72. Do not add a status, severity, health score or threshold breach to the operational snapshot or
+    to a source row. `20` requires exact thresholds to be documented before production and
+    `BLK-008` records that none exist; a verdict would invent one and an operator would act on it
+    (DEC-060, trap 29 by another route).
+73. Do not report a source that has never been checked successfully as zero milliseconds overdue.
+    `neverSucceeded` is a separate field, because folding the two together hides the worst case
+    inside the best-looking number.
+74. Do not narrow `/v1/reviewer/operations` to `SOURCE_OPERATIONS_OWNER`. Source freshness is a
+    safety metric a clinical lead needs, and the snapshot carries no user content (DEC-061). What
+    must not be relaxed is the role coming from a stored row rather than a client claim.

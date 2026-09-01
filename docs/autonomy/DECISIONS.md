@@ -1628,3 +1628,71 @@ the reproaches, because the screen that congratulates you on Monday is the one w
 Tuesday.
 
 **Sources.** `04` Phase 4.3; `18`; `02`.
+
+## DEC-059 - An operational metric is a key from a closed vocabulary and a number
+
+**Context.** `20`'s first observability principle is "measure system behavior, not sensitive
+content", and its alerting section says operator output should carry "identifiers/codes, not
+medicine names or diagnoses". A projection is exactly where somebody would helpfully attach "which
+profile" to make a number actionable.
+
+**Decision.** `MetricReading` is `{ key, value, unit }` - the key from `OPERATIONAL_METRICS`, the
+value a `number`. There is no `label`, `subject`, `profileId` or `note`, and there is nowhere in
+the type to put one.
+
+**Rationale.** The rule survives being forgotten. A projection that wanted to report which profile
+holds the oldest review task could not express it, so the reviewer who would have caught that in
+code review does not need to be there. The route's test walks a real response and asserts no
+profile, user, item or household ID appears anywhere in it.
+
+**Why the queues stay separate.** `reviewer_queue_*` counts publication requests and
+`review_tasks_*` counts the household inbox. They are different queues with different owners, and
+only the first is staff workload; reporting either as the other makes an SLA meaningless.
+
+**Sources.** `20`; `14`; `16`.
+
+## DEC-060 - The projection reports what is true and reaches no verdict
+
+**Context.** `20` lists the conditions worth alerting on - critical source stale, ingestion failure
+spike, review queue SLA breach - and then says "exact thresholds must be documented before
+production". None are documented, and `BLK-008` records that no labelled dataset exists to set them
+against.
+
+**Decision.** No `status`, `severity`, `healthScore`, `degraded` or `alertLevel` anywhere in the
+snapshot or on a source row. Tests assert the absence over the reading keys, the source row keys
+and the module's exported names.
+
+**Rationale.** The same reasoning trap 29 applies to a shadow run: a verdict here would invent a
+threshold, and an operator would read it as an answer. The numbers are what the system knows; the
+thresholds go beside them when somebody with the authority to set them has done so.
+
+**The one comparison that is not a threshold.** A source is overdue when the elapsed time since its
+last successful check exceeds `expected_refresh_interval_ms` - the cadence that source itself
+declares on its registry row, approved when it was registered. That is arithmetic against an
+existing decision, not a new one. `overdueByMs` is reported; "critically stale" is not.
+
+**Never checked is not zero overdue.** They are separate fields, because a source that has never
+succeeded is not comfortably inside its window, and folding it in would hide the worst case inside
+the best-looking number.
+
+**Sources.** `20`; `22`; `BLK-008`; trap 29.
+
+## DEC-061 - Any active reviewer may read the operational projection
+
+**Context.** `13` asks for least privilege on staff routes, and the obvious reading is that
+operational metrics belong to `SOURCE_OPERATIONS_OWNER` alone.
+
+**Decision.** Any ACTIVE row in `reviewer` admits the caller. Everyone else gets the same bare
+not-found the console gives.
+
+**Rationale.** `20` calls source freshness a **safety** metric, and a clinical safety lead deciding
+whether a published rule should stay published needs to know the source behind it has not been
+checked in a fortnight. Narrowing the read by role would keep a safety signal from the people whose
+job is to act on one. The usual reason to narrow a staff read does not apply here either: the
+snapshot contains no user content at all - counts, ages, and the public identity of regulators.
+
+**What is not relaxed.** The role still comes from a stored row and never from a client claim
+(`14`), a suspended reviewer is refused, and the refusal is a 404 so the route is not an oracle for
+its own existence.
+
+**Sources.** `13`; `14`; `20`; DEC-032; `DEV-016`.

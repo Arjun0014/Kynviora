@@ -434,13 +434,17 @@ that does and does not cover.
 
 ## Immediate next work
 
-1. Revocation, the last `DEV-007` surface. It has the step-up seam the invitation flow introduced
-   and needs a confirmation that never applies the change locally (`12`, `14`).
-2. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
-   cache-hit rate, assessment recomputation throughput. The review-queue age becomes measurable
-   once inbox derivation moves behind a scheduler (`DEV-013`).
+1. Phase 7.1: assessment states and the profile inbox. The shadow and replay machinery supports
+   it and nothing external blocks it.
+2. A staff reviewer console interface (`DEV-016`), on its own origin and session policy. The
+   console backend and the operational projection both exist with no interface in front of them.
 3. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch and its authorization already exist; nothing calls them with a real occurrence.
+
+Done since this list was last written: revocation and the rest of `DEV-007`, caregiver delegation
+(`DEV-026`), Phase 4.3, and the observability projections (`20`) - review-queue age for both
+queues, source freshness against each source's own declared cadence, extraction outcomes and
+catalog conflicts, with no verdict anywhere in the output.
 
 ## What "complete" means here, and what it does not
 

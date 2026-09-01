@@ -39,6 +39,7 @@ import { registerAlertDeliveryRoutes } from './alertDelivery.js';
 import { registerReviewInboxRoutes } from './reviewInbox.js';
 import { registerReconciliationRoutes } from './reconciliation.js';
 import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
+import { registerOperationsRoutes } from './operations.js';
 import { registerShadowModeRoutes } from './shadowMode.js';
 
 /**
@@ -727,6 +728,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
   // stored reviewer role rather than a claim in the request (spec 14).
 
   registerReviewerConsoleRoutes(app, { contextFor, fail });
+  registerOperationsRoutes(app, { contextFor, fail });
 
   // -------------------------------------------------------------------------
   // Shadow-run and replay routes (spec 04 Phase 6.7)

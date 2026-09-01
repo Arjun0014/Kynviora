@@ -1447,3 +1447,53 @@ and the control is absent rather than disabled on a personal-care product.
 2239 tests passing across 67 files, up from 2203 across 65. Typecheck, mobile typecheck, lint and
 format all clean via `npm run verify`, exit 0. 36 new tests: 14 on the copy, 14 on the builder and
 the history view, and 8 end to end against a real server process.
+
+### Observability projections - the numbers, and nothing beside them
+
+`20` asks for two things that pull in opposite directions: enough signal to run the system, and
+operator output that carries no medicine name, no diagnosis and no subject. The way to have both is
+for the type to have nowhere to put the second.
+
+A `MetricReading` is a key from a closed vocabulary, a number, and a unit. A projection that wanted
+to report _which_ profile holds the oldest review task could not express it, which means the
+reviewer who would have caught that in code review does not have to be there (DEC-059). The route's
+test walks a real response and asserts that no profile, user, item or household ID appears anywhere
+in it - a real assertion, because the fixture has all four.
+
+**The harder discipline is the verdict that is not there.** `20` lists the alerting conditions and
+then says "exact thresholds must be documented before production". None are, and `BLK-008` records
+that no labelled dataset exists to set them against. So there is no `status`, no `severity`, no
+`degraded`, and no threshold breach anywhere - the same reasoning trap 29 applies to a shadow run,
+because an operator reads a verdict as an answer (DEC-060).
+
+**One comparison survives that rule, and it is worth naming why.** A source is overdue when the
+time since its last successful check exceeds `expected_refresh_interval_ms` - the cadence that
+source itself declares on its registry row, approved when it was registered. That is arithmetic
+against an existing decision rather than a new one. `overdueByMs` is reported; "critically stale" is
+not. And "never successfully checked" is a separate field rather than an infinite overdue, because
+folding it in would hide the worst case inside the best-looking number.
+
+**Two queues that are not one queue.** `reviewer_queue_*` counts publication requests and
+`review_tasks_*` counts the household inbox. Different queues, different owners, and only the first
+is staff workload - reporting either as the other makes an SLA meaningless. It also means
+`DEV-013`'s queue-age metric now exists for the reviewer queue, which has a real scheduler-shaped
+lifecycle, while the household inbox age is reported as what it is: a derived-on-read number.
+
+**Who may read it.** Any ACTIVE reviewer, not one role. Least privilege points the other way and is
+wrong here for a specific reason: `20` calls source freshness a safety metric, and a clinical safety
+lead deciding whether a published rule should stay published needs to know the source behind it has
+gone quiet. The snapshot contains no user content, so the usual reason to narrow a staff read does
+not apply, and narrowing it would keep a safety signal from the people whose job is to act on one
+(DEC-061). Everything else holds: the role is a stored row, a suspended reviewer is refused, and the
+refusal is a 404.
+
+Confirmed by hand against a live server: an ordinary authenticated user gets the bare not-found, and
+an unauthenticated one gets a 401. The development seed grants no reviewer role, so there is no way
+to see a snapshot through the dev authenticator at all - which is DEC-038 working rather than a gap.
+
+### State
+
+2270 tests passing across 69 files, up from 2239 across 67. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 31 new tests: 20 on the projection and 11 on the
+route against a real PostgreSQL engine, including the three source-freshness cases and the four
+ways the staff boundary can be approached.
