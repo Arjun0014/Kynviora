@@ -9,18 +9,18 @@ Last updated: 2026-09-01
 
 ## Current position
 
-|                    |                                                |
-| ------------------ | ---------------------------------------------- |
-| **Current stage**  | Stage 6 (governance), after completing Stage 8 |
-| **Current phase**  | Stage 6 governance surfaces; `DEV-007` closed  |
-| **Last completed** | Phase 7.2 - the Regulatory Lens screen         |
-| **Branch**         | `master`                                       |
-| **Latest commit**  | `feat(safety): the Global Regulatory Lens`     |
-| **Baseline tag**   | `baseline-spec-only`                           |
+|                    |                                                         |
+| ------------------ | ------------------------------------------------------- |
+| **Current stage**  | Stage 7 (Safety Watch), after the staff surface         |
+| **Current phase**  | Phase 7.3 next; `DEV-007` and `DEV-016` closed          |
+| **Last completed** | The reviewer console and the API surface split          |
+| **Branch**         | `master`                                                |
+| **Latest commit**  | `feat(staff): the reviewer console, on its own surface` |
+| **Baseline tag**   | `baseline-spec-only`                                    |
 
 ## Verification state
 
-- **2341 tests passing**, 0 failing, across 72 files.
+- **2513 tests passing**, 0 failing, across 78 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -43,30 +43,52 @@ Migrates, seeds one synthetic household and listens on `127.0.0.1:3000`. The see
 ID to send as `x-kynviora-dev-user`. Safety and Regulatory Lens are **empty** against this seed on
 purpose - `BLK-006` and DEC-016, not a configuration mistake.
 
+### Running the staff surface and the reviewer console
+
+Three origins. The household API serves no reviewer route and the staff API serves nothing else
+(DEC-066), so both are needed and the console talks only to the second.
+
+```bash
+KYNVIORA_DEV_AUTH=1 KYNVIORA_DEV_SEED=1 KYNVIORA_STAFF_PORT=3100 npm run dev
+```
+
+```bash
+KYNVIORA_STAFF_API_URL=http://127.0.0.1:3100 KYNVIORA_HOUSEHOLD_API_URL=http://127.0.0.1:3000 npm run dev:console
+```
+
+The console listens on `127.0.0.1:4100`. The staff listener is **off** unless `KYNVIORA_STAFF_PORT`
+is set, and the console refuses to start against the household origin.
+
+Every page is empty against the seed, and that is correct twice over: the seed grants no reviewer
+role (DEC-038), and nothing shipped is publishable (`BLK-004`). Signing in with any UUID shows the
+three standing blocker warnings and "nothing to show" - which is also what a stranger sees, because
+the API will not distinguish them.
+
 ## What is genuinely built and tested
 
-| Area                                                       | State                                                |
-| ---------------------------------------------------------- | ---------------------------------------------------- |
-| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                   |
-| Database schema, 13 migrations, full RLS                   | Complete, 293 tests incl. threats A1/A2/A3           |
-| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                  |
-| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                   |
-| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                   |
-| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                                   |
-| Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                                  |
-| API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                                   |
-| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                                   |
-| Caregiver invitation, acceptance, revocation, audit        | Complete, 214 tests                                  |
-| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                                  |
-| Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009)          |
-| Household Review Inbox, record-writing completion          | Complete, 95 tests                                   |
-| Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                                  |
-| Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006) |
-| Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                   |
-| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                   |
-| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                  |
-| Caregiver, export, notification, inbox, reconciliation UI  | Wired; **not device-verified** (`DEV-007`)           |
-| CI pipeline                                                | Written; not yet run on a real runner                |
+| Area                                                       | State                                                   |
+| ---------------------------------------------------------- | ------------------------------------------------------- |
+| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                      |
+| Database schema, 13 migrations, full RLS                   | Complete, 293 tests incl. threats A1/A2/A3              |
+| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                     |
+| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                      |
+| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                      |
+| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                                      |
+| Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                                     |
+| API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                                      |
+| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                                      |
+| Caregiver invitation, acceptance, revocation, audit        | Complete, 214 tests                                     |
+| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                                     |
+| Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009)             |
+| Household Review Inbox, record-writing completion          | Complete, 95 tests                                      |
+| Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                                     |
+| Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006)    |
+| Staff surface split, console package, console process      | Complete, 172 tests; **authenticates nobody** (BLK-010) |
+| Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                      |
+| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                      |
+| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                     |
+| Caregiver, export, notification, inbox, reconciliation UI  | Wired; **not device-verified** (`DEV-007`)              |
+| CI pipeline                                                | Written; not yet run on a real runner                   |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
 alert-delivery, Review Inbox, reconciliation and reviewer-console rows each count tests that
@@ -95,56 +117,64 @@ documented configuration requirements.
 | BLK-007 | `EXTERNAL_CREDENTIAL`               | Real OCR/multimodal extraction                |
 | BLK-008 | `DATA_AVAILABILITY`                 | Every numeric release threshold (Stage 9.1)   |
 | BLK-009 | `EXTERNAL_CREDENTIAL`               | Actually sending any notification to a device |
+| BLK-010 | `EXTERNAL_CREDENTIAL`               | Strong authentication for a reviewer account  |
 
 ## Immediate next task
 
-**`DEV-007` is finished.** Every read destination is wired and every write flow has a screen:
-completing a review task, inviting a caregiver, delegating as a caregiver, removing access,
-generating a Visit Pack, resolving a reconciliation difference, and recording a dose event with the
-history to read it back. `DEV-026` is closed and Phase 4.3 is complete.
+**`DEV-016` is finished, and so is `DEV-007`.** There are three origins now: the household API, a
+staff API that serves `/v1/reviewer/*` and nothing else, and the reviewer console on its own port.
+`createServer` takes a **required** `surface`, so a staff route is absent from a household process
+rather than refused by it (DEC-066). The console lives in `packages/staff-console` (session,
+client, view models, pages) and `services/staff-web` (the process, which holds no database
+connection at all).
 
-Observability projections are done too: `GET /v1/reviewer/operations` returns a snapshot of the
-metrics `20` names, with one row per registered source, and no verdict anywhere in it.
+Building it closed `DEV-017`'s presentational remainder too: a request names a shadow run and the
+console fetches it, so a reviewer confirming `EXPECTED_MATCH_VOLUME` reads a computed figure on the
+page rather than going to find it.
 
-Next, in order of how self-contained each is:
+What it did **not** do: authenticate anybody. `13` and `14` require MFA or a passkey for a reviewer
+account, and `BLK-010` records that none exists. The sign-in page says so and every page carries it
+in a banner.
 
-Phase 7.1 is done too - every item on a profile's shelf now carries a safety state, so "checked and
-nothing matched" and "never checked" are different lines instead of the same absence - and so is
-Phase 7.2's UI: six jurisdiction cards, each with its own coverage statement and limitations, no
-verdict and no ordering by severity.
+Next, in the order they build on each other:
 
-1. **A staff reviewer console interface** (`DEV-016`), on its own origin and session policy. The
-   console backend and the operational projection both exist with no interface in front of them.
-2. **Phase 7.3** - alert detail and explainability, which now has a list to open a detail from.
-3. **A missed-dose scheduler** (`DEV-011`), once the grace window is a decided product question.
-   The dispatch and its authorization already exist; nothing calls them with a real occurrence.
+1. **Phase 7.3** - alert detail and explainability. `04` lists ten things one alert must show:
+   affected person, exact item, match confidence, reason for match, evidence level, urgency,
+   jurisdiction/source/date, source reference where allowed, next action, limitations, and a
+   report-incorrect action. The Safety inbox from 7.1 is the list to open one from, and the
+   approved message templates already exist in `@kynviora/presentation`. Missing: the route that
+   assembles one alert's full context, and the screen.
+2. **Phase 7.4's regulatory half.** `diffIngredients` covers formulation. The regulatory-version
+   diff - what changed, and whether a regulator acted or Kynviora corrected itself - is the
+   outstanding half, and its exit criterion is exactly that distinction.
+3. **Phase 7.6** - resolution and the Safety Receipt, which needs 7.3's detail to resolve from and
+   must not erase historical assessment.
+4. **A missed-dose scheduler** (`DEV-011`), once the grace window is a decided product question.
 
-Done: **reconciliation** (a typed list, both values shown, and the side stated by a person), the
-**Visit Pack** (selection, review, and a digest the live server accepts), the
-**review task editor** (five of seven kinds; `BATCH_MISSING` and
-`FORMULA_NEEDS_CONFIRMATION` wait on guided capture, `DEV-024`), the **caregiver invitation**
-(capability selection limited to what the inviter may delegate, a step-up-scoped request, and a
-token emitted once and never held anywhere) and **removing access** (a confirmation that names what
-stops and what starting again would take, the right route for a grant or an invitation, an
-idempotent request, and the access history that shows the removal happened).
-
-Alternatively **Phase 4.3** (dose events and adherence history) or **Phase 7.1** (assessment states
-and inbox), both fully implementable with no external dependency.
-
-Note what the two governance phases did **not** do: they did not clear `BLK-006`. The reviewer
-console is the workflow a qualified reviewer would use and the shadow run is what they would look
-at; no qualified reviewer exists, and nothing in the shipped fixtures is publishable.
+Note what none of this clears: `BLK-006`. The reviewer console is the workflow a qualified reviewer
+would use, the shadow run is what they would look at, and no qualified reviewer exists. Nothing in
+the shipped fixtures is publishable and a test asserts that every one is refused.
 
 ## Next three planned tasks
 
-1. Observability projections (`20`), including the review-queue age that becomes measurable once
-   inbox derivation moves behind a scheduler (`DEV-013`).
-2. A staff reviewer console interface, on its own origin and session policy (`DEV-016`). It is
-   deliberately not a screen in the Expo app.
-3. Phase 7.1 assessment states and inbox, which the shadow and replay machinery now supports.
+1. Phase 7.3 - the alert detail route and screen.
+2. Phase 7.4's regulatory-version diff, distinguishing a regulator's action from a correction.
+3. Phase 7.6 - resolution outcomes and the versioned Safety Receipt.
 
 ## Recent decisions worth knowing
 
+- **DEC-066** - a process serves **one** surface and the option is required. `createServer` has no
+  `BOTH`, so a new route cannot land on the wrong side of a security boundary by default. Two
+  listeners run in one development process only because PGlite is a single writer (DEC-037).
+- **DEC-067** - the staff console shares nothing with the household client. Not
+  `@kynviora/contracts`, not `@kynviora/presentation`: those ship in the Expo bundle and `13` asks
+  for environment isolation. Its transport refuses query strings **entirely**, because no staff
+  route takes one.
+- **DEC-068** - the reviewer queue is never ordered by urgency, and this is a security property:
+  `maxUrgency` is set by whoever opened the request, so sorting by it would let them choose how
+  soon their own request is looked at. `views.ts` exports no comparator and a test asserts it.
+- **DEC-069** - nothing in the console is preselected and the checklist is never offered in bulk.
+  `ChecklistItemView.confirmed` is typed `false`, not `boolean`.
 - **DEC-004/005** - PGlite is the migration and RLS harness. Authorization tests **must** run as
   the non-superuser `kynviora_app` role; the harness fails the test if they do not, because
   superusers bypass RLS even under `FORCE ROW LEVEL SECURITY`. Verified empirically (R-003).
@@ -578,3 +608,26 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 83. Backticks are still fatal inside a SQL template literal, and trap 18 fired again while writing
     the safety-inbox query. A `` `09` `` in a SQL comment surfaced as "decimals with leading zeros
     are not allowed" forty characters away. Write "spec 09" in SQL.
+84. Do not give `createServer` a default `surface`, and do not add a `BOTH`. The option is
+    required so a new route cannot land on the wrong side of a security boundary silently, and the
+    boundary test reads the paths an instance actually registered rather than a list of forbidden
+    ones (DEC-066).
+85. Do not register a household route inside the staff block or the reverse. It happened once with
+    `/v1/profiles/:profileId/safety-inbox`, grouped by proximity to a comment, and nothing caught
+    it because both surfaces were one origin.
+86. Do not make the staff console depend on `@kynviora/contracts` or `@kynviora/presentation`.
+    Those ship in the Expo bundle, and `13` asks for environment isolation between a user surface
+    and a staff one (DEC-067).
+87. Do not sort the reviewer queue by `maxUrgency`, or add any comparator to the console's view
+    models. The requester sets that field, and sorting by it hands them the review order (DEC-068).
+88. Do not preselect a decision, pre-tick a checklist item, or add a "confirm all" control to the
+    console. `ChecklistItemView.confirmed` is typed `false` so the compiler refuses (DEC-069).
+89. Do not add an outcome, a page or a sentence to the console meaning "you are not a reviewer".
+    The staff API answers that with a bare 404 so it is not an oracle, and a console that reported
+    it would hand the fact back on the screen.
+90. Do not assert `not.toContain('onerror=')` or `not.toContain('checked')` on rendered HTML. Both
+    strings appear legitimately - the first as escaped, inert text, the second in the checklist
+    copy. Assert the property: no surviving tag, and no `checked` **attribute**.
+91. Do not reuse one rule across two console fixtures that both open a publication request.
+    `publication_request_open_idx` allows one open request per target and action, so the second
+    fails with a 500 that reads as a bug in the route.

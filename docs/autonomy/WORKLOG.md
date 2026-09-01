@@ -1635,3 +1635,112 @@ two honest answers available to it.
 `npm run verify` exit 0: 2341 tests across 72 files, typecheck, mobile typecheck, lint and format
 all clean. That matches the recorded baseline exactly, so the tree resumed from is the tree the last
 session committed.
+
+### The staff surface, and the half of a sentence nobody had read
+
+`DEV-016` had recorded a reviewer console backend with no interface, and building the interface
+started by re-reading what `13` actually asks for:
+
+> Internal/admin APIs are separately authenticated/authorized **and not exposed as user APIs**.
+
+The first clause was true and had been for two phases: a reviewer role is a stored row, the app
+database role holds no grant on any publication table, and a caller with no row gets a bare
+not-found. The second clause was not true at all. `/v1/reviewer/queue` was registered on the same
+Fastify instance that serves `/v1/items`, so the only thing between a phone and the publication
+tables was the check - correct, tested, and the only thing.
+
+`createServer` now takes a required `surface`. Required rather than defaulted, because a default
+decides for every future route which side of a security boundary it lands on and decides it
+silently; making it required meant the compiler listed all eleven call sites and each one had to
+say which surface it was. The test that matters does not name a route: it reads the paths an
+instance actually registered and asserts the partition, so a new route on the wrong side fails
+rather than a list somebody forgot to update. The pool those tests use throws on any query, which
+is how "the handler is absent" is distinguished from "the handler declined".
+
+**It found a real misplacement immediately.** `/v1/profiles/:profileId/safety-inbox` had sat inside
+the reviewer registration block since Phase 7.1, grouped by proximity to a comment rather than by
+boundary. It is a household route. Nothing had caught it because both surfaces were one origin, so
+the grouping had no consequence - which is exactly the condition under which this kind of mistake
+accumulates.
+
+**And it weakened a test that had been claiming too much.** `main.test.ts` asserted that the seeded
+owner "gets no staff access at all" by hitting `/v1/reviewer/queue` and expecting 404. That still
+passes and now proves less: on the household origin the route does not exist. The reviewer-row
+check is asserted on the staff origin instead, where it can fail.
+
+### Three origins, not two
+
+The console could have been served from the staff API's origin. It is not, and the reason is worth
+writing down: its session cookie would then be sent to the API on every call, so any XSS anywhere
+in the console would carry publication authority directly. On the household origin it would be
+worse - shared cookies, shared CORS policy, shared everything - so `resolveStaffApiBaseUrl` refuses
+to start against it, and says why in the error.
+
+In development all three are one process short of that: PGlite is a single writer (DEC-037), so a
+separate staff API process pointed at the same data directory would overwrite the household one.
+Two Fastify instances in one process is the honest version of the same boundary here, and becomes
+two deployments unchanged when `BLK-001` clears.
+
+### What the console refuses to do
+
+**Authenticate anybody.** `13` and `14` both require MFA or a passkey for a reviewer account and no
+provider exists, so the sign-in page says it is not an authentication step rather than looking like
+a login, and every page carries the gap in a banner that cannot be dismissed. `BLK-010` records it.
+`AuthenticationStrength` is a closed union with one member, so a passkey provider lands as a second
+member and the banner stops appearing because the value changed - not because somebody deleted it.
+
+**Order the queue by urgency.** This one is a security property rather than a taste one.
+`maxUrgency` is set by whoever _opened_ the request; sorting by it would let a requester choose how
+soon their own request is looked at, by claiming an urgency. The queue is oldest-first, which is
+also what `20` measures, and the module exports no comparator (DEC-068).
+
+**Preselect anything.** No decision option, no checklist item, and no control that ticks the
+checklist together. `10`'s second reviewer is worth something because they check independently, and
+a pre-ticked box turns ten judgements into one click that is indistinguishable afterwards from ten
+real ones (DEC-069).
+
+**Say why something is unavailable.** The staff API answers "no such request", "not yours" and "you
+hold no reviewer role" identically on purpose. One `outcomePage` renders all three, so no page can
+invent a more helpful sentence.
+
+### The join `DEV-017` left behind
+
+Phase 6.7 made `EXPECTED_MATCH_VOLUME` confirmable against a computed figure rather than a
+judgement, and left a presentational remainder: the request detail returns a `shadowRunId` and a
+reviewer had to go and fetch the run. The console does the join, and puts the run's counts beside
+the checklist item that asks about them - including "People this would reach", named the way the
+checklist names it rather than the way the database does.
+
+### Two locks on the forms
+
+`SameSite=Strict` on the session cookie stops a cross-site post in any browser that honours it, and
+a per-session form token is the second. On a surface that can publish safety content, one control
+that an old browser or a proxy can undo is not enough. The token is bound to the session, so it
+cannot be lifted from a page an attacker was allowed to see and replayed against a different one -
+a test signs two reviewers in and tries exactly that.
+
+The cookie itself carries 256 bits of opaque randomness and nothing else. Everything about the
+session - who, when it began, when it was last used, when identity was last confirmed - is
+server-side, so its holder cannot extend it, claim a step-up they did not perform, or survive a
+sign-out the server performed.
+
+### Three test bugs worth recording, because they all had the same shape
+
+The page tests initially asserted `not.toContain('onerror=')` on escaped output. The escaping was
+working: `onerror=&quot;` is inert prose, and the string is still there. Likewise
+`not.toContain('checked')` failed on the checklist copy "I checked the shadow run", and a
+before/after ordering assertion compared against the word "content" in the viewport meta tag. Every
+one was a test looking for a scary-looking substring instead of the property it meant. The fixes
+assert the property: no surviving tag, no `checked` **attribute**, and distinctive markers.
+
+### State
+
+2513 tests passing across 78 files, up from 2341 across 72. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 172 new tests: 21 on the surface boundary, 6 against
+real processes on two origins, 123 on the console package, and 22 driving the real console against
+the real staff API over a real PostgreSQL engine.
+
+Confirmed by hand: both API origins healthy and each answering 404 for the other's routes, the
+console refusing to start against the household origin with the reason in the message, and a
+signed-in caller holding no reviewer row seeing "nothing to show" above three standing blocker
+warnings rather than a permission error.

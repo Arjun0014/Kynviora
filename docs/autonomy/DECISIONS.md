@@ -1802,3 +1802,93 @@ default, and inventing one would put a legal claim on screen that no reviewer ap
 because an empty box reads as "fine here" - `23` D-014 drawn rather than written.
 
 **Sources.** `04` Phase 7.2; `07`; `09`; `23` D-014; trap 2.
+
+## DEC-066 - A process serves one surface, and the surface is required
+
+**Context.** `13` requires internal/admin APIs to be "separately authenticated/authorized and not
+exposed as user APIs". Separate authorization was already true - a reviewer role is a stored row
+and the refusal is a bare 404 - and separate exposure was not: `/v1/reviewer/queue` was registered
+on the same Fastify instance that serves `/v1/items`.
+
+**Decision.** `createServer` takes a required `surface` of `HOUSEHOLD` or `STAFF`. A household
+process registers no reviewer route; a staff process registers nothing else. There is no `BOTH`.
+
+**Rationale.** The only thing between a phone and the publication tables was a check. It is now
+also the absence of a handler, so the 404 arrives before any authorization runs - which a test
+proves with a database pool that throws on any query. The option is required rather than defaulted
+because a default decides, for every future route, which side of a security boundary it lands on,
+and decides it silently. The tests assert over the paths an instance actually registered rather
+than over a list of forbidden paths, so a new route on the wrong side fails.
+
+**Two listeners, one process, in development only.** `main.ts` binds a second instance on
+`KYNVIORA_STAFF_PORT` when one is set, sharing the process and the database. Two processes are the
+deployment shape and cannot be the development shape: PGlite is a single writer (DEC-037), and a
+separate staff process pointed at the same data directory overwrites it. The staff listener is off
+unless asked for.
+
+**Sources.** `13`; `14`; `DEV-016`; DEC-037.
+
+## DEC-067 - The staff console is its own package, and shares nothing with the household client
+
+**Context.** `@kynviora/contracts` already has a transport, an outcome union and a session type,
+and the console needs all three.
+
+**Decision.** `@kynviora/staff-console` implements its own, and depends on `@kynviora/domain` and
+nothing else. Neither `@kynviora/contracts` nor `@kynviora/presentation` is a dependency.
+
+**Rationale.** `13` asks for environment isolation between a user surface and a staff one. Reusing
+the household transport would need either a `STAFF` member on `ClientSession` - shipping reviewer
+session code in the Expo bundle, and making one union the place where two trust boundaries meet -
+or a refactor that widens the household client for the staff client's benefit. The presentation
+package is excluded for the reason `DEV-016` already gave: its copy rules are about what Kynviora
+says to a household, and reviewer-facing strings are not that.
+
+**The duplication buys a stronger rule.** The household transport refuses query parameters whose
+names look like credentials. The staff transport refuses query strings **entirely**, because no
+staff route takes one - a rule with no exceptions cannot be applied inconsistently later. Every
+identifier is checked as a UUID before it becomes a path segment.
+
+**Sources.** `13`; `14`; `DEV-016`.
+
+## DEC-068 - The reviewer queue is never ordered by urgency
+
+**Context.** A publication request carries `maxUrgency` and `evidenceLevel`, and a queue invites an
+order.
+
+**Decision.** The console renders the queue in the order the API returned it - oldest first - and
+`views.ts` exports no function that compares two requests. A test asserts the module has no export
+whose name suggests one.
+
+**Rationale.** On the household side `02` forbids alarm-optimised design. Here the argument is
+different and stronger: `maxUrgency` is stated by whoever _opened_ the request. Sorting by it would
+let a requester choose how soon their own request is looked at, by claiming an urgency - which is a
+governance control defeated from inside the workflow it protects. Oldest-first is also what `20`
+measures as queue age, so the screen and the metric describe the same thing.
+
+**The tally is per jurisdiction and never summed.** Migration `0012` requires each requested
+jurisdiction to reach the approval count on its own. A single "2 of 4" would read as half-done and
+names no quantity that exists; the shortfall is a list of jurisdictions, not a number.
+
+**Sources.** `02`; `04` Phase 6.6; `10`; `20`; migration `0012`.
+
+## DEC-069 - Nothing in the console is preselected, and the checklist is never offered in bulk
+
+**Context.** The decision form has three options and ten checklist items, and every one of them
+could have a default.
+
+**Decision.** No decision option is preselected, no checklist item renders ticked, no option
+carries a `recommended` or `default` field, and there is no control that ticks the checklist
+together. `ChecklistItemView.confirmed` is typed `false` rather than `boolean`.
+
+**Rationale.** `10` makes the second reviewer worth something because they check independently. A
+pre-ticked box, a "confirm all" control, or a remembered previous answer each turn ten judgements
+into one click, and the record afterwards is indistinguishable from ten real ones. A default of
+Approve would collect approvals from people who pressed the button that was already pressed. This
+is DEC-030's reasoning on a different surface: the software does not have an opinion, and a
+preselected control is an opinion nobody signed.
+
+**Absent, not disabled.** A control this caller may not use is not rendered, and a sentence states
+which rule removed it. On a separation-of-duties refusal a greyed-out Approve would be the
+requester learning their own request is waiting for somebody (DEC-045, one level up).
+
+**Sources.** `04` Phase 6.6; `10`; DEC-030; DEC-045.

@@ -158,3 +158,28 @@ implemented, the exact configuration required is documented, and independent wor
 - **To resolve**: obtain provider credentials, set the corresponding `KYNVIORA_PUSH_*` values,
   implement the adapter behind the existing port, and re-run the delivery suite against it. The
   lock-screen assertions in `15` A6 additionally need a physical device (`BLK-002`).
+
+## BLK-010 - No strong authentication for a reviewer account
+
+- **Class**: `EXTERNAL_CREDENTIAL`
+- **Status**: OPEN - worked around
+- **Blocks**: `13`'s reviewer console requirement of "MFA/passkey or approved strong
+  authentication"; `14`'s "strong MFA/passkeys" and "no shared accounts" for reviewer/admin
+  accounts; any claim that an action recorded in the console is attributable to a person.
+- **Detail**: Phase 1.1 has not chosen an auth provider, so the only identity in this repository
+  is the development header the API accepts behind `KYNVIORA_DEV_AUTH=1`. On a household surface
+  that is a development convenience; on the reviewer console it is a claim to publication
+  authority with nothing behind it, and `14` names reviewer compromise as the reason the whole
+  governance chapter exists.
+- **Workaround in place**: the console's sign-in page states that it is not an authentication
+  step, and says so again in a standing banner on every page. `StaffSession.strength` is a closed
+  union whose only member is `DEVELOPMENT_HEADER`, so a passkey provider lands as a second member
+  and the banner stops appearing because the value changed rather than because somebody removed
+  it. The strength grants nothing: authority is a stored `reviewer` row and always was, which an
+  end-to-end test shows by signing the same person in twice with only that row changing. A
+  development identity is refused outright over any non-loopback staff origin. Everything else
+  `13` and `14` ask for is implemented: absolute and idle session expiry, step-up at publish and
+  withdraw, an opaque server-side session, and an append-only audit of every privileged action.
+- **To resolve**: complete Phase 1.1, add a `PASSKEY` (or equivalent) member to
+  `AuthenticationStrength`, implement the challenge, and remove the development member from the
+  console's accepted strengths.

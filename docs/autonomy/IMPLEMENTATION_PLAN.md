@@ -193,9 +193,16 @@ of a second reviewer is that they check independently.
 the layering: two qualified reviewers approve a regulatory record and the Citation Gate refuses it
 anyway.
 
+The console interface now exists (`DEV-016`, closed): `packages/staff-console` and
+`services/staff-web`, on a third origin, with its own session policy. Building it also closed a gap
+in the API rather than only in the interface - `13` asks for internal APIs to be "separately
+authenticated/authorized **and not exposed as user APIs**", and only the first half was true, so
+`createServer` now takes a required `surface` and a staff route is absent from a household process
+rather than refused by it (DEC-066).
+
 Outstanding: this does **not** clear `BLK-006` - it builds the workflow a qualified reviewer would
-use, and none exists. There is no console interface and deliberately no mobile screen (`DEV-016`),
-and rule preview is deferred to Phase 6.7 (`DEV-017`).
+use, and none exists - and the console cannot authenticate anybody, which is `BLK-010`. There is
+still deliberately no mobile screen.
 
 **6.7**: complete. Migration `0013` adds `shadow_run`, `shadow_run_sample` and `replay_run`, and
 `packages/safety/src/shadow.ts` provides the run, the before/after comparison and the replay.
@@ -225,8 +232,9 @@ a high-impact rule is now shadow run, then request, then two approvals.
 
 69 tests across the safety (28), database (24) and API (17) suites. Outstanding: a historical run
 refuses `INGREDIENT_SENSITIVITY` and `DUPLICATE_ACTIVE_INGREDIENT` because the shelf join does not
-carry the ingredient declaration, and under-measuring would be worse than refusing (`DEV-018`);
-there is still no staff interface (`DEV-016`).
+carry the ingredient declaration, and under-measuring would be worse than refusing (`DEV-018`).
+`DEV-017`'s presentational remainder is closed: the console fetches the run a request names and
+shows its counts beside the checklist item that asks about them.
 
 ---
 
@@ -452,20 +460,41 @@ that does and does not cover.
 
 ---
 
+## The staff surface
+
+Not a spec phase, and recorded separately because it changed the shape of the deployment rather
+than the contents of a stage. There are three origins now.
+
+| Origin           | Serves                               | Holds                    |
+| ---------------- | ------------------------------------ | ------------------------ |
+| Household API    | `/v1/items`, `/v1/alerts`, the rest  | The database, under RLS  |
+| Staff API        | `/v1/reviewer/*` only                | The database, privileged |
+| Reviewer console | The pages a reviewer reads and posts | Nothing but its sessions |
+
+`createServer({ surface })` decides which set of routes a process registers, and the option is
+required so a new route cannot land on a security boundary by default (DEC-066). The console is
+`packages/staff-console` (session, client, view models, pages - depending on `@kynviora/domain`
+and nothing else, DEC-067) plus `services/staff-web` (the process, holding no database connection
+at all).
+
+Two listeners run in one process in development because PGlite is a single writer (DEC-037); they
+become two deployments unchanged when `BLK-001` clears.
+
 ## Immediate next work
 
-1. A staff reviewer console interface (`DEV-016`), on its own origin and session policy. The
-   console backend and the operational projection both exist with no interface in front of them.
-2. Phase 7.3: alert detail and explainability, which now has a list to open a detail from. The
+1. Phase 7.3: alert detail and explainability, which now has a list to open a detail from. The
    approved message templates already exist in `@kynviora/presentation`; what is missing is the
    route that assembles one alert's full context and the screen that renders it.
-3. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
+2. Phase 7.4's regulatory half: `diffIngredients` covers formulation, and the regulatory-version
+   diff - which changed, and whether it was a regulator acting or Kynviora correcting itself - is
+   outstanding.
+3. Phase 7.6: resolution and the Safety Receipt, which needs 7.3's detail to resolve from.
+4. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch and its authorization already exist; nothing calls them with a real occurrence.
 
 Done since this list was last written: revocation and the rest of `DEV-007`, caregiver delegation
-(`DEV-026`), Phase 4.3, Phase 7.1, Phase 7.2's UI, and the observability projections (`20`) - review-queue age for both
-queues, source freshness against each source's own declared cadence, extraction outcomes and
-catalog conflicts, with no verdict anywhere in the output.
+(`DEV-026`), Phase 4.3, Phase 7.1, Phase 7.2's UI, the observability projections (`20`), and the
+staff reviewer console with the API surface split behind it (`DEV-016`, `DEV-017`).
 
 ## What "complete" means here, and what it does not
 

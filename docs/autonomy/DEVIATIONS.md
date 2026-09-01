@@ -298,7 +298,7 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   once `BLK-007` clears, presenting each extracted line for confirmation before it enters the
   comparison.
 
-## DEV-016 - The reviewer console has a backend and no interface
+## DEV-016 - The reviewer console has a backend and no interface (CLOSED)
 
 - **Affected specification**: `04` Phase 6.6 lists a "source/evidence/legal-scope view" and a
   reviewer queue among its expected output, which implies a screen.
@@ -316,9 +316,21 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Temporary or permanent**: temporary. The API is the contract a console would build against.
 - **Risk**: low. Nothing is publishable today regardless (`BLK-006`), and the workflow is fully
   exercised by tests rather than by a screen.
-- **Required future work**: a separate staff application, on its own origin and its own session
-  policy, with the MFA/passkey and environment isolation `13` requires. It is deliberately not the
-  Expo app.
+- **Required future work**: ~~a separate staff application, on its own origin and its own session
+  policy~~ **done**. `packages/staff-console` holds the session, the client, the view models and
+  the pages; `services/staff-web` is the process. It runs on a third origin - the household API,
+  the staff API and the console are three - holds no database connection, and depends on neither
+  `@kynviora/contracts` nor `@kynviora/presentation`, because those are the household client and
+  the household's copy rules and `13` asks for environment isolation between the two surfaces.
+
+  Closing this also surfaced a genuine gap in the API rather than only in the interface. `13` asks
+  for internal APIs to be "separately authenticated/authorized **and not exposed as user APIs**",
+  and only the first half was true: `/v1/reviewer/*` was registered on the instance that serves
+  `/v1/items`. `createServer` now takes a required `surface`, so a staff route is absent from a
+  household process rather than refused by it.
+
+  What remains is not this deviation: the MFA/passkey half of `13`'s reviewer requirement is
+  `BLK-010`, and it is a credential, not an interface.
 
 ## DEV-017 - Rule preview is deferred to shadow mode (CLOSED by Phase 6.7)
 
@@ -561,3 +573,26 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   invite control at all. DEC-045 keeps a capability they cannot delegate absent rather than
   disabled; the same reasoning one level up, because the only reachable outcome of that control
   was a 404 after they had filled in a form.
+
+## DEV-027 - The staff session lifetimes are engineering defaults
+
+- **Affected specification**: `13` requires "session expiration" of the reviewer console and `14`
+  requires a "session timeout"; neither states a number, and `14` requires step-up at publish and
+  withdraw without saying how long one stays fresh.
+- **Expected behaviour**: lifetimes set by whoever owns the security policy for staff access,
+  informed by how reviewers actually work.
+- **Implemented behaviour**: three constants in `packages/staff-console/src/session.ts` - an
+  eight-hour absolute lifetime, a thirty-minute idle window, and a five-minute step-up freshness -
+  each enforced independently and each with a stated reason. The absolute bound is what limits a
+  stolen session; the idle window is what limits an abandoned desk; the step-up window is short
+  because `14` asks for the confirmation _at_ the action, and one that lasted the session would be
+  the control deleted and its name kept.
+- **Reason**: no product or security owner exists to set them, and a console with no expiry at all
+  would be worse than one with a defensible default. They are separated rather than collapsed into
+  one number precisely so that changing one does not silently change the others.
+- **Temporary or permanent**: temporary.
+- **Risk**: low, and in the safe direction - all three are shorter than a policy is likely to
+  choose. The API enforces its own step-up window and is the authority; the console's copy of it
+  only decides whether to send an assertion it already knows is stale.
+- **Required future work**: a security owner sets the three values; they move to configuration if
+  they need to differ per environment.
