@@ -596,3 +596,31 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   only decides whether to send an assertion it already knows is stale.
 - **Required future work**: a security owner sets the three values; they move to configuration if
   they need to differ per environment.
+
+## DEV-028 - An assessment does not record which inputs produced the match
+
+- **Affected specification**: `04` Phase 7.3 requires an alert to be independently understandable,
+  and the approved ingredient-sensitivity template names the exact ingredient and the exact
+  recorded sensitivity. `09` requires the reason for a match to be explainable.
+- **Expected behaviour**: an alert about an ingredient sensitivity says which ingredient matched
+  which recorded sensitivity, in the approved wording.
+- **Implemented behaviour**: `profile_assessment` stores `reasons` (machine codes),
+  `profile_fact_versions` and `formulation_version` - versions and codes, not identities. So the
+  detail route can say _that_ a substance in the declaration matched a recorded fact, and cannot
+  say _which_. `explanationFor` refuses to render the sensitivity template without them, and the
+  alert shows every fact, the reasons, the states and the source with no narrative.
+- **Reason**: the alternative was to re-derive it on the read path by joining the item's
+  formulation to the profile's allergy records and taking the intersection. That is a different
+  computation from the one the rule ran - the formulation and the facts may both have moved since
+  - so it could name a substance the rule did not match on. A confident, specific, approved-looking
+    sentence about the wrong ingredient is worse than no sentence, which is exactly what DEC-064
+    decided for the Lens.
+- **Temporary or permanent**: temporary.
+- **Risk**: moderate, and it is why this is written down. The affected alerts are readable but
+  less useful than the spec intends, and the gap is invisible until an ingredient rule is actually
+  published - which `BLK-006` currently prevents, so nobody has seen it yet.
+- **Required future work**: add the matched identifiers to `profile_assessment` - the substance
+  key and the profile fact ID the rule matched on - written by `evaluateRule` at evaluation time
+  and frozen like every other field on that row. It is a migration, a change to the `Assessment`
+  type, and a change to every fixture that builds one; it is not a read-path change, and it must
+  not become one.

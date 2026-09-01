@@ -1744,3 +1744,72 @@ Confirmed by hand: both API origins healthy and each answering 404 for the other
 console refusing to start against the household origin with the reason in the message, and a
 signed-in caller holding no reviewer row seeing "nothing to show" above three standing blocker
 warnings rather than a permission error.
+
+### Phase 7.3 - why you are seeing this
+
+The approved message templates had existed since the presentation layer was written and nothing
+rendered them. `alert_publication` carried an `explanation_template_id` that no code read, and the
+Safety screen listed a state per item with no way to ask what was behind it.
+
+**The exit criterion that shaped the design.** "The UI reveals what is known versus inferred" can
+be satisfied by a sentence, and a sentence would be a claim about the screen rather than a property
+of it - true on the day it was written and stale the first time a field moved. So it is a type:
+every value is an `AlertFact` carrying a `FactBasis`, and there is no constructor that makes one
+without.
+
+Six bases rather than two, and the extra four are the interesting part. "Known" is not one thing -
+a batch number somebody typed and a batch number read from the label are both known, and for a
+recall they are not remotely the same evidence. And `NOT_KNOWN` and `WITHHELD_FROM_THIS_SESSION`
+are opposite facts: one says the data is missing, the other says it exists and this session may not
+have it. Collapsing them would make an access decision look like ignorance.
+
+**The case that needed a decision rather than a fix.** A caregiver holding `VIEW_SAFETY` and not
+`VIEW_MEDICINES` is entitled to an alert about a medicine whose name they may not have - `03` group
+H makes those separate permissions and both facts are true at once. The first version inner-joined
+`owned_item` and answered 404, which reports an alert somebody may read as though it did not exist.
+The fix was already written down: DEC-026 settled that the caregiver alert view narrows _by column_
+and reports the withholding. So the joins are `LEFT`, row-level security narrows the item to NULL,
+and the view says which half is being kept back. It is deliberately not the "cannot explain" state,
+because Kynviora can explain that alert perfectly well and is choosing not to show all of it.
+
+**Two refusals worth keeping.** An explanation template this build does not have produces no
+narrative at all - a generic "a safety rule matched this item" is a sentence about somebody's
+medicine that no reviewer wrote. And an _approved_ template whose required context is missing gets
+the same treatment, because `batchRecallMessage` will happily render "null published a notice about
+specific batches" from an absent authority, and a sourceless claim about a recall is worse than
+none.
+
+**What the licence review costs, on screen.** `04` asks for the source reference "where allowed";
+`25` makes that a per-source legal question and `BLK-005` records that no review has happened. So
+every alert today withholds the reference and says so, while keeping the publisher and the date,
+which are not restricted. A silent gap would read as "there is no source" - the one direction this
+line must not fail in, because a person taking an alert to a pharmacist needs to know a regulator
+is behind it even when the citation cannot be reproduced.
+
+**What it exposed and did not fix.** The ingredient-sensitivity template names the exact ingredient
+and the exact recorded sensitivity, and the assessment records neither - only reason codes and
+input versions. Re-deriving them on the read path would mean intersecting the item's formulation
+with the profile's allergy records, which is a different computation from the one the rule ran and
+can name a substance the rule did not match on. That is DEC-064's failure with a different subject,
+so those alerts render without a narrative and `DEV-028` names the write-path fix.
+
+**A latent flake, found and fixed.** One integration test took the first `FIELD_DIFFERS` from the
+reconciliation response. A named line with no dosage form produces two, the order is not
+guaranteed, and it failed about one run in five with `expected null to be '999 mg'` - which names
+the strength and is caused by the dosage form. It now matches on the field as well as the kind.
+
+**And a self-inflicted one.** The phase-count paragraph written earlier this session drifted
+immediately: it was measured before the same commit moved 2.1 from `NOT_STARTED` to `IN_PROGRESS`.
+The paragraph now carries the command that counts the rows.
+
+### State
+
+2602 tests passing across 81 files, up from 2513 across 78. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 89 new tests: 42 on the view model and its copy, 27
+against a real PostgreSQL engine through the real route including the caregiver-withholding case,
+14 on the client's narrowing, and 6 end to end against a live server process.
+
+Nothing here is visible against the seed, and that is correct: no rule is approved (`BLK-006`) and
+no regulatory record passes the Citation Gate (`BLK-004`), so every safety line has a null alert
+identifier and the "why am I seeing this?" control appears nowhere. Absent rather than disabled,
+which is the same rule the Lens control already followed on that screen.

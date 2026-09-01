@@ -9,18 +9,18 @@ Last updated: 2026-09-01
 
 ## Current position
 
-|                    |                                                         |
-| ------------------ | ------------------------------------------------------- |
-| **Current stage**  | Stage 7 (Safety Watch), after the staff surface         |
-| **Current phase**  | Phase 7.3 next; `DEV-007` and `DEV-016` closed          |
-| **Last completed** | The reviewer console and the API surface split          |
-| **Branch**         | `master`                                                |
-| **Latest commit**  | `feat(staff): the reviewer console, on its own surface` |
-| **Baseline tag**   | `baseline-spec-only`                                    |
+|                    |                                                  |
+| ------------------ | ------------------------------------------------ |
+| **Current stage**  | Stage 7 (Safety Watch), after the staff surface  |
+| **Current phase**  | Phase 7.4 next; DEV-007, DEV-016, DEV-017 closed |
+| **Last completed** | Phase 7.3 - alert detail and explainability      |
+| **Branch**         | `master`                                         |
+| **Latest commit**  | `feat(safety): why you are seeing this`          |
+| **Baseline tag**   | `baseline-spec-only`                             |
 
 ## Verification state
 
-- **2513 tests passing**, 0 failing, across 78 files.
+- **2602 tests passing**, 0 failing, across 81 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -84,6 +84,7 @@ the API will not distinguish them.
 | Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                                     |
 | Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006)    |
 | Staff surface split, console package, console process      | Complete, 172 tests; **authenticates nobody** (BLK-010) |
+| Alert detail, explainability, report-incorrect             | Complete, 89 tests; **no alert to open** (BLK-006)      |
 | Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                      |
 | End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                      |
 | Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                     |
@@ -121,6 +122,25 @@ documented configuration requirements.
 
 ## Immediate next task
 
+**Phase 7.3 is finished, and blocked on its first exit criterion.** `GET /v1/alerts/:alertId`
+assembles everything `04` lists and `POST /v1/alerts/:alertId/report-incorrect` is the correction
+action. The second exit criterion is met structurally - every fact carries a `FactBasis` and there
+is no constructor that omits one (DEC-070). The first needs usability participants to explain why
+they received a test alert, and nobody here can convene them, so the phase is `BLOCKED_EXTERNAL`
+rather than complete.
+
+Three decisions on that phase are worth not undoing: an explanation template this build does not
+have produces **no narrative at all** (DEC-071); a caregiver who may see an alert and not the item
+is shown the alert with the item withheld and the withholding stated (DEC-072); and a source's
+legal reference is withheld until its licence review is done, and the screen says so (DEC-073).
+
+`DEV-028` records what 7.3 exposed and did not fix: an assessment stores versions and reason codes
+but not _which_ ingredient matched _which_ recorded sensitivity, so the approved sensitivity
+template cannot be filled from stored data. The fix is a write-path change and must not become a
+read-path one.
+
+### What landed before it
+
 **`DEV-016` is finished, and so is `DEV-007`.** There are three origins now: the household API, a
 staff API that serves `/v1/reviewer/*` and nothing else, and the reviewer console on its own port.
 `createServer` takes a **required** `surface`, so a staff route is absent from a household process
@@ -138,17 +158,15 @@ in a banner.
 
 Next, in the order they build on each other:
 
-1. **Phase 7.3** - alert detail and explainability. `04` lists ten things one alert must show:
-   affected person, exact item, match confidence, reason for match, evidence level, urgency,
-   jurisdiction/source/date, source reference where allowed, next action, limitations, and a
-   report-incorrect action. The Safety inbox from 7.1 is the list to open one from, and the
-   approved message templates already exist in `@kynviora/presentation`. Missing: the route that
-   assembles one alert's full context, and the screen.
-2. **Phase 7.4's regulatory half.** `diffIngredients` covers formulation. The regulatory-version
+1. **Phase 7.4's regulatory half.** `diffIngredients` covers formulation. The regulatory-version
    diff - what changed, and whether a regulator acted or Kynviora corrected itself - is the
    outstanding half, and its exit criterion is exactly that distinction.
-3. **Phase 7.6** - resolution and the Safety Receipt, which needs 7.3's detail to resolve from and
-   must not erase historical assessment.
+2. **Phase 7.6** - resolution and the Safety Receipt. `safety_receipt` already exists with its
+   full vocabulary and 7.3 writes one member of it (`REPORTED_INCORRECT_MATCH`). What remains is
+   the rest of the vocabulary, the versioned receipt, and making corrections visible without
+   erasing historical assessment.
+3. **Phase 7.5** - notification policy. Most of it landed with 8.2; what `04` still asks for is
+   deduplication, a digest policy, quiet hours and current-state revalidation on open.
 4. **A missed-dose scheduler** (`DEV-011`), once the grace window is a decided product question.
 
 Note what none of this clears: `BLK-006`. The reviewer console is the workflow a qualified reviewer
@@ -157,12 +175,24 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 
 ## Next three planned tasks
 
-1. Phase 7.3 - the alert detail route and screen.
-2. Phase 7.4's regulatory-version diff, distinguishing a regulator's action from a correction.
-3. Phase 7.6 - resolution outcomes and the versioned Safety Receipt.
+1. Phase 7.4's regulatory-version diff, distinguishing a regulator's action from a correction.
+2. Phase 7.6 - resolution outcomes and the versioned Safety Receipt.
+3. Phase 7.5's remainder - deduplication, digests, quiet hours, revalidation on open.
 
 ## Recent decisions worth knowing
 
+- **DEC-070** - where a fact came from is a **type**. Every value on the alert detail carries a
+  `FactBasis` and there is no constructor without one, so a new field cannot reach the screen
+  unlabelled. Six bases, not two: a batch number read off the pack and one somebody typed are both
+  "known" and are not the same evidence, and `NOT_KNOWN` and `WITHHELD_FROM_THIS_SESSION` are
+  opposite facts.
+- **DEC-071** - an explanation template this build does not have produces **no narrative**, and so
+  does an approved template whose required context is missing. A generic sentence about somebody's
+  medicine is content no reviewer approved.
+- **DEC-072** - a caregiver holding `VIEW_SAFETY` and not `VIEW_MEDICINES` sees the alert with the
+  item withheld, not a 404. The joins are `LEFT` so row-level security narrows rather than removes.
+- **DEC-073** - a source's legal reference and its required attribution are shown only where the
+  licence review is `APPROVED`. The publisher and the date are not restricted. `BLK-005`.
 - **DEC-066** - a process serves **one** surface and the option is required. `createServer` has no
   `BOTH`, so a new route cannot land on the wrong side of a security boundary by default. Two
   listeners run in one development process only because PGlite is a single writer (DEC-037).
@@ -631,3 +661,20 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 91. Do not reuse one rule across two console fixtures that both open a publication request.
     `publication_request_open_idx` allows one open request per target and action, so the second
     fails with a 500 that reads as a bug in the route.
+92. Do not fill an approved safety template from data re-derived on the read path. The assessment
+    stores versions and reason codes, not the identities it matched on (`DEV-028`), and joining
+    the lists afresh can name a substance the rule did not match - DEC-064's failure with a
+    different subject.
+93. Do not add a generic fallback explanation for an unrecognised template identifier. The absence
+    of a narrative is the design (DEC-071).
+94. Do not turn a withheld half of an alert into a 404, and do not render it as `NOT_KNOWN`. The
+    two are opposite facts, and the joins to `profile` and `owned_item` are `LEFT` for exactly
+    this (DEC-072).
+95. Do not show a source's legal reference or its attribution unless `license_review_state` is
+    `APPROVED`. Today that is none of them (DEC-073, `BLK-005`).
+96. Do not `.find()` a difference by kind alone in a reconciliation test. A named line with no
+    dosage form produces two `FIELD_DIFFERS` rows and the order is not guaranteed; match on the
+    field as well. It failed about one run in five and blamed the wrong thing.
+97. Do not use `git add -A` to stage a commit in this repository. `docs/autonomy/
+last_session_messeges.md` is untracked on purpose and was swept into a feature commit that
+    way; stage paths explicitly.

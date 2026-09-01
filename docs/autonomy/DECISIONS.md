@@ -1892,3 +1892,94 @@ which rule removed it. On a separation-of-duties refusal a greyed-out Approve wo
 requester learning their own request is waiting for somebody (DEC-045, one level up).
 
 **Sources.** `04` Phase 6.6; `10`; DEC-030; DEC-045.
+
+## DEC-070 - Where a fact came from is a type, not a sentence
+
+**Context.** `04` Phase 7.3's second exit criterion is "the UI reveals what is known versus
+inferred".
+
+**Decision.** Every value on the alert detail is an `AlertFact` carrying a `FactBasis`, and there
+is no constructor that produces one without a basis. The bases are `RECORDED_BY_A_PERSON`,
+`READ_FROM_THE_PACK`, `PUBLISHED_BY_A_SOURCE`, `COMPUTED_BY_KYNVIORA`, `NOT_KNOWN` and
+`WITHHELD_FROM_THIS_SESSION`.
+
+**Rationale.** A sentence saying "some of this is inferred" is a claim about the screen rather
+than a property of it, and it goes stale the first time a field moves. A type means a new field
+cannot arrive on the screen unlabelled.
+
+**Six bases rather than two.** "Known" is not one thing: a batch number somebody typed and a batch
+number read off the label are both known and are not the same evidence for a recall, which is the
+field a recall turns on. `NOT_KNOWN` and `WITHHELD_FROM_THIS_SESSION` are opposite facts - the
+first says the data is missing, the second says it exists and this session may not have it - and
+collapsing them would make an access decision look like ignorance.
+
+**A missing value is never reported as recorded.** `fact()` forces `NOT_KNOWN` when the value is
+absent, whatever basis the caller passed, so an absent batch number cannot be presented as
+something a person entered.
+
+**Sources.** `04` Phase 7.3; `18`; DEC-026; DEC-064.
+
+## DEC-071 - An explanation this build cannot write is not written
+
+**Context.** `assessment_rule_version.explanation_template_id` is free text, frozen onto the
+assessment at evaluation time. The presentation layer holds three approved templates.
+
+**Decision.** An identifier outside the approved list - or an approved one whose required context
+is missing - produces **no narrative at all**. The detail shows the facts, the states, the reasons
+and the source, and says plainly that Kynviora will not write an explanation of its own.
+
+**Rationale.** The alternative is a generic sentence, and a generic sentence about somebody's
+medicine is content no reviewer approved - which is the thing `10`'s content review exists to
+prevent. `23` D-014's rule ("an absence must never render as something else") applied to prose.
+
+**Missing context counts as much as an unknown identifier.** `batchRecallMessage` will happily
+produce "null published a notice about specific batches" from an absent authority. A sourceless
+claim about a recall is worse than no narrative, so the required fields are checked before the
+template is called.
+
+**Sources.** `04` Phase 7.3; `10`; `23` D-014.
+
+## DEC-072 - A caregiver who may see the alert and not the item is shown the alert
+
+**Context.** `03` group H makes safety access and shelf access separate permissions. A caregiver
+holding `VIEW_SAFETY` and not `VIEW_MEDICINES` is entitled to an alert about a medicine whose name
+they may not have.
+
+**Decision.** The detail route joins `profile` and `owned_item` with `LEFT JOIN`, so row-level
+security narrows them to NULL rather than removing the alert. The view marks those facts
+`WITHHELD_FROM_THIS_SESSION`, renders no narrative (every approved template names both the person
+and the item in its first two sentences), and states which half is being withheld.
+
+**Rationale.** An inner join would answer 404 - an alert this person is entitled to read, reported
+as though it did not exist. A blank would read as Kynviora not knowing. DEC-026 had already
+settled the shape for the caregiver alert view: the withholding is reported rather than shown as a
+blank.
+
+**It is not the "cannot explain" state.** Kynviora can explain this alert perfectly well and is
+not showing all of it to this session. Rendering `UNEXPLAINABLE` would blame the build for an
+access decision.
+
+**The other direction really is absence.** Without `VIEW_SAFETY` the alert row itself is invisible,
+so there is nothing to withhold half of, and the answer is the same 404 a stranger gets.
+
+**Sources.** `03` group H; `04` Phase 7.3; DEC-026; DEC-039.
+
+## DEC-073 - A source reference is withheld until its licence review is done
+
+**Context.** `04` Phase 7.3 asks for a "source link/retained reference **where allowed**".
+
+**Decision.** The legal reference and the required attribution are shown only where
+`source_registry_entry.license_review_state` is `APPROVED`. Otherwise the detail says the reference
+is withheld pending licence review and names `BLK-005`. The publisher, the jurisdiction and the
+publication date are not restricted and stay.
+
+**Rationale.** `25` makes redistribution a per-source legal question, `license_review_state`
+defaults to `NOT_REVIEWED`, and `BLK-005` records that no review has been performed for any source.
+A silent gap would read as "there is no source", which is the one direction this line must not fail
+in - a person taking an alert to a pharmacist needs to know a regulator is behind it even when the
+citation cannot be reproduced.
+
+**Attribution travels with the reference.** Attribution names the licence, so showing it while
+withholding what it licenses would disclose the thing the review is about.
+
+**Sources.** `04` Phase 7.3; `25`; `BLK-005`.

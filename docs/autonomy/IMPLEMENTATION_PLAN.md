@@ -244,7 +244,7 @@ shows its counts beside the checklist item that asks about them.
 | ----- | ------------------------------- | ------------------ |
 | 7.1   | Assessment states and inbox     | `COMPLETE`         |
 | 7.2   | Global Regulatory Lens          | `BLOCKED_EXTERNAL` |
-| 7.3   | Alert detail and explainability | `NOT_STARTED`      |
+| 7.3   | Alert detail and explainability | `BLOCKED_EXTERNAL` |
 | 7.4   | Evidence and Regulatory Diff    | `IN_PROGRESS`      |
 | 7.5   | Notification policy             | `NOT_STARTED`      |
 | 7.6   | Resolution and Safety Receipt   | `NOT_STARTED`      |
@@ -254,6 +254,15 @@ shows its counts beside the checklist item that asks about them.
   in usability testing" - which requires human participants (`BLK-008`-shaped: an evaluation
   nobody here can run). The Lens is also unreachable from the shelf until an item has a substance
   with an `EXACT` ingredient mapping, which needs guided capture (`DEV-024`, `BLK-007`).
+- **7.3**: every item of expected output is built and tested. `GET /v1/alerts/:alertId` assembles
+  the person, the item, the confidence, the reasons, the evidence level, the urgency, the
+  jurisdiction, the source and its date, the reference where licensing allows one, the next step,
+  the limitations and the coverage statement; `POST /v1/alerts/:alertId/report-incorrect` is the
+  correction action. The second exit criterion - "the UI reveals what is known versus inferred" -
+  is met structurally: every fact carries a {@link FactBasis} and there is no way to build one
+  without. The **first** criterion is what blocks the phase: "usability participants can explain
+  why they received a test alert" needs human participants, which nobody here can convene. Same
+  shape as 7.2's block.
 - **7.4**: `diffIngredients` provides the formulation half; the regulatory-version diff is
   outstanding.
 
@@ -502,15 +511,20 @@ Twenty-five phases are marked `COMPLETE` above. In every case that means the log
 implemented, tested, documented and committed - and in most cases the tests execute against a real
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
-It does **not** mean the phase is releasable. Eight phases carry exit criteria that depend on a
-device, a credential, a labelled dataset, or a qualified human reviewer, and those are marked
-`BLOCKED_EXTERNAL` (seven) or `BLOCKED_TECHNICAL` (one) rather than complete even where all
-buildable work is finished. `BLOCKERS.md` records what each one needs.
+It does **not** mean the phase is releasable. Nine phases carry exit criteria that depend on a
+device, a credential, a labelled dataset, human participants, or a qualified human reviewer, and
+those are marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even
+where all buildable work is finished. `BLOCKERS.md` records what each one needs.
 
-The counts above are the tables' own, recomputed on 2026-09-01 rather than remembered: 25
-`COMPLETE`, 8 `IN_PROGRESS`, 10 `NOT_STARTED`, 7 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over
-the 51 phases `04` defines. A prose count that drifts from the table it describes is the quiet way
-a status document stops being one, so it is derived by counting the rows.
+The counts above are the tables' own, recounted whenever a status changes: 25 `COMPLETE`, 9
+`IN_PROGRESS`, 8 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
+`04` defines. A prose count that drifts from the table it describes is the quiet way a status
+document stops being one - and the first version of this paragraph drifted immediately, because it
+was measured before the same commit moved 2.1. Count the rows:
+
+```bash
+grep -E "^\| [0-9]\.[0-9] " docs/autonomy/IMPLEMENTATION_PLAN.md | grep -oE "COMPLETE|NOT_STARTED|IN_PROGRESS|BLOCKED_EXTERNAL|BLOCKED_TECHNICAL" | sort | uniq -c
+```
 
 The MVP is complete at the end of Stage 9. It is not close to that, and the largest remaining
 gaps are the ones no amount of engineering closes on its own: clinical and regulatory review
