@@ -933,3 +933,85 @@ format all clean via `npm run verify`, exit 0. 21 new tests: 12 for the developm
 `npm run dev` now starts a server against a persisted PostgreSQL with a synthetic household in it.
 The remaining gap between that and holding the app on a phone is `DEV-007` - the Expo screens are
 still placeholders - and `BLK-002`, which needs an Android SDK on a real machine.
+
+### DEV-007 - wiring the Expo screens to the API
+
+Every feature phase since Stage 7 left a screen that typechecked against the presentation package
+and was connected to nothing. The API contract and the presentation layer both existed and were
+tested; what did not exist was anything joining them, and the join is where the interesting
+mistakes were waiting.
+
+**The shape.** A new `@kynviora/contracts` package - which had existed as a `package.json` and an
+empty directory since Stage 0 - now holds the configuration, the session, the transport, the typed
+client, the outcome union and the view models. The Expo app holds a provider, a hook and the
+components. The split is not tidiness: `apps/**` is excluded from the test run and there is no
+renderer here (`BLK-002`), so anything decided inside a component is decided where nothing can
+check it. Moving the decisions into a package put them under test; `DEV-021` records what that
+does and does not buy.
+
+**The decision this phase existed to get right.** The API answers `PERMISSION_DENIED` with 404 so
+it is not an existence oracle. That is worth nothing if the client reads the code out of the body
+and renders "you do not have permission" - which is the obvious thing to write, and which hands
+back on the screen precisely the fact the status code was chosen to withhold. So the outcome union
+has no member meaning refusal, `UNAVAILABLE` carries only its `kind`, and `EMPTY` and `UNAVAILABLE`
+share their tone, their retry label and their content flag. Tests enumerate the union and assert
+no member matches `/DENIED|FORBIDDEN|REFUSED/`, and the integration suite asks a stranger for a
+real profile and for an invented one and compares the two resources (DEC-039).
+
+**Two states that were one.** The mobile `offline` copy read "This shows what Kynviora last saved
+on this device". There is no cache behind these screens, so on an offline first load that sentence
+described data the user was not looking at. `OFFLINE` now means the check did not happen and there
+is nothing on screen; `STALE` means something older is on screen and could not be refreshed.
+Neither names where content came from, because the answer differs between a failed refetch and a
+future local store and the reader does not need to know (DEC-041).
+
+**What an unrecognised value means.** Seven vocabularies are narrowed out of responses and each
+needed an answer for a value this client does not know. All of them fall back to the member that
+asserts least - `UNVERIFIED` not `CONFIRMED`, `REVOKED` not `ACTIVE` - except urgency, which falls
+back to `INFORMATIONAL` rather than to something louder, because "act now" raised by a parse
+failure is a false alarm with a medicine's name on it. A review task kind and a caregiver
+capability have no safe fallback at all, since the presentation layer holds one description per
+member and no default, so those rows are dropped and counted (DEC-040).
+
+**A bug found by running it.** `npm run dev` runs with `services/api` as its working directory and
+`npm run migrate` runs with `db`, and `KYNVIORA_LOCAL_DB_DIR` defaulted to a relative path - so the
+two commands opened different databases. PGlite is a single writer, so the second is not a second
+connection, it is a separate empty database: migrating and then starting the server would have
+shown an empty shelf and read as data loss. The same class of failure as the standalone seed
+DEC-037 records, arriving by a different route. `resolveDataDir` now anchors at the workspace root
+(DEC-042).
+
+**Dogfooding it.** The shipped client was driven against a live `npm run dev` server rather than
+only against a test fixture. The owner sees three items with three separate verification
+statements; a stranger sees `EMPTY` with the same words as a genuinely empty shelf; an anonymous
+caller sees `UNAUTHENTICATED`; Safety is `EMPTY` with its coverage sentence; an unreachable server
+produces `OFFLINE`. That is the first time the whole path has been observed working rather than
+asserted.
+
+### Things worth recording
+
+- The screen-state union and its copy moved from the React component into
+  `@kynviora/presentation`. They were the one family of user-visible strings in the codebase that
+  no scan looked at, because `apps/**` is excluded. They now pass `findForbiddenClaims` and a
+  shaming-language check like every other string.
+- The client refuses a development identity header to any non-loopback origin, mirroring
+  `devAuth.ts` refusing under `NODE_ENV=production`. One side refusing is a control; both sides
+  refusing is a boundary.
+- `buildUrl` refuses a query parameter whose name looks like a credential, which makes trap 11 a
+  runtime failure rather than a code review somebody has to remember.
+- Trap 13 caught one more file. Writing `\\b` inside a heredoc collapsed to `\b`, which Python
+  then wrote as a real backspace character - so a regex that should have had word boundaries had
+  control characters instead, and the test passed for the wrong reason. Found by noticing the
+  escape was missing from the file while the assertion still passed. Rebuilt with `chr(92)` and
+  re-scanned the repository.
+
+### State
+
+2028 tests passing across 59 files, up from 1902 across 50. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 126 new tests: 14 for the screen states, 94 for the
+contracts package (configuration, transport, outcomes, resources, client surface, view models),
+14 for the client against a real server process, and 4 for the data directory.
+
+`DEV-007` is not closed. Five destinations read real data; two things write. The invitation,
+revocation, task-completion, Visit Pack and reconciliation flows each need a screen of their own,
+and `DEV-022` records why each is a screen rather than a button.

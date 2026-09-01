@@ -81,6 +81,14 @@ npm --prefix apps/mobile run android
 Requires an Android SDK and a development build (`BLK-002`). Expo Go will not work: the encrypted
 local store uses SQLCipher, which needs `npx expo prebuild` first.
 
+Point the app at the server with `EXPO_PUBLIC_API_BASE_URL` and give it an identity with
+`EXPO_PUBLIC_DEV_USER_ID` - see `.env.example`. The client refuses to send a development identity
+to anything but a loopback origin, mirroring the server's refusal under `NODE_ENV=production`.
+
+Today, Shelf, Safety, Care and You read real data. The write flows - inviting a caregiver,
+completing a review task, generating a Visit Pack, resolving a reconciliation difference - exist on
+the client and do not have screens yet (`DEV-022`).
+
 ---
 
 ## What this is not

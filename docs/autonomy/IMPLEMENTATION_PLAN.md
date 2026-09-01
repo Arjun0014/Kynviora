@@ -396,13 +396,35 @@ header-based development identity that fails closed three ways and grants no sta
 
 ---
 
+## Wiring the screens (`DEV-007`, partly done)
+
+A new `@kynviora/contracts` package holds the client every surface shares: configuration, the
+session, the transport, the outcome union, the resource model and the view models. The five
+primary destinations read real data through it.
+
+| Destination | Reads                               | State                          |
+| ----------- | ----------------------------------- | ------------------------------ |
+| Today       | `GET /v1/profiles/:id/review-tasks` | Wired                          |
+| Shelf       | `GET /v1/items`                     | Wired, three verification axes |
+| Safety      | `GET /v1/alerts`                    | Wired; empty by design         |
+| Care        | `GET /v1/caregiver-grants`          | Wired, read-only               |
+| You         | `GET/PUT .../notification-*`        | Wired, reads and writes        |
+
+Still to build, each because it needs a screen rather than a button (`DEV-022`): the invitation
+flow with its once-shown token, the step-up prompt, a per-record-kind task editor for completing
+a review task, the Visit Pack selection and review flow, and the reconciliation difference
+resolution. Every one exists on the client and is exercised by tests.
+
+`DEV-021` records that screen behaviour is tested in the packages rather than in the app, and what
+that does and does not cover.
+
+---
+
 ## Immediate next work
 
-1. Wire the Expo screens to the API contract, replacing the placeholder empty states with the
-   Shelf, Trust Passport, Regulatory Lens, caregiver, Visit Pack, notification, Review Inbox and
-   reconciliation surfaces the presentation package already supports (`DEV-007`). This is now the
-   largest gap between "implemented" and "usable", and the runnable stack is what makes it
-   testable end to end rather than against a mock.
+1. Finish `DEV-007`: the five write flows above, starting with the review task editor - it is the
+   one that closes Phase 8.3's loop, and completing a task writes to the authoritative record
+   rather than ticking a box (DEC-027).
 2. Observability projections (`20`): review-queue age, ingestion failure rate, catalog
    cache-hit rate, assessment recomputation throughput. The review-queue age becomes measurable
    once inbox derivation moves behind a scheduler (`DEV-013`).

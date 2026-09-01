@@ -411,3 +411,53 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Required future work**: resolve `BLK-001`, add a pooled implementation, and re-run the
   authorization suite against it - the suite is the thing that has to pass unchanged for the swap
   to be trustworthy.
+
+## DEV-021 - Screen behaviour is tested in a package, not in the app
+
+- **Affected specification**: `04` Phase 0.3 and `24` (UX done criteria), `06` (every critical
+  route defines its states).
+- **Expected behaviour**: the screens are tested as screens - rendered, interacted with, and
+  asserted against.
+- **Implemented behaviour**: every decision a screen makes lives in `@kynviora/contracts` or
+  `@kynviora/presentation` and is tested there in Node: the state union and its copy, the mapping
+  from an API outcome to a state, the view models, and every vocabulary narrowing. The React
+  components take those results as props and render them. The Expo app itself is covered by `tsc`
+  only.
+- **Reason**: `BLK-002`. There is no Android SDK, no emulator and no device here, and `apps/**` is
+  excluded from the test run. A React renderer could be added, but it would test the components
+  rather than the app - and the decisions worth checking are not "does this `View` appear", they
+  are "does a 404 read as a refusal" and "what does an unknown verification value claim". Those
+  are now checked, where before they lived inside a component nothing looked at.
+- **Temporary or permanent**: partly permanent, and deliberately. Keeping the logic out of the
+  components is better design regardless of the blocker. What is temporary is the absence of any
+  render test at all, and of any device verification of the accessibility behaviour `18` requires.
+- **Risk**: a component could render the right data in the wrong place, use a token it should not,
+  or break a touch target, and nothing here would catch it. The accessibility properties in
+  particular - announcement order, font scaling, 48dp targets - are asserted about the tokens and
+  not about a rendered tree.
+- **Required future work**: resolve `BLK-002`, then add render tests for the five primary
+  destinations and run the `18` accessibility checks on a device. Until then, treat "the app
+  typechecks and its logic is tested" as exactly that claim and not as "the screens work".
+
+## DEV-022 - The Expo screens read, and write only two things
+
+- **Affected specification**: `04` Phases 8.1, 8.3, 8.4, 8.5 (caregiver, inbox, Visit Pack,
+  reconciliation), `06` Journeys.
+- **Expected behaviour**: each feature's screen performs that feature's whole workflow.
+- **Implemented behaviour**: the five primary destinations are wired to real reads - profiles,
+  shelf, alerts, review tasks, caregiver grants, notification settings - and the only writes are
+  the notification preference and the recording of a dose event. Inviting a caregiver, revoking a
+  grant, completing a review task, generating a Visit Pack and resolving a reconciliation
+  difference all exist on the client and are exercised by tests; none has a screen yet.
+- **Reason**: each of those writes needs a screen of its own with a real interaction behind it. An
+  invitation returns a token shown once and unrecoverable afterwards (DEC-018); a revocation is
+  behind step-up (`14`); completing a review task writes to the authoritative record and so needs
+  the editor for that record kind (DEC-027); a Visit Pack quotes a digest of exactly what the user
+  reviewed (DEC-023). Wiring a button to each without those screens would produce controls that
+  fail in ways the user cannot act on.
+- **Temporary or permanent**: temporary.
+- **Risk**: low, and one part worth naming: the invite and revoke controls are present and do
+  nothing, which teaches a user they are broken. They were already present before this work; the
+  handlers now carry comments saying what each is waiting for.
+- **Required future work**: an invitation screen (token shown once, never logged), a step-up
+  prompt, a per-record-kind task editor, and the Visit Pack selection and review flow.

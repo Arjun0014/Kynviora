@@ -13,6 +13,7 @@
     "paths": {
       "@/*": ["src/*"],
       "@kynviora/domain": ["../../packages/domain/src/index.ts"],
+      "@kynviora/contracts": ["../../packages/contracts/src/index.ts"],
       "@kynviora/presentation": ["../../packages/presentation/src/index.ts"],
       "@kynviora/catalog": ["../../packages/catalog/src/index.ts"]
     }

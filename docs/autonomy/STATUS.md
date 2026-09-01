@@ -98,15 +98,18 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Wire the Expo screens to the API contract** (`DEV-007`). Every feature phase since Stage 7 has
-left a screen that typechecks against the presentation package and is not connected to anything:
-Shelf, Trust Passport, Regulatory Lens, caregiver access, Visit Pack, notification settings, Review
-Inbox and reconciliation. The presentation layer and the API contract both exist and are tested, so
-this is wiring rather than design - and it is the largest gap between "implemented" and "usable".
+**Finish the `DEV-007` write flows.** Today, Shelf, Safety, Care and You now read real data through
+the shared client, and the only writes are the notification preference and a dose event. Five
+flows remain, and each needs a screen rather than a button (`DEV-022`):
 
-There is now a server to wire them **to**: `npm run dev` starts a real process against a persisted
-database with a synthetic household in it, so the wiring can be tested end to end rather than
-against a mock of a contract.
+1. The **review task editor**, per record kind. Best first: it closes Phase 8.3's loop, and
+   completing a task writes to the authoritative record rather than ticking a box (DEC-027).
+2. The **caregiver invitation** screen. The token is shown once and is unrecoverable afterwards
+   (DEC-018), and it must never reach a URL, a log or an exception (trap 11).
+3. The **step-up prompt**, which revocation and export both need (`14`).
+4. The **Visit Pack** selection and review flow, which quotes a digest of exactly what the user
+   reviewed (DEC-023).
+5. The **reconciliation** difference resolution, where the side is stated by a person (DEC-030).
 
 Alternatively **Phase 4.3** (dose events and adherence history) or **Phase 7.1** (assessment states
 and inbox), both fully implementable with no external dependency.
@@ -210,6 +213,22 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
   closed three ways: it needs `KYNVIORA_DEV_AUTH=1` exactly, it **throws** under
   `NODE_ENV=production`, and with no header it returns `null`. It grants **no** reviewer role,
   because a header is a client claim and `14` says staff roles are never inferred from one.
+
+- **DEC-039** - the client has **no** outcome and the screen union has **no** state meaning "you
+  are not allowed". A 404 becomes `UNAVAILABLE`, which carries only its `kind` and reads exactly
+  like `EMPTY`. The API answers `PERMISSION_DENIED` with 404 so it is not an existence oracle, and
+  a client that rendered "you do not have permission" would hand that fact back on the screen.
+- **DEC-040** - an unrecognised value from the server claims **less**: `UNVERIFIED` not
+  `CONFIRMED`, `REVOKED` not `ACTIVE`, `GENERIC` not `NAMED`. Urgency is the exception and falls
+  back to `INFORMATIONAL`, because a false alarm with a medicine's name on it is the worse
+  failure. A review task kind and a caregiver capability are dropped and counted instead, because
+  the presentation layer has no default description to give them.
+- **DEC-041** - `OFFLINE` and `STALE` are different states. `OFFLINE` means the check did not
+  happen and nothing is on screen; `STALE` means older content is on screen and could not be
+  refreshed. A failed refresh keeps the content and labels it. `resourceFor` never carries a value
+  for a failed outcome, so a banner over discarded data is not expressible.
+- **DEC-042** - `KYNVIORA_LOCAL_DB_DIR` is resolved against the workspace root, not the working
+  directory, because `npm run dev` runs from `services/api` and `npm run migrate` runs from `db`.
 
 ## Traps to avoid on resume
 
@@ -319,3 +338,19 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 37. The composition root is not an exception to the `new Date()` ban. `systemClock()` is the one
     sanctioned source of ambient time, and opening a second one in the file nobody injects into is
     how the rule erodes. The logger takes the clock too.
+38. Do not add a `FORBIDDEN`, `PERMISSION_DENIED` or `NO_ACCESS` member to `ApiOutcome` or to
+    `ScreenState`, and do not make `UNAVAILABLE` carry a code, a message or a correlation ID.
+    Tests enumerate both unions and compare the `UNAVAILABLE` and `EMPTY` presentations. The
+    absence is what makes the 404 decision worth anything (DEC-039).
+39. Do not put user-visible copy inside a React component in `apps/mobile`. `apps/**` is excluded
+    from the test run, so a string defined there is the one kind of copy no scan looks at. Words
+    live in `@kynviora/presentation`; components render them.
+40. Do not give the client a method that evaluates a rule, computes a severity, or publishes
+    anything. Tests enumerate the client's own keys and assert no name matches
+    `/evaluate|assess|score|severity|publish|approve/`. DEC-010 keeps the rule engine server-side.
+41. Do not have `useResource` discard content when a refresh fails. It returns `STALE` when there
+    is previous content, which keeps a medicine list on screen and says it is older than it looks
+    (DEC-041).
+42. Do not read `process.env` at module scope in the Expo app. `EXPO_PUBLIC_*` values are inlined
+    at build time and there is no `process.env` on a device; `ApiProvider` reads them once and
+    hands the result down, which is also what makes the resolution testable.

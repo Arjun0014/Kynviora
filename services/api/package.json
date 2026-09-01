@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@kynviora/catalog": "*",
+    "@kynviora/contracts": "*",
     "@kynviora/db": "*",
     "@kynviora/domain": "*",
     "@kynviora/regulatory": "*",

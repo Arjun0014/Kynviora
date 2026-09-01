@@ -11,8 +11,11 @@
 
 import { PGlite } from '@electric-sql/pglite';
 import { applyMigrations } from './runtime.js';
+import { resolveDataDir } from './migrations.js';
 
-const dataDir = process.env.KYNVIORA_LOCAL_DB_DIR ?? '.kynviora-data';
+// Anchored at the workspace root, so this and `npm run dev` open the same database
+// whichever directory the script happens to run from.
+const dataDir = resolveDataDir(process.env.KYNVIORA_LOCAL_DB_DIR);
 
 async function main(): Promise<void> {
   const db = await PGlite.create(dataDir);

@@ -27,7 +27,8 @@ import {
 } from '@kynviora/presentation';
 import type { VisitPackSection } from '@kynviora/domain';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { ScreenState, type ScreenStateKind } from '@/components/ScreenState';
+import { ScreenState } from '@/components/ScreenState';
+import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
 
 /** An entry as the review screen needs it: enough to summarise, enough to show. */
 export interface ReviewEntry {
@@ -38,7 +39,7 @@ export interface ReviewEntry {
 }
 
 export interface VisitPackReviewProps {
-  readonly state: ScreenStateKind | 'ready';
+  readonly state: ScreenStateKind;
   /** Exactly what will be sent. The summary is derived from this and nothing else. */
   readonly selected: readonly ReviewEntry[];
   /** True once the content changed under the user and the selection must be reviewed again. */
@@ -56,8 +57,8 @@ export function VisitPackReview({
   onBack,
   onRetry,
 }: VisitPackReviewProps) {
-  if (state !== 'ready') {
-    return <ScreenState kind={state} {...(onRetry ? { onRetry } : {})} />;
+  if (state !== 'READY') {
+    return <ScreenState state={state} {...(onRetry ? { onRetry } : {})} />;
   }
 
   const summary = summarizeSelection(selected);
@@ -75,7 +76,7 @@ export function VisitPackReview({
       ) : null}
 
       {summary.included.length === 0 ? (
-        <ScreenState kind="empty" message={VISIT_PACK_COPY.emptySelection} />
+        <ScreenState state="EMPTY" message={VISIT_PACK_COPY.emptySelection} />
       ) : (
         summary.included.map((line) => (
           <View key={line.section} style={styles.section}>

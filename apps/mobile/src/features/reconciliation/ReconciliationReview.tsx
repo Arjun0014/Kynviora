@@ -30,7 +30,8 @@ import {
 } from '@kynviora/presentation';
 import type { DifferenceKind, ReconciliationResolution } from '@kynviora/domain';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { ScreenState, type ScreenStateKind } from '@/components/ScreenState';
+import { ScreenState } from '@/components/ScreenState';
+import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
 
 export interface ReconciliationDifferenceView {
   readonly differenceId: string;
@@ -43,7 +44,7 @@ export interface ReconciliationDifferenceView {
 }
 
 export interface ReconciliationReviewProps {
-  readonly state: ScreenStateKind | 'ready';
+  readonly state: ScreenStateKind;
   readonly differences: readonly ReconciliationDifferenceView[];
   readonly completedUnresolvedCount: number | null;
   readonly onChooseResolution: (differenceId: string, resolution: ReconciliationResolution) => void;
@@ -57,8 +58,8 @@ export function ReconciliationReview({
   onChooseResolution,
   onRetry,
 }: ReconciliationReviewProps) {
-  if (state !== 'ready') {
-    return <ScreenState kind={state} {...(onRetry ? { onRetry } : {})} />;
+  if (state !== 'READY') {
+    return <ScreenState state={state} {...(onRetry ? { onRetry } : {})} />;
   }
 
   const summary = summarizeComparison(differences);
@@ -79,7 +80,7 @@ export function ReconciliationReview({
       ) : null}
 
       {summary.emptyMessage !== null ? (
-        <ScreenState kind="empty" message={summary.emptyMessage} />
+        <ScreenState state="EMPTY" message={summary.emptyMessage} />
       ) : (
         summary.lines.map((line) => (
           <View key={line.differenceId} style={styles.difference}>

@@ -29,10 +29,11 @@ import {
   previewNotification,
 } from '@kynviora/presentation';
 import type { NotificationDetailLevel } from '@kynviora/domain';
-import { ScreenState, type ScreenStateKind } from '@/components/ScreenState';
+import { ScreenState } from '@/components/ScreenState';
+import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
 
 export interface NotificationSettingsProps {
-  readonly state: ScreenStateKind | 'ready';
+  readonly state: ScreenStateKind;
   readonly relationship: 'OWNER' | 'CAREGIVER';
   readonly maxCaregiverDetail: NotificationDetailLevel;
   /** Null when this person has never chosen, which is not the same as choosing GENERIC. */
@@ -56,8 +57,8 @@ export function NotificationSettings({
   onChoose,
   onRetry,
 }: NotificationSettingsProps) {
-  if (state !== 'ready') {
-    return <ScreenState kind={state} {...(onRetry ? { onRetry } : {})} />;
+  if (state !== 'READY') {
+    return <ScreenState state={state} {...(onRetry ? { onRetry } : {})} />;
   }
 
   const view = notificationSettingsView({

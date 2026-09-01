@@ -1064,3 +1064,118 @@ like a bug in every route, and the distinction is worth one explicit error at st
 `KYNVIORA_ALLOW_ANONYMOUS_START=1` opts into it deliberately.
 
 **Sources.** `04` Phase 1.1; `13`; `14`; DEC-032.
+
+---
+
+## DEC-039 - The client has no outcome meaning "you are not allowed"
+
+**Context.** `errors.ts` maps `PERMISSION_DENIED` to **404**, deliberately, so the API is not an
+existence oracle: a caller must not learn that a resource exists by being refused it (`19`; trap
+14). Wiring the screens meant deciding what a client does with that 404, and the obvious reading -
+"the server said no, so tell the user they lack permission" - would have undone the whole decision
+at the layer a person actually reads.
+
+**Options.** (a) Distinguish `PERMISSION_DENIED` from `NOT_FOUND` in the client, since the code is
+right there in the body. (b) Map both to one outcome and let each screen decide. (c) Map both to
+one outcome and give the union no member that could mean refusal.
+
+**Decision.** (c). `classifyError` maps 404 - with `PERMISSION_DENIED`, with `NOT_FOUND`, or with
+no parseable body at all - to a single `UNAVAILABLE` outcome carrying **only** its `kind`. There
+is no code, no message and no correlation ID on it, because anything that appears for one case and
+not the other is a side channel. `ScreenState` likewise has no `PERMISSION_DENIED` member.
+
+**Rationale.** (a) hands back on the screen exactly the fact the status code was chosen to
+withhold. (b) leaves the decision to every screen separately, which means it is made correctly
+until somebody writes the next screen. (c) makes the safe answer the only expressible one: a test
+enumerates the union and asserts no member matches `/DENIED|FORBIDDEN|REFUSED|NO_ACCESS/`, and
+another asserts the `UNAVAILABLE` and `EMPTY` presentations share their tone, their retry label
+and their content flag - so the two are indistinguishable to a reader as well as to a `switch`.
+
+**Consequences.** A developer debugging a legitimately missing record gets no help from the screen
+and has to read a server log. That is the cost, and it is the right way round: the alternative
+spends a stranger's privacy to save a developer a minute. The integration suite asserts the
+property end to end - a stranger asking for a real profile and for an invented one gets identical
+resources.
+
+**Sources.** `13`; `14`; `19`; `errors.ts`; DEC-021.
+
+---
+
+## DEC-040 - An unrecognised value from the server claims less, never more
+
+**Context.** The client narrows several vocabularies out of responses: verification state, match
+confidence, evidence level, urgency, caregiver grant status, notification detail, review task
+kind. A value this client does not recognise means a newer server, a proxy rewriting a body, or a
+bug - and every one of those needed an answer.
+
+**Decision.** Each narrowing falls back to the member that **asserts least**: `UNVERIFIED` not
+`CONFIRMED`, `NOT_MATCHED` not `EXACT`, evidence `U` not `A`, grant status `REVOKED` not `ACTIVE`,
+notification detail `GENERIC` not `NAMED`. A review task kind and a caregiver capability have no
+safe fallback at all, because the presentation layer holds one description per member and no
+default - so an unrecognised one is **dropped**, and the count of dropped rows is returned so the
+screen can say the list is short (`06`'s partial state).
+
+**The one that goes the other way.** `asActionUrgency` falls back to `INFORMATIONAL` - the
+_quietest_ value, not the most cautious. `02` and `18` require a product that does not optimise
+for alarm, and "act now" raised because a string failed to parse is a false alarm with a
+medicine's name attached to it. `09` sets the same default for a foreign regulatory difference, so
+this is the existing rule rather than a new one.
+
+**Rationale.** Deny by default (`14`) is usually stated about access; it applies identically to
+claims about a medicine. The asymmetry makes the direction obvious in each case: reading an
+unknown grant status as `ACTIVE` would state, in words on a screen, that somebody can see a
+person's health data when nobody knows whether they can, while reading it as `REVOKED` costs one
+unnecessary re-invitation.
+
+**Consequences.** A server that adds a vocabulary member shows conservative values in older
+clients rather than crashing or lying. Every fallback is tested by name.
+
+**Sources.** `14`; `18`; `02`; `09`; `06`; DEC-025.
+
+---
+
+## DEC-041 - A failed refresh keeps the content and labels it, rather than discarding it
+
+**Context.** The screens needed a rule for what happens when a refetch fails while something is
+already on screen. The original mobile `offline` copy read "This shows what Kynviora last saved on
+this device" - a claim about a local cache that does not exist behind these screens, so on an
+offline first load it described data the user was not looking at.
+
+**Decision.** `OFFLINE` and `STALE` are separate states and each says only what is true of itself.
+`OFFLINE` means the check did not happen and there is nothing on screen. `STALE` means something
+older is on screen and could not be refreshed. `useResource` returns `STALE` when a refetch fails
+and there is previous content, and the failure state otherwise. `resourceFor` never carries a
+value for a failed outcome, so "failure banner over discarded data" is not expressible.
+
+**Rationale.** The three available behaviours on a failed refresh are: discard the content, leave
+it up silently, or keep it and say it is older than it looks. The first takes away a medicine list
+somebody was reading because a network call timed out. The second presents old information as
+current, which `18` forbids. Neither state names _where_ the content came from, because the answer
+differs between a failed refetch and a future local store and the reader does not need to know.
+
+**Consequences.** `showsContent` on the presentation is the invariant: a resource carries a
+non-null value exactly when its state says a screen may show one, and a test asserts they agree.
+
+**Sources.** `06`; `12`; `18`; `24`.
+
+---
+
+## DEC-042 - The local database directory is anchored at the workspace root
+
+**Context.** `npm run dev` runs with `services/api` as its working directory and `npm run migrate`
+runs with `db`. `KYNVIORA_LOCAL_DB_DIR` defaulted to the relative `.kynviora-data`, so the two
+commands opened **different databases** - and found this out by running them.
+
+**Decision.** `resolveDataDir` anchors a relative value at the workspace root and honours an
+absolute one as given. Both entry points use it.
+
+**Rationale.** PGlite is a single writer (DEC-037), so the second directory is not a second
+connection to one database - it is a separate, empty one. Running the migration CLI and then the
+server would have shown an empty shelf against a database that had just been migrated, which reads
+as data loss rather than as a path bug. This is the same class of failure as the standalone seed
+that DEC-037 records, arriving by a different route: two things that look like one database.
+
+**Consequences.** The same `.env` value means the same directory whichever script reads it. Four
+tests assert it, including that an absolute path is left alone.
+
+**Sources.** DEC-037; `21`; `BLK-001`.

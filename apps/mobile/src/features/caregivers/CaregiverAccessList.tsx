@@ -28,7 +28,8 @@ import {
 import type { CaregiverCapability } from '@kynviora/domain';
 import { StatusChip } from '@/components/StatusChip';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { ScreenState, type ScreenStateKind } from '@/components/ScreenState';
+import { ScreenState } from '@/components/ScreenState';
+import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
 
 /** One row, as the API returns it. */
 export interface CaregiverAccessRow {
@@ -46,7 +47,7 @@ export interface CaregiverAccessRow {
 }
 
 export interface CaregiverAccessListProps {
-  readonly state: ScreenStateKind | 'ready';
+  readonly state: ScreenStateKind;
   readonly rows: readonly CaregiverAccessRow[];
   /** Invoked for a revoke. The caller performs the step-up prompt and the request. */
   readonly onRevoke: (id: string) => void;
@@ -61,10 +62,10 @@ export function CaregiverAccessList({
   onInvite,
   onRetry,
 }: CaregiverAccessListProps) {
-  if (state !== 'ready') {
+  if (state !== 'READY') {
     // Every non-success state is rendered explicitly. `06` treats a screen with only a success
     // path as incomplete, and this one can genuinely be offline, stale or newly unauthorized.
-    return <ScreenState kind={state} {...(onRetry ? { onRetry } : {})} />;
+    return <ScreenState state={state} {...(onRetry ? { onRetry } : {})} />;
   }
 
   return (
@@ -75,7 +76,7 @@ export function CaregiverAccessList({
       <Text style={styles.intro}>{CAREGIVER_COPY.inviteIntro}</Text>
 
       {rows.length === 0 ? (
-        <ScreenState kind="empty" message={CAREGIVER_COPY.emptyState} />
+        <ScreenState state="EMPTY" message={CAREGIVER_COPY.emptyState} />
       ) : (
         rows.map((row) => <CaregiverRow key={row.id} row={row} onRevoke={onRevoke} />)
       )}

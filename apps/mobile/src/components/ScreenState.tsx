@@ -1,76 +1,61 @@
 /**
  * Screen state presenter.
  *
- * Spec references: `06` ("Every critical route must define: loading, empty, success,
- * partial/insufficient data, offline, permission denied, recoverable error, authorization lost,
- * stale data, corrected/superseded"), `24` (UX done criteria), `12` (error handling classes).
+ * Spec references: `06` (every critical route defines its states), `18` (meaning is never carried
+ * by colour alone; status is announced politely), `12` (error handling classes), `24` (UX done
+ * criteria).
  *
- * Modelling these as a closed union means a screen cannot quietly ship with only a success path:
- * the switch must handle every state or it fails to compile.
+ * The union and every word in it live in `@kynviora/presentation`, not here. `apps/**` is
+ * excluded from the test run and there is no renderer available (`BLK-002`), so copy defined in
+ * this file would be the one family of user-visible strings in the codebase that no scan ever
+ * looks at. This component renders; it decides nothing.
  */
 
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import { LIGHT_THEME, SPACING, FONT_SIZE, LINE_HEIGHT_MULTIPLIER } from '@kynviora/presentation';
+import {
+  LIGHT_THEME,
+  SPACING,
+  FONT_SIZE,
+  LINE_HEIGHT_MULTIPLIER,
+  presentScreenState,
+  screenStateAccessibilityLabel,
+  type ScreenState as ScreenStateKind,
+} from '@kynviora/presentation';
+import type { Resource } from '@kynviora/contracts';
 import { PrimaryButton } from './PrimaryButton';
 
-export type ScreenStateKind =
-  | 'loading'
-  | 'empty'
-  | 'partial'
-  | 'offline'
-  | 'permission-denied'
-  | 'error'
-  | 'authorization-lost'
-  | 'stale';
-
 export interface ScreenStateProps {
-  readonly kind: ScreenStateKind;
-  /** Overrides the default copy where a screen has something more specific to say. */
-  readonly message?: string;
+  readonly state: ScreenStateKind;
+  /**
+   * Overrides the state's own description.
+   *
+   * Used for a server-supplied refusal message, which `errors.ts` has already made client-safe.
+   * Never used to invent a reason the server withheld.
+   */
+  readonly message?: string | null;
   readonly onRetry?: () => void;
-  readonly retryLabel?: string;
 }
 
-/**
- * Default copy per state.
- *
- * Plain language, one idea per sentence, and never blaming the user - `18` requires familiar
- * words first and forbids shaming or fear-driven phrasing.
- */
-const DEFAULT_COPY: Record<ScreenStateKind, string> = {
-  loading: 'Loading.',
-  empty: 'Nothing here yet.',
-  partial: 'Some information is missing. What is shown may be incomplete.',
-  offline:
-    'You are offline. This shows what Kynviora last saved on this device, which may not be current.',
-  'permission-denied':
-    'Kynviora does not have permission for this. You can grant it in your device settings, or continue without it.',
-  error: 'Something went wrong. You can try again.',
-  'authorization-lost': 'You are no longer signed in. Sign in again to continue.',
-  stale: 'This information may be out of date. Kynviora could not check for updates.',
-};
-
-export function ScreenState({ kind, message, onRetry, retryLabel }: ScreenStateProps) {
-  const text = message ?? DEFAULT_COPY[kind];
-
-  // An offline or stale screen is informational, not a failure: spec 12 requires low-risk work
-  // to continue offline, so it uses a neutral surface rather than an error tone.
-  const tone =
-    kind === 'error' || kind === 'authorization-lost'
-      ? LIGHT_THEME.attention
-      : LIGHT_THEME.surfaceMuted;
+export function ScreenState({ state, message, onRetry }: ScreenStateProps) {
+  const presentation = presentScreenState(state);
+  const tone = LIGHT_THEME[presentation.tone];
+  const description = message ?? presentation.description;
 
   return (
     <View
       accessible
-      // `polite` rather than `assertive`: spec 18 requires meaningful status changes to be
-      // announced politely, not to interrupt what the user is already doing.
+      // `polite` rather than `assertive`: `18` requires meaningful status changes to be announced
+      // without interrupting what the user is already doing.
       accessibilityLiveRegion="polite"
       accessibilityRole="alert"
-      accessibilityLabel={text}
+      accessibilityLabel={
+        message === undefined || message === null
+          ? screenStateAccessibilityLabel(state)
+          : `${presentation.label}. ${message}`
+      }
       style={[styles.container, { backgroundColor: tone.background, borderColor: tone.border }]}
     >
-      {kind === 'loading' ? (
+      {state === 'LOADING' ? (
         <ActivityIndicator
           accessibilityElementsHidden
           importantForAccessibility="no"
@@ -78,11 +63,14 @@ export function ScreenState({ kind, message, onRetry, retryLabel }: ScreenStateP
         />
       ) : null}
 
-      <Text style={[styles.message, { color: tone.foreground }]}>{text}</Text>
+      {/* The label always renders. `18`: meaning is never carried by an icon or colour alone. */}
+      <Text style={[styles.label, { color: tone.foreground }]}>{presentation.label}</Text>
+      <Text style={[styles.message, { color: tone.foreground }]}>{description}</Text>
 
-      {onRetry ? (
+      {/* Offered only where the state says a retry could change the answer. */}
+      {onRetry !== undefined && presentation.retryLabel !== null ? (
         <PrimaryButton
-          label={retryLabel ?? 'Try again'}
+          label={presentation.retryLabel}
           onPress={onRetry}
           variant="secondary"
           style={styles.retry}
@@ -92,15 +80,44 @@ export function ScreenState({ kind, message, onRetry, retryLabel }: ScreenStateP
   );
 }
 
+/**
+ * Render a resource's state, or `null` when the resource is showing content on its own.
+ *
+ * `READY` is the one state with nothing to say: the content is the message. Every other state
+ * either replaces the content or annotates it, and both need to be visible.
+ */
+export function ResourceState({
+  resource,
+  onRetry,
+}: {
+  readonly resource: Resource<unknown>;
+  readonly onRetry?: () => void;
+}) {
+  if (resource.state === 'READY') return null;
+  return (
+    <ScreenState
+      state={resource.state}
+      message={resource.message}
+      {...(onRetry === undefined ? {} : { onRetry })}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     padding: SPACING.lg,
     borderRadius: SPACING.sm,
     borderWidth: 1,
     alignItems: 'center',
+    gap: SPACING.xs,
   },
   spinner: {
-    marginBottom: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  label: {
+    fontSize: FONT_SIZE.bodyLarge,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   message: {
     fontSize: FONT_SIZE.body,
@@ -108,6 +125,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   retry: {
-    marginTop: SPACING.lg,
+    marginTop: SPACING.md,
   },
 });

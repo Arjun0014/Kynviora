@@ -19,7 +19,7 @@
 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRuntimeDb, seedDevelopmentData, type RuntimeDb } from '@kynviora/db';
+import { createRuntimeDb, resolveDataDir, seedDevelopmentData, type RuntimeDb } from '@kynviora/db';
 import {
   systemClock,
   type Clock,
@@ -62,7 +62,11 @@ export function readConfig(): MainConfig {
     // Loopback by default. A development server that binds every interface is one that ends up
     // reachable from a network somebody did not think about.
     host: process.env.KYNVIORA_API_HOST ?? '127.0.0.1',
-    dataDir: process.env.KYNVIORA_LOCAL_DB_DIR ?? '.kynviora-data',
+    // Resolved against the workspace root rather than the working directory. `npm run dev` runs
+    // from `services/api` and `npm run migrate` runs from `db`, so a relative path produced two
+    // separate databases - and because PGlite is a single writer, the second one is an empty
+    // database that reads as data loss rather than as a second copy.
+    dataDir: resolveDataDir(process.env.KYNVIORA_LOCAL_DB_DIR),
     devAuth: process.env.KYNVIORA_DEV_AUTH === '1',
     seed: process.env.KYNVIORA_DEV_SEED === '1',
     allowAnonymousStart: process.env.KYNVIORA_ALLOW_ANONYMOUS_START === '1',

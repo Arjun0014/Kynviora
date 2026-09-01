@@ -120,3 +120,14 @@
 {"ts": "2026-09-01T03:07:00Z", "type": "decision_recorded", "detail": "DEC-037 PGlite on disk and the seed inside the server; DEC-038 the development authenticator and its three refusals"}
 {"ts": "2026-09-01T03:08:00Z", "type": "deviation_recorded", "detail": "DEV-019 development authenticator stands in for Phase 1.1; DEV-020 the local database is single-writer and development-only"}
 {"ts": "2026-09-01T03:09:00Z", "type": "milestone", "detail": "npm run dev starts a server against a persisted PostgreSQL; 1902 tests across 50 files, verify exit 0"}
+{"ts": "2026-09-01T13:20:00Z", "type": "work_started", "detail": "DEV-007 wiring the Expo screens: shared API client, session, screen states, view models"}
+{"ts": "2026-09-01T13:24:00Z", "type": "code_added", "detail": "screen state union and copy moved from the React component into @kynviora/presentation, where the copy scans reach it"}
+{"ts": "2026-09-01T13:30:00Z", "type": "code_added", "detail": "@kynviora/contracts: config, session, transport, outcome union, resource model, typed client"}
+{"ts": "2026-09-01T13:33:00Z", "type": "decision_recorded", "detail": "DEC-039 the client has no outcome meaning permission denied; DEC-040 an unrecognised value claims less; DEC-041 a failed refresh keeps content and labels it"}
+{"ts": "2026-09-01T13:35:00Z", "type": "bug_found", "detail": "trap 13 again: heredoc collapsed a double backslash and Python wrote real backspace characters into a regex, so a test passed for the wrong reason"}
+{"ts": "2026-09-01T13:39:00Z", "type": "code_added", "detail": "Today, Shelf, Safety, Care and You wired to the API through the shared client"}
+{"ts": "2026-09-01T13:41:00Z", "type": "verified", "detail": "client driven against a real server process: owner READY with three verification axes, stranger EMPTY, anonymous UNAUTHENTICATED, safety EMPTY with coverage, unreachable OFFLINE"}
+{"ts": "2026-09-01T13:45:00Z", "type": "bug_found", "detail": "npm run dev and npm run migrate opened different databases because the data dir was relative to each package cwd; PGlite is single-writer so the second was empty"}
+{"ts": "2026-09-01T13:46:00Z", "type": "decision_recorded", "detail": "DEC-042 the local database directory is anchored at the workspace root"}
+{"ts": "2026-09-01T13:47:00Z", "type": "deviation_recorded", "detail": "DEV-021 screen behaviour is tested in a package not in the app; DEV-022 the screens read and write only two things"}
+{"ts": "2026-09-01T13:50:00Z", "type": "milestone", "detail": "five primary destinations read real data end to end; 2028 tests across 59 files, verify exit 0"}

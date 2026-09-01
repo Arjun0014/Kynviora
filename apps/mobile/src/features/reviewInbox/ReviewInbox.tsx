@@ -27,7 +27,8 @@ import {
 } from '@kynviora/presentation';
 import type { ReviewTaskKind } from '@kynviora/domain';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { ScreenState, type ScreenStateKind } from '@/components/ScreenState';
+import { ScreenState } from '@/components/ScreenState';
+import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
 
 export interface ReviewInboxTask {
   readonly taskId: string;
@@ -36,15 +37,15 @@ export interface ReviewInboxTask {
 }
 
 export interface ReviewInboxProps {
-  readonly state: ScreenStateKind | 'ready';
+  readonly state: ScreenStateKind;
   readonly tasks: readonly ReviewInboxTask[];
   readonly onStartTask: (taskId: string) => void;
   readonly onRetry?: () => void;
 }
 
 export function ReviewInbox({ state, tasks, onStartTask, onRetry }: ReviewInboxProps) {
-  if (state !== 'ready') {
-    return <ScreenState kind={state} {...(onRetry ? { onRetry } : {})} />;
+  if (state !== 'READY') {
+    return <ScreenState state={state} {...(onRetry ? { onRetry } : {})} />;
   }
 
   const summary = summarizeInbox(tasks);
@@ -59,7 +60,7 @@ export function ReviewInbox({ state, tasks, onStartTask, onRetry }: ReviewInboxP
       <Text style={styles.intro}>{REVIEW_INBOX_COPY.intro}</Text>
 
       {summary.emptyMessage !== null ? (
-        <ScreenState kind="empty" message={summary.emptyMessage} />
+        <ScreenState state="EMPTY" message={summary.emptyMessage} />
       ) : (
         summary.lines.map((line) => (
           <View key={line.taskId} style={styles.task}>
