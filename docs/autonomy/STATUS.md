@@ -12,15 +12,15 @@ Last updated: 2026-09-01
 |                    |                                                |
 | ------------------ | ---------------------------------------------- |
 | **Current stage**  | Stage 6 (governance), after completing Stage 8 |
-| **Current phase**  | Wiring the Expo screens to the API (DEV-007)   |
-| **Last completed** | Caregiver delegation (`DEV-026` closed)        |
+| **Current phase**  | `DEV-007` complete; next is observability      |
+| **Last completed** | Phase 4.3 - dose events and history            |
 | **Branch**         | `master`                                       |
-| **Latest commit**  | `feat(mobile): a caregiver can delegate`       |
+| **Latest commit**  | `feat(care): recording what happened`          |
 | **Baseline tag**   | `baseline-spec-only`                           |
 
 ## Verification state
 
-- **2203 tests passing**, 0 failing, across 65 files.
+- **2239 tests passing**, 0 failing, across 67 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -98,13 +98,13 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Phase 4.3 - dose events and adherence history.** The whole caregiver surface is now wired:
-invite, accept, delegate, remove, and the access history. `DEV-026` is closed. What remains under
-`DEV-007` is Phase 4.3: the client already records a dose event and the route is idempotent, but
-only the single control on Today calls it and there is no history to read back.
+**`DEV-007` is finished.** Every read destination is wired and every write flow has a screen:
+completing a review task, inviting a caregiver, delegating as a caregiver, removing access,
+generating a Visit Pack, resolving a reconciliation difference, and recording a dose event with the
+history to read it back. `DEV-026` is closed and Phase 4.3 is complete.
 
-After that, the three planned tasks below - observability projections, the staff reviewer console
-interface, and Phase 7.1 assessment states.
+Next is the three planned tasks below - observability projections, the staff reviewer console
+interface, and Phase 7.1 assessment states - of which the first is the most self-contained.
 
 Done: **reconciliation** (a typed list, both values shown, and the side stated by a person), the
 **Visit Pack** (selection, review, and a digest the live server accepts), the
@@ -254,6 +254,13 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 - **DEC-048** - the Visit Pack client hashes the candidates it **displayed** and never re-fetches
   before hashing. `canonicalizeSelection` and `toNoteEntries` come from the domain so both sides
   build the same string. An entry this client cannot canonicalise is refused, never coerced.
+
+- **DEC-057** - the dose history is a list and carries no count, rate, streak or total of anything
+  a person did. Enforced at the route as well as the view, because a `takenCount` on the response
+  hands a screen everything it needs and the screen is where nobody would notice it.
+- **DEC-058** - the four dose controls carry equal weight and the four recorded kinds share one
+  neutral tone. An emphasised "I took it" is a preference about somebody's treatment, and a red
+  chip on SKIPPED is a scorecard drawn in colour. The icons differ instead.
 
 - **DEC-055** - `heldCapabilities` unions the caller's own active, unexpired grants, which is what
   `has_capability` does in SQL. An expired grant contributes nothing even where its stored status
@@ -485,3 +492,14 @@ at; no qualified reviewer exists, and nothing in the shipped fixtures is publish
 67. Do not re-add "Invite someone" for a caregiver who may delegate nothing, and do not render it
     disabled. Its only reachable outcome is a 404 after a form has been filled in, and a disabled
     control states that the action exists and that this person is not trusted with it (DEC-056).
+68. Do not add a count, rate, streak, percentage or total to the dose-event response, the history
+    view, or a screen that renders it. `02` names gamified adherence scoring as an anti-feature and
+    `23` D-005 forbids the aggregate; tests enumerate the response keys, the view keys and the
+    module's exported names (DEC-057).
+69. Do not collapse `SKIPPED` and `UNABLE_TO_TAKE` into "missed", and do not use that word for
+    anything a person recorded. It belongs to a schedule that lapsed with nothing recorded, and the
+    two kinds exist because they are different facts.
+70. Do not make "I took it" the primary control or give `TAKEN` a positive tone. All four controls
+    are one weight and all four kinds one neutral tone; the icons carry the distinction and a test
+    asserts they differ (DEC-058). Praise is the other half of shame - the copy scan rejects
+    "well done" and "keep it up" as well as the reproaches.

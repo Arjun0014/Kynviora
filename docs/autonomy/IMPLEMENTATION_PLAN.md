@@ -112,7 +112,7 @@ corroboration state, coverage statement - already exists in the domain and catal
 | ----- | --------------------------------- | ------------------- |
 | 4.1   | Medicine schedule model           | `COMPLETE`          |
 | 4.2   | Local reminder engine             | `BLOCKED_TECHNICAL` |
-| 4.3   | Dose events and adherence history | `NOT_STARTED`       |
+| 4.3   | Dose events and adherence history | `COMPLETE`          |
 | 4.4   | Refill awareness                  | `COMPLETE`          |
 
 **4.2** exit criteria require measuring reminder reliability across process death and device

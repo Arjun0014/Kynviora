@@ -21,12 +21,15 @@ import {
   contentChanged,
   accessHistory,
   accessList,
+  buildDoseRecord,
   buildRevocation,
+  doseHistory,
   heldCapabilities,
   inviterAuthority,
   mayInvite,
   refreshedResource,
   revocationMessage,
+  MAX_DOSE_NOTE_LENGTH,
   reviewInboxView,
   safetyView,
   selectableCapabilities,
@@ -1267,5 +1270,191 @@ describe('a caregiver delegating what they hold, end to end', () => {
     const held = heldCapabilities(grants.value.grants, grants.value.serverTime);
     expect(held).toEqual([]);
     expect(mayInvite(inviterAuthority({ isOwner: false, ownCapabilities: held }))).toBe(false);
+  });
+});
+
+describe('recording what happened, end to end', () => {
+  /**
+   * Phase 4.3 through the code the app runs.
+   *
+   * Its two exit criteria are a copy rule and an idempotency rule. The copy is asserted where the
+   * copy lives; the idempotency rule can only be shown against a real server, because "a duplicate
+   * sync does not create a duplicate dose event" is a claim about what the database ends up
+   * holding after the same intent arrives twice.
+   */
+  let itemId: string;
+
+  beforeAll(async () => {
+    const items = await owner.listItems({ profileId: SEED.profileId, itemKind: 'MEDICINE' });
+    if (items.kind !== 'OK') throw new Error(`the shelf did not load: ${items.kind}`);
+    const first = items.value.items[0];
+    if (first === undefined) throw new Error('the seed has no medicine to record against');
+    itemId = first.id;
+  });
+
+  it('records what the screen built, and reads it back', async () => {
+    const draft = buildDoseRecord({
+      ownedItemId: itemId,
+      itemKind: 'MEDICINE',
+      eventKind: 'SKIPPED',
+      note: 'felt sick after breakfast',
+    });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok || draft.body === null) return;
+
+    const recorded = await owner.recordDoseEvent(draft.body, crypto.randomUUID());
+    expect(recorded.kind).toBe('OK');
+
+    const events = await owner.doseEvents({ ownedItemId: itemId });
+    expect(events.kind).toBe('OK');
+    if (events.kind !== 'OK') return;
+
+    const history = doseHistory(events.value.events);
+    expect(history.lines[0]?.presentation.label).toBe('Skipped');
+    // Verbatim. It is the person's own account of what happened to them.
+    expect(history.lines[0]?.note).toBe('felt sick after breakfast');
+    expect(history.unreadableCount).toBe(0);
+  });
+
+  it('does not record a second event for one intent', async () => {
+    // Phase 4.3's second exit criterion, and the reason the idempotency key is a parameter rather
+    // than generated inside the client: an event created offline may be uploaded more than once,
+    // and a duplicated history is a false record of what somebody did.
+    const before = await owner.doseEvents({ ownedItemId: itemId });
+    if (before.kind !== 'OK') return;
+    const countBefore = before.value.events.length;
+
+    const key = crypto.randomUUID();
+    const body = { ownedItemId: itemId, eventKind: 'TAKEN' as const };
+
+    const first = await owner.recordDoseEvent(body, key);
+    const replay = await owner.recordDoseEvent(body, key);
+    expect(first.kind).toBe('OK');
+    expect(replay.kind).toBe('OK');
+    if (first.kind !== 'OK' || replay.kind !== 'OK') return;
+    // The same row, not a second one.
+    expect(replay.value.id).toBe(first.value.id);
+
+    const after = await owner.doseEvents({ ownedItemId: itemId });
+    if (after.kind !== 'OK') return;
+    expect(after.value.events.length).toBe(countBefore + 1);
+  });
+
+  it('returns nothing a screen could turn into a score', async () => {
+    // `02` lists gamified adherence scoring as an anti-feature and `23` D-005 forbids the
+    // aggregate. A `takenCount` on this response would hand a screen everything it needs, which
+    // is where nobody would notice it had appeared.
+    const events = await owner.doseEvents({ ownedItemId: itemId });
+    expect(events.kind).toBe('OK');
+    if (events.kind !== 'OK') return;
+
+    expect(Object.keys(events.value).sort()).toEqual(['events', 'ownedItemId', 'serverTime']);
+    const names = Object.keys(events.value.events[0] ?? {});
+    expect(names.filter((n) => /count|rate|streak|score|percent|total|adherence/i.test(n))).toEqual(
+      [],
+    );
+  });
+
+  it('keeps the newest first', async () => {
+    const events = await owner.doseEvents({ ownedItemId: itemId });
+    if (events.kind !== 'OK') return;
+    const times = events.value.events.map((event) => event.recordedAt);
+    expect([...times].sort().reverse()).toEqual(times);
+  });
+
+  it('shows a stranger nothing, without confirming the item exists', async () => {
+    // The item ID narrows; `dose_event_select` decides. An item this caller cannot reach comes
+    // back as an empty list rather than a refusal, exactly as the shelf does - so the route is
+    // not an existence oracle for an owned item ID.
+    const real = await stranger.doseEvents({ ownedItemId: itemId });
+    const invented = await stranger.doseEvents({
+      ownedItemId: '00000000-0000-4000-8000-0000000000fe',
+    });
+    expect(real.kind).toBe('OK');
+    expect(invented.kind).toBe(real.kind);
+    if (real.kind !== 'OK' || invented.kind !== 'OK') return;
+    expect(real.value.events).toEqual([]);
+    expect(invented.value.events).toEqual([]);
+  });
+
+  it('refuses to record against an item the caller cannot reach', async () => {
+    // The write side is not filtered, it is refused - and reported as absence rather than as a
+    // refusal, so the response does not confirm the item exists (DEC-039).
+    const outcome = await stranger.recordDoseEvent(
+      { ownedItemId: itemId, eventKind: 'TAKEN' },
+      crypto.randomUUID(),
+    );
+    expect(outcome.kind).toBe('UNAVAILABLE');
+  });
+
+  it('refuses a note longer than the column will take, before sending it', async () => {
+    const draft = buildDoseRecord({
+      ownedItemId: itemId,
+      itemKind: 'MEDICINE',
+      eventKind: 'TAKEN',
+      note: 'x'.repeat(MAX_DOSE_NOTE_LENGTH + 1),
+    });
+    expect(draft.ok).toBe(false);
+
+    // And the server agrees, which is what makes refusing it on the client a convenience rather
+    // than a rule only the screen knows.
+    const outcome = await owner.recordDoseEvent(
+      {
+        ownedItemId: itemId,
+        eventKind: 'TAKEN',
+        note: 'x'.repeat(MAX_DOSE_NOTE_LENGTH + 1),
+      },
+      crypto.randomUUID(),
+    );
+    expect(outcome.kind).toBe('REFUSED');
+  });
+
+  it('lets a caregiver read the history their grant admits', async () => {
+    // `16`: a caregiver gets exactly what they were granted. VIEW_MEDICINES reaches the item, and
+    // `dose_event_select` follows the item rather than carrying a rule of its own.
+    const draft = buildInvitation({
+      profileId: SEED.profileId,
+      authority: { kind: 'OWNER' },
+      selected: ['VIEW_MEDICINES'],
+      invitedEmail: 'caregiver@example.test',
+    });
+    if (!draft.ok || draft.body === null) return;
+    const elevated = createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(SEED.userId, { stepUp: true }),
+    });
+    const created = await elevated.createInvitation(draft.body, crypto.randomUUID());
+    if (created.kind !== 'OK') return;
+
+    const response = await fetch(`${server.url}/v1/caregiver-invitations/accept`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-kynviora-dev-user': SEED.caregiverUserId,
+        'Idempotency-Key': crypto.randomUUID(),
+      },
+      body: JSON.stringify({ token: created.value.token }),
+    });
+    const grantId = ((await response.json()) as { grantId?: string }).grantId ?? '';
+    expect(grantId).not.toBe('');
+
+    const asCaregiver = createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(SEED.caregiverUserId),
+    });
+    const events = await asCaregiver.doseEvents({ ownedItemId: itemId });
+    expect(events.kind).toBe('OK');
+    if (events.kind !== 'OK') return;
+    expect(events.value.events.length).toBeGreaterThan(0);
+
+    // And it stops on the next request after the grant is removed (`15` A2).
+    await createClient({
+      config: { baseUrl: server.url, timeoutMs: 10_000 },
+      session: developmentSession(SEED.userId, { stepUp: true }),
+    }).revokeGrant(grantId);
+
+    const after = await asCaregiver.doseEvents({ ownedItemId: itemId });
+    if (after.kind !== 'OK') return;
+    expect(after.value.events).toEqual([]);
   });
 });

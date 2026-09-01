@@ -116,6 +116,21 @@ const doseEventBodySchema = z.object({
   note: z.string().max(500).optional(),
 });
 
+/**
+ * How many dose events one request returns.
+ *
+ * A window, not a page. `04` Phase 4.3 wants a person to see what happened; scrolling back
+ * through a year of it is not what the screen is for, and an unbounded query on an append-only
+ * table is how one item's history becomes a slow request for everybody.
+ */
+const DEFAULT_DOSE_EVENT_LIMIT = 50;
+const MAX_DOSE_EVENT_LIMIT = 200;
+
+const doseEventQuerySchema = z.object({
+  ownedItemId: uuidSchema,
+  limit: z.coerce.number().int().min(1).max(MAX_DOSE_EVENT_LIMIT).optional(),
+});
+
 const shelfItemSchema = z.object({
   id: uuidSchema,
   profileId: uuidSchema,
@@ -537,6 +552,73 @@ export function createServer(options: ServerOptions): FastifyInstance {
       ctx.logger.error('api.dose_event_failed', { correlation_id: ctx.correlationId });
       return fail(reply, domainError('INTERNAL', 'Could not record event.'), ctx.correlationId);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /v1/dose-events
+  // -------------------------------------------------------------------------
+  // `04` Phase 4.3: "let users record what happened without gamifying or judging them". The read
+  // side of that is a list of what happened, in order.
+  //
+  // WHAT THIS ROUTE DELIBERATELY DOES NOT RETURN
+  // A count, a rate, a streak, a percentage or a "missed" total. `02` lists gamified adherence
+  // scoring as an anti-feature and `23` D-005 forbids the aggregate; a route returning
+  // `takenCount` and `skippedCount` hands a screen everything it needs to draw a scorecard, and
+  // the screen is where nobody would notice it had been reintroduced. The events are the answer.
+
+  app.get('/v1/dose-events', async (request, reply) => {
+    const ctx = await contextFor(request, reply);
+    if (!ctx) return;
+
+    const query = doseEventQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return fail(
+        reply,
+        domainError('VALIDATION_FAILED', 'Invalid query parameters.', {
+          reason_code: 'query_schema',
+        }),
+        ctx.correlationId,
+      );
+    }
+
+    // The item ID narrows; `dose_event_select` decides. An item this caller cannot reach comes
+    // back as an empty page rather than a refusal, exactly as the shelf does - so this route is
+    // not an existence oracle for an owned item ID (`13`, DEC-039).
+    const limit = query.data.limit ?? DEFAULT_DOSE_EVENT_LIMIT;
+    const result = await ctx.db((db) =>
+      db.query<{
+        id: string;
+        owned_item_id: string;
+        schedule_id: string | null;
+        event_kind: string;
+        scheduled_for: Date | string | null;
+        recorded_at: Date | string;
+        note: string | null;
+      }>(
+        `SELECT id, owned_item_id, schedule_id, event_kind, scheduled_for, recorded_at, note
+           FROM dose_event
+          WHERE owned_item_id = $1
+          ORDER BY recorded_at DESC, id
+          LIMIT $2`,
+        [query.data.ownedItemId, limit],
+      ),
+    );
+
+    return reply.send({
+      ownedItemId: query.data.ownedItemId,
+      events: result.rows.map((row) => ({
+        id: row.id,
+        ownedItemId: row.owned_item_id,
+        scheduleId: row.schedule_id,
+        eventKind: row.event_kind,
+        // Trap 45: the driver hands back a `Date`, and a response schema would validate before
+        // Fastify serialises it.
+        scheduledFor: isoOrNull(row.scheduled_for),
+        recordedAt: isoOrNull(row.recorded_at) ?? ctx.now,
+        note: row.note,
+      })),
+      serverTime: ctx.now,
+    });
   });
 
   // -------------------------------------------------------------------------

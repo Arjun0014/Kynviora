@@ -226,6 +226,31 @@ export interface CaregiverAuditResponse {
   readonly serverTime: string;
 }
 
+export interface DoseEventRecord {
+  readonly id: string;
+  readonly ownedItemId: string;
+  readonly scheduleId: string | null;
+  readonly eventKind: string;
+  /** The dose this was recorded against, where there was one. Not every event has a schedule. */
+  readonly scheduledFor: string | null;
+  readonly recordedAt: string;
+  /** The person's own words. Never rewritten, summarised or scored. */
+  readonly note: string | null;
+}
+
+/**
+ * What was recorded for one medicine.
+ *
+ * No count, no rate, no streak and no total. `02` lists gamified adherence scoring as an
+ * anti-feature and `23` D-005 forbids the aggregate; a `takenCount` here would hand a screen
+ * everything it needs to draw a scorecard, which is where nobody would notice it had appeared.
+ */
+export interface DoseEventsResponse {
+  readonly ownedItemId: string;
+  readonly events: readonly DoseEventRecord[];
+  readonly serverTime: string;
+}
+
 export interface VisitPackCandidate {
   readonly section: string;
   readonly entityKind: string;
@@ -431,6 +456,18 @@ export interface KynvioraClient {
     idempotencyKey: string,
   ): Promise<ApiOutcome<{ id: string | null; serverTime: string }>>;
 
+  /**
+   * What has been recorded for one medicine, newest first.
+   *
+   * The item ID narrows; `dose_event_select` decides. An item this caller cannot reach comes back
+   * as an empty list rather than a refusal, exactly as the shelf does - so the route is not an
+   * existence oracle for an owned item ID.
+   */
+  doseEvents(query: {
+    readonly ownedItemId: string;
+    readonly limit?: number;
+  }): Promise<ApiOutcome<DoseEventsResponse>>;
+
   listCaregiverGrants(query?: {
     readonly profileId?: string;
   }): Promise<ApiOutcome<CaregiverGrantsResponse>>;
@@ -602,6 +639,12 @@ export function createClient(options: ClientOptions): KynvioraClient {
         body,
         idempotencyKey,
       ),
+
+    doseEvents: (query) =>
+      get<DoseEventsResponse>('/v1/dose-events', {
+        ownedItemId: query.ownedItemId,
+        limit: query.limit,
+      }),
 
     listCaregiverGrants: (query) =>
       get<CaregiverGrantsResponse>('/v1/caregiver-grants', { profileId: query?.profileId }),

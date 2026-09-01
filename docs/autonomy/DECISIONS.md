@@ -1581,3 +1581,50 @@ a test asserts that the server refuses the request the withheld control would ha
 what makes hiding it honest rather than merely tidy.
 
 **Sources.** `04` Phase 8.1; `12`; `16`; DEC-020; DEC-045; DEC-055.
+
+## DEC-057 - The dose history is a list, and carries no number about what a person did
+
+**Context.** Phase 4.3's goal is "let users record what happened without gamifying or judging
+them". The obvious read side of a dose record is a summary: taken 12, skipped 3, 80% this month.
+
+**Options.** (a) Per-kind counts. (b) A rate or streak. (c) The events, in order, and nothing else.
+
+**Decision.** (c). `GET /v1/dose-events` returns the events; `doseHistory` returns lines and one
+number - how many events this build could not name. Tests enumerate the response's keys, the
+view's keys and the module's exported names.
+
+**Rationale.** Someone who skipped a dose because it made them ill has recorded a decision about
+their own treatment. A number telling them how often they do that has told them the decision was
+wrong, which is medical advice arrived at by arithmetic and attributed to nobody. `02` lists
+gamified adherence scoring as a named anti-feature and `23` D-005 forbids the aggregate.
+
+**Why the absence is enforced at the route as well as the screen.** A `takenCount` on the response
+hands a screen everything it needs to draw a scorecard, and the screen is the layer where nobody
+would notice it had been reintroduced - the same reasoning that keeps urgency off a review task at
+every layer rather than only in the tone list (trap 17).
+
+**`SKIPPED` and `UNABLE_TO_TAKE` stay two kinds.** They are different facts, and "missed" - the
+word the notification vocabulary uses for a schedule that lapsed with nothing recorded - loses the
+difference. A person who could not take a medicine and a person who chose not to have both told
+Kynviora something.
+
+**Sources.** `04` Phase 4.3; `02`; `09`; `18`; `23` D-005.
+
+## DEC-058 - Every dose control carries the same weight, and every recorded kind the same tone
+
+**Context.** "I took it" is the common case and the natural primary action.
+
+**Decision.** Four controls of equal weight in the vocabulary's order, and one shared `neutral`
+tone across all four recorded kinds. The icons differ so the kinds stay distinguishable.
+
+**Rationale.** An emphasised "I took it" is a preference about somebody's treatment expressed in a
+button style, and a red chip on `SKIPPED` beside a green one on `TAKEN` is a scorecard drawn in
+colour. `18` forbids meaning through colour alone, which is usually read as "add a label" - here it
+is read in the other direction: with one tone, the shape has to carry the distinction, so the four
+icons must differ and a test asserts they do.
+
+**Praise is the other half of shame.** The copy scan rejects "well done" and "keep it up" as well as
+the reproaches, because the screen that congratulates you on Monday is the one with an opinion on
+Tuesday.
+
+**Sources.** `04` Phase 4.3; `18`; `02`.

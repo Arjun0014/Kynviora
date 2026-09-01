@@ -16,8 +16,10 @@
  * server refuses a completion with an empty change set, and a tick box on this screen would
  * promise something it would then have to take back.
  *
- * Dose reminders are not here because Phase 4.3 has not been built and Phase 4.2 needs a device
- * (`BLK-002`). An empty schedule strip would be a promise the app cannot keep.
+ * Dose reminders are not here because Phase 4.2 needs a device (`BLK-002`) - an empty schedule
+ * strip would be a promise the app cannot keep. Recording what happened (Phase 4.3) lives on the
+ * Shelf instead, on the medicine's own row, because that is where a person looking for "the one I
+ * take in the morning" already is.
  */
 
 import { useCallback, useMemo, useState } from 'react';

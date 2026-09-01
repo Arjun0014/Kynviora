@@ -439,17 +439,16 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   destinations and run the `18` accessibility checks on a device. Until then, treat "the app
   typechecks and its logic is tested" as exactly that claim and not as "the screens work".
 
-## DEV-022 - The Expo screens read, and write only two things
+## DEV-022 - The Expo screens read, and write only two things (CLOSED)
 
 - **Affected specification**: `04` Phases 8.1, 8.3, 8.4, 8.5 (caregiver, inbox, Visit Pack,
   reconciliation), `06` Journeys.
 - **Expected behaviour**: each feature's screen performs that feature's whole workflow.
 - **Implemented behaviour**: the five primary destinations are wired to real reads - profiles,
-  shelf, alerts, review tasks, caregiver grants, notification settings - and five write flows now
-  have screens: completing a review task, inviting a caregiver, generating a Visit Pack, resolving
-  a reconciliation difference, and removing a caregiver's access. Two writes still have no screen
-  of their own: recording a dose event beyond the single control on Today (Phase 4.3), and
-  delegating capabilities as a caregiver rather than as the owner (`DEV-026`, now unblocked).
+  shelf, alerts, review tasks, caregiver grants, notification settings - and every write flow has a
+  screen: completing a review task, inviting a caregiver, delegating as a caregiver, removing
+  access, generating a Visit Pack, resolving a reconciliation difference, and recording a dose
+  event with the history to read it back.
 - **Reason**: each of those writes needs a screen of its own with a real interaction behind it. An
   invitation returns a token shown once and unrecoverable afterwards (DEC-018); a revocation is
   behind step-up (`14`); completing a review task writes to the authoritative record and so needs
@@ -457,10 +456,11 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   reviewed (DEC-023). Wiring a button to each without those screens would produce controls that
   fail in ways the user cannot act on.
 - **Temporary or permanent**: temporary.
-- **Risk**: low. The invite and revoke controls used to be present and do nothing, which teaches a
-  user they are broken; both now perform their flow.
-- **Required future work**: Phase 4.3 dose events and adherence history. The invitation screen,
-  step-up prompt, per-record-kind task editor, Visit Pack flow and removal confirmation are done.
+- **Status**: CLOSED. Every read destination is wired and every write flow has a screen.
+- **Risk**: none remaining. The invite and revoke controls used to be present and do nothing, which
+  teaches a user they are broken; both now perform their flow.
+- **Required future work**: none. What is left in this area is not wiring: Phase 4.2 reminders need
+  a device (`BLK-002`), and `DEV-023` and `DEV-024` are a product decision and guided capture.
 
 ## DEV-023 - The task editor offers only the RESOLVED outcome
 

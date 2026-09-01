@@ -1395,3 +1395,55 @@ all - which is what makes withholding a control honest rather than merely tidy.
 clean via `npm run verify`, exit 0. 18 new tests: 13 on the derivation and the control, and 5 end to
 end against a real server process - including a caregiver actually sending an invitation, which was
 unreachable before this.
+
+### Phase 4.3 - recording what happened, without keeping score
+
+The write route had existed since Phase 4.1 and nothing called it. What Phase 4.3 needed was the
+other three quarters: a way to read the record back, the words, and a screen.
+
+**The interesting decision is a number that is not there.** The obvious read side of a dose record
+is a summary - taken 12, skipped 3, 80% this month - and Phase 4.3's goal sentence rules it out:
+"without gamifying or judging them". Someone who skipped a dose because it made them ill has
+recorded a decision about their own treatment, and a number telling them how often they do that has
+told them the decision was wrong. That is medical advice arrived at by arithmetic, attributed to
+nobody (DEC-057).
+
+So `GET /v1/dose-events` returns events and no totals, `doseHistory` returns lines and one number -
+how many events this build could not name - and three tests enumerate the response's keys, the
+view's keys and the module's exported function names. The absence is enforced at the route as well
+as the screen for the same reason urgency is kept off a review task at every layer: a `takenCount`
+on the response hands a screen everything it needs, and the screen is where nobody would notice it
+had appeared.
+
+**Four controls of equal weight.** "I took it" is the common case and the natural primary action,
+which is exactly why it is not styled as one: an emphasised button is a preference about somebody's
+treatment. Every recorded kind carries the same neutral tone for the same reason - a red chip on
+`SKIPPED` beside a green one on `TAKEN` is a scorecard drawn in colour. With one shared tone the
+icon has to carry the distinction, so the four shapes must differ and a test asserts it (DEC-058).
+
+**Praise is the other half of shame.** The copy scan rejects "well done" and "keep it up" alongside
+the reproaches. The screen that congratulates you on Monday is the one with an opinion on Tuesday.
+It also rejects "missed": `SKIPPED` and `UNABLE_TO_TAKE` are different facts, and the word that
+covers both is the one the notification vocabulary uses for a schedule that lapsed with nothing
+recorded at all.
+
+**The exit criterion that needed a real server.** "Duplicate sync does not create duplicate dose
+events" is a claim about what the database holds after the same intent arrives twice, and no unit
+test on either side can make it. Driving it live: the second POST with the same key returns 200
+with `replayed: true` and the same row ID, and the history is one line longer, not two.
+
+**A trap caught itself.** Writing the copy test through a heredoc turned `\uXXXX` into a real
+backspace character in the source - trap 13, arriving exactly as recorded. Repaired with
+`chr(92)`, and a scan of every `.ts` and `.tsx` in the tree confirms no other control character
+survives anywhere.
+
+**Where it lives.** The Shelf, on the medicine's own row. Phase 4.2's reminders need a device
+(`BLK-002`) so there is no schedule strip to hang it off, and an item's row is where a person
+looking for "the one I take in the morning" already is. Medicines only: a dose is a medicine's idea,
+and the control is absent rather than disabled on a personal-care product.
+
+### State
+
+2239 tests passing across 67 files, up from 2203 across 65. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 36 new tests: 14 on the copy, 14 on the builder and
+the history view, and 8 end to end against a real server process.
