@@ -2663,3 +2663,127 @@ as absence, so the route is not an oracle for whether it exists.
 
 **Sources.** `04` Phase 1.2; `13`; migration `0017`; migration `0002`'s `household_insert` and
 `profile_insert`; DEC-079; `DEV-031`; `DEV-032`.
+
+---
+
+## DEC-091 - Provenance is derived from who is writing, and there is no field to send it
+
+**Date:** 2026-09-02
+**Phase:** 1.3
+
+**Status:** Accepted
+
+`04` Phase 1.3's first exit criterion is "no OCR or inferred fact silently becomes a confirmed
+diagnosis". It is a sentence about what cannot happen, and the way to make it true is to leave the
+field out rather than to validate it.
+
+**No body carries a provenance, and neither does the domain draft.** `HealthFactDraft` has `kind`,
+`displayTerm`, `certainty` and `notedOn` and nothing else; the route's schema is `.strict()`, so a
+request naming one is refused as a malformed body rather than silently ignored; and there is no
+parameter the value could reach if the schema let it through. What reaches the column comes from
+`provenanceForRelationship`, a function with **two** possible answers.
+
+**Two of the four the column allows.** `USER_REPORTED` when the caller owns the profile,
+`CAREGIVER_ENTERED` otherwise. `IMPORTED` needs an import path that does not exist and
+`REVIEWER_CONFIRMED` needs a reviewer, which `BLK-006` records there is none of. A test enumerates
+every reachable output and asserts the set is exactly those two, and another asserts the list is a
+strict subset of the column's - so widening the schema later does not silently widen what a client
+can assert.
+
+**An unrecognised relationship gets the weaker answer.** Deny by default (`14`).
+`CAREGIVER_ENTERED` claims less about how directly the fact was observed, and a caller this build
+cannot classify must not be treated as the person themselves.
+
+**Editing cannot change it either.** `HealthFactChange` has no provenance field for the same
+reason: a person who could correct a fact into `REVIEWER_CONFIRMED` would have found the way round
+the criterion the create path closes.
+
+**This is what makes the second criterion mean anything.** "Rules can explicitly require a
+provenance level before using a fact" was already met - `requiredProfileProvenance` has been in the
+rule engine since Stage 6 - but a rule filtering on a value a client could set would be filtering on
+nothing. The two criteria are one mechanism, and only the first has teeth.
+
+**Sources.** `04` Phase 1.3; `13`; `14`; `15` A5; `17`; migration `0004`'s
+`allergy_provenance_valid`; `rules.ts`; `BLK-006`.
+
+---
+
+## DEC-092 - Certainty is the person's; provenance is Kynviora's; neither implies the other
+
+**Date:** 2026-09-02
+**Phase:** 1.3
+
+**Status:** Accepted
+
+The schema has carried both columns since migration `0004` and nothing had ever written either, so
+what each one means was still open.
+
+**Certainty is how sure the person is.** "I have been told this", "I think so", "I am sure" - the
+labels are all first-person, and a test asserts every one of them is. Provenance is where the fact
+came from, which for anything typed into this app is `USER_REPORTED` however sure they are.
+
+**So a person may say `CONFIRMED`.** Refusing it from a household surface would throw away real
+information: somebody hospitalised for a penicillin reaction knows something worth recording, and a
+product that only let them say "I think so" would be second-guessing their account of their own
+body. What the exit criterion forbids is that becoming a _confirmed diagnosis_, and it does not -
+the provenance still reads `USER_REPORTED`, the schema has no `CLINICIAN_CONFIRMED` provenance at
+all, and no shipped rule reads certainty.
+
+**They are never combined into one word.** There is no function anywhere that derives one from the
+other and no screen that merges them; the row shows two separate phrases. The same separation
+DEC-007 keeps between regulatory status and applicability, for the same reason - collapsing two axes
+is how a confident sentence gets built out of thin evidence.
+
+**The default is the weakest of the three.** `REPORTED`, matching the column default. A record that
+defaulted to `CONFIRMED` would put a stronger claim on somebody's file than they made.
+
+**A provenance is described by who put the record there, never by how good it is.** A test asserts
+no provenance sentence contains "reliable", "weak", "unverified" or their opposites: ranking them
+would be scoring somebody's account of their own body on a screen they read.
+
+**Sources.** `04` Phase 1.3; `09`; `18`; migration `0004`; DEC-007.
+
+---
+
+## DEC-093 - An unmatched term says so on the record, and a review is never inferred
+
+**Date:** 2026-09-02
+**Phase:** 1.3
+
+**Status:** Accepted
+
+Two things a person would otherwise assume, and both would be wrong.
+
+**Kynviora cannot check anything against a term it has not matched.** `allergy_record.substance_id`
+is nullable and this route never sets it: a household typing "penicillin" is not the catalog
+learning a substance, which is the rule manual entry already keeps (`15` A11), and `04` Phase 5.2
+makes the mapping the catalog's business. So in this build **every** hand-entered fact is unmatched,
+and a rule that matches on canonical substances cannot see any of them.
+
+The response reports `matchesCanonicalSubstance` rather than leaving a screen to infer it from a
+missing field, and `healthFactRowView` turns it into one of two sentences that appear on every row.
+The unmatched one says both halves - Kynviora cannot check your products against this **and** it is
+recorded and not lost - because "not being used" without "not lost" reads as the record having been
+rejected. A person who typed an allergy and assumed it was being watched would find out through an
+alert that never arrived, which is the `10` failure this whole feature is most exposed to.
+
+**A review is something somebody did, not something an edit implies.** `last_reviewed_at` is
+stamped only when the change says `markReviewed`, and it is stamped by the server: a client-set
+timestamp would let a screen claim somebody checked an allergy at a moment they did not. Correcting
+a typo leaves it alone, because a review date Kynviora inferred would make a stale record look
+checked - the same "silently becomes" the phase's exit criterion is about, one level up from the
+fact itself.
+
+**And it is a fact on the screen, not a nag.** "Nobody has checked this since it was added" is
+information. There is no count of unreviewed records, no badge, no ordering by staleness, and a copy
+test asserts no sentence in the module says "overdue" or "action required" - `02` names that as the
+anti-feature, and this is somebody's own account of their own body.
+
+**An edit is conditional on the version.** `sync.ts` has set `allergy_record`'s conflict policy to
+`ASK_USER` since Stage 1 with no reader; losing a recorded allergy to a stale offline edit is
+exactly the case that policy exists for. A save that changes nothing is refused with its own reason
+code rather than committed, because an empty save moves the version and becomes somebody else's
+conflict.
+
+**Sources.** `04` Phase 1.3; `04` Phase 5.2; `02`; `10`; `15` A11; `sync.ts`; migration `0004`;
+DEC-082.

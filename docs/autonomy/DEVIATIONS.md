@@ -810,3 +810,33 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   how long it is kept, and how somebody who is not a user asks for it to go), then a column with
   its own grant or its own table with its own policy, then the field. The consent and retention half
   belongs with `04` Phase 1.4, which is where the export-and-deletion shell lands.
+
+---
+
+## DEV-035 - No condition is recorded, because no approved rule requires one
+
+- **Affected specification**: `04` Phase 1.3 lists "limited user-reported conditions only where
+  approved rules require them" among its expected output.
+- **Expected behaviour**: a household can record the narrow set of conditions the MVP safety rules
+  need in order to be about a particular person.
+- **Implemented behaviour**: the table exists and nothing writes to it. `condition_record` has been
+  in migration `0004` since Stage 1 with its provenance, certainty, review date, version and full
+  RLS; `ProfileFact` in the rule engine carries a `CONDITION` kind; and there is no route, no
+  domain draft and no screen. Allergies and sensitivities are built in full.
+- **Reason**: the spec's own qualifier is not met. **No shipped rule consults a condition.**
+  `evaluateIngredientSensitivity` is the only rule that reads profile facts and it filters to
+  `ALLERGY` and `SENSITIVITY`; nothing anywhere reads `CONDITION`. Collecting a condition today
+  would be storing health data about somebody that changes nothing, which is precisely what `16`'s
+  data minimisation forbids - and the wording "only where approved rules require them" is that
+  requirement written into the phase. `BLK-006` compounds it: no rule in this build is publishable
+  at all, so there is no approved rule that could require one.
+- **Temporary or permanent**: temporary, and gated on somebody else's decision rather than on work.
+- **Risk**: low, and the safe direction. The failure it leaves is that a rule which one day needs a
+  condition has no data to run on - which is a gap that appears at the same moment the rule does,
+  rather than one that silently degrades an existing feature. The opposite failure, collecting
+  conditions "so they are there", is unbounded and irreversible: a person cannot un-tell a product
+  their diagnoses.
+- **Required future work**: a reviewer-approved rule that names the conditions it needs, then a
+  closed vocabulary of exactly those (free text is not acceptable here - an open condition field is
+  a diagnosis box, which `04` Phase 1.3's first exit criterion is written against), then the same
+  four layers allergies now have. The provenance mechanism (DEC-091) transfers unchanged.

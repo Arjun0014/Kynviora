@@ -9,18 +9,18 @@ Last updated: 2026-09-02
 
 ## Current position
 
-|                    |                                                     |
-| ------------------ | --------------------------------------------------- |
-| **Current stage**  | Stage 1 (Identity, Profiles, Consent)               |
-| **Current phase**  | 1.2 complete; 1.1 blocked, 1.3 and 1.4 open         |
-| **Last completed** | Phase 1.2 - household and profile creation          |
-| **Branch**         | `master`                                            |
-| **Latest commit**  | `feat(identity): a household, and the people in it` |
-| **Baseline tag**   | `baseline-spec-only`                                |
+|                    |                                                      |
+| ------------------ | ---------------------------------------------------- |
+| **Current stage**  | Stage 1 (Identity, Profiles, Consent)                |
+| **Current phase**  | 1.2 and 1.3 complete; 1.1 blocked, 1.4 open          |
+| **Last completed** | Phase 1.3 - health-context facts and provenance      |
+| **Branch**         | `master`                                             |
+| **Latest commit**  | `feat(identity): what a household records about you` |
+| **Baseline tag**   | `baseline-spec-only`                                 |
 
 ## Verification state
 
-- **3230 tests passing**, 0 failing, across 108 files.
+- **3316 tests passing**, 0 failing, across 112 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -87,6 +87,7 @@ the API will not distinguish them.
 | Alert detail, explainability, report-incorrect             | Complete, 89 tests; **no alert to open** (BLK-006)         |
 | Notification delivery policy, quiet hours, revalidation    | Complete, 139 tests; **holds nothing** (`DEV-030`)         |
 | Household and profile creation, the profile switcher       | Complete, 90 tests; no emergency contact (`DEV-034`)       |
+| Allergy and sensitivity records, provenance, review date   | Complete, 86 tests; no conditions (`DEV-035`)              |
 | Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)             |
 | Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                         |
 | Manual entry: the write path, the form and the screen      | Complete, 105 tests; the only surface that creates an item |
@@ -127,70 +128,72 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Phase 1.2 is finished**, which closes the oldest unbuilt surface in the plan. `POST /v1/households`
-and `POST /v1/profiles` exist, both behind an idempotency key the server requires, and the You tab
-carries the two screens: setting up a household with its first person, and switching between people.
+**Phase 1.3 is finished**, and with it Stage 1 has everything that is not blocked on an auth
+provider. `POST` and `GET /v1/profiles/:profileId/health-facts` and a version-conditional
+`PATCH /v1/health-facts/:factId` are the write path for allergy and sensitivity records - behind
+`MANAGE_MEDICINES` rather than `MANAGE_SHELF`, because health context is the most sensitive profile
+data there is.
 
-Phase 1.2's first exit criterion - "every item created later must require a profile" - had been true
-by accident, because there was no way to have a profile at all. It is true by construction now.
+The tables have been in migration `0004` since Stage 1 with provenance, certainty, `noted_on`,
+`last_reviewed_at`, `version` and full RLS, and nothing had ever written one.
 
 Four things about it are worth not undoing:
 
-- **A selection the server no longer offers becomes no selection, never a different one.**
-  `profileSwitcherView` owns the second exit criterion, and it never falls back to whoever is first.
-  A caregiver grant revoked between launches would otherwise turn into the wrong person's records
-  under an unchanged heading, and the failure is silent (DEC-087). It lives in
-  `@kynviora/contracts` because `apps/**` is outside the test run.
-- **Who a profile is for is a claim about the caller and can never be about anybody else.** No body
-  field names another user and there is no parameter one could reach if it did. `self_user_id` is
-  unique, so a wrong claim would also take a name that person could never make (DEC-088).
-- **A band that disagrees with a birth year is a question, not a refusal.** `bandMatchesBirthYear`
-  is deliberately outside the validator: refusing would throw away everything else somebody typed
-  over a correctable mistake (DEC-089).
-- **Both creation routes require an idempotency key, scoped rather than global.** Two households are
-  not a duplicate row - every later record hangs off one, nothing merges them, and there is no
-  delete control to undo it (DEC-090, `DEV-032`).
+- **Provenance is derived from who is writing, and there is no field to send it.** Phase 1.3's first
+  exit criterion is a sentence about what cannot happen, so the draft has no `provenance`, the body
+  schema is `.strict()`, and there is no parameter the value could reach. It comes from
+  `provenanceForRelationship`, which has two possible answers and can never produce `IMPORTED` or
+  `REVIEWER_CONFIRMED` (DEC-091). This is what makes the second criterion mean anything: a rule
+  filtering on a value a client could set filters on nothing.
+- **Certainty and provenance are separate axes.** "I am sure" is how sure the _person_ is; the
+  record still reads `USER_REPORTED`. A person may say `CONFIRMED` - refusing it would be
+  second-guessing their account of their own body - and it still claims no clinician said so
+  (DEC-092).
+- **Every row says whether Kynviora can check anything against it, and in this build none can.**
+  Nothing maps a typed term to a catalog substance, so no rule can see any hand-entered fact. The
+  sentence says both halves - not being checked, **and** not lost (DEC-093).
+- **A review is something somebody did.** Stamped by the server, only when asked for, never inferred
+  from an edit - and shown as a fact rather than a nag: no count, no badge, no ordering by
+  staleness.
 
-`DEV-034` records what Phase 1.2 does **not** include: emergency information. It is personal data
-about a third party who is not a Kynviora user and never consented, and `profile` is readable by
-every caregiver holding any viewing capability with no column-level grant - so shipping the column
-as it stands would send a stranger's contact details to everybody the owner ever granted
-`VIEW_SHELF`. The form says out loud that Kynviora does not hold one.
+`DEV-035` records what Phase 1.3 does **not** include: conditions. `04` lists them qualified - "only
+where approved rules require them" - and no shipped rule reads a `CONDITION` fact at all, so
+collecting them would be storing health data that changes nothing.
 
 ### What landed before it
 
-**Phase 7.5, both halves.** The route has reported quiet hours, the urgency-to-channel table and the
-copy since the phase's first half; a person can now set a window from the You tab, behind step-up,
-with the whole policy written on every request so a partial body cannot silently clear one
-(DEC-085). A typed time is refused rather than repaired, a window this build cannot read is a third
-state rather than "none", and the screen says quiet hours do not hold anything yet **before**
-somebody sets their first one - `QUIET_HOURS_APPLIED` is a server constant checked against the
-dispatcher by a test, and `notificationPolicyView` turns it into the sentence (DEC-086). What 7.5
-still lacks is the digest (`DEV-033`).
+**Phase 1.2 - household and profile creation.** The oldest unbuilt surface in the plan. Both exit
+criteria hold, and the second one - "screens cannot accidentally display one profile's data under
+another profile identity" - holds as a tested function rather than a habit: `profileSwitcherView`
+drops a selection the server no longer offers rather than falling back to whoever is first
+(DEC-087). Who a profile is _for_ is a claim the caller makes about themselves and can never be
+about anybody else (DEC-088). No emergency information (`DEV-034`).
 
-**Stage 2 now reads true except for deletion.** Phases 2.2 and 2.3 gave manual entry a write path, a
-client and a screen; Stage 2's remaining three words gave an item a version-conditional edit, the
-three lifecycle states and "I have checked this" (DEC-082, DEC-083, DEC-084). Every lifecycle state
-says what Kynviora **stops** doing - archiving turns the safety watch off, and that sentence sits
-above the control. Deletion is deliberately absent (`DEV-032`).
+**Phase 7.5, both halves.** A person can set quiet hours from the You tab, behind step-up, with the
+whole policy written on every request (DEC-085). The screen says quiet hours do not hold anything
+yet **before** somebody sets their first one - a server constant checked against the dispatcher by a
+test, turned into a sentence by the view (DEC-086). What 7.5 still lacks is the digest (`DEV-033`).
 
-**Phase 7.6 and 7.4's attribution half** landed before that - the versioned Safety Receipt, and a
-change attributed from what was _recorded_ rather than from what two versions look like (DEC-074,
-DEC-075, DEC-076).
+**Stage 2 reads true except for deletion**, and **Phase 7.6 and 7.4's attribution half** landed
+before that.
 
 Next, in the order they build on each other:
 
-1. **A missed-dose scheduler** (`DEV-011`), once the grace window is a decided product question. It
-   is one wiring gap standing in front of three unbuilt things: the scheduler itself, the digest
-   (`DEV-033`), and quiet hours actually holding (`DEV-030`) if a recipient's local minute is
-   supplied at the same time.
-2. **Phase 1.4's consent enforcement and the export-and-deletion shell.** `consent_receipt` is
-   written and never read as a precondition. The deletion half is where three deviations converge -
-   `DEV-032`, `DEV-009` and now `DEV-034`, which needs the third-party consent shape that phase has
-   to define anyway.
-3. **Phase 1.3's health-context facts.** The narrow profile context the MVP safety rules need, which
-   is also what `DEV-028` wants: an assessment records versions and reason codes but not which
-   recorded sensitivity matched which ingredient.
+1. **Phase 1.4's consent enforcement and the export-and-deletion shell.** `consent_receipt` is
+   append-only, tested, and never read as a precondition by anything. The deletion half is where
+   four deviations converge - `DEV-032`, `DEV-009`, `DEV-034` and the retention question `DEV-035`
+   inherits - all waiting on the retention matrix `16` requires, which that phase must define
+   anyway.
+2. **`DEV-028`'s write-path fix.** An assessment stores versions and reason codes but not which
+   recorded sensitivity matched which ingredient. Phase 1.3 makes this reachable for the first
+   time: there are now real recorded sensitivities to name.
+3. **Phase 5.2's substance normalization for a typed term.** Every hand-entered allergy is unmatched
+   and therefore invisible to the one rule that would use it. This is the difference between Phase
+   1.3's records existing and working.
+
+**Not next, and why.** A missed-dose scheduler (`DEV-011`) is blocked on a product decision rather
+than on work: the grace window has no answer, and `18` forbids shaming copy, so "how long before we
+tell a relative" is a question with a wrong answer rather than a missing one.
 
 Note what none of this clears: `BLK-006`. The reviewer console is the workflow a qualified reviewer
 would use, the shadow run is what they would look at, and no qualified reviewer exists. Nothing in
@@ -198,12 +201,23 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 
 ## Next three planned tasks
 
-1. A missed-dose scheduler, which also unblocks the digest and quiet-hours enforcement.
-2. Phase 1.4's consent enforcement and the export-and-deletion shell.
-3. Phase 1.3's health-context facts and provenance.
+1. Phase 1.4's consent enforcement and the export-and-deletion shell.
+2. `DEV-028`'s write-path fix - which sensitivity matched which ingredient.
+3. Phase 5.2's substance normalization, so a typed allergy becomes one a rule can see.
 
 ## Recent decisions worth knowing
 
+- **DEC-091** - provenance is derived from **who is writing** and there is no field to send it. The
+  draft has none, the body schema is `.strict()`, and `provenanceForRelationship` has two possible
+  answers - so `IMPORTED` and `REVIEWER_CONFIRMED` are unreachable from a phone. Phase 1.3's first
+  exit criterion enforced by absence, which is what makes the second one mean anything.
+- **DEC-092** - certainty is the person's and provenance is Kynviora's, and neither implies the
+  other. A person may say "I am sure"; the record still reads `USER_REPORTED`, and no shipped rule
+  reads certainty at all. They are never combined into one word.
+- **DEC-093** - an unmatched term says so on the record, in both halves: Kynviora cannot check your
+  products against this **and** it is recorded and not lost. A review is stamped by the server only
+  when somebody says they checked, never inferred from an edit, and shown as a fact rather than a
+  nag.
 - **DEC-087** - a profile the server no longer offers becomes **no selection**, never a different
   one. `profileSwitcherView` owns Phase 1.2's second exit criterion and never falls back to whoever
   is first; "the list is empty" and "your selection is gone" are separate states with separate

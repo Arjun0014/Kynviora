@@ -2437,3 +2437,80 @@ and eight end to end through the client the app ships.
 
 `04` Phase 1.2's expected output now reads true except for emergency information. Both exit criteria
 hold, and the second one holds as a tested function rather than as a habit.
+
+---
+
+### Phase 1.3 - the only health information Kynviora asks for
+
+**Why this and not the scheduler.** The plan's next item was a missed-dose scheduler, and it is not
+implementable: `DEV-011` records that the grace window - how long before a dose counts as unrecorded
+
+- is a product decision nobody has made, and `18` forbids shaming copy, which makes "how long before
+  we tell a relative" a question with a wrong answer rather than a missing one. Inventing the number
+  would embed an unapproved judgement about somebody's medication routine. Phase 1.3 was the next
+  thing that could actually be built, and it follows directly from 1.2: profiles now exist, so the
+  context that makes a rule about a particular person is the natural next write path.
+
+**What was already there.** All of it except the writing. `allergy_record` and `condition_record`
+have been in migration `0004` since Stage 1 with provenance, certainty, `noted_on`,
+`last_reviewed_at`, `version` and full RLS; `sync.ts` has set the conflict policy to `ASK_USER` with
+no reader; and `requiredProfileProvenance` in the rule engine has met the phase's **second** exit
+criterion since Stage 6. What did not exist was any way to put a fact in.
+
+**The first exit criterion is enforced by an absent field.** "No OCR or inferred fact silently
+becomes a confirmed diagnosis" is a sentence about what cannot happen, so the draft has no
+`provenance`, the body schema is `.strict()`, and there is no parameter the value could reach if it
+let one through. What reaches the column comes from `provenanceForRelationship`, which has two
+possible answers: `USER_REPORTED` if the caller owns the profile, `CAREGIVER_ENTERED` otherwise.
+`IMPORTED` and `REVIEWER_CONFIRMED` are in the column's vocabulary and unreachable from a phone. A
+test enumerates every reachable output and asserts the set is exactly those two (DEC-091).
+
+That is also what makes the second criterion mean anything. A rule filtering on a provenance a
+client could set would be filtering on nothing; the two criteria are one mechanism and only the
+first has teeth.
+
+**Certainty and provenance are kept apart, deliberately.** "I am sure" is how sure the _person_ is;
+`USER_REPORTED` is where the fact came from. A person may say `CONFIRMED` - refusing it would throw
+away real information from somebody hospitalised for a reaction, and would be second-guessing their
+account of their own body - and it still does not claim a clinician said so, because the provenance
+does not move and the schema has no `CLINICIAN_CONFIRMED` at all. Every certainty label is
+first-person, and a test asserts it (DEC-092).
+
+**The limit is on every row.** `substance_id` is never set by this route - a household typing
+"penicillin" is not the catalog learning a substance (`15` A11) - so in this build _every_
+hand-entered fact is unmatched and no rule can see any of them. Each row says which it is, and the
+unmatched sentence says both halves: Kynviora cannot check your products against this, **and** it is
+recorded and not lost. "Not being used" without "not lost" reads as the record having been rejected,
+and a person who assumed an allergy was being watched would find out through an alert that never
+arrived (DEC-093).
+
+**A review is something somebody did.** `last_reviewed_at` is stamped only when the change asks for
+it, and by the server - a client-set timestamp would let a screen claim somebody checked an allergy
+at a moment they did not. Correcting a typo leaves it alone. And it is a fact on the screen rather
+than a nag: no count of unreviewed records, no badge, no ordering by staleness, with a copy test
+asserting no sentence says "overdue" or "action required".
+
+**What is deliberately not built.** Conditions. `04` Phase 1.3 lists them, qualified - "only where
+approved rules require them" - and no shipped rule reads a `CONDITION` fact at all;
+`evaluateIngredientSensitivity` filters to `ALLERGY` and `SENSITIVITY`, and `BLK-006` means no rule
+is publishable anyway. Collecting conditions today would be storing health data that changes
+nothing, which is what `16` forbids and what the spec's own qualifier says. `DEV-035`, with a note
+that the eventual field must be a closed vocabulary rather than free text - an open condition box is
+a diagnosis box, which the phase's first exit criterion is written against.
+
+**Two small things.** Lint caught a `string | 'CLEAR' | null` union where the literal is swallowed
+by `string`; it became a separate `clearNotedOn` flag, which is better anyway, because a sentinel
+inside `string` is a value somebody could type into the date box. And the API fixture needed the
+database owner for its `beforeEach` cleanup again - neither application role holds DELETE, which is
+trap 105 for the fourth time.
+
+### State
+
+3316 tests passing across 112 files, up from 3230 across 108. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 86 new tests across five suites - the domain draft
+and change validators, the presentation copy, the contracts row and list views, the API against
+real PostgreSQL, and eight end to end through the client the app ships.
+
+`04` Phase 1.3's expected output now reads true except for conditions, and both exit criteria hold.
+The first is enforced by a field that does not exist rather than by a check, which is what makes the
+second - already met by the rule engine - mean anything at all.

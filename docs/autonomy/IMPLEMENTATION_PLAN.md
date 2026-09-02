@@ -58,7 +58,7 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 | ----- | ------------------------------------ | ------------- |
 | 1.1   | Authentication and session lifecycle | `NOT_STARTED` |
 | 1.2   | Household and profile creation       | `COMPLETE`    |
-| 1.3   | Health-context facts and provenance  | `NOT_STARTED` |
+| 1.3   | Health-context facts and provenance  | `COMPLETE`    |
 | 1.4   | Consent and privacy controls         | `IN_PROGRESS` |
 
 - **1.2**: complete. The schema, the RLS policies and the authorization suite have been there since
@@ -89,6 +89,31 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
   90 tests across the domain (23), presentation (16), contracts (20), the API against real
   PostgreSQL (21) and eight end to end. Outstanding: emergency information, which is third-party
   personal data with no consent or retention shape in this build (`DEV-034`).
+
+- **1.3**: complete. The tables have been in migration `0004` since Stage 1 with provenance,
+  certainty, `noted_on`, `last_reviewed_at`, `version` and full RLS, and nothing had ever written
+  one. `POST` and `GET /v1/profiles/:profileId/health-facts`, and a version-conditional
+  `PATCH /v1/health-facts/:factId`, are the write path - behind `MANAGE_MEDICINES` rather than
+  `MANAGE_SHELF`, because health context is the most sensitive profile data there is (`08.2`).
+
+  **Exit criterion 1** - "no OCR or inferred fact silently becomes a confirmed diagnosis" - is
+  enforced by a field that does not exist. No body carries a provenance, the schema is `.strict()`,
+  and there is no parameter the value could reach if it did; what reaches the column comes from
+  `provenanceForRelationship`, which has two possible answers and can never produce `IMPORTED` or
+  `REVIEWER_CONFIRMED` (DEC-091). **Exit criterion 2** - "rules can explicitly require a provenance
+  level before using a fact" - was already met by `requiredProfileProvenance` in the engine, and
+  only means anything because of the first: a rule filtering on a value a client could set filters
+  on nothing.
+
+  Certainty and provenance are separate axes and are never combined into one word - "I am sure" is
+  how sure the person is, and the record still reads `USER_REPORTED` (DEC-092). Every row says
+  whether Kynviora can check anything against it, and in this build none can, because nothing maps
+  a typed term to a catalog substance. The review date is stamped only when somebody says they
+  checked, by the server, and never inferred from an edit (DEC-093).
+
+  86 tests across the domain (23), presentation (18), contracts (12), the API against real
+  PostgreSQL (24) and eight end to end. Outstanding: conditions, which no shipped rule reads, so
+  collecting them would be storing health data that changes nothing (`DEV-035`).
 
 - **1.4**: `consent_receipt` is append-only with supersession-based withdrawal and is tested.
   Consent _enforcement_ wiring and the export/deletion shell are outstanding.
@@ -686,28 +711,35 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
-1. **A missed-dose scheduler**, once the grace window is a decided product question (`DEV-011`).
-   The dispatch, its authorization and its delivery policy all exist; nothing calls them with a
-   real occurrence. It is the same missing piece the digest needs (`DEV-033`), and supplying a
-   recipient's local minute at the same time would close `DEV-030` and make quiet hours hold.
-   Three unbuilt things, one wiring gap.
-2. **Phase 1.4's consent enforcement and the export-and-deletion shell.** `consent_receipt` is
-   written and never read as a precondition. The deletion half is where three deviations converge:
-   `DEV-032`'s missing item delete, `DEV-009`'s Visit Pack retention, and `DEV-034`'s emergency
-   information, which needs the third-party consent shape that phase has to define anyway.
-3. **Phase 1.3's health-context facts.** The narrow profile context the MVP safety rules need -
-   which is also what `DEV-028` wants, since an assessment records versions and reason codes but
-   not which recorded sensitivity matched which ingredient.
+1. **Phase 1.4's consent enforcement and the export-and-deletion shell.** `consent_receipt` is
+   append-only, tested, and never read as a precondition by anything. The deletion half is where
+   four deviations converge: `DEV-032`'s missing item delete, `DEV-009`'s Visit Pack retention,
+   `DEV-034`'s emergency information, and the retention question `DEV-035` inherits - all of them
+   waiting on the retention matrix `16` requires, which that phase has to define anyway.
+2. **`DEV-028`'s write-path fix.** An assessment stores versions and reason codes but not _which_
+   recorded sensitivity matched _which_ ingredient, so the approved sensitivity template cannot be
+   filled from stored data. Phase 1.3 makes this reachable for the first time: there are now real
+   recorded sensitivities to name. It is a write-path change and must not become a read-path one.
+3. **Phase 5.2's substance normalization for a typed term.** Every hand-entered allergy is unmatched
+   (DEC-093) and therefore invisible to the one rule that would use it. Mapping a term to a
+   canonical substance is the difference between Phase 1.3's records existing and working.
+
+**Not next, and why:** a missed-dose scheduler (`DEV-011`) is blocked on a product decision rather
+than on work. The grace window - how long before a dose counts as unrecorded - has no answer, and
+`18` forbids shaming copy, which makes "how long before we tell a relative" a question with a wrong
+answer rather than a missing one. Inventing the number would embed an unapproved judgement about
+somebody's medication routine.
 
 Done since this list was last written: Phase 7.5's client half - the clock parser, the policy view,
 the delivery screen and the whole-policy write, with the truthfulness rule moved out of the screen
-so it is tested once (DEC-085, DEC-086, `DEV-033`) - and then Phase 1.2 entire: the two creation
-routes, the switcher that owns its exit criterion, and the two screens (DEC-087 to DEC-090,
-`DEV-034`).
+so it is tested once (DEC-085, DEC-086, `DEV-033`); Phase 1.2 entire - the two creation routes, the
+switcher that owns its exit criterion, and the two screens (DEC-087 to DEC-090, `DEV-034`); and
+Phase 1.3 - allergy and sensitivity records whose provenance no client can name (DEC-091 to
+DEC-093, `DEV-035`).
 
 ## What "complete" means here, and what it does not
 
-Thirty-one phases are marked `COMPLETE` above. In every case that means the logic is
+Thirty-two phases are marked `COMPLETE` above. In every case that means the logic is
 implemented, tested, documented and committed - and in most cases the tests execute against a real
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
@@ -716,8 +748,8 @@ device, a credential, a labelled dataset, human participants, or a qualified hum
 those are marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even
 where all buildable work is finished. `BLOCKERS.md` records what each one needs.
 
-The counts above are the tables' own, recounted whenever a status changes: 31 `COMPLETE`, 7
-`IN_PROGRESS`, 4 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
+The counts above are the tables' own, recounted whenever a status changes: 32 `COMPLETE`, 7
+`IN_PROGRESS`, 3 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
 `04` defines. A prose count that drifts from the table it describes is the quiet way a status
 document stops being one - and the first version of this paragraph drifted immediately, because it
 was measured before the same commit moved 2.1. Count the rows:
