@@ -2831,3 +2831,241 @@ the three that did not match, one that holds an unmapped term to a measured zero
 the run still writes no assessment and names nobody, and the split refusal case.
 
 `DEV-018` is closed. What it was waiting on turned out to be two things, and Phase 5.2 was the first.
+
+---
+
+## 2026-09-03 - Session: a device, and what it found
+
+### The toolchain, installed rather than described
+
+`BLK-002` had been open since Stage 0 with one sentence behind it: no Android SDK. This session
+installed one, and everything below follows from having done that rather than from reasoning about
+it.
+
+Nothing needed elevation, a reboot, or a firmware change. Every install is user-scoped:
+
+| Component      | Version                             | Where                                    |
+| -------------- | ----------------------------------- | ---------------------------------------- |
+| JDK            | Temurin 17.0.20.1+1                 | `%USERPROFILE%\.jdks\jdk-17.0.20.1+1`    |
+| Android Studio | 2026.1.4.7 (zip, no installer)      | `%LOCALAPPDATA%\Programs\android-studio` |
+| Command-line   | `cmdline-tools;latest` 22.0         | `%LOCALAPPDATA%\Android\Sdk`             |
+| Platform       | `platforms;android-36`              | Android 16                               |
+| Build-Tools    | `36.0.0`, `36.1.0`                  |                                          |
+| Platform-Tools | 37.0.1 (`adb` 1.0.41)               |                                          |
+| Emulator       | 37.1.11                             |                                          |
+| NDK            | `27.0.12077973` and `27.1.12297006` | the first is what Expo SDK 57 pins       |
+| CMake          | `3.22.1`                            | needed: `expo-sqlite` compiles SQLCipher |
+| System image   | `android-36;google_apis;x86_64`     | Android 16, API 36                       |
+| AVD            | `Kynviora_Pixel_7_API_36`           | Pixel 7, 2 GB, `hw.gpu.mode=host`        |
+
+`JAVA_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT` and the four `PATH` entries are set at user scope.
+All seven SDK licences are accepted.
+
+**Hardware acceleration works and did not need anything from BIOS.** The machine is an AMD Ryzen
+5 4600H with `VirtualizationFirmwareEnabled` true and a hypervisor already running for VBS, so
+`emulator -accel-check` reports `WHPX(10.0.26200) is installed and usable`. The AMD-specific AEHD
+driver, which would have required disabling Hyper-V, is not needed.
+
+**One thing to know about `java`.** The machine has JDK 26 on the _machine_ `PATH` via Oracle's
+`javapath`, which precedes any user entry, so `java -version` still reports 26. Nothing breaks:
+`gradlew` reads `JAVA_HOME` first and every SDK tool does the same. Removing the machine entry
+would need elevation and is not worth it.
+
+**`ndk.dir` in `local.properties` is a trap.** Setting it to the NDK that happened to be installed
+made the build fail with `[CXX1104] ... disagrees with android.ndkVersion`. The generated project
+asks for a specific NDK by version; the right answer is to install that one and let AGP find it.
+
+### The app launches
+
+`npx expo prebuild --platform android --clean` then `./gradlew :app:assembleDebug`:
+**BUILD SUCCESSFUL in 27m 11s**, 383 tasks, four ABIs, `app-debug.apk` at 254 MB. Installed on the
+emulator, pointed at the local API with `adb reverse tcp:3000 tcp:3000`, and it renders the seeded
+household: Today's review tasks, the Shelf with three items and three separate verification chips
+each.
+
+`04` Phase 0.1's exit criterion "Android development build launches on emulator/device" is met.
+
+**The project path contains a space** (`C:\Web UI\KYNVIORA`) and it did not matter. CMake and Ninja
+quote correctly; the historic failures were `ndk-build`, which nothing here uses.
+
+**`adb reverse`, not `10.0.2.2`.** The client refuses a plaintext base URL that is not loopback and
+refuses to send a development identity to a non-loopback origin (`config.ts`). Both rules are right
+and neither needed weakening: `adb reverse` makes the host's API genuinely reachable at
+`127.0.0.1:3000` on the device, so `EXPO_PUBLIC_API_BASE_URL` stays loopback and the refusals stay
+in force. The emulator alias would have required turning one of them off.
+
+### Three defects that only a build could find
+
+`npm run verify` had been green on every one of these for the life of the project, because the
+native side had never been compiled and Metro had never been run.
+
+**The mobile dependencies were from an earlier SDK line.** `react-native-screens@~4.11.0` against
+React Native 0.86 fails on `Unresolved reference 'CSSBackgroundDrawable'` - a class 0.86 moved.
+`expo-router`, `expo-sqlite`, `expo-secure-store` and `expo-crypto` were all on pre-57 majors.
+Aligned to what `expo install --check` resolves (DEC-101). TypeScript is deliberately left at 5.9.
+
+**Metro could not resolve the workspace packages at all.** They are TypeScript source with
+ESM-style relative imports - `export * from './tokens.js'` - which `verbatimModuleSyntax` requires
+and which tsc, vitest and eslint all resolve. Metro looked for `tokens.js`, did not find it, and
+failed the bundle with a red screen. `metro.config.js` now rewrites a `.js` specifier to its
+extensionless form **only for files inside `packages/`**, because a `.js` import in `node_modules`
+really does mean a `.js` file.
+
+**A tab icon's `color` prop was typed `string`.** The newer navigator types hand it React Native's
+`ColorValue`, which a platform colour object also inhabits. Narrowed types compile until something
+passes the other member.
+
+### Encrypted local storage, demonstrated
+
+`secureDatabase.ts` had been written since Stage 0 and **nothing called it**. No screen opened the
+database, so no file existed - which meant `14`'s "encrypted local storage validated" gate could
+not be attempted even with a device attached. There was nothing to inspect.
+
+What landed is the read half of `12`'s repository: an encrypted projection holding the last
+successful profile list and shelf, opted into per call site (DEC-100). `03` group J asks for
+exactly those two things to stay usable with no network.
+
+**The security rule is derived, not restated.** `projectionActionFor` reads its answer from
+`retainsPreviousContent`, which already decides whether a failed refresh may leave content on the
+screen. `OFFLINE` and `SERVER_ERROR` keep the row; every other failure deletes it - `15` A2's
+"local projection purge on loss of grant". A test asserts the two agree for every member of the
+outcome union, so a new failure kind cannot get one behaviour and not the other.
+
+**Local content arrives as `STALE`.** On the device it renders as "Checked earlier - Kynviora
+showed this earlier and could not check it again just now", with a Check again control. Not
+`READY`, because it is what the server said last time.
+
+### Two more defects, both only reachable on a device
+
+**The projection key was truncated, and every screen collided on one row.** The key joined the
+session ID and the screen's name with a NUL - the usual choice, because it cannot occur in either
+part. `expo-sqlite` binds a TEXT parameter through C string handling and cut it at the NUL. The
+symptom was `TypeError: Cannot read property 'length' of undefined` and a red box on the second
+launch: the profile list read back the shelf. Reading the stored keys off the emulator showed one
+row whose characters were the session ID alone. The encoding is now length-prefixed, which asks
+nothing of the store, and it lives in `@kynviora/contracts` where it is tested for injectivity.
+
+**Two races between the request and the store, and the store lost both.** Opening a SQLCipher
+database is a round trip through the keystore; a request to a loopback server that is not there
+fails in milliseconds. So on a device the response routinely arrives first, and:
+
+- the **write** was dropped, because the store was still `null` when the response landed. The very
+  first fill never happened, leaving an empty store that looked like a working one. The write is
+  now handed to an effect that also runs when the store opens.
+- the **stored copy was suppressed**, because it was only applied while the resource was still
+  `LOADING` - and by then it was `OFFLINE`. Whether a stored copy may be shown is the same question
+  as whether a failure may leave content up, so it is now the same function, and both orders
+  converge on the same answer.
+
+A third, smaller one: an interpretation failure on a stored body rejected a promise nothing was
+handling. A body the screen cannot read is now discarded, which is what a build that changed a
+response shape would need.
+
+### The harness
+
+`scripts/device/` verifies rather than asserts. The judgements are separated from the `adb` work so
+they run in CI with no device attached (DEC-102), and a check that could not be performed reports
+`INCONCLUSIVE`, which fails the run - two of the checks are absence tests, and an absence test over
+an empty input passes trivially.
+
+`npm run verify:device`, against the emulator, all seven **PASS**:
+
+```
+STORAGE-1  read 12288 bytes from /data/data/com.kynviora.app/files/SQLite/kynviora.db
+STORAGE-2  the first sixteen bytes are not SQLite's magic
+STORAGE-3  none of four stored strings appears in the raw file
+KEY-1      no 256-bit hex key in either of the app's preference files
+KEY-2      after a force-stop the app reopened the database and read back what it had stored
+BACKUP-1   the installed package does not carry ALLOW_BACKUP
+STORAGE-4  the read-back ran with the adb reverse tunnel removed
+```
+
+**What makes the absence checks mean anything is `KEY-2` and `STORAGE-4` together.** The app is
+killed, the API is put out of reach, and it is relaunched - and it still shows "Synthetic Tablet
+A". That string can only have come out of the encrypted file. The same file's 12,288 bytes were
+then scanned: entropy 7.98 bits per byte, first sixteen bytes `125d7599a6019a7f38eed5fb105346ae`,
+and no occurrence of any seeded name, of `projected_read_v1`, or of `SQLite format 3`.
+
+The key is Keystore-wrapped, not stored: `shared_prefs/SecureStore.xml` holds only
+`{"ct":"...","iv":"...","tlen":128,"scheme":"aes","keystoreAlias":"key_v1"}`.
+
+### The rendered screen, measured
+
+`MIN_TOUCH_TARGET_DP` has been asserted in `packages/presentation` since Stage 0 and
+`PrimaryButton` has applied it since. Both were true while nothing had ever been laid out. A style
+that sets `minHeight` is a claim about what the layout engine will do; the hierarchy Android built
+is what it did.
+
+`npm run verify:device:a11y` walks all five destinations at font scale 1 and at 2 - the ceiling
+`MAX_SUPPORTED_FONT_SCALE` sets and clamps to, so it is the boundary rather than an arbitrary large
+number - and reads the rendered hierarchy back. Thirty screen checks, all **PASS**: every control
+is at least 48dp in both directions and every one carries a name a screen reader can announce.
+
+**It found one violation of `18`, and it took three attempts to be right about it.**
+
+The first run reported the shelf's "Open this item" as 354x40dp. It is not: `uiautomator` reports
+**visible** bounds, and that button's bottom edge was the ScrollView's bottom edge at
+`[0,304][1080,2145]`. The harness had invented a 48dp violation out of a button that was simply
+scrolled. A node whose edge coincides with a clipping rectangle is now counted and named as not
+measured, rather than measured wrongly - four checks cover that, including the one that refuses to
+call a screen a pass when nothing on it could be measured.
+
+The first run also reported the app crashing under TalkBack. It was not the app: the crash was
+TalkBack's own process, an `IllegalStateException` in its touch-exploration state machine,
+provoked by the harness's own synthetic taps. Two lessons landed as code. `crashedApp` reads the
+`Process:` line rather than matching `FATAL EXCEPTION` anywhere, and the screen-reader test no
+longer taps at all - TalkBack takes over touch, so an injected single tap is an explore gesture
+rather than an activation, and navigation was never happening anyway. What it can honestly show is
+that the app starts under a screen reader, keeps running, and exposes named controls, and the
+report says exactly that.
+
+Also fixed in the harness: tabs are found by name and tapped at their centre, because the first
+version used fixed coordinates for a 1080-wide screen and at font scale 2 the taller tab bar made
+every tap land somewhere else - which read as four inconclusive screens rather than as the harness
+missing.
+
+**The real finding was in the app.** At 2x the tab bar rendered Safety as "Safet...". `18` requires
+font scaling "without clipping critical content/actions", and a destination whose name is cut off
+is the icon-only tab bar the same document forbids, reached from a different direction - for
+exactly the audience `01` names, who are the people most likely to have set 2x.
+
+Wrapping does not fix it, and trying it made things worse: the five names are single words, a
+single word does not break, and `numberOfLines={2}` turned an ellipsised label into one clipped
+with no ellipsis at all. That was measured on the device, not reasoned about. The label is now
+sized to the fifth of the screen it has - it grows with the system scale until it would stop
+fitting, and no further (DEC-103). All five names render in full at 2x.
+
+### The other blockers, checked rather than assumed
+
+Every remaining blocker was tested against this environment rather than restated. Nothing was
+found, and nothing was invented to fill the gap:
+
+- **`BLK-001`** - no `KYNVIORA_DATABASE_URL`, no Supabase project, no Postgres binary or service on
+  this machine, and no `.env` holding either. Managed-Postgres parity stays unverified. PGlite
+  remains what the tests run against.
+- **`BLK-003`** - no `KYNVIORA_CATALOG_PROVIDER_KEY`. No GS1 or product-provider access was
+  fabricated.
+- **`BLK-004`, `BLK-005`, `BLK-006`** - unchanged, and unchangeable from here. No regulatory
+  document was retrieved, no licence review performed, and no reviewer exists. Nothing shipped
+  moved to an approved state.
+- **`BLK-007`** - no `KYNVIORA_OCR_PROVIDER_KEY` or `KYNVIORA_VISION_PROVIDER_KEY`, so no adapter
+  was written behind the extraction ports. Every AI kill switch stays `false`.
+- **`BLK-008`** - no labelled dataset appeared, so no numeric threshold was measured or assigned.
+- **`BLK-009`** - no push credentials. A device now exists, which is half of what `15` A6's
+  lock-screen assertion needs, and the other half is a provider that can send to it.
+  `recordingTransport` is still the only transport.
+- **`BLK-010`** - unchanged. The development header is still a development header; a device does
+  not make it authentication.
+
+### State
+
+3521 tests passing across 118 files, up from 3451 across 116. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0 read from the log.
+
+Two device harnesses, both green against a Pixel 7 / Android 16 emulator:
+`npm run verify:device` 7/7 and `npm run verify:device:a11y` 34/34. Their judgements are covered by
+61 tests that need no device, so `npm run verify` fails if a rule changes even where no hardware is
+attached.
+
+`BLK-002` is resolved. `04` Phase 0.1's four exit criteria hold, Phase 0.3 is complete, and `14`'s
+"encrypted local storage validated" release gate has evidence behind it for the first time.

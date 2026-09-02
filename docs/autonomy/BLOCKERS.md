@@ -26,18 +26,46 @@ implemented, the exact configuration required is documented, and independent wor
 ## BLK-002 - Encrypted local storage unverified on device
 
 - **Class**: `ENVIRONMENT`
-- **Status**: OPEN
-- **Blocks**: `04` Phase 0.1 exit criterion ("Android development build launches on
+- **Status**: **RESOLVED 2026-09-03**
+- **Was blocking**: `04` Phase 0.1 exit criterion ("Android development build launches on
   emulator/device"); `14` release gate ("encrypted local storage validated"); `19` device E2E
   suite; MASVS local-storage testing.
-- **Detail**: No Android SDK, emulator, or physical device is available here. `expo-sqlite` with
-  SQLCipher requires `npx expo prebuild` and a development build; it cannot run in Expo Go, and
-  encryption at rest cannot be demonstrated without a device.
-- **Workaround in place**: the storage strategy is decided and documented (DEC-012, R-002); the
-  key-management design (per-install random key from `expo-crypto`, held in `expo-secure-store`)
-  is specified. No claim is made that encryption at rest has been verified.
-- **To resolve**: install the Android SDK, run `npx expo prebuild` and a development build, then
-  execute the local-storage MASTG checks.
+- **Detail (historical)**: no Android SDK, emulator, or physical device was available. `expo-sqlite`
+  with SQLCipher requires `npx expo prebuild` and a development build; it cannot run in Expo Go,
+  and encryption at rest could not be demonstrated without a device.
+- **How it resolved**: a full user-scope Android toolchain was installed (JDK 17, SDK Platform 36,
+  Build-Tools 36.x, Platform-Tools, Emulator, NDK `27.0.12077973`, CMake 3.22.1, an Android 16
+  system image and a Pixel 7 AVD). `npx expo prebuild` and `./gradlew :app:assembleDebug` produced
+  a development build in 27 minutes across four ABIs, it installed and launched on the emulator,
+  and `npm run verify:device` reports **PASS on all seven checks**:
+
+  | Check       | What it showed                                                                     |
+  | ----------- | ---------------------------------------------------------------------------------- |
+  | `STORAGE-1` | 12,288 bytes read from `files/SQLite/kynviora.db` through `run-as`                 |
+  | `STORAGE-2` | the file does not begin with `SQLite format 3` - SQLCipher encrypts the header too |
+  | `STORAGE-3` | none of four strings the app had stored appears anywhere in the raw bytes          |
+  | `KEY-1`     | no 256-bit hex key in either of the app's preference files                         |
+  | `KEY-2`     | after a force-stop the app reopened the database and read back what it had stored  |
+  | `BACKUP-1`  | the installed package does not carry `ALLOW_BACKUP`                                |
+  | `STORAGE-4` | the read-back ran with the `adb reverse` tunnel removed, so nothing was refetched  |
+
+  `KEY-2` and `STORAGE-4` are what make `STORAGE-3` mean anything: an absence test over an empty
+  file passes trivially, so the run needs a positive control. The app is killed, the API is put out
+  of reach, and it still shows "Synthetic Tablet A" - which can only have come out of that file.
+  The file's entropy is 7.98 bits per byte and its first sixteen bytes are
+  `125d7599a6019a7f38eed5fb105346ae`.
+
+  The key is Keystore-wrapped rather than stored: `shared_prefs/SecureStore.xml` holds only
+  `{"ct":"...","iv":"...","tlen":128,"scheme":"aes","keystoreAlias":"key_v1"}`.
+
+- **What it did not resolve, and where that went**: `19`'s device E2E suite lists fourteen
+  scenarios and this session exercised four of them. The rest are not waiting on hardware any more
+  - each is now waiting on a named thing (`DEV-040`). Notably `04` Phase 4.2's reminder engine was
+    recorded as blocked on this environment and is not: it is blocked on there being no way to
+    create a schedule (`DEV-039`).
+
+  Nothing here covers the other MASVS categories `14` lists - network communication, platform
+  interaction, deep links, tampering. Only local data storage and key management were tested.
 
 ## BLK-003 - No commercial identity or normalization provider access
 

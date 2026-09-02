@@ -976,3 +976,139 @@ route.
   term, or with household consent - then the queue on the staff surface. The mapping states this
   build now stores are exactly what such a queue would select on, so it is a read over data that
   already exists rather than new collection.
+
+---
+
+## DEV-038 - The projection reads offline and writes nothing offline
+
+- **Affected specification**: `12` "Repository behavior" lists a pending-operation journal,
+  idempotency keys, conflict status and sync metadata alongside local query/write; `03` group J
+  requires "pending user edits with deterministic sync handling"; `13` defines the sync protocol
+  and `packages/domain/src/sync.ts` implements all of it.
+- **Expected behaviour**: a person with no network can add an item, record a dose or correct a
+  record, and the change uploads later exactly once.
+- **Implemented behaviour**: the **read** half only. The encrypted projection holds the last
+  successful profile list and shelf, and both render with no network, labelled `STALE`
+  (DEC-100). Every write still goes straight to the API and fails as `OFFLINE` when there is no
+  network, exactly as it did before.
+- **Reason**: the journal is not the missing piece; a decision about each entity is. `13`'s
+  conflict policy is **per entity type**, `sync.ts` encodes it, and `isOptimisticallyApplicable`
+  already says which mutations may be shown before the server has seen them - "Do not
+  optimistically change caregiver grants or safety severity/publication state". Queueing writes
+  without wiring that per-entity policy into each screen would produce exactly the global
+  last-write-wins the specification refuses, and the first entity it would be wrong for is the
+  profile fact somebody recorded about their own allergy.
+
+  Two of the entities also have no offline story yet for a reason that is not engineering. A dose
+  event created offline needs `04` Phase 4.3's duplicate-suppression against the same idempotency
+  key, which exists on the server and has no client that retries. An item created offline reaches
+  Phase 8.5's reconciliation, where two of the same medicine read as two medicines somebody is
+  taking.
+
+  Writing the read half alone is the split that leaves nothing half-true: what is on the screen
+  is either confirmed by the server or labelled as older than it looks, and nothing is queued
+  that could later be applied under a policy nobody chose.
+
+- **Temporary or permanent**: temporary. The domain half exists and is tested; what is missing is
+  the journal table, the retry, and the per-entity application at each call site.
+- **Risk**: low and visible. Somebody offline sees their medicine list and is told a change could
+  not be saved, rather than being told it was saved and finding later that it was not. The
+  opposite failure - a queued edit applied under the wrong conflict rule - is the one `13` writes
+  a per-entity table to prevent.
+- **Required future work**: a `pending_operation` table in the projection keyed by the client
+  operation ID that is already the idempotency key, a retry that drains it, and per-call-site
+  application through `sync.ts`'s existing policy rather than a generic replay.
+
+---
+
+## DEV-039 - Phase 4.2 has no schedule to remind anybody about
+
+- **Affected specification**: `04` Phase 4.2 (local reminder engine): local notification
+  scheduling, restart/reboot recovery, permission handling, generic lock-screen default,
+  quiet-hour behaviour. Its exit criteria are reminder reliability measured across process death
+  and device restart, and no sensitive medicine name on the lock screen by default.
+- **Expected behaviour**: reminders fire at the times a person entered, survive the app being
+  killed and the device restarting, and say nothing identifying on a locked screen.
+- **Implemented behaviour**: nothing. `expo-notifications` is not a dependency and no reminder is
+  scheduled.
+- **Reason**: the phase was recorded as `BLOCKED_TECHNICAL` on `BLK-002` because measuring
+  reliability across process death needs a device. That is now false - a device exists, and
+  `KEY-2` in the storage harness exercises process death against it. What blocks Phase 4.2 is
+  something else, and it was underneath the environment blocker the whole time: **there is no way
+  to create a medicine schedule.**
+
+  `medicine_schedule` has existed since migration `0004` with full row-level security, and
+  `packages/safety/src/schedule.ts` computes occurrences from it with deterministic tests -
+  Phase 4.1's model, complete. What does not exist is any route that writes or reads a row:
+  `/v1/items`, `/v1/dose-events`, `/v1/profiles`, `/v1/health-facts`, `/v1/consents`,
+  `/v1/households`, `/v1/alerts` and `/v1/regulatory-lens` are the whole surface. A dose event can
+  reference a `scheduleId`, and nothing can produce one.
+
+  A reminder engine over an empty table would schedule nothing, and its exit criterion - measured
+  reliability across restart - would be measured against zero reminders. That is the structural
+  zero DEC-099 is about, in a different part of the codebase.
+
+- **Temporary or permanent**: temporary, and no longer environmental. Phase 4.1 needs its write
+  and read path before Phase 4.2 can begin.
+- **Risk**: none created by the omission itself. `(tabs)/index.tsx` deliberately shows no schedule
+  strip and says why, so nobody is promised a reminder that is not coming. The risk being avoided
+  is the opposite one: a person who believes Kynviora will remind them and stops setting their own
+  alarm.
+- **Required future work**: Phase 4.1's surface - create, list, update and deactivate a schedule
+  behind `MANAGE_MEDICINES`, with the local times and IANA zone `schedule.ts` already expects -
+  and then Phase 4.2 on top of it: `expo-notifications`, permission handling, a generic
+  lock-screen body from the notification-detail dial that Phase 7.5 already computes, restart
+  recovery, and quiet hours once `DEV-030`'s local-time gap is closed.
+
+---
+
+## DEV-040 - Four of `19`'s fourteen device scenarios are covered, and the other ten are not waiting on a device
+
+- **Affected specification**: `19` "Device E2E tests" lists fourteen scenarios that must be
+  covered.
+- **Expected behaviour**: all fourteen exercised on a device.
+- **Implemented behaviour**: four, plus two automated harnesses that re-run them
+  (`npm run verify:device`, `npm run verify:device:a11y`).
+
+  | `19` scenario                         | State                                                      |
+  | ------------------------------------- | ---------------------------------------------------------- |
+  | Android install/update                | Install covered; update over an existing install untested  |
+  | Sign-up/sign-in/recovery              | No authentication exists (`BLK-010`, Phase 1.1)            |
+  | Profile creation                      | Built and untested on device                               |
+  | Medicine add/scan/manual path         | Manual path built; no scanner (`04` Phase 2.2)             |
+  | Personal-care add/scan/OCR/confirm    | No OCR provider (`BLK-007`)                                |
+  | Medicine reminder after process death | No reminder engine (`DEV-039`)                             |
+  | Offline create/edit/sync              | **Read covered.** No pending-operation journal (`DEV-038`) |
+  | Safety alert open/resolution          | Nothing is publishable (`BLK-006`)                         |
+  | Caregiver invite/revoke               | Built and untested on device                               |
+  | Visit Pack export                     | Built and untested on device                               |
+  | Camera/file permissions               | Nothing requests either yet                                |
+  | TalkBack smoke suite                  | **Covered**                                                |
+  | Clock/time-zone change                | Untested                                                   |
+  | Low storage/network disruption        | **Network disruption covered.** Low storage untested       |
+
+- **Reason**: the environment blocker is gone, and what is left divides into three kinds. Six
+  scenarios are about a feature that does not exist, and each names the blocker or deviation that
+  explains why. Four are about features that do exist and simply have not been driven on a device
+  yet - which is work, not a decision. Nothing here is waiting on hardware.
+
+  The two that are worth being explicit about, because their absence is easy to misread as
+  coverage:
+
+  **"Offline create/edit/sync" is half done and the visible half is the read half.** The shelf and
+  the profile list come back with no network and are labelled as older than they look. Nothing can
+  be created or edited offline (`DEV-038`), so the sync half of that scenario has nothing to sync.
+
+  **The TalkBack suite is a smoke test and the report says so.** It shows the app starts under a
+  screen reader, keeps running, and exposes controls with names. It does not navigate: TalkBack
+  takes over touch for exploration, so an injected single tap is an explore gesture rather than an
+  activation - and driving its state machine with synthetic events crashed TalkBack itself on the
+  first run, which the harness then wrongly reported as Kynviora crashing. Whether the
+  announcements are any good is a question for somebody listening, which `04` Phase 9.4 already
+  says needs people this build does not have.
+
+- **Temporary or permanent**: temporary.
+- **Risk**: low, and the shape of it is known rather than hidden. The claim being avoided is "the
+  device suite passes", which would read as fourteen scenarios when it is four.
+- **Required future work**: drive the four built-but-untested flows on the emulator and add them to
+  a harness; the other six unblock with the blockers they name.

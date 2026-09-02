@@ -3164,3 +3164,197 @@ stops being viable first. `array_agg` returns `NULL` rather than an empty array 
 matched, which the mapper coalesces - an item with no formulation never reaches the subquery at all.
 
 **Sources.** `04` Phase 6.7; `09`; `DEV-018`; DEC-098; `BLK-003`; `BLK-006`.
+
+---
+
+## DEC-100 - The local projection is the last thing the server said, and an access failure deletes it
+
+**Date:** 2026-09-03
+**Phase:** 12 / `04` Phase 0.1 (`BLK-002`)
+
+**Status:** Accepted
+
+**Context.** `secureDatabase.ts` had existed since Stage 0 with the SQLCipher key path written and
+**nothing in the app calling it**. No screen opened the database, so no database file was ever
+created - which meant `14`'s "encrypted local storage validated" release gate could not be
+attempted even with a device attached: there was nothing on disk to inspect. `03` group J
+separately requires the current medicine list and the basic personal-care shelf to stay usable
+with no network, and neither did.
+
+**Options.** (a) A development-only diagnostics screen that opens the database so a MASTG check
+has a file to look at. (b) A per-entity local schema mirroring the server's tables. (c) One table
+of API responses, opted into per call site.
+
+**Decision.** (c). `projected_read_v1(key, body)` inside the SQLCipher database, written by
+`useResource` for the reads that name a `projectionKey` - currently the profile list and the
+shelf.
+
+**Rationale.**
+
+- **(a) would have proved the wrong thing.** A screen that opens a database so it can be inspected
+  demonstrates that the harness's own write was encrypted. `14` gates a release on the app's data
+  being encrypted, and the only honest evidence is a file the app filled while somebody used it.
+- **(b) is a second copy of the server's shape, maintained by hand.** It drifts every time a
+  response gains a field, and it drifts silently, because nothing compares the two. What is stored
+  is exactly what the client already treats as the response type, so there is one shape and the
+  server owns it. The cost is that no local query narrows a row, which is acceptable while the
+  projection serves whole screens.
+- **Opt-in per call site, not a cache layer.** What may live on a device is a decision about that
+  content, not about caching in general. A screen has to name what it keeps.
+
+**The part that is a security decision rather than a caching one.** `12` requires
+"authorization loss invalidates local access" and `15` A2 lists "local projection purge on loss of
+grant" among its mitigations. `retainsPreviousContent` already decides whether a failed refresh
+may leave content on the _screen_; `projectionActionFor` derives the answer for the _disk_ from it
+rather than restating it. `OFFLINE` and `SERVER_ERROR` keep the row, because neither is an answer
+about access. Everything else deletes it. Without that, a revoked caregiver loses the shelf from
+the screen, closes the app, reopens it offline and reads it again.
+
+Deriving rather than duplicating matters because the two rules must never disagree: a failure kind
+added to `ApiOutcome` gets both behaviours from one exhaustiveness check, and a test asserts the
+two agree for every member of the union.
+
+**Local content arrives as `STALE`, never `READY`.** It is what the server said last time, not an
+answer to this load, and `18` forbids presenting uncertain information as certain. `12`'s "screens
+read local state immediately" is satisfied by showing it at once - the honesty is in the label,
+not in a delay. A stored response that is empty is not shown at all: `STALE` over nothing would
+put "this is older than it looks" on a screen with nothing on it.
+
+**The key carries the session.** `projectionKey(sessionId, logical)` is the only way to build one,
+so a row cannot be written without the identity that fetched it. Two people on one device get two
+sets of rows, and changing identity clears the store as well - `12`'s "sign-out removes decrypted
+projections", in the only form reachable before Phase 1.1.
+
+**Consequences.** The app now creates `kynviora.db` on first launch, which is what makes
+`npm run verify:device` able to look at anything at all. The write half of `12`'s repository - the
+pending-operation journal, offline creates and edits - is **not** built (`DEV-038`).
+
+**Sources.** `12` (repository behaviour, offline storage, sign-out); `03` group J; `15` A2; `14`;
+`18`; DEC-012; DEC-041; `BLK-002`.
+
+---
+
+## DEC-101 - The mobile dependency set is what Expo SDK 57 actually resolves, and the app commits to light
+
+**Date:** 2026-09-03
+**Phase:** 0.1 (`BLK-002`)
+
+**Status:** Accepted
+
+**Context.** `04` Phase 0.1 fixes the baseline at "Expo SDK 57 / React Native 0.86". The
+repository pinned `react-native-screens@~4.11.0`, `react-native-safe-area-context@~5.4.0`,
+`expo-router@~6.0.0`, `expo-sqlite@~16.0.0`, `expo-secure-store@~15.0.0` and
+`expo-crypto@~15.0.0` - versions from an earlier SDK line. All of them typechecked, and
+`npm run verify` was green on them for the whole life of the project, because **nothing had ever
+compiled the native side**. The first real Gradle build failed on
+`react-native-screens ... Unresolved reference 'CSSBackgroundDrawable'`, a class React Native 0.86
+moved.
+
+**Decision.** Align to what `expo install --check` resolves for the installed Expo: the four
+`expo-*` modules onto the unified `~57.x` line, `react-native` to `0.86.3`,
+`react-native-screens` to `~4.26.0`, `react-native-safe-area-context` to `~5.7.0`. Add
+`expo-system-ui`, which is what makes a declared `userInterfaceStyle` take effect at all.
+
+**TypeScript is deliberately left at 5.9.** `expo install --check` also asks for `~6.0.3`. That is
+a compiler change across every package in the monorepo, orthogonal to getting a device build to
+run, and taking it in the same change would mix "the app builds now" with "every test was
+recompiled by a new major". It is recorded rather than done.
+
+**`userInterfaceStyle` moved from `automatic` to `light`.** The claim was never true: there is no
+`DARK_THEME` in `@kynviora/presentation` and thirty-four files import `LIGHT_THEME` directly. On
+Android 16, where edge-to-edge is mandatory, `automatic` means the system chrome follows the
+device into dark while every surface stays light - worst for exactly the audience `01` names.
+Committing to light is the honest description of what the app does, and it is a smaller thing to
+correct later than a dark mode nobody implemented.
+
+**`edgeToEdgeEnabled` was removed** because Android 16 makes edge-to-edge mandatory and the option
+no longer exists; prebuild warned about it on every run.
+
+**Consequences.** `react-native-reanimated`, `react-native-worklets` and
+`react-native-gesture-handler` arrive as transitive dependencies of the newer
+`react-native-screens`. A four-ABI debug build takes roughly half an hour on this machine;
+`-PreactNativeArchitectures=x86_64` builds only the one an x86_64 emulator needs.
+
+**Sources.** `04` Phase 0.1; `01`; `18`; the Gradle failure recorded in this session's WORKLOG
+entry; `BLK-002`.
+
+---
+
+## DEC-102 - A check that could not look reports INCONCLUSIVE, and an inconclusive run fails
+
+**Date:** 2026-09-03
+**Phase:** 0.1 / `14` security release gates (`BLK-002`)
+
+**Status:** Accepted
+
+**Context.** `14` puts "encrypted local storage validated" behind a release gate and asks for
+MASVS/MASTG coverage of local data storage and key management. A harness for that is a piece of
+code somebody will eventually point at and say "it passed".
+
+**Decision.** `scripts/device/analysis.ts` returns `PASS | FAIL | INCONCLUSIVE` per check, and
+`overallStatus` returns `INCONCLUSIVE` - which the runner exits non-zero on - if a single check
+could not be performed.
+
+**Rationale.** The dangerous shape for a security check is one that reports success because it
+could not look. Two of these are _absence_ tests: the database must not contain a stored medicine
+name in plaintext, and the installed package must not carry `ALLOW_BACKUP`. An absence test over
+an empty input passes trivially, so `adb` failing, `run-as` being refused, or a `dumpsys` line
+not being found would each read as evidence of security. Each is a distinct `INCONCLUSIVE`, and
+there is a test for every one of them.
+
+**The judgements are separated from the device work on purpose.** `analysis.ts` decides what
+output means; `verifyLocalStorage.ts` runs `adb`. The rules are exercised on a machine with no
+emulator attached, so `npm run verify` covers the checks and only the evidence needs hardware.
+
+**Nothing is written into the app to be found.** The strings searched for are the development
+seed's own synthetic product names, which the app stored through `useResource` while somebody
+used it. A canary the harness inserted would only show that the harness's write was encrypted.
+
+**Sources.** `14` (mobile security validation; release gates); `12`; `19`; OWASP MASVS-STORAGE;
+`BLK-002`.
+
+---
+
+## DEC-103 - A tab label is sized to the slot it has, because a clipped name is worth less than a small one
+
+**Date:** 2026-09-03
+**Phase:** 0.1 / `18` (`BLK-002`)
+
+**Status:** Accepted
+
+**Context.** `18` requires the app to "support system font scaling without clipping critical
+content/actions", and `MAX_SUPPORTED_FONT_SCALE` is 2.0, so 2x is what the app claims to survive.
+On the emulator at 2x it did not: the navigator's own tab label is one line and ellipsises, and
+Safety rendered as "Safet...". This had never been visible because nothing had ever been laid out
+on a screen.
+
+**Options.** (a) Leave it: an ellipsis at least signals truncation, and the screen's own heading
+names the destination. (b) Wrap to two lines. (c) Size the label so it fits.
+
+**Decision.** (c), and only on the tab bar. The label grows with the system scale up to the point
+where it would stop fitting its fifth of the screen, and no further.
+
+**Rationale.**
+
+- **(a) is the thing the rule names.** A destination whose name is cut off is the icon-only tab bar
+  `18` forbids, arrived at from a different direction - and `01` names older adults as the primary
+  audience, who are the people most likely to have set 2x in the first place.
+- **(b) does not work, and trying it made things worse.** The five names are single words and a
+  single word does not break, so `numberOfLines={2}` changed a label with an ellipsis into a label
+  clipped with no ellipsis at all. That was measured, not reasoned about.
+- **There is no fourth option of showing fewer tabs.** `06` fixes five primary destinations.
+
+**What is given up, and why it is the right thing to give up.** A person who set 2x does not get
+2x on this one label. That is a real cost and it is smaller than the alternative: a name that is
+cut off conveys less than the same name a size smaller, and this label is the third of three cues
+for the same thing - the icon is beside it and the screen's own heading is above it, and that
+heading does scale the whole way.
+
+**The width heuristic is deliberate.** The size comes from an approximate glyph-width ratio rather
+than from measuring the rendered text, which would need a layout pass and a second render for a
+five-word problem. The constant errs small: too low renders a label smaller than it had to be,
+which is untidy, and too high clips it, which is the failure the whole decision is about.
+
+**Sources.** `18` (font scaling without clipping; meaning never carried by an icon alone); `06`
+(five primary destinations); `01`; `04` Phase 9.4; the 2x screenshots in this session's WORKLOG
+entry.

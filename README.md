@@ -72,18 +72,68 @@ design working:
 Seeding content to make those screens look populated would put exactly the material in front of a
 developer that the governance layers exist to keep out.
 
-### On a phone
+### On a phone or an emulator
+
+The app needs a **development build**. Expo Go will not work and is not a fallback: the encrypted
+local store is SQLCipher, which is compiled into the app by `expo-sqlite`'s config plugin, so it
+only exists in a build made from the generated native project.
+
+What has to be installed once:
+
+- JDK 17 (the Gradle wrapper reads `JAVA_HOME`, so a newer JDK on `PATH` does not matter);
+- the Android SDK with Platform 36, Build-Tools 36.x, Platform-Tools, the emulator, NDK
+  `27.0.12077973` and CMake 3.22.1;
+- an Android 16 (API 36) system image and an AVD, or a device with USB debugging on.
+
+`ANDROID_HOME` and `JAVA_HOME` must be set. The exact package list and the Windows notes are in
+`docs/autonomy/WORKLOG.md` under the session that first built this.
 
 ```bash
-npm --prefix apps/mobile run android
+cd apps/mobile && npx expo prebuild --platform android --clean
 ```
 
-Requires an Android SDK and a development build (`BLK-002`). Expo Go will not work: the encrypted
-local store uses SQLCipher, which needs `npx expo prebuild` first.
+```bash
+cd apps/mobile && npx expo run:android
+```
 
-Point the app at the server with `EXPO_PUBLIC_API_BASE_URL` and give it an identity with
-`EXPO_PUBLIC_DEV_USER_ID` - see `.env.example`. The client refuses to send a development identity
-to anything but a loopback origin, mirroring the server's refusal under `NODE_ENV=production`.
+On an x86_64 emulator, building only the one architecture it can run cuts the first build from
+about half an hour to a few minutes:
+
+```bash
+cd apps/mobile/android && ./gradlew :app:assembleDebug -PreactNativeArchitectures=x86_64
+```
+
+`android/` and `ios/` are **not** committed. They are generated from `app.json`, and a committed
+copy is a second source of truth that drifts from the config plugins - including the SQLCipher
+one, whose entire effect is one line in a generated `gradle.properties`.
+
+#### Pointing the app at the local API
+
+Use `adb reverse` rather than the emulator's `10.0.2.2` host alias:
+
+```bash
+adb reverse tcp:3000 tcp:3000
+```
+
+The client refuses to send a development identity anywhere but a loopback origin, and refuses a
+plaintext base URL that is not loopback - both mirroring the server's refusal under
+`NODE_ENV=production`. `adb reverse` makes the host's API genuinely reachable at `127.0.0.1:3000`
+_on the device_, so `EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:3000` stays true rather than being
+worked around. Put it in `apps/mobile/.env.local` along with `EXPO_PUBLIC_DEV_USER_ID` - see
+`.env.example`.
+
+#### Checking that local storage is really encrypted
+
+```bash
+npm run verify:device
+```
+
+Reads the app's own files through `adb run-as`, and fails if the database announces itself as
+plaintext SQLite, if anything the app stored is readable in the raw bytes, if a 256-bit hex key
+appears in the app's preferences, if the app cannot reopen its store after a force-stop, or if the
+installed package still allows platform backup. A check that could not be performed reports
+`INCONCLUSIVE`, and an inconclusive run exits non-zero - "we could not look" must never be
+recorded as "we looked and it was fine".
 
 Today, Shelf, Safety, Care and You read real data. The write flows - inviting a caregiver,
 completing a review task, generating a Visit Pack, resolving a reconciliation difference - exist on
@@ -175,8 +225,13 @@ reading the code:
    implemented; no qualified clinical or regulatory reviewer was available. Test helpers that
    simulate approval use the reviewer id `synthetic-test-reviewer` so they can never be mistaken
    for a real approval.
-3. **Nothing has run on a device.** The mobile app typechecks against the real Expo SDK 57
-   toolchain, but encryption at rest is written and configured rather than demonstrated.
+3. **Four of `19`'s fourteen device scenarios are covered.** The app builds and runs on an Android
+   16 emulator and encryption at rest is demonstrated rather than described - `npm run
+verify:device` kills the app, puts the API out of reach, and requires it to show content that
+   can only have been decrypted from a file whose bytes contain no readable trace of it. What is
+   not covered is not waiting on hardware: six scenarios are about features that do not exist and
+   four are built and simply not yet driven on the emulator (`DEV-040`). Nothing can be created or
+   edited offline (`DEV-038`), and there are no reminders (`DEV-039`).
 
 ## Licence
 

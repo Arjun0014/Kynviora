@@ -3,24 +3,24 @@
 **Resume checkpoint.** Read this first on any autonomous restart, then `git log`, then the tail
 of `WORKLOG.md`, then `BLOCKERS.md`.
 
-Last updated: 2026-09-02
+Last updated: 2026-09-03
 
 ---
 
 ## Current position
 
-|                    |                                                       |
-| ------------------ | ----------------------------------------------------- |
-| **Current stage**  | Stage 5/6 (normalization, shadow measurement)         |
-| **Current phase**  | Phase 5.2 complete; `DEV-018` and `DEV-028` closed    |
-| **Last completed** | `DEV-018` - both halves of a substance match          |
-| **Branch**         | `master`                                              |
-| **Latest commit**  | `feat(safety): measuring a rule against a real shelf` |
-| **Baseline tag**   | `baseline-spec-only`                                  |
+|                    |                                                         |
+| ------------------ | ------------------------------------------------------- |
+| **Current stage**  | Stage 0 revisited on real hardware                      |
+| **Current phase**  | Phase 0.1 and 0.3 complete; `BLK-002` **resolved**      |
+| **Last completed** | Encrypted local storage, demonstrated on a device       |
+| **Branch**         | `master`                                                |
+| **Latest commit**  | `docs(autonomy): a device, and the six things it found` |
+| **Baseline tag**   | `baseline-spec-only`                                    |
 
 ## Verification state
 
-- **3451 tests passing**, 0 failing, across 116 files.
+- **3521 tests passing**, 0 failing, across 118 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -32,6 +32,32 @@ npm run verify
 - The mobile app typechecks against the real Expo SDK 57 / RN 0.86 / React 19.2 toolchain.
 - `main.test.ts` boots real API processes on real ports against a persisted database, so role
   switching, the request GUC and the RLS policies are exercised together rather than mocked.
+
+### On a device
+
+Two harnesses need an attached Android device or emulator and are **not** part of `npm run
+verify`. Their judgements are, though: 61 of the tests above exercise the rules they apply, so a
+rule cannot change without CI noticing even where no hardware exists.
+
+```bash
+npm run verify:device
+```
+
+Seven checks on the encrypted local store: the database is unreadable, none of four strings the
+app stored appears in its bytes, no 256-bit key sits in the app's preferences, the key survives a
+force-stop, and the installed package does not allow platform backup. Last run **7/7 PASS** against
+a Pixel 7 / Android 16 emulator.
+
+```bash
+npm run verify:device:a11y
+```
+
+Thirty-four checks: every control on all five destinations, at font scale 1 and at 2, measured
+against the 48dp minimum and against having a name a screen reader can announce, plus a TalkBack
+smoke test. Last run **34/34 PASS**.
+
+A check that could not be performed reports `INCONCLUSIVE` and fails the run. Two of the storage
+checks are absence tests, and an absence test over an empty input passes trivially (DEC-102).
 
 ### Running it
 
@@ -66,38 +92,40 @@ the API will not distinguish them.
 
 ## What is genuinely built and tested
 
-| Area                                                       | State                                                      |
-| ---------------------------------------------------------- | ---------------------------------------------------------- |
-| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                         |
-| Database schema, 19 migrations, full RLS                   | Complete, 311 tests incl. threats A1/A2/A3                 |
-| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                        |
-| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                         |
-| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                         |
-| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                                         |
-| Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                                        |
-| API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                                         |
-| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                                         |
-| Caregiver invitation, acceptance, revocation, audit        | Complete, 214 tests                                        |
-| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                                        |
-| Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009)                |
-| Household Review Inbox, record-writing completion          | Complete, 95 tests                                         |
-| Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                                        |
-| Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006)       |
-| Staff surface split, console package, console process      | Complete, 172 tests; **authenticates nobody** (BLK-010)    |
-| Alert detail, explainability, report-incorrect             | Complete, 89 tests; **no alert to open** (BLK-006)         |
-| Notification delivery policy, quiet hours, revalidation    | Complete, 139 tests; **holds nothing** (`DEV-030`)         |
-| Household and profile creation, the profile switcher       | Complete, 90 tests; no emergency contact (`DEV-034`)       |
-| Allergy and sensitivity records, provenance, review date   | Complete, 86 tests; no conditions (`DEV-035`)              |
-| Consent state, withdrawal, and what withdrawing stops      | Complete, 87 tests; no export/deletion (`DEV-036`)         |
-| Typed term mapped to a canonical substance                 | Complete, 27 tests; no review queue (`DEV-037`)            |
-| Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)             |
-| Shadow runs, before/after comparison, assessment replay    | Complete, 74 tests; substance rules now measurable         |
-| Manual entry: the write path, the form and the screen      | Complete, 105 tests; the only surface that creates an item |
-| Item update, the three lifecycle states, mark-as-checked   | Complete, 105 tests; no deletion (`DEV-032`)               |
-| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                         |
-| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                        |
-| Caregiver, export, inbox, reconciliation, add-an-item UI   | Wired; **not device-verified** (`DEV-007`)                 |
-| CI pipeline                                                | Written; not yet run on a real runner                      |
+| Area                                                       | State                                                       |
+| ---------------------------------------------------------- | ----------------------------------------------------------- |
+| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                          |
+| Database schema, 19 migrations, full RLS                   | Complete, 311 tests incl. threats A1/A2/A3                  |
+| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                         |
+| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                          |
+| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                          |
+| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                                          |
+| Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                                         |
+| API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                                          |
+| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                                          |
+| Caregiver invitation, acceptance, revocation, audit        | Complete, 214 tests                                         |
+| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                                         |
+| Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009)                 |
+| Household Review Inbox, record-writing completion          | Complete, 95 tests                                          |
+| Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                                         |
+| Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006)        |
+| Staff surface split, console package, console process      | Complete, 172 tests; **authenticates nobody** (BLK-010)     |
+| Alert detail, explainability, report-incorrect             | Complete, 89 tests; **no alert to open** (BLK-006)          |
+| Notification delivery policy, quiet hours, revalidation    | Complete, 139 tests; **holds nothing** (`DEV-030`)          |
+| Household and profile creation, the profile switcher       | Complete, 90 tests; no emergency contact (`DEV-034`)        |
+| Allergy and sensitivity records, provenance, review date   | Complete, 86 tests; no conditions (`DEV-035`)               |
+| Consent state, withdrawal, and what withdrawing stops      | Complete, 87 tests; no export/deletion (`DEV-036`)          |
+| Typed term mapped to a canonical substance                 | Complete, 27 tests; no review queue (`DEV-037`)             |
+| Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)              |
+| Shadow runs, before/after comparison, assessment replay    | Complete, 74 tests; substance rules now measurable          |
+| Manual entry: the write path, the form and the screen      | Complete, 105 tests; the only surface that creates an item  |
+| Item update, the three lifecycle states, mark-as-checked   | Complete, 105 tests; no deletion (`DEV-032`)                |
+| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                          |
+| Mobile app shell, encrypted store, accessible primitives   | **Runs on Android 16; storage and 48dp verified on device** |
+| The encrypted read projection, offline shelf and profiles  | Complete, 11 tests; no offline writes (`DEV-038`)           |
+| Device harnesses: local storage, key handling, 48dp, 2x    | Complete, 61 tests; 4 of `19`'s 14 scenarios (`DEV-040`)    |
+| Caregiver, export, inbox, reconciliation, add-an-item UI   | Wired; **not device-verified** (`DEV-007`)                  |
+| CI pipeline                                                | Written; not yet run on a real runner                       |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
 alert-delivery, Review Inbox, reconciliation and reviewer-console rows each count tests that
@@ -115,10 +143,11 @@ None.
 See `BLOCKERS.md`. None of them stops further work; each has a port, a local adapter, and
 documented configuration requirements.
 
+`BLK-002` is **resolved** as of 2026-09-03 and no longer appears here.
+
 | ID      | Class                               | Blocks                                        |
 | ------- | ----------------------------------- | --------------------------------------------- |
 | BLK-001 | `EXTERNAL_SERVICE`                  | Managed Postgres/Supabase parity              |
-| BLK-002 | `ENVIRONMENT`                       | On-device encryption proof; all device E2E    |
 | BLK-003 | `EXTERNAL_CREDENTIAL` + `LICENSING` | GS1/provider identity resolution              |
 | BLK-004 | `DATA_AVAILABILITY`                 | Publishing any regulatory status as trusted   |
 | BLK-005 | `LEGAL_REVIEW`                      | Source snapshot retention                     |
@@ -130,112 +159,87 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Phase 5.2 is finished**, and with it the recorded allergies Phase 1.3 introduced are things a rule
-could see - where the vocabulary carries the word. `allergy_record.substance_id` had been nullable
-since migration `0004` with nothing ever setting it, so every recorded allergy in this build was
-invisible to `evaluateIngredientSensitivity` by construction. DEC-093 said so honestly on every row
-a day ago; this is the cause, closed.
+**`BLK-002` is resolved.** There is a real Android toolchain on this machine, the app builds and
+launches on an Android 16 emulator, and `14`'s "encrypted local storage validated" release gate has
+evidence behind it: `npm run verify:device` reports 7/7, including a positive control - the app is
+killed, the API is put out of reach, and it still shows "Synthetic Tablet A", which can only have
+come out of a file whose 12,288 bytes contain no readable trace of it.
 
-Five things about it are worth not undoing:
+Six things that were invisible to every gate this project runs, because nothing had ever compiled
+the native side or run Metro, and which are worth not undoing:
 
-- **A typed term and a printed one go through the same function.** `resolveRecordedTerm` and
-  `normalizeIngredients` both call `resolveLookupKey` and both key through `ingredientLookupKey`.
-  The rule intersects a declaration's canonical keys with a profile fact's, so two resolvers become
-  a rule that fires on one spelling of a substance and not another. A test asserts the two paths
-  agree field for field (DEC-098).
-- **Only a reviewed alias resolves - never a display name.** `substance_alias` carries provenance
-  and an exact-versus-ambiguous state; `preferred_name` is a label. Matching on the label would let
-  a rule fire on a mapping nobody reviewed, which is Phase 5.2's first exit criterion failing by the
-  back door. `REJECTED` aliases count towards neither a match nor the ambiguity that blocks one.
-- **Nothing a person types reaches the vocabulary.** The lookup is a SELECT with no insert branch,
-  and a test counts both catalog tables across a write. `08` and threat A11, the same rule manual
-  entry keeps for products.
-- **The outcome is stored, not re-derived.** Migration `0019` adds `substance_mapping_state` with a
-  biconditional CHECK against `substance_id`. Re-resolving on the read path would be `DEV-028`'s
-  mistake one level up - the vocabulary can move, and a re-resolution can disagree with the mapping
-  actually driving the rule.
-- **A corrected term is re-resolved and an unrelated edit is not.** A record whose wording changed
-  while keeping the old mapping would drive a rule on a substance nobody typed; a review stamp
-  re-running the lookup would let a moved vocabulary change what a rule sees on an edit that never
-  touched the word.
+- **The dependency set was from an earlier SDK line** and the first Gradle build failed on it.
+  `expo install --check` is now the source of truth for the mobile packages (DEC-101). TypeScript
+  is deliberately still 5.9 - that bump is a compiler change across every package.
+- **Metro could not resolve the workspace packages at all.** They are TypeScript source with
+  `./x.js` relative imports, which `verbatimModuleSyntax` requires and which tsc, vitest and eslint
+  all resolve. The rewrite in `metro.config.js` is scoped to `packages/` on purpose.
+- **`secureDatabase.ts` had never been called**, so no database existed and the release gate could
+  not have been attempted even with a device attached. The encrypted read projection is what fills
+  it, and it is `03` group J working rather than a diagnostic (DEC-100).
+- **A NUL in a projection key was truncated by `expo-sqlite`** and every screen collided on one
+  row. Keys are length-prefixed now, in `contracts`, with injectivity tested.
+- **Two races between the request and the store, and the store lost both.** Opening SQLCipher is a
+  keystore round trip; a loopback failure is milliseconds. The write is deferred to an effect that
+  also fires when the store opens, and whether a stored copy may be shown now goes through
+  `retainsPreviousContent` rather than through "is it still LOADING".
+- **The tab bar clipped Safety at 2x font scale.** `18` forbids exactly that, wrapping cannot fix a
+  single word, and the label is now sized to its slot (DEC-103).
 
-And a NULL is now two sentences rather than one. "Kynviora does not know that word" is a gap in a
-licensed vocabulary (`BLK-003`) and nothing the person can act on; "that word means more than one
-thing here" is something they can fix by being more specific. The second does not list the
-candidates - offering them would be Kynviora suggesting what somebody is allergic to.
+**Two things a device turned out not to unblock, and it matters which.**
 
-`DEV-037` records what Phase 5.2 does **not** include: the review queue for unresolved mappings.
-There is nothing to map to until `BLK-003` clears, and the entries would be terms people typed about
-their own bodies on a staff screen - which `DEC-066`'s split exists to prevent.
+`04` Phase 4.2's reminder engine was recorded as `BLOCKED_TECHNICAL` on `BLK-002`. It is not
+blocked on hardware and never really was: **no route creates a medicine schedule**. The table has
+had full row-level security since migration `0004` and `schedule.ts` computes occurrences from it
+with deterministic tests, but the entire API surface is items, dose events, profiles, health facts,
+consents, households, alerts and the Lens. A reminder engine over an empty table would schedule
+nothing and its exit criterion would be measured against zero reminders (`DEV-039`).
 
-### What landed before it
+`19`'s device E2E suite has fourteen scenarios and four are covered. The other ten are not waiting
+on a device either - six are about a feature that does not exist, each naming its blocker, and four
+are built and simply have not been driven on the emulator yet (`DEV-040`).
 
-**`DEV-028` - which ingredient matched which recorded sensitivity.** Migration `0018` freezes the
-substance key and the profile fact ID at evaluation; the alert detail resolves both by that identity
-under row-level security and never re-intersects the declaration with the profile's facts (DEC-097).
-
-**Phase 1.4 - consent as a state rather than a log.** `CONSENT_ENFORCEMENT` answers for all eight
-purposes; two enforce something and five say on their own row that they do not. Withdrawing
-notifications stops every notification, a critical safety alert included, and nothing pierces it
-(DEC-094 to DEC-096). No export or deletion shell (`DEV-036`).
-
-**Phase 1.3 - allergy and sensitivity records.** Provenance derived from who is writing, with no
-field to send it (DEC-091); certainty and provenance kept apart (DEC-092). No conditions
-(`DEV-035`).
-
-**Phase 1.2 - household and profile creation**, and **Phase 7.5, both halves**. **Stage 2 reads true
-except for deletion.**
-
-Next, in the order they build on each other:
-
-1. **`DEV-033`'s notification digest**, the last piece of Phase 7.5. Unlike the missed-dose
-   scheduler it needs no unmade product decision - `18` constrains the grouping rather than leaving
-   it open - and it is the difference between a household with several alerts getting several
-   interruptions and getting one.
-2. **`DEV-018`'s remaining half.** Phase 5.2 gave the historical shadow dataset the _fact_ side of a
-   substance match; the _item_ side is still missing, because the shelf join does not reach the
-   confirmed declaration. Joining `marketed_formulation` and `formulation_ingredient` would let
-   `INGREDIENT_SENSITIVITY` come off `HISTORICAL_UNSUPPORTED_KINDS` - and a rule nobody can measure
-   against real data is one nobody can approve.
-3. **Phase 2.5's item deletion**, the moment the retention matrix exists. `DEV-032` has been waiting
-   on the same document as `DEV-036` and is the smallest thing that unblocks with it.
-
-**Not next, and why.** The notification digest (`DEV-033`) is not the cheap win it looks like. A
-digest is sent on a cadence, and nothing sends anything (`BLK-009`) or runs on a cadence. Every
-question it has to answer - how often, what somebody sees if they open the app first, whether an
-item resolved since it was collected still appears - is about a delivery that does not happen. It
-also wants the local time `DEV-030` records as missing, and that is a product decision in disguise:
-quiet hours live on the _profile_, so applying them means deciding whether a caregiver abroad is
-held through the household's night or their own. `04` Phase 7.5 does not say, and inventing it
-decides when somebody is woken.
-
-The export-and-deletion shell (`DEV-036`) is a document, not a feature: "get
-me a copy" and "remove it" cannot be answered without a retention matrix saying what is kept
-regardless, and this build has records that must survive a deletion request with no approved
-statement of which. Five deviations converge on that one missing document (`DEV-009`, `DEV-032`,
-`DEV-034`, `DEV-035`, `DEV-036`), and it is a retention and disclosure decision rather than an
-engineering one.
-
-The substance review queue (`DEV-037`) is the same shape twice over: nothing to map to until
-`BLK-003` clears, and a disclosure question - may a term somebody typed about their own body appear
-on a staff screen - that `16` has no answer for.
-
-A missed-dose scheduler (`DEV-011`) is blocked the same way: the grace window has no answer, and
-`18` forbids shaming copy, so "how long before we tell a relative" is a question with a wrong answer
-rather than a missing one.
-
-Note what none of this clears: `BLK-006`. The reviewer console is the workflow a qualified reviewer
-would use, the shadow run is what they would look at, and no qualified reviewer exists. Nothing in
-the shipped fixtures is publishable and a test asserts that every one is refused.
+**What no device could touch.** Every other blocker was checked against this environment rather
+than restated: no database URL, no provider keys, no push credentials, no labelled dataset, no
+reviewer. All unchanged, and nothing was invented to fill the gap.
 
 ## Next three planned tasks
 
-1. `DEV-033`'s notification digest, the last piece of Phase 7.5.
-2. `DEV-018`'s remaining half - the confirmed declaration in the historical shadow dataset.
-3. Phase 2.5's item deletion, once the retention matrix exists.
+1. **Phase 4.1's missing surface** - create, list, update and deactivate a medicine schedule behind
+   `MANAGE_MEDICINES`, with the local times and IANA zone `schedule.ts` already expects. It is the
+   one thing standing in front of Phase 4.2, which is now the only `BLOCKED_TECHNICAL` phase left
+   and the only one whose blocker is inside this repository.
+2. **Phase 4.2's local reminder engine**, on top of it: `expo-notifications`, permission handling, a
+   generic lock-screen body from the detail dial Phase 7.5 already computes, and restart recovery -
+   with the reliability across process death now measurable, because `KEY-2` already does exactly
+   that for the store.
+3. **The four built-but-untested device scenarios** from `DEV-040` - profile creation, caregiver
+   invite and revoke, Visit Pack export, manual medicine entry - driven on the emulator and added
+   to a harness, so `19`'s suite grows by measurement rather than by assertion.
+
+**Not next, and why.** The offline write half (`DEV-038`) looks like the obvious sequel to the read
+half and is not: `13`'s conflict policy is per entity type, `sync.ts` encodes it, and queueing
+writes without wiring that into each call site is the global last-write-wins the specification
+refuses. The first entity it would be wrong for is a profile fact somebody recorded about their own
+allergy.
 
 ## Recent decisions worth knowing
 
+- **DEC-103** - a tab label is sized to the slot it has. `18` forbids clipping a critical action's
+  name under font scaling; the five destination names are single words so wrapping cannot help; and
+  `06` will not let a sixth slot be freed. A name a size smaller conveys more than one cut off, and
+  it is the third of three cues beside the icon and the screen's own heading.
+- **DEC-102** - a check that could not look reports `INCONCLUSIVE`, and an inconclusive run fails.
+  Two of the device storage checks are absence tests, so `adb` failing or `run-as` being refused
+  would otherwise read as evidence of security. The judgements live apart from the device work, so
+  they run in CI with nothing attached.
+- **DEC-101** - the mobile dependency set is what Expo SDK 57 actually resolves, and the app
+  commits to light because there is no `DARK_THEME` and thirty-four files import `LIGHT_THEME`
+  directly. TypeScript stays at 5.9 deliberately.
+- **DEC-100** - the local projection is the last thing the server said, and an access failure
+  deletes it. The disk rule is derived from `retainsPreviousContent` rather than restated, so a new
+  failure kind cannot get one behaviour on screen and another on disk; `15` A2 names the purge as a
+  mitigation. Local content arrives as `STALE`, never `READY`.
 - **DEC-099** - a blast radius counts only mappings somebody made. Only `EXACT` ingredients
   contribute a canonical key to the historical shadow dataset, which is what makes a zero a measured
   one rather than a structural one. Both halves of a substance match landed together, because

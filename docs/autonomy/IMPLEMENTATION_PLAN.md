@@ -14,12 +14,12 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 
 ## Stage 0 - Reset, Product Contract, Engineering Foundation
 
-| Phase | Title                                             | Status        |
-| ----- | ------------------------------------------------- | ------------- |
-| 0.1   | Repository reset and toolchain                    | `COMPLETE`    |
-| 0.2   | Product and safety contract                       | `COMPLETE`    |
-| 0.3   | Design and accessibility foundation               | `IN_PROGRESS` |
-| 0.4   | Domain contracts and data-classification baseline | `COMPLETE`    |
+| Phase | Title                                             | Status     |
+| ----- | ------------------------------------------------- | ---------- |
+| 0.1   | Repository reset and toolchain                    | `COMPLETE` |
+| 0.2   | Product and safety contract                       | `COMPLETE` |
+| 0.3   | Design and accessibility foundation               | `COMPLETE` |
+| 0.4   | Domain contracts and data-classification baseline | `COMPLETE` |
 
 ### 0.1 - Repository reset and toolchain
 
@@ -28,8 +28,17 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
   banning ambient `new Date()`; Prettier; Vitest; `.env.example` separating server secrets from
   `EXPO_PUBLIC_` config; directory boundaries for domain / contracts / catalog / regulatory /
   safety / ingestion / fixtures / services / db.
-- **Outstanding**: CI workflow file; Expo app scaffold; development-build workflow.
-- **Exit criteria blocked**: "Android development build launches on emulator/device" - `BLK-002`.
+- **Done 2026-09-03**: the development-build workflow, for real. A user-scope Android toolchain
+  (JDK 17, Platform 36, Build-Tools 36.x, Platform-Tools, Emulator, NDK `27.0.12077973`, CMake
+  3.22.1, an Android 16 system image, a Pixel 7 AVD), `npx expo prebuild`, and
+  `./gradlew :app:assembleDebug` producing an APK that installs and launches on the emulator
+  against the local API over `adb reverse`. Documented in `README.md`.
+- **All four exit criteria now hold.** "Android development build launches on emulator/device" was
+  the one blocked on `BLK-002`, which is resolved. Getting there needed three fixes that had been
+  invisible to every gate the project runs, because nothing had ever compiled the native side or
+  run Metro: a dependency set from an earlier SDK line, a Metro resolver that could not read the
+  workspace packages at all, and a narrowed prop type (DEC-101).
+- **Outstanding**: the CI workflow has still never run on a real runner.
 
 ### 0.2 - Product and safety contract
 
@@ -41,8 +50,12 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 
 ### 0.3 - Design and accessibility foundation
 
-- **Not started.** Typography/spacing scale, 48dp touch targets, status components that never
-  rely on colour alone, and the Today/Shelf/Safety/Care/You navigation shell.
+- The tokens, the 48dp minimum and the five-destination shell have existed since Stage 0; what
+  was missing was any evidence that a layout engine agreed. `npm run verify:device:a11y` now
+  measures the rendered hierarchy on all five destinations at font scale 1 and at 2 - the ceiling
+  `MAX_SUPPORTED_FONT_SCALE` sets - and every control meets 48dp in both directions and carries a
+  name a screen reader can announce. It found one violation of `18`'s "support system font scaling
+  without clipping": at 2x the tab bar rendered Safety as "Safet..." (DEC-103, now fixed).
 
 ### 0.4 - Domain contracts and data-classification baseline
 
@@ -279,8 +292,14 @@ corroboration state, coverage statement - already exists in the domain and catal
 | 4.3   | Dose events and adherence history | `COMPLETE`          |
 | 4.4   | Refill awareness                  | `COMPLETE`          |
 
-**4.2** exit criteria require measuring reminder reliability across process death and device
-restart, which needs a device (`BLK-002`).
+**4.2** was recorded as blocked on `BLK-002` - a device, to measure reminder reliability across
+process death and restart. `BLK-002` resolved on 2026-09-03 and Phase 4.2 did not: what actually
+blocks it was underneath, and is that **no route creates a medicine schedule**. `medicine_schedule`
+has existed since migration `0004` with full row-level security and `packages/safety/src/schedule.ts`
+computes occurrences from it with deterministic tests, but the whole API surface is `/v1/items`,
+`/v1/dose-events`, `/v1/profiles`, `/v1/health-facts`, `/v1/consents`, `/v1/households`,
+`/v1/alerts` and `/v1/regulatory-lens`. A reminder engine over an empty table would schedule
+nothing, and its exit criterion would be measured against zero reminders (`DEV-039`).
 
 ---
 
@@ -840,11 +859,13 @@ implemented, tested, documented and committed - and in most cases the tests exec
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
 It does **not** mean the phase is releasable. Nine phases carry exit criteria that depend on a
-device, a credential, a labelled dataset, human participants, or a qualified human reviewer, and
-those are marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even
-where all buildable work is finished. `BLOCKERS.md` records what each one needs.
+credential, a labelled dataset, human participants, or a qualified human reviewer, and those are
+marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even where all
+buildable work is finished. `BLOCKERS.md` records what each one needs. None of them is waiting on
+a device any more: `BLK-002` resolved on 2026-09-03, and the one `BLOCKED_TECHNICAL` phase turned
+out to be blocked on something else underneath it (`DEV-039`).
 
-The counts above are the tables' own, recounted whenever a status changes: 34 `COMPLETE`, 5
+The counts above are the tables' own, recounted whenever a status changes: 35 `COMPLETE`, 4
 `IN_PROGRESS`, 3 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
 `04` defines. A prose count that drifts from the table it describes is the quiet way a status
 document stops being one - and the first version of this paragraph drifted immediately, because it
