@@ -342,6 +342,26 @@ export interface DispatchResult {
  * a unique index rather than a read-then-write, because two dispatches racing would both read
  * "not yet delivered".
  */
+/**
+ * Whether a quiet-hours window that is set actually holds anything.
+ *
+ * `false`, and reported to the settings screen so a person who sets a window is not told it is
+ * working when it is not. Two reasons, either of which alone is enough:
+ *
+ *  - Nothing supplies `localMinuteOfDay`. `deliveryDecision` takes the recipient's local minute
+ *    rather than computing it, because Kynviora stores no timezone for anybody and a converted
+ *    instant would be converted with a number somebody invented (`DEV-030`). With `null`, the
+ *    decision does not hold - deliberately, since a `CRITICAL` recall waiting for a window that
+ *    never closes is the worse failure.
+ *  - Nothing calls {@link dispatchAlert} at all. `BLK-009` - no notification is sent, so there is
+ *    nothing for a window to hold back.
+ *
+ * Flip it when a caller supplies a local minute **and** something dispatches. Flipping it early
+ * would put "Kynviora will hold notifications during that window" in front of somebody as a
+ * statement of fact, which is the `10` failure this codebase spends the most care avoiding.
+ */
+export const QUIET_HOURS_APPLIED = false;
+
 export async function dispatchAlert(
   ctx: RequestContext,
   input: DispatchInput,
@@ -611,6 +631,8 @@ export function registerAlertDeliveryRoutes(
       quietHoursLabel:
         quietHours === null ? null : quietHoursLabel(quietHours.startMinute, quietHours.endMinute),
       quietHoursCopy: QUIET_HOURS_COPY,
+      // Whether a window that is set actually holds anything today. See the constant.
+      quietHoursApplied: QUIET_HOURS_APPLIED,
       // What each urgency does, read from the domain ceiling rather than restated here, so a
       // screen cannot describe a policy the server does not have.
       urgencyChannels: urgencyChannelLines(ACTION_URGENCIES),

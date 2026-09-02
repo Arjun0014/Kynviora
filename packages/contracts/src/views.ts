@@ -29,6 +29,7 @@ import {
   isEvidenceLevel,
   isItemKind,
   isItemLifecycleState,
+  isValidQuietHours,
   isItemVerification,
   isMatchConfidence,
   type ActionUrgency,
@@ -40,10 +41,12 @@ import {
   type MatchConfidence,
   type NotificationDetailLevel,
   type ProductSafetyState,
+  type QuietHours,
   type ReviewTaskKind,
 } from '@kynviora/domain';
 import {
   ICON_NAMES,
+  QUIET_HOURS_COPY,
   describeAuditAction,
   presentEvidenceLevel,
   presentSafetyState,
@@ -64,6 +67,7 @@ import type {
   CaregiverGrant,
   ItemDetailResponse,
   ManualEntryBody,
+  NotificationSettingsResponse,
   SafetyInboxLineResponse,
   SafetyReceiptResponse,
   PendingInvitation,
@@ -1035,5 +1039,107 @@ export function manualEntryDraft(input: {
     itemKind: input.itemKind,
     displayName: input.values['displayName'] ?? '',
     ...offered,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Notification policy (`04` Phase 7.5)
+// ---------------------------------------------------------------------------
+
+export interface UrgencyChannelView {
+  readonly urgency: ActionUrgency;
+  readonly channelLabel: string;
+  readonly channelDescription: string;
+}
+
+export interface NotificationPolicyView {
+  /** The window, where this client can read it. Prefills the editor. */
+  readonly quietHours: QuietHours | null;
+  /** The window as a person reads it, composed on the server. Shown whatever the numbers say. */
+  readonly quietHoursLabel: string | null;
+  /**
+   * The server reported a window and the numbers did not narrow.
+   *
+   * A separate fact from "no window is set", and the reason it is separate is what a screen does
+   * next: it must not offer an editor prefilled with nothing, because saving that would clear a
+   * window somebody set using a value this build could not read. Deny by default (`14`) applied
+   * to a control - the label still shows, so nobody is told the window does not exist.
+   */
+  readonly quietHoursUnreadable: boolean;
+  /** Whether this caller may change the policy at all. The owner may; a caregiver reads it. */
+  readonly mayChangePolicy: boolean;
+  /**
+   * Whether a window that is set actually holds anything today.
+   *
+   * Defaults to `false` where the server did not say. The safe direction on this one is the
+   * pessimistic reading: telling somebody their quiet hours are not working when they are costs
+   * them a moment's confusion, and telling them the opposite is a promise the build does not keep.
+   */
+  readonly quietHoursApplied: boolean;
+  /**
+   * The sentence saying the window does not hold anything yet, or `null` where there is none.
+   *
+   * Present whenever {@link quietHoursApplied} is `false` - **including where no window is set**.
+   * The person who most needs this sentence is the one about to set their first window, and a
+   * screen that produced it only after the fact would have let them decide to rely on quiet hours
+   * and then told them. A composed view rather than a condition inside a screen, so the rule is
+   * tested once here instead of once per surface that ever renders it.
+   *
+   * The server's wording where it sent any, and the packaged wording otherwise. Never `null`
+   * while the window does nothing: a missing copy key must not turn into a screen that quietly
+   * implies quiet hours are working.
+   */
+  readonly limitationNote: string | null;
+  /** What each urgency does. An urgency this client cannot read is dropped, never rendered raw. */
+  readonly urgencyChannels: readonly UrgencyChannelView[];
+}
+
+/**
+ * The delivery half of the notification settings, as a screen renders it.
+ *
+ * The sentences are all the server's - `quietHoursCopy` and the channel descriptions are approved
+ * wording, and a client that assembled them would carry it in every build that ever shipped. What
+ * this decides is narrower and is exactly what a screen must not get wrong: whether to offer the
+ * editor, and what to do with an urgency it does not recognise.
+ */
+export function notificationPolicyView(
+  response: NotificationSettingsResponse,
+): NotificationPolicyView {
+  const raw = response.quietHours;
+  const applied = response.quietHoursApplied === true;
+  const serverNote = (response.quietHoursCopy ?? {})['unknownLocalTime'];
+  const window: QuietHours | null =
+    raw !== null &&
+    typeof raw === 'object' &&
+    typeof raw.startMinute === 'number' &&
+    typeof raw.endMinute === 'number' &&
+    isValidQuietHours({ startMinute: raw.startMinute, endMinute: raw.endMinute })
+      ? { startMinute: raw.startMinute, endMinute: raw.endMinute }
+      : null;
+
+  return {
+    quietHours: window,
+    quietHoursLabel: typeof response.quietHoursLabel === 'string' ? response.quietHoursLabel : null,
+    quietHoursUnreadable: raw !== null && window === null,
+    mayChangePolicy: response.relationship === 'OWNER',
+    quietHoursApplied: applied,
+    limitationNote: applied
+      ? null
+      : typeof serverNote === 'string' && serverNote !== ''
+        ? serverNote
+        : QUIET_HOURS_COPY.unknownLocalTime,
+    urgencyChannels: (response.urgencyChannels ?? []).flatMap((line) =>
+      // Dropped rather than rendered as its code. An urgency beside somebody's medicine is a
+      // field value, not a phrase - the same rule the personal-care category keeps (trap 129).
+      isActionUrgency(line.urgency)
+        ? [
+            {
+              urgency: line.urgency,
+              channelLabel: line.channelLabel,
+              channelDescription: line.channelDescription,
+            },
+          ]
+        : [],
+    ),
   };
 }

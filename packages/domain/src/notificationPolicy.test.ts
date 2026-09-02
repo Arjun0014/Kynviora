@@ -10,6 +10,8 @@ import {
   URGENCIES_PIERCING_QUIET_HOURS,
   deliveryDecision,
   isValidQuietHours,
+  parseClockMinute,
+  quietHoursFromClock,
   regulatoryDifferenceUrgency,
   revalidate,
   withinQuietHours,
@@ -377,5 +379,125 @@ describe('exit criterion 2 - nothing stale stays actionable', () => {
       }).actionable;
     });
     expect(actionable).toEqual(['STILL_CURRENT']);
+  });
+});
+
+describe('a clock time somebody typed', () => {
+  /**
+   * `04` Phase 7.5's window, entered by a person rather than seeded.
+   *
+   * What this decides is whether a phone lights up at three in the morning, so it refuses rather
+   * than repairs - the same rule the manual-entry form keeps for a barcode.
+   */
+
+  it('reads a 24-hour time', () => {
+    for (const [text, minute] of [
+      ['00:00', 0],
+      ['07:00', 420],
+      ['22:30', 1350],
+      ['23:59', 1439],
+    ] as const) {
+      const result = parseClockMinute(text, 'quietHoursStart');
+      expect(result.ok, text).toBe(true);
+      if (result.ok) expect(result.value, text).toBe(minute);
+    }
+  });
+
+  it('ignores surrounding spaces and nothing else', () => {
+    const result = parseClockMinute('  22:00  ', 'quietHoursStart');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(1320);
+  });
+
+  it('refuses a time it would have to guess at', () => {
+    // `9:5` is not read as `09:05`. A window Kynviora quietly reinterpreted is one a person cannot
+    // check against what they meant.
+    for (const text of ['9:5', '9:05', '2200', '22.00', '10pm', '', '22:00:00']) {
+      expect(parseClockMinute(text, 'quietHoursStart').ok, text).toBe(false);
+    }
+  });
+
+  it('refuses a time that is not on a clock', () => {
+    // `24:00` is not read as midnight, for the same reason.
+    for (const text of ['24:00', '23:60', '99:99']) {
+      const result = parseClockMinute(text, 'quietHoursStart');
+      expect(result.ok, text).toBe(false);
+      if (!result.ok) expect(result.error.detail?.['field']).toBe('quietHoursStart');
+    }
+  });
+
+  it('names the field it refused', () => {
+    const result = parseClockMinute('nope', 'quietHoursEnd');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.detail?.['field']).toBe('quietHoursEnd');
+      expect(result.error.detail?.['reason_code']).toBe('quiet_hours');
+    }
+  });
+});
+
+describe('the window two typed times describe', () => {
+  it('reads the window people actually mean, which wraps past midnight', () => {
+    const result = quietHoursFromClock('22:00', '07:00');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual({ startMinute: 1320, endMinute: 420 });
+
+    // And it means what it says: 3am is inside, 8am is not.
+    if (result.value !== null) {
+      expect(withinQuietHours(180, result.value)).toBe(true);
+      expect(withinQuietHours(480, result.value)).toBe(false);
+    }
+  });
+
+  it('reads two empty fields as no window at all', () => {
+    // Clearing quiet hours is a real answer, and it is how somebody turns them off.
+    const result = quietHoursFromClock('', '   ');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBeNull();
+  });
+
+  it('refuses one bound alone', () => {
+    // A window whose other end somebody has to invent. The schema refuses the same shape
+    // (`notification_quiet_hours_paired`).
+    const missingEnd = quietHoursFromClock('22:00', '');
+    expect(missingEnd.ok).toBe(false);
+    if (!missingEnd.ok) expect(missingEnd.error.detail?.['field']).toBe('quietHoursEnd');
+
+    const missingStart = quietHoursFromClock('', '07:00');
+    expect(missingStart.ok).toBe(false);
+    if (!missingStart.ok) expect(missingStart.error.detail?.['field']).toBe('quietHoursStart');
+  });
+
+  it('refuses two identical times', () => {
+    // Equal bounds are a zero-length window or a whole-day one depending on which way they are
+    // read, and a rule whose meaning depends on the reader has no place deciding whether somebody
+    // is woken up.
+    const result = quietHoursFromClock('22:00', '22:00');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.detail?.['field']).toBe('quietHoursEnd');
+  });
+
+  it('names whichever of the two is malformed', () => {
+    const bad = quietHoursFromClock('22:00', 'nope');
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error.detail?.['field']).toBe('quietHoursEnd');
+  });
+
+  it('agrees with the validator the decision layer uses', () => {
+    // The parser and `isValidQuietHours` must not disagree: a window this accepted and that
+    // rejected would be stored and then silently ignored, which is quiet hours that do nothing
+    // while the screen says they are set.
+    for (const [start, end] of [
+      ['22:00', '07:00'],
+      ['00:00', '06:30'],
+      ['13:00', '13:01'],
+    ] as const) {
+      const result = quietHoursFromClock(start, end);
+      expect(result.ok, `${start}-${end}`).toBe(true);
+      if (result.ok && result.value !== null) {
+        expect(isValidQuietHours(result.value), `${start}-${end}`).toBe(true);
+      }
+    }
   });
 });

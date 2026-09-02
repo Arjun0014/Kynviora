@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { start, type StartedServer } from './main.js';
 import { SEED } from '@kynviora/db';
-import { noopLogger } from '@kynviora/domain';
+import { noopLogger, quietHoursFromClock } from '@kynviora/domain';
 import {
   ALREADY_ACCEPTED_CODE,
   ANONYMOUS,
@@ -29,6 +29,7 @@ import {
   itemDetailScreenView,
   lensView,
   manualEntryDraft,
+  notificationPolicyView,
   mayInvite,
   refreshedResource,
   revocationMessage,
@@ -2185,5 +2186,136 @@ describe('changing an item, end to end', () => {
     const detail = await owner.itemDetail(id);
     if (detail.kind !== 'OK') return;
     expect(itemDetailScreenView(detail.value).identity?.label).not.toMatch(/confirmed/i);
+  });
+});
+
+describe('when Kynviora may interrupt somebody, end to end', () => {
+  /**
+   * `04` Phase 7.5's client half, through the code path the Expo screen uses.
+   *
+   * The domain, the route and the copy have all been tested since Phase 7.5. What had never been
+   * exercised is the round trip a person actually makes: type a time, have it become minutes,
+   * store it, and read it back as the same window. `setNotificationPolicy` had been on the client
+   * since 7.5 with no caller anywhere, so nothing had ever run it against a real server.
+   */
+
+  /** The same client with step-up asserted. `14` puts this change behind confirming who you are. */
+  const elevated = () => owner.withSession(developmentSession(SEED.userId, { stepUp: true }));
+
+  it('turns a typed time into a stored window and reads it back the same', async () => {
+    const window = quietHoursFromClock('22:00', '07:00');
+    expect(window.ok).toBe(true);
+    if (!window.ok || window.value === null) return;
+
+    const saved = await elevated().setNotificationPolicy(SEED.profileId, {
+      maxCaregiverDetail: 'GENERIC',
+      quietHoursStartMinute: window.value.startMinute,
+      quietHoursEndMinute: window.value.endMinute,
+    });
+    expect(saved.kind).toBe('OK');
+
+    const read = await owner.notificationSettings(SEED.profileId);
+    if (read.kind !== 'OK') throw new Error('expected the settings to load');
+
+    const view = notificationPolicyView(read.value);
+    expect(view.quietHours).toEqual(window.value);
+    expect(view.quietHoursLabel).toBe('22:00 to 07:00');
+    expect(view.quietHoursUnreadable).toBe(false);
+    expect(view.mayChangePolicy).toBe(true);
+  });
+
+  it('says the window is not being applied yet', async () => {
+    // `DEV-030` and `BLK-009`, on the screen where somebody sets it. Telling them nothing would
+    // be letting them believe it works.
+    const read = await owner.notificationSettings(SEED.profileId);
+    if (read.kind !== 'OK') throw new Error('expected the settings to load');
+
+    const view = notificationPolicyView(read.value);
+    expect(view.quietHoursApplied).toBe(false);
+    expect(read.value.quietHoursCopy['unknownLocalTime']).toContain('Nothing is being held back');
+    // And the view hands the screen the sentence rather than leaving it to compose one.
+    expect(view.limitationNote).toBe(read.value.quietHoursCopy['unknownLocalTime']);
+  });
+
+  it('clears the window when both fields are emptied', async () => {
+    // Turning quiet hours off is emptying both fields, which the domain reads as no window and
+    // the route stores as two nulls. There is no separate "off" state to get out of step.
+    const cleared = quietHoursFromClock('', '');
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    expect(cleared.value).toBeNull();
+
+    const saved = await elevated().setNotificationPolicy(SEED.profileId, {
+      maxCaregiverDetail: 'GENERIC',
+      quietHoursStartMinute: null,
+      quietHoursEndMinute: null,
+    });
+    expect(saved.kind).toBe('OK');
+
+    const read = await owner.notificationSettings(SEED.profileId);
+    if (read.kind !== 'OK') throw new Error('expected the settings to load');
+
+    const view = notificationPolicyView(read.value);
+    expect(view.quietHours).toBeNull();
+    expect(view.quietHoursLabel).toBeNull();
+    expect(view.quietHoursUnreadable).toBe(false);
+    expect(read.value.quietHoursCopy['notSet']).toContain('any time');
+    // Still said with nothing set. Somebody about to set their first window is the person who
+    // most needs to know it will not hold anything yet.
+    expect(view.limitationNote).toContain('Nothing is being held back');
+  });
+
+  it('refuses the change without step-up', async () => {
+    // `14`. The unelevated session is the one the app holds by default, so this is the path a
+    // screen takes if it forgets to elevate - and it fails loudly rather than silently.
+    const refused = await owner.setNotificationPolicy(SEED.profileId, {
+      maxCaregiverDetail: 'GENERIC',
+      quietHoursStartMinute: 22 * 60,
+      quietHoursEndMinute: 7 * 60,
+    });
+
+    expect(refused.kind).toBe('STEP_UP_REQUIRED');
+    expect(screenStateForFailure(refused as Exclude<typeof refused, { kind: 'OK' }>)).toBe(
+      'STEP_UP_REQUIRED',
+    );
+  });
+
+  it('tells a stranger nothing about the profile', async () => {
+    const refused = await stranger.notificationSettings(SEED.profileId);
+    expect(refused.kind).toBe('UNAVAILABLE');
+  });
+
+  it('reports what every urgency does, as phrases rather than codes', async () => {
+    // Exit criterion 1 as the sentence a person reads: a foreign regulatory difference is
+    // `INFORMATIONAL`, and `INFORMATIONAL` reaches no device at all.
+    const read = await owner.notificationSettings(SEED.profileId);
+    if (read.kind !== 'OK') throw new Error('expected the settings to load');
+
+    const view = notificationPolicyView(read.value);
+    expect(view.urgencyChannels.length).toBeGreaterThan(0);
+
+    const informational = view.urgencyChannels.find((line) => line.urgency === 'INFORMATIONAL');
+    expect(informational?.channelLabel).toBe('Kept in the app only');
+
+    // No raw vocabulary member reaches a screen through this view.
+    for (const line of view.urgencyChannels) {
+      expect(line.channelLabel).not.toBe(line.urgency);
+      expect(line.channelDescription.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('refuses a window the domain would not accept, before it reaches the server', () => {
+    // The refusal names the field, so a form can point at it. Checked here because this is the
+    // only layer that sees what somebody typed - the route takes minutes.
+    for (const [start, end, field] of [
+      ['22:00', '22:00', 'quietHoursEnd'],
+      ['9:5', '07:00', 'quietHoursStart'],
+      ['22:00', '', 'quietHoursEnd'],
+      ['24:00', '07:00', 'quietHoursStart'],
+    ] as const) {
+      const result = quietHoursFromClock(start, end);
+      expect(result.ok, `${start}-${end}`).toBe(false);
+      if (!result.ok) expect(result.error.detail?.['field'], `${start}-${end}`).toBe(field);
+    }
   });
 });

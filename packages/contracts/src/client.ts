@@ -501,7 +501,54 @@ export interface NotificationSettingsResponse {
   readonly effectiveDetail: NotificationDetailLevel;
   readonly cappedByOwner: boolean;
   readonly levels: readonly NotificationDetailLevel[];
+  /**
+   * The window notifications are held in, or `null` (`04` Phase 7.5).
+   *
+   * Sent to every reader of the settings, not only the owner. `16`'s reason: a caregiver who
+   * receives nothing at 3am deserves to know a window is doing that rather than a bug, which is
+   * the same reason the ceiling is readable.
+   */
+  readonly quietHours: { readonly startMinute: number; readonly endMinute: number } | null;
+  /** The window as a person reads it, composed on the server. `null` where none is set. */
+  readonly quietHoursLabel: string | null;
+  /** The approved wording, including the exception a person must know before relying on it. */
+  readonly quietHoursCopy: Readonly<Record<string, string>>;
+  /**
+   * Whether a window that is set actually holds anything today.
+   *
+   * `false` in this build, for two reasons the server holds together in one constant: nothing
+   * supplies a recipient's local minute (`DEV-030`), and nothing dispatches a notification at all
+   * (`BLK-009`). Reported rather than assumed by a screen, so that when either changes the screen
+   * follows without anybody remembering to edit it - and so that until then nobody is told quiet
+   * hours are working when they are not.
+   */
+  readonly quietHoursApplied: boolean;
+  /**
+   * What each urgency does.
+   *
+   * Read from the domain's ceiling on the server rather than restated by a client, so a screen
+   * cannot describe a policy the server does not have.
+   */
+  readonly urgencyChannels: readonly {
+    readonly urgency: string;
+    readonly channelLabel: string;
+    readonly channelDescription: string;
+  }[];
   readonly serverTime: string;
+}
+
+/**
+ * The owner's ceiling and the window, together (`04` Phase 7.5).
+ *
+ * One body, because the route writes one row and a partial write would leave the other half at
+ * whatever it was - which for quiet hours means silently clearing a window somebody set. The two
+ * bounds are set or cleared together for the same reason the schema requires it: one alone is a
+ * window whose other end somebody has to invent.
+ */
+export interface NotificationPolicyBody {
+  readonly maxCaregiverDetail: string;
+  readonly quietHoursStartMinute: number | null;
+  readonly quietHoursEndMinute: number | null;
 }
 
 export interface ReviewTask {
@@ -1045,9 +1092,16 @@ export interface KynvioraClient {
     profileId: string,
     detailLevel: string,
   ): Promise<ApiOutcome<Record<string, unknown>>>;
+  /**
+   * The owner's ceiling and the quiet-hours window.
+   *
+   * Requires step-up (`14`), which is why the session carries it rather than this method: raising
+   * the ceiling widens what leaves the profile onto other people's devices, and changing the
+   * window changes when Kynviora is allowed to interrupt somebody.
+   */
   setNotificationPolicy(
     profileId: string,
-    maxCaregiverDetail: string,
+    body: NotificationPolicyBody,
   ): Promise<ApiOutcome<Record<string, unknown>>>;
 
   reviewTasks(profileId: string): Promise<ApiOutcome<ReviewTasksResponse>>;
@@ -1251,11 +1305,14 @@ export function createClient(options: ClientOptions): KynvioraClient {
         { detailLevel },
       ),
 
-    setNotificationPolicy: (profileId, maxCaregiverDetail) =>
+    // The whole policy every time. Sending only the changed half would leave the other at
+    // whatever it was - and for quiet hours that means a window somebody set being cleared by a
+    // request that never mentioned it.
+    setNotificationPolicy: (profileId, body) =>
       send<Record<string, unknown>>(
         'PUT',
         `/v1/profiles/${encodeURIComponent(profileId)}/notification-policy`,
-        { maxCaregiverDetail },
+        body,
       ),
 
     reviewTasks: (profileId) =>

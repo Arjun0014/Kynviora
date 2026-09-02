@@ -2,12 +2,13 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance, FastifyRequest, InjectOptions } from 'fastify';
 import { createServer } from './server.js';
 import { createRequestContext } from './context.js';
-import { dispatchAlert, recordingTransport } from './alertDelivery.js';
+import { QUIET_HOURS_APPLIED, dispatchAlert, recordingTransport } from './alertDelivery.js';
 import type { DatabaseConnection, DatabasePool, Principal } from './context.js';
 import { createTestDb, testUuid, type TestDb } from '../../../db/harness/harness.js';
 import {
   ACTION_URGENCIES,
   MAX_CHANNEL_FOR_URGENCY,
+  deliveryDecision,
   instantFrom,
   regulatoryDifferenceUrgency,
   type ActionUrgency,
@@ -584,5 +585,82 @@ describe('the dispatcher acts on the policy, not only reports it', () => {
     // And still no medicine and no person.
     expect(detail).not.toContain('Synthetic Tablet');
     expect(detail).not.toContain('Parent A');
+  });
+});
+
+describe('what the settings say about whether quiet hours work', () => {
+  interface AppliedBody {
+    readonly quietHoursApplied: boolean;
+    readonly quietHoursLabel: string | null;
+    readonly quietHoursCopy: { readonly unknownLocalTime: string };
+  }
+
+  const read = (as: Principal) =>
+    request(as, { method: 'GET', url: `/v1/profiles/${PROFILE}/notification-settings` });
+
+  it('says a window that is set is not being applied yet', async () => {
+    // `DEV-030` and `BLK-009`. A person who set a window and was told nothing would believe it
+    // was working, which is the `10` failure this codebase spends the most care avoiding.
+    await request(principalFor(OWNER, true), {
+      method: 'PUT',
+      url: `/v1/profiles/${PROFILE}/notification-policy`,
+      payload: {
+        maxCaregiverDetail: 'GENERIC',
+        quietHoursStartMinute: 22 * 60,
+        quietHoursEndMinute: 7 * 60,
+      },
+    });
+
+    const body = (await read(principalFor(OWNER))).json<AppliedBody>();
+    expect(body.quietHoursLabel).toBe('22:00 to 07:00');
+    expect(body.quietHoursApplied).toBe(false);
+    expect(body.quietHoursApplied).toBe(QUIET_HOURS_APPLIED);
+    // And the sentence to show for it is on the response, not written by a client.
+    expect(body.quietHoursCopy.unknownLocalTime).toContain('Nothing is being held back');
+  });
+
+  it('agrees with what the dispatcher is actually given', () => {
+    // The constant is a claim about this build, so it is checked against the behaviour rather
+    // than trusted. With no local minute supplied, a HIGH alert inside the window is not held -
+    // which is exactly what "not being applied" means, and the safe direction (`DEC-078`).
+    expect(QUIET_HOURS_APPLIED).toBe(false);
+
+    const decision = deliveryDecision({
+      urgency: 'HIGH',
+      deliverable: true,
+      alreadyDelivered: false,
+      quietHours: { startMinute: 22 * 60, endMinute: 7 * 60 },
+      localMinuteOfDay: null,
+    });
+    expect(decision.held).toBe(false);
+  });
+
+  it('tells a caregiver about the window too', async () => {
+    // `16`: somebody who receives nothing at 3am deserves to know a window is doing that rather
+    // than a bug. They read it; only the owner sets it.
+    await t.asService((db) =>
+      db.query(
+        `INSERT INTO caregiver_grant
+           (profile_id, grantee_user_id, granted_by_user_id, capabilities, status, accepted_at)
+         VALUES ($1, $2, $3, ARRAY['VIEW_SAFETY']::text[], 'ACTIVE', now())`,
+        [PROFILE, CAREGIVER, OWNER],
+      ),
+    );
+    await request(principalFor(OWNER, true), {
+      method: 'PUT',
+      url: `/v1/profiles/${PROFILE}/notification-policy`,
+      payload: {
+        maxCaregiverDetail: 'GENERIC',
+        quietHoursStartMinute: 22 * 60,
+        quietHoursEndMinute: 7 * 60,
+      },
+    });
+
+    const body = (await read(principalFor(CAREGIVER))).json<
+      AppliedBody & { readonly relationship: string }
+    >();
+    expect(body.relationship).toBe('CAREGIVER');
+    expect(body.quietHoursLabel).toBe('22:00 to 07:00');
+    expect(body.quietHoursApplied).toBe(false);
   });
 });

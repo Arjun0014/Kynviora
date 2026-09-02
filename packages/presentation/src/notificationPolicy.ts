@@ -99,6 +99,70 @@ export const QUIET_HOURS_COPY = Object.freeze({
   unknownLocalTime:
     'Kynviora does not know what time it is where you are, so quiet hours are not being applied ' +
     'yet. Nothing is being held back.',
+
+  // ---------------------------------------------------------------------
+  // Setting one
+  // ---------------------------------------------------------------------
+  // A 24-hour clock, typed. Not a locale-aware picker and not an am/pm control: `07:00` is never
+  // seven in the evening, and the thing being decided is whether a phone lights up at three in
+  // the morning. Refused rather than repaired, which is why each field says its format.
+
+  startLabel: 'From',
+  endLabel: 'Until',
+  fieldHelp: 'A 24-hour time, like 22:00.',
+  saveLabel: 'Save quiet hours',
+  clearLabel: 'Turn quiet hours off',
+  /**
+   * What was recorded, never what will follow from it.
+   *
+   * "Kynviora will hold notifications during that window" is a promise this build does not keep -
+   * `QUIET_HOURS_APPLIED` is `false` (`DEV-030`, `BLK-009`) - and it would be made at the exact
+   * moment somebody has just decided to rely on it. The window is stored; whether anything is
+   * held is a separate sentence, and {@link QUIET_HOURS_COPY.unknownLocalTime} is the one that
+   * says it.
+   */
+  savedNote: 'Saved. Kynviora has recorded these hours.',
+  clearedNote: 'Quiet hours are off. Notifications can arrive at any time.',
+  /**
+   * Said where a window is stored that this build cannot render as two editable times.
+   *
+   * The controls are absent rather than prefilled with nothing, because saving an empty form
+   * would clear a window somebody set using a value Kynviora could not read. Both halves matter:
+   * why there is no editor, and that nothing has been changed by saying so.
+   */
+  unreadableWindow:
+    'Kynviora cannot show these hours in a form it can edit, so they cannot be changed here. Nothing has been altered.',
+  /**
+   * Said to a caregiver, who can read the window and not change it.
+   *
+   * Read rather than hidden, for `16`'s reason: somebody receiving nothing at 3am deserves to
+   * know a window is doing that rather than a bug. The control is absent, not disabled.
+   */
+  ownerOnly:
+    'The person whose profile this is sets these hours. You can see them because they decide when your device stays quiet.',
+  /** `14` puts a change to what leaves the profile behind re-authentication. */
+  stepUpPrompt: 'Confirm it is you before changing when notifications can arrive.',
+});
+
+/** Every sentence this module can put on a settings screen, for the copy scans. */
+export const ALL_QUIET_HOURS_STRINGS: readonly string[] = Object.freeze(
+  Object.values(QUIET_HOURS_COPY),
+);
+
+/**
+ * The heading and the sentence above the urgency table.
+ *
+ * The table is a statement about what Kynviora does rather than a control: none of it is
+ * settable, and saying so stops somebody hunting for the switch. `02` is why there is no switch -
+ * a person who could raise every urgency to an interrupt would have built the alarm optimisation
+ * the product refuses, one row at a time.
+ */
+export const URGENCY_CHANNEL_COPY = Object.freeze({
+  heading: 'What reaches your device',
+  intro:
+    'Kynviora decides this by how urgent something is, and it is the same for everybody. It is here so you can see it rather than to be changed.',
+  foreignNote:
+    'A restriction from a regulator somewhere you do not get care is kept in the app. It is recorded and it is not a personal alert.',
 });
 
 /** A window as a person reads it. Minutes from local midnight, rendered as a local clock time. */

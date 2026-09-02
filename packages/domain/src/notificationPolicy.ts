@@ -22,6 +22,7 @@
  * quiet-hours deferral cannot add a recipient, and an urgency cannot raise a detail level.
  */
 
+import { domainError, err, ok, type DomainError, type Result } from './result.js';
 import type { ActionUrgency, Jurisdiction } from './vocabulary.js';
 import { FOREIGN_REGULATORY_DEFAULT_URGENCY } from './vocabulary.js';
 import type { Instant } from './ports.js';
@@ -125,6 +126,87 @@ export function withinQuietHours(localMinuteOfDay: number, window: QuietHours): 
     ? minute >= window.startMinute && minute < window.endMinute
     : // Wrapped past midnight, which is the ordinary case.
       minute >= window.startMinute || minute < window.endMinute;
+}
+
+/**
+ * A clock time somebody typed, as minutes from local midnight.
+ *
+ * Refuses rather than repairs, like every other input path here: `9:5` is not read as `09:05` and
+ * `24:00` is not read as midnight. A window Kynviora quietly reinterpreted is one a person cannot
+ * check against what they meant, and what it decides is whether a phone lights up at three in the
+ * morning.
+ *
+ * Deliberately not a locale-aware parser. `18` says familiar words first, and a 24-hour clock is
+ * the one format that means the same thing to everybody who reads it - `07:00` is never seven in
+ * the evening, where "7:00" plus an am/pm control is a second thing to get wrong.
+ */
+export function parseClockMinute(value: string, field: string): Result<number, DomainError> {
+  const trimmed = value.trim();
+  const match = /^(\d{2}):(\d{2})$/.exec(trimmed);
+  if (match === null) {
+    return err(
+      domainError('VALIDATION_FAILED', 'A time looks like 22:00.', {
+        reason_code: 'quiet_hours',
+        field,
+      }),
+    );
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) {
+    return err(
+      domainError('VALIDATION_FAILED', 'A time is between 00:00 and 23:59.', {
+        reason_code: 'quiet_hours',
+        field,
+      }),
+    );
+  }
+
+  return ok(hours * 60 + minutes);
+}
+
+/**
+ * The window two typed times describe, or a refusal naming the field to correct.
+ *
+ * Both bounds or neither: one alone is a window whose other end somebody has to invent, and the
+ * schema refuses the same shape (`notification_quiet_hours_paired`). Equal bounds are refused for
+ * the reason {@link isValidQuietHours} refuses them - a rule whose meaning depends on the reader
+ * has no place deciding whether somebody is woken up.
+ */
+export function quietHoursFromClock(
+  start: string,
+  end: string,
+): Result<QuietHours | null, DomainError> {
+  const from = start.trim();
+  const to = end.trim();
+
+  if (from === '' && to === '') return ok(null);
+  if (from === '' || to === '') {
+    return err(
+      domainError('VALIDATION_FAILED', 'Quiet hours need a start and an end.', {
+        reason_code: 'quiet_hours',
+        field: from === '' ? 'quietHoursStart' : 'quietHoursEnd',
+      }),
+    );
+  }
+
+  const startMinute = parseClockMinute(from, 'quietHoursStart');
+  if (!startMinute.ok) return startMinute;
+  const endMinute = parseClockMinute(to, 'quietHoursEnd');
+  if (!endMinute.ok) return endMinute;
+
+  const window: QuietHours = { startMinute: startMinute.value, endMinute: endMinute.value };
+  if (!isValidQuietHours(window)) {
+    return err(
+      domainError('VALIDATION_FAILED', 'Quiet hours need two different times.', {
+        reason_code: 'quiet_hours',
+        field: 'quietHoursEnd',
+      }),
+    );
+  }
+
+  return ok(window);
 }
 
 // ---------------------------------------------------------------------------
