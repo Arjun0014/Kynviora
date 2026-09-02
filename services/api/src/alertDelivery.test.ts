@@ -169,6 +169,38 @@ afterAll(async () => {
   await t.close();
 });
 
+/**
+ * `04` Phase 1.4. Everybody in this suite has agreed to be notified and to caregiver sharing.
+ *
+ * What this suite is about is the *authorization and disclosure* half - which capability admits
+ * which recipient, and what a notification may say. Consent is checked before any of that in
+ * `selectRecipients`, so without these rows every recipient assertion here would pass for the
+ * wrong reason: nobody selected, because nobody had agreed to anything.
+ *
+ * Written once rather than per test, because `consent_receipt` is append-only by trigger and
+ * refuses DELETE to every role - the database owner included.
+ */
+beforeAll(async () => {
+  await t.asService(async (db) => {
+    for (const userId of [
+      OWNER,
+      OTHER_OWNER,
+      SAFETY_CAREGIVER,
+      DOSE_CAREGIVER,
+      SHELF_CAREGIVER,
+      STRANGER,
+    ]) {
+      for (const purpose of ['NOTIFICATIONS', 'CAREGIVER_SHARING']) {
+        await db.query(
+          `INSERT INTO consent_receipt (user_id, purpose, granted, policy_version)
+           VALUES ($1, $2, true, 'test')`,
+          [userId, purpose],
+        );
+      }
+    }
+  });
+});
+
 beforeEach(async () => {
   currentNow = NOW;
   // audit_event is deliberately not cleared: the append-only trigger refuses a DELETE (DEC-013).

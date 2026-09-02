@@ -5,9 +5,16 @@
  * a locked screen), DEC-025 (two dials, the narrower wins), `14` (no session secret on screen),
  * `04` Phase 1.1.
  *
- * The notification settings are the live part. Everything else on this screen - account, consent,
- * export and deletion - is gated on Phase 1.1 choosing an auth provider, and a settings row that
- * opens nothing is worse than no row: it tells the user a control exists.
+ * The notification settings, the health context and the consent list are the live parts. What is
+ * still absent - account, export and deletion - is gated on Phase 1.1 choosing an auth provider
+ * and on a retention matrix nobody has written, and a settings row that opens nothing is worse
+ * than no row: it tells the user a control exists. `ConsentSettings` says so in a sentence
+ * instead of showing one (`DEV-036`).
+ *
+ * Consent is the only block here that is **not** profile-scoped. A receipt is the caller's own
+ * answer about themselves - `consent_select` and `consent_insert` both require the row to be
+ * theirs - so it renders whether or not a profile is selected, and switching person does not
+ * change it.
  *
  * The identity strip names who the app is acting as, because with a development session there is
  * otherwise no way to tell - and "which account am I looking at" is the first question when a
@@ -21,6 +28,7 @@ import type { NotificationDetailLevel, QuietHours } from '@kynviora/domain';
 import {
   asChosenDetailLevel,
   asNotificationDetailLevel,
+  consentView,
   messageForFailure,
   healthContextView,
   notificationPolicyView,
@@ -35,6 +43,7 @@ import { Screen } from '@/components/Screen';
 import { ResourceState } from '@/components/ScreenState';
 import { DeliveryPolicy } from '@/features/notifications/DeliveryPolicy';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
+import { ConsentSettings } from '@/features/consent/ConsentSettings';
 import { HealthContext } from '@/features/profiles/HealthContext';
 import { ProfileSwitcher } from '@/features/profiles/ProfileSwitcher';
 import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
@@ -85,6 +94,15 @@ export default function YouScreen() {
 
   const { resource: factsResource, reload: reloadFacts } = useResource(loadFacts, {
     enabled: activeProfileId !== null,
+  });
+
+  // `04` Phase 1.4. Not profile-scoped and deliberately not keyed on `activeProfileId`: a receipt
+  // is the caller's own answer about themselves, and re-reading it when somebody switches person
+  // would imply it is a property of the profile they are looking at.
+  const loadConsents = useMemo(() => (client === null ? null : () => client.consents()), [client]);
+
+  const { resource: consentsResource, reload: reloadConsents } = useResource(loadConsents, {
+    enabled: client !== null,
   });
 
   // The preference is written to the server and then re-read. Never applied locally first: this
@@ -241,6 +259,21 @@ export default function YouScreen() {
           }}
         />
       )}
+
+      {/* `04` Phase 1.4. Above the settings that depend on it: whether Kynviora may contact this
+          person at all is the question that decides what the notification dials below mean.
+          Outside the profile gate, because a receipt is the caller's own and not the profile's.
+
+          Nothing is offered while it is still loading. A consent list that has not arrived and
+          one where nobody has answered look identical, and rendering the second for the first
+          would tell somebody they had never agreed to anything. */}
+      {profilesLoaded && !switcher.isEmpty && !addingPerson ? (
+        consentsResource.value === null ? (
+          <ResourceState resource={consentsResource} onRetry={reloadConsents} />
+        ) : (
+          <ConsentSettings view={consentView(consentsResource.value)} onChanged={reloadConsents} />
+        )
+      ) : null}
 
       {activeProfileId === null || settings === null || policy === null ? (
         <ResourceState resource={resource} onRetry={onRetry} />

@@ -30,6 +30,10 @@ import {
   manualEntryLimits,
   normalizeItemUpdate,
   normalizeManualEntry,
+  normalizeConsentDecision,
+  consentStateFrom,
+  consentEnforcement,
+  CONSENT_POLICY_VERSION,
   normalizeHealthFactChange,
   normalizeHealthFactDraft,
   isEmptyHealthFactChange,
@@ -284,6 +288,23 @@ const shelfQuerySchema = cursorQuerySchema.extend({
 });
 
 const itemParamsSchema = z.object({ itemId: uuidSchema });
+
+/**
+ * A consent decision (`04` Phase 1.4).
+ *
+ * `.strict()`, and note what is not here: no `userId`, no `policyVersion`, no `recordedAt`. The
+ * first is the request context's and the RLS policy checks it; the second and third are the
+ * server's, because a client that could name the policy version it agreed to could record
+ * agreement to a text nobody showed them, and a client-set timestamp is an audit trail written by
+ * the thing being audited.
+ */
+const consentBodySchema = z
+  .object({
+    purpose: z.string(),
+    granted: z.boolean(),
+    locale: z.string().nullish(),
+  })
+  .strict();
 
 /** `04` Phase 1.3. */
 const profileIdParamsSchema = z.object({ profileId: uuidSchema });
@@ -1532,6 +1553,165 @@ export function createServer(options: ServerOptions): FastifyInstance {
         lifecycleState: next.lifecycleState,
         changedFields: next.changedFields,
         lastReviewedAt: isoOrNull(committed.last_reviewed_at),
+        serverTime: ctx.now,
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Consent  (`04` Phase 1.4)
+    // -------------------------------------------------------------------------
+    //   GET /v1/consents  - what is in force, for every purpose
+    //   PUT /v1/consents  - record a decision, by writing a new receipt
+    //
+    // STRICTLY THE CALLER'S OWN
+    // `consent_select` and `consent_insert` both require `user_id = current_user_id()`, so neither
+    // route takes a user and neither could accept one. Consent is the one thing in this product
+    // that nobody may exercise on somebody else's behalf, not even a profile owner for a caregiver
+    // - which is why these are not profile-scoped routes.
+    //
+    // WITHDRAWING WRITES A ROW, IT DOES NOT CHANGE ONE
+    // `consent_receipt` is append-only by trigger and refuses UPDATE and DELETE to every role
+    // including the database owner. A withdrawal is a **new** receipt with `granted = false` that
+    // supersedes the previous one, so the history of what somebody agreed to and when is not
+    // something a later version of this product can quietly rewrite. That is `04` Phase 1.4's
+    // "auditable" half, and it is the database's property rather than this handler's promise.
+
+    app.get('/v1/consents', async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      const rows = await ctx.db((db) =>
+        db.query<{
+          purpose: string;
+          granted: boolean;
+          policy_version: string;
+          locale: string;
+          recorded_at: Date | string;
+        }>(
+          // Every receipt this caller has, newest last. The domain decides which one stands: it
+          // reads the newest per purpose rather than following `supersedes_id`, because a chain
+          // with a broken link would produce no answer, and "no answer" here means "not granted"
+          // - the safe direction, but for the wrong reason.
+          `SELECT purpose, granted, policy_version, locale, recorded_at
+             FROM consent_receipt
+            ORDER BY recorded_at`,
+        ),
+      );
+
+      const state = consentStateFrom(
+        rows.rows.map((row) => ({
+          purpose: row.purpose,
+          granted: row.granted,
+          policyVersion: row.policy_version,
+          locale: row.locale,
+          recordedAt: isoOrNull(row.recorded_at) ?? ctx.now,
+        })),
+        CONSENT_POLICY_VERSION,
+      );
+
+      return reply.status(200).send({
+        policyVersion: CONSENT_POLICY_VERSION,
+        consents: state.map((standing) => ({
+          purpose: standing.purpose,
+          granted: standing.granted,
+          everAnswered: standing.everAnswered,
+          policyVersion: standing.policyVersion,
+          recordedAt: standing.recordedAt,
+          // Whether withdrawing it actually stops anything in this build. Reported rather than
+          // assumed by a screen, so that when a purpose becomes enforceable the screen follows
+          // without anybody remembering to edit it - and so that until then nobody is offered a
+          // switch they believe does something (`10`).
+          enforcement: standing.enforcement,
+          optional: standing.enforcement !== 'REQUIRED',
+          stale: standing.stale,
+        })),
+        serverTime: ctx.now,
+      });
+    });
+
+    app.put('/v1/consents', async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      const body = consentBodySchema.safeParse(request.body ?? {});
+      if (!body.success) return badRequest(reply, ctx, 'body_schema');
+
+      const normalized = normalizeConsentDecision(body.data);
+      if (isErr(normalized)) return fail(reply, normalized.error, ctx.correlationId);
+      const decision = normalized.value;
+
+      // The previous standing receipt for this purpose, so the new one can point at it. Read
+      // through the RLS-scoped connection, so it can only ever be the caller's own.
+      const previous = await ctx.db((db) =>
+        db.query<{ id: string }>(
+          `SELECT id FROM consent_receipt
+            WHERE purpose = $1
+            ORDER BY recorded_at DESC
+            LIMIT 1`,
+          [decision.purpose],
+        ),
+      );
+
+      const written = await insertOrRefusal(ctx, () =>
+        ctx.db((db) =>
+          db.query<{ id: string; recorded_at: Date | string }>(
+            // `user_id` comes from the request context and `policy_version` from the server. A
+            // client that could name either could record agreement, on somebody's behalf, to a
+            // text nobody showed them.
+            `INSERT INTO consent_receipt
+               (user_id, purpose, granted, policy_version, locale, supersedes_id)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id, recorded_at`,
+            [
+              ctx.principal.userId,
+              decision.purpose,
+              decision.granted,
+              CONSENT_POLICY_VERSION,
+              decision.locale,
+              previous.rows[0]?.id ?? null,
+            ],
+          ),
+        ),
+      );
+
+      const receipt = written?.rows[0];
+      if (receipt === undefined) {
+        return fail(
+          reply,
+          domainError('PERMISSION_DENIED', 'That is not yours to answer.'),
+          ctx.correlationId,
+        );
+      }
+
+      // `04` Phase 1.4's "auditable". The purpose and the answer only - both are closed
+      // vocabularies and neither says anything about anybody's health (`14`).
+      await ctx.privileged('AUDIT_WRITE', (db) =>
+        db.query(
+          `INSERT INTO audit_event
+             (actor_user_id, actor_role, action, target_kind, target_id, correlation_id, detail)
+           VALUES ($1, 'kynviora_app', $2, 'consent_receipt', $3, $4, $5::jsonb)`,
+          [
+            ctx.principal.userId,
+            decision.granted ? 'CONSENT_GRANTED' : 'CONSENT_WITHDRAWN',
+            receipt.id,
+            ctx.correlationId,
+            JSON.stringify({
+              purpose: decision.purpose,
+              policy_version: CONSENT_POLICY_VERSION,
+              locale: decision.locale,
+            }),
+          ],
+        ),
+      );
+
+      return reply.status(200).send({
+        purpose: decision.purpose,
+        granted: decision.granted,
+        policyVersion: CONSENT_POLICY_VERSION,
+        locale: decision.locale,
+        recordedAt: isoOrNull(receipt.recorded_at) ?? ctx.now,
+        // What this answer actually changes, said back rather than assumed by the screen.
+        enforcement: consentEnforcement(decision.purpose),
         serverTime: ctx.now,
       });
     });

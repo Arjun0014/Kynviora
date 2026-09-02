@@ -554,3 +554,67 @@ describe('append-only enforcement (DEC-013)', () => {
     expect(message).toMatch(/permission denied/i);
   });
 });
+
+describe('consent is strictly the caller’s own (`04` Phase 1.4)', () => {
+  // `consent_select` and `consent_insert` both require `user_id = kynviora.current_user_id()`,
+  // with no relationship clause of any kind - no household, no grant, no capability. Consent is
+  // the one thing in this product nobody may exercise or read on somebody else's behalf, and the
+  // routes that serve it take no user parameter *because* of these two policies rather than as a
+  // separate promise. Asserted here in SQL, so a future route that named a user would fail at the
+  // table rather than succeed quietly.
+
+  it('shows one person nothing of what anybody else answered', async () => {
+    const mine = testUuid(900_020);
+    await t.asService((db) =>
+      db.query(
+        `INSERT INTO consent_receipt (id, user_id, purpose, granted, policy_version)
+         VALUES ($1, $2, 'RESEARCH_PROGRAMME', true, 'v1')`,
+        [mine, OWNER_B],
+      ),
+    );
+
+    const asOther = await t.asUser(OWNER_A, (db) =>
+      db.query<{ id: string }>('SELECT id FROM consent_receipt WHERE id = $1', [mine]),
+    );
+    expect(asOther.rows).toEqual([]);
+
+    // And the owner of the row can still see it, so the empty result above is the policy working
+    // rather than the insert having failed.
+    const asOwner = await t.asUser(OWNER_B, (db) =>
+      db.query<{ id: string }>('SELECT id FROM consent_receipt WHERE id = $1', [mine]),
+    );
+    expect(asOwner.rows.map((row) => row.id)).toEqual([mine]);
+  });
+
+  it('refuses a receipt recorded in somebody else’s name', async () => {
+    // The abuse this prevents is not reading - it is *writing*: an owner recording that a
+    // caregiver agreed to something, or a caregiver recording it for the person they look after.
+    // Neither would leave a trace distinguishable from the real thing, which is why it has to be
+    // impossible rather than audited.
+    const message = await expectDenied(() =>
+      t.asUser(OWNER_A, (db) =>
+        db.query(
+          `INSERT INTO consent_receipt (id, user_id, purpose, granted, policy_version)
+           VALUES ($1, $2, 'NOTIFICATIONS', true, 'v1')`,
+          [testUuid(900_021), OWNER_B],
+        ),
+      ),
+    );
+    expect(message).toMatch(/row-level security/i);
+  });
+
+  it('refuses one even for somebody in the same household', async () => {
+    // A caregiver holding every capability there is still may not answer for the person they look
+    // after. There is no capability that admits this, because the policy names no capability.
+    const message = await expectDenied(() =>
+      t.asUser(CAREGIVER, (db) =>
+        db.query(
+          `INSERT INTO consent_receipt (id, user_id, purpose, granted, policy_version)
+           VALUES ($1, $2, 'CAREGIVER_SHARING', true, 'v1')`,
+          [testUuid(900_022), OWNER_A],
+        ),
+      ),
+    );
+    expect(message).toMatch(/row-level security/i);
+  });
+});

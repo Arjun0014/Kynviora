@@ -114,6 +114,22 @@ export interface DeliveryCandidate {
   readonly grantExpiresAt: Instant | null;
   /** This recipient's own setting for their own device. Absent means the default. */
   readonly detailPreference: NotificationDetailLevel | null;
+  /**
+   * Whether **this person** has agreed to be sent notifications (`04` Phase 1.4).
+   *
+   * Their own consent about their own device, so it applies to the owner as well as to a
+   * caregiver - it is not a grant-shaped check. Absent is treated as not granted by the caller
+   * that builds these; deny by default (`14`), because silence is not agreement.
+   */
+  readonly notificationsConsented: boolean;
+  /**
+   * Whether the **profile owner** has agreed to their information reaching caregivers.
+   *
+   * A property of the profile rather than of this candidate, carried on each candidate because
+   * that is where the decision is made. It excludes caregivers and never the owner: withdrawing
+   * it is "stop telling other people about me", not "stop telling me".
+   */
+  readonly caregiverSharingConsented: boolean;
 }
 
 /** Why a candidate was not told. Reported, never silent. */
@@ -123,6 +139,17 @@ export const EXCLUSION_REASONS = [
   'GRANT_EXPIRED',
   'CAPABILITY_MISSING',
   'ALERT_NOT_DELIVERABLE',
+  /**
+   * This person has not agreed to be sent notifications (`04` Phase 1.4).
+   *
+   * Distinct from every reason above, and the distinction is the point: the others say a grant
+   * does not admit them, and this says they asked not to be contacted. Reporting it as
+   * `CAPABILITY_MISSING` would put a person who exercised a right into the same audit bucket as
+   * one whose access was never wide enough.
+   */
+  'CONSENT_WITHDRAWN',
+  /** The profile owner has not agreed to their information reaching caregivers. */
+  'CAREGIVER_SHARING_WITHDRAWN',
 ] as const;
 export type ExclusionReason = (typeof EXCLUSION_REASONS)[number];
 
@@ -220,6 +247,19 @@ export function selectRecipients(
   const excluded: ExcludedCandidate[] = [];
 
   for (const candidate of candidates) {
+    // `04` Phase 1.4's exit criterion, checked before anything else and before the owner
+    // short-circuit. Consent is the basis on which Kynviora may contact this person at all, so it
+    // is not a grant-shaped check and the owner is not exempt from their own answer.
+    //
+    // There is deliberately no urgency that pierces this. A `CRITICAL` alert pierces quiet hours
+    // (DEC-078) because those are a timing preference; continuing to send to somebody who
+    // withdrew consent is not a safety feature, it is sending without consent. The settings copy
+    // says so above the control rather than after it.
+    if (!candidate.notificationsConsented) {
+      excluded.push({ userId: candidate.userId, reason: 'CONSENT_WITHDRAWN' });
+      continue;
+    }
+
     if (candidate.relationship === 'OWNER') {
       // The owner is not admitted by a capability and cannot be excluded by one. They hold no
       // grant, so every grant-shaped check below would be vacuous for them. Their own preference
@@ -230,6 +270,14 @@ export function selectRecipients(
         relationship: 'OWNER',
         detailLevel: candidate.detailPreference ?? DEFAULT_NOTIFICATION_DETAIL,
       });
+      continue;
+    }
+
+    // The owner's answer about their information leaving the profile. Checked before the grant
+    // state, because "I have stopped sharing" is a stronger statement than "your grant expired"
+    // and reporting the weaker one would describe the wrong thing in the audit trail.
+    if (!candidate.caregiverSharingConsented) {
+      excluded.push({ userId: candidate.userId, reason: 'CAREGIVER_SHARING_WITHDRAWN' });
       continue;
     }
 

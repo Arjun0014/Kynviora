@@ -148,6 +148,11 @@ describe('a route on the wrong surface is absent, not refused', () => {
       method: 'GET' as const,
       url: '/v1/profiles/00000000-0000-4000-8000-0000000000bb/health-facts',
     },
+    // `04` Phase 1.4. A staff origin serving these would let a reviewer account read, or answer,
+    // what a household consented to - and consent is the one thing nobody may exercise on
+    // somebody else's behalf.
+    { method: 'GET' as const, url: '/v1/consents' },
+    { method: 'PUT' as const, url: '/v1/consents' },
     { method: 'GET' as const, url: '/v1/items?profileId=00000000-0000-4000-8000-0000000000bb' },
     { method: 'GET' as const, url: '/v1/alerts' },
     { method: 'GET' as const, url: '/v1/caregiver-grants' },
@@ -159,7 +164,7 @@ describe('a route on the wrong surface is absent, not refused', () => {
   for (const { method, url } of householdRequests) {
     it('the staff surface does not serve ' + method + ' ' + url, async () => {
       const response = await staff.inject(
-        method === 'POST' ? { method, url, payload: {} } : { method, url },
+        method === 'POST' || method === 'PUT' ? { method, url, payload: {} } : { method, url },
       );
       expect(response.statusCode).toBe(404);
       expect(response.json<WireBody>().error.code).toBe('NOT_FOUND');

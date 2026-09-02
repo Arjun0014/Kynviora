@@ -50,6 +50,10 @@ function owner(overrides: Partial<DeliveryCandidate> = {}): DeliveryCandidate {
     grantRevokedAt: null,
     grantExpiresAt: null,
     detailPreference: null,
+    // Consented by default in these fixtures, so the tests below keep testing the grant rules
+    // rather than accidentally testing consent. `04` Phase 1.4's own behaviour has its own block.
+    notificationsConsented: true,
+    caregiverSharingConsented: true,
     ...overrides,
   };
 }
@@ -63,6 +67,8 @@ function caregiver(overrides: Partial<DeliveryCandidate> = {}): DeliveryCandidat
     grantRevokedAt: null,
     grantExpiresAt: null,
     detailPreference: null,
+    notificationsConsented: true,
+    caregiverSharingConsented: true,
     ...overrides,
   };
 }

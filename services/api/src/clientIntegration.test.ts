@@ -5,7 +5,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { start, type StartedServer } from './main.js';
 import { SEED } from '@kynviora/db';
-import { bandMatchesBirthYear, noopLogger, quietHoursFromClock } from '@kynviora/domain';
+import {
+  bandMatchesBirthYear,
+  consentEnforcement,
+  isConsentPurpose,
+  noopLogger,
+  quietHoursFromClock,
+  CONSENT_POLICY_VERSION,
+  CONSENT_PURPOSES,
+} from '@kynviora/domain';
 import {
   ALREADY_ACCEPTED_CODE,
   ANONYMOUS,
@@ -18,6 +26,7 @@ import {
   buildUrl,
   buildVisitPack,
   medicationLine,
+  consentView,
   contentChanged,
   accessHistory,
   accessList,
@@ -49,7 +58,7 @@ import {
   type DigestFn,
   type KynvioraClient,
 } from '@kynviora/contracts';
-import { REVOCATION_COPY, SCREEN_STATE_PRESENTATION } from '@kynviora/presentation';
+import { CONSENT_COPY, REVOCATION_COPY, SCREEN_STATE_PRESENTATION } from '@kynviora/presentation';
 
 /**
  * The client the app ships, driven against the server the app talks to.
@@ -2628,5 +2637,219 @@ describe('what a household records about a person, end to end', () => {
       displayTerm: 'Sneaky',
     });
     expect(refused.kind).toBe('UNAVAILABLE');
+  });
+});
+
+describe('what you have agreed to, end to end', () => {
+  /**
+   * `04` Phase 1.4, through the code path the Expo screen uses.
+   *
+   * The enforcement half - a withdrawal actually stopping a notification - is asserted in
+   * `consent.test.ts`, because `dispatchAlert` is a function rather than a route (`BLK-009`) and
+   * driving it needs the database rather than the client. What is asserted **here** is everything
+   * that reaches a person: that the screen renders sentences rather than codes, that a withdrawal
+   * is a new receipt rather than an edited one, and that nobody sees or answers for anybody else.
+   */
+
+  it('renders every purpose as a sentence, never as a code', async () => {
+    const listed = await owner.consents();
+    if (listed.kind !== 'OK') throw new Error('expected the consents to load');
+
+    const view = consentView(listed.value);
+    expect(view.rows).toHaveLength(CONSENT_PURPOSES.length);
+    expect(view.policyVersion).toBe(CONSENT_POLICY_VERSION);
+
+    for (const row of view.rows) {
+      expect(row.label, row.purpose).not.toMatch(/_/);
+      expect(row.description.length, row.purpose).toBeGreaterThan(0);
+      // The sentence a person reads before pressing. Never empty, on any row (trap 109).
+      expect(row.withdrawalEffect.length, row.purpose).toBeGreaterThan(0);
+    }
+  });
+
+  it('says which switches actually stop something, and the server is what says it', async () => {
+    // The screen does not infer this. A purpose that becomes enforceable is described correctly
+    // without anybody remembering to edit a client - and until then nobody is offered a switch
+    // they believe does something (`10`).
+    const listed = await owner.consents();
+    if (listed.kind !== 'OK') throw new Error('expected the consents to load');
+
+    for (const line of listed.value.consents) {
+      if (!isConsentPurpose(line.purpose)) throw new Error('unknown purpose on the wire');
+      expect(line.enforcement, line.purpose).toBe(consentEnforcement(line.purpose));
+    }
+
+    const view = consentView(listed.value);
+    const enforcing = view.rows.filter((row) => row.enforcesSomething).map((row) => row.purpose);
+    expect([...enforcing].sort()).toEqual(['CAREGIVER_SHARING', 'NOTIFICATIONS']);
+    // And the other five say so on their own row rather than in a footnote.
+    expect(view.notYetCount).toBe(5);
+    for (const row of view.rows) {
+      if (row.mayChoose && !row.enforcesSomething) {
+        expect(row.notYetNote, row.purpose).toBe(CONSENT_COPY.notYetNote);
+      }
+    }
+  });
+
+  it('treats never having answered as not agreed, and says so', async () => {
+    // Deny by default (`14`). A stranger has never answered anything, which is the state every
+    // account starts in - and silence must never read as agreement.
+    const listed = await stranger.consents();
+    if (listed.kind !== 'OK') throw new Error('expected the consents to load');
+
+    for (const row of consentView(listed.value).rows) {
+      expect(row.granted, row.purpose).toBe(false);
+      expect(row.neverAnsweredNote, row.purpose).toBe(CONSENT_COPY.neverAnsweredNote);
+    }
+  });
+
+  it('records a decision and reads it back as what is in force', async () => {
+    const recorded = await owner.recordConsent({ purpose: 'NOTIFICATIONS', granted: true });
+    if (recorded.kind !== 'OK') throw new Error('expected the decision to be recorded');
+
+    // The policy version is the server's. There is no field for it on the body.
+    expect(recorded.value.policyVersion).toBe(CONSENT_POLICY_VERSION);
+    expect(recorded.value.enforcement).toBe('ENFORCED');
+
+    const listed = await owner.consents();
+    if (listed.kind !== 'OK') throw new Error('expected the consents to load');
+    const row = consentView(listed.value).rows.find((line) => line.purpose === 'NOTIFICATIONS');
+    expect(row?.granted).toBe(true);
+    // Having answered is not the same as never having answered, whichever way they answered.
+    expect(row?.neverAnsweredNote).toBeNull();
+    // The control now names what pressing it would do next.
+    expect(row?.actionLabel).toBe(CONSENT_COPY.withdrawLabel);
+  });
+
+  it('withdraws by writing a new receipt, never by changing the old one', async () => {
+    const granted = await owner.recordConsent({ purpose: 'CAREGIVER_SHARING', granted: true });
+    if (granted.kind !== 'OK') throw new Error('expected the grant to be recorded');
+
+    const withdrawn = await owner.recordConsent({ purpose: 'CAREGIVER_SHARING', granted: false });
+    if (withdrawn.kind !== 'OK') throw new Error('expected the withdrawal to be recorded');
+    expect(withdrawn.value.granted).toBe(false);
+
+    // The two are separate rows recorded at separate moments, which is what makes the history
+    // auditable rather than a single mutable flag. `consent_receipt` refuses UPDATE and DELETE to
+    // every role including the owner, so nothing here could have rewritten the first.
+    expect(withdrawn.value.recordedAt).not.toBe(granted.value.recordedAt);
+
+    const listed = await owner.consents();
+    if (listed.kind !== 'OK') throw new Error('expected the consents to load');
+    const row = consentView(listed.value).rows.find((line) => line.purpose === 'CAREGIVER_SHARING');
+    // The newest answer stands, and it is the withdrawal.
+    expect(row?.granted).toBe(false);
+    expect(row?.actionLabel).toBe(CONSENT_COPY.grantLabel);
+  });
+
+  it('lets somebody change their mind back', async () => {
+    const again = await owner.recordConsent({ purpose: 'CAREGIVER_SHARING', granted: true });
+    if (again.kind !== 'OK') throw new Error('expected the grant to be recorded');
+
+    const listed = await owner.consents();
+    if (listed.kind !== 'OK') throw new Error('expected the consents to load');
+    const row = consentView(listed.value).rows.find((line) => line.purpose === 'CAREGIVER_SHARING');
+    expect(row?.granted).toBe(true);
+  });
+
+  it('offers no control for the one the product cannot run without, and refuses it besides', async () => {
+    const listed = await owner.consents();
+    if (listed.kind !== 'OK') throw new Error('expected the consents to load');
+    const row = consentView(listed.value).rows.find((line) => line.purpose === 'PROFILE_DATA');
+
+    // No button on the screen, and no route behind one either. A control whose only outcome is a
+    // refusal is a control that should not be offered (DEC-045), and both halves say the same.
+    expect(row?.mayChoose).toBe(false);
+    expect(row?.actionLabel).toBeNull();
+    expect(row?.statusLabel).toBe(CONSENT_COPY.requiredLabel);
+
+    const refused = await owner.recordConsent({ purpose: 'PROFILE_DATA', granted: false });
+    expect(refused.kind).toBe('REFUSED');
+    if (refused.kind !== 'REFUSED') return;
+    expect(refused.detail?.['reason_code']).toBe('consent_required');
+  });
+
+  it('refuses a purpose it does not know rather than storing it', async () => {
+    // A receipt naming a purpose nothing can enforce is a record of agreement to something
+    // undefined, which is worse than no record.
+    const refused = await owner.recordConsent({ purpose: 'SELL_MY_DATA', granted: true });
+    expect(refused.kind).toBe('REFUSED');
+    if (refused.kind !== 'REFUSED') return;
+    expect(refused.detail?.['field']).toBe('purpose');
+
+    const listed = await owner.consents();
+    if (listed.kind !== 'OK') throw new Error('expected the consents to load');
+    expect(JSON.stringify(listed.value)).not.toContain('SELL_MY_DATA');
+  });
+
+  it('has no field for a user, a policy version or a time', async () => {
+    // The audit trail must not be written by the thing being audited. The body schema is
+    // `.strict()` and there is no parameter any of these could reach if it were not.
+    for (const extra of [
+      { userId: STRANGER },
+      { policyVersion: '1999-01-01.1' },
+      { recordedAt: '1999-01-01T00:00:00.000Z' },
+    ]) {
+      // No cast: a spread is not excess-property checked, so this is exactly the body a client
+      // could send by accident. The server refuses it because the schema is `.strict()`.
+      const refused = await owner.recordConsent({
+        purpose: 'RESEARCH_PROGRAMME',
+        granted: true,
+        ...extra,
+      });
+      expect(refused.kind, JSON.stringify(extra)).toBe('REFUSED');
+    }
+
+    const listed = await owner.consents();
+    if (listed.kind !== 'OK') throw new Error('expected the consents to load');
+    const row = listed.value.consents.find((line) => line.purpose === 'RESEARCH_PROGRAMME');
+    // Nothing was written by any of those attempts.
+    expect(row?.everAnswered).toBe(false);
+    expect(row?.policyVersion).toBeNull();
+  });
+
+  it('shows one person nothing of what anybody else answered', async () => {
+    // `consent_select` requires the row to be the caller's own, so consent is the one thing in
+    // this product nobody may read on somebody else's behalf - not even a profile owner for a
+    // caregiver, and not the seeded owner for a stranger.
+    const mine = await owner.consents();
+    const theirs = await stranger.consents();
+    if (mine.kind !== 'OK' || theirs.kind !== 'OK') throw new Error('expected both to load');
+
+    const answered = (response: typeof mine.value) =>
+      response.consents.filter((line) => line.everAnswered).map((line) => line.purpose);
+
+    expect(answered(mine.value).length).toBeGreaterThan(0);
+    // The stranger has answered nothing, and the owner's answers do not appear under their name.
+    expect(answered(theirs.value)).toEqual([]);
+  });
+
+  it('tells a caller with no session nothing at all', async () => {
+    // `UNAUTHENTICATED` rather than a refusal naming a purpose. Nothing about consent is readable
+    // or answerable without a session, and the answer does not vary by what was asked for.
+    expect((await anonymous.consents()).kind).toBe('UNAUTHENTICATED');
+    const refused = await anonymous.recordConsent({ purpose: 'NOTIFICATIONS', granted: true });
+    expect(refused.kind).toBe('UNAUTHENTICATED');
+  });
+
+  it('never puts a code where a sentence belongs, anywhere in the rendered view', async () => {
+    const listed = await owner.consents();
+    if (listed.kind !== 'OK') throw new Error('expected the consents to load');
+
+    const rendered = JSON.stringify(
+      consentView(listed.value).rows.map((row) => ({
+        label: row.label,
+        description: row.description,
+        withdrawalEffect: row.withdrawalEffect,
+        statusLabel: row.statusLabel,
+        actionLabel: row.actionLabel,
+        notYetNote: row.notYetNote,
+        neverAnsweredNote: row.neverAnsweredNote,
+        staleNote: row.staleNote,
+      })),
+    );
+    for (const purpose of CONSENT_PURPOSES) {
+      expect(rendered, purpose).not.toContain(purpose);
+    }
   });
 });

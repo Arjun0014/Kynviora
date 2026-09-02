@@ -210,6 +210,61 @@ export interface ItemCreated {
 }
 
 // ---------------------------------------------------------------------------
+// Consent (`04` Phase 1.4)
+// ---------------------------------------------------------------------------
+
+export interface ConsentStandingLine {
+  readonly purpose: string;
+  readonly granted: boolean;
+  /** Whether anybody has ever answered. Distinct from having answered "no". */
+  readonly everAnswered: boolean;
+  readonly policyVersion: string | null;
+  readonly recordedAt: string | null;
+  /**
+   * Whether withdrawing this actually stops anything in **this** build.
+   *
+   * `ENFORCED`, `NOTHING_TO_STOP` or `REQUIRED`. Reported by the server rather than assumed by a
+   * screen, so a purpose that becomes enforceable is described correctly without anybody
+   * remembering to edit a client - and so that until then nobody is offered a switch they believe
+   * does something (`10`).
+   */
+  readonly enforcement: string;
+  readonly optional: boolean;
+  /** Whether the standing answer predates the policy text now in force. */
+  readonly stale: boolean;
+}
+
+export interface ConsentsResponse {
+  readonly policyVersion: string;
+  readonly consents: readonly ConsentStandingLine[];
+  readonly serverTime: string;
+}
+
+/**
+ * A consent decision.
+ *
+ * No `userId`, no `policyVersion` and no `recordedAt`. The first is the session's and the database
+ * checks it; the second and third are the server's, because a client that could name the policy
+ * version it agreed to could record agreement to a text nobody showed them.
+ */
+export interface ConsentBody {
+  readonly purpose: string;
+  readonly granted: boolean;
+  /** The language the policy was read in. `16` asks for consent state to be localizable. */
+  readonly locale?: string | null;
+}
+
+export interface ConsentRecorded {
+  readonly purpose: string;
+  readonly granted: boolean;
+  readonly policyVersion: string;
+  readonly locale: string;
+  readonly recordedAt: string;
+  readonly enforcement: string;
+  readonly serverTime: string;
+}
+
+// ---------------------------------------------------------------------------
 // Health context (`04` Phase 1.3)
 // ---------------------------------------------------------------------------
 
@@ -1093,6 +1148,16 @@ export interface KynvioraClient {
   createItem(body: ManualEntryBody, idempotencyKey: string): Promise<ApiOutcome<ItemCreated>>;
 
   /**
+   * What somebody has agreed to, and changing it (`04` Phase 1.4).
+   *
+   * Neither takes a user. `consent_select` and `consent_insert` both require the row to be the
+   * caller's own, so consent is the one thing in this product nobody may exercise or read on
+   * somebody else's behalf - not even a profile owner for a caregiver.
+   */
+  consents(): Promise<ApiOutcome<ConsentsResponse>>;
+  recordConsent(body: ConsentBody): Promise<ApiOutcome<ConsentRecorded>>;
+
+  /**
    * What a household records about a person (`04` Phase 1.3).
    *
    * No idempotency key. A retried create would make a second identical allergy row, which is
@@ -1369,6 +1434,13 @@ export function createClient(options: ClientOptions): KynvioraClient {
     // The domain refuses and names the field; this sends what it was given.
     createItem: (body, idempotencyKey) =>
       send<ItemCreated>('POST', '/v1/items', body, idempotencyKey),
+
+    consents: () => get<ConsentsResponse>('/v1/consents'),
+
+    // PUT rather than POST: one standing answer per purpose, and re-sending the same one is not a
+    // second decision. The server still writes a new receipt each time, because the table is
+    // append-only and the history is the point.
+    recordConsent: (body) => send<ConsentRecorded>('PUT', '/v1/consents', body),
 
     healthFacts: (profileId) =>
       get<HealthFactsResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/health-facts`),

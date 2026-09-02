@@ -172,6 +172,9 @@ interface CandidateRow {
   readonly grant_revoked_at: Date | null;
   readonly grant_expires_at: Date | null;
   readonly detail_level: string | null;
+  /** `04` Phase 1.4. Never null in practice - the query COALESCEs - and typed as it comes back. */
+  readonly notifications_consented: boolean | null;
+  readonly caregiver_sharing_consented: boolean | null;
 }
 
 interface AlertRow {
@@ -238,27 +241,52 @@ async function ownsProfile(ctx: RequestContext, profileId: string): Promise<bool
 }
 
 /**
- * Everyone who might be notified about this profile, with their raw grant state.
+ * Everyone who might be notified about this profile, with their raw grant and consent state.
  *
  * Privileged: choosing recipients means reading grants held by people other than the caller, and
  * there is no row-level predicate that would admit them - the same reason invitation acceptance
  * is privileged. The rows come back raw and the domain decides; nothing is filtered here.
+ *
+ * `04` Phase 1.4's exit criterion lives on the join below. Each candidate's own `NOTIFICATIONS`
+ * standing is their newest receipt, and the profile owner's `CAREGIVER_SHARING` standing is read
+ * once and carried on every row - it is a property of the profile rather than of the person being
+ * considered. **No receipt is not consent** (`14`), which is why both are `COALESCE`d to `false`
+ * rather than to `true`: a person with no row has never agreed to anything.
  */
 async function loadCandidates(
   db: DatabaseConnection,
   profileId: ProfileId,
 ): Promise<readonly DeliveryCandidate[]> {
   const res = await db.query<CandidateRow>(
-    `SELECT p.owner_user_id AS user_id,
+    // The newest receipt per user for one purpose. `DISTINCT ON` rather than a window function
+    // because the answer is a single row per user and the index on
+    // (user_id, purpose, recorded_at DESC) serves it directly.
+    `WITH notif AS (
+       SELECT DISTINCT ON (user_id) user_id, granted
+         FROM consent_receipt
+        WHERE purpose = 'NOTIFICATIONS'
+        ORDER BY user_id, recorded_at DESC
+     ),
+     sharing AS (
+       SELECT DISTINCT ON (cr.user_id) cr.user_id, cr.granted
+         FROM consent_receipt cr
+         JOIN profile p ON p.owner_user_id = cr.user_id
+        WHERE cr.purpose = 'CAREGIVER_SHARING' AND p.id = $1
+        ORDER BY cr.user_id, cr.recorded_at DESC
+     )
+     SELECT p.owner_user_id AS user_id,
             'OWNER'         AS relationship,
             NULL::text[]    AS capabilities,
             true            AS grant_accepted,
             NULL::timestamptz AS grant_revoked_at,
             NULL::timestamptz AS grant_expires_at,
-            np.detail_level AS detail_level
+            np.detail_level AS detail_level,
+            COALESCE(n.granted, false) AS notifications_consented,
+            COALESCE((SELECT granted FROM sharing), false) AS caregiver_sharing_consented
        FROM profile p
        LEFT JOIN notification_preference np
               ON np.profile_id = p.id AND np.user_id = p.owner_user_id
+       LEFT JOIN notif n ON n.user_id = p.owner_user_id
       WHERE p.id = $1
       UNION ALL
      SELECT g.grantee_user_id AS user_id,
@@ -267,10 +295,13 @@ async function loadCandidates(
             (g.accepted_at IS NOT NULL) AS grant_accepted,
             g.revoked_at      AS grant_revoked_at,
             g.expires_at      AS grant_expires_at,
-            np.detail_level   AS detail_level
+            np.detail_level   AS detail_level,
+            COALESCE(n.granted, false) AS notifications_consented,
+            COALESCE((SELECT granted FROM sharing), false) AS caregiver_sharing_consented
        FROM caregiver_grant g
        LEFT JOIN notification_preference np
               ON np.profile_id = g.profile_id AND np.user_id = g.grantee_user_id
+       LEFT JOIN notif n ON n.user_id = g.grantee_user_id
       WHERE g.profile_id = $1`,
     [profileId],
   );
@@ -283,6 +314,10 @@ async function loadCandidates(
     grantRevokedAt: iso(row.grant_revoked_at) as DeliveryCandidate['grantRevokedAt'],
     grantExpiresAt: iso(row.grant_expires_at) as DeliveryCandidate['grantExpiresAt'],
     detailPreference: asDetailLevel(row.detail_level),
+    // `=== true` rather than a truthy read: a driver returning `'t'` or `1` must not become
+    // agreement, and neither must a null the COALESCE somehow missed.
+    notificationsConsented: row.notifications_consented === true,
+    caregiverSharingConsented: row.caregiver_sharing_consented === true,
   }));
 }
 

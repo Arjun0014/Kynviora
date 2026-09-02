@@ -27,3 +27,4 @@ export * from './manualEntry.js';
 export * from './itemUpdate.js';
 export * from './profileCreation.js';
 export * from './healthContext.js';
+export * from './consent.js';
