@@ -30,6 +30,10 @@ import {
   manualEntryLimits,
   normalizeItemUpdate,
   normalizeManualEntry,
+  normalizeHealthFactChange,
+  normalizeHealthFactDraft,
+  isEmptyHealthFactChange,
+  provenanceForRelationship,
   normalizeHouseholdDraft,
   normalizeProfileDraft,
   DEFAULT_LANGUAGE_TAG,
@@ -93,6 +97,22 @@ async function insertOrRefusal<T>(ctx: RequestContext, run: () => Promise<T>): P
     }
     throw cause;
   }
+}
+
+/**
+ * Whether this caller owns the profile (`04` Phase 1.3).
+ *
+ * Read through the RLS-scoped connection, so a profile this caller cannot see answers "not the
+ * owner". That is the safe direction: it produces the weaker of the two provenance values (`14`),
+ * and it is never used to decide access - only to record where a fact came from.
+ */
+async function ownsProfileHere(ctx: RequestContext, profileId: string): Promise<boolean> {
+  const res = await ctx.db((db) =>
+    db.query<{ owner_user_id: string }>('SELECT owner_user_id FROM profile WHERE id = $1', [
+      profileId,
+    ]),
+  );
+  return res.rows[0]?.owner_user_id === (ctx.principal.userId as string);
 }
 
 /** Unknown means unverified. Never `CONFIRMED` - the reassuring member is never the fallback. */
@@ -264,6 +284,43 @@ const shelfQuerySchema = cursorQuerySchema.extend({
 });
 
 const itemParamsSchema = z.object({ itemId: uuidSchema });
+
+/** `04` Phase 1.3. */
+const profileIdParamsSchema = z.object({ profileId: uuidSchema });
+const factIdParamsSchema = z.object({ factId: uuidSchema });
+
+/**
+ * A reaction somebody is recording (`04` Phase 1.3).
+ *
+ * `.strict()`, and note what is not here: no `provenance`, no `substanceId`, no `profileId`. The
+ * first is derived from who is asking and is the whole of the phase's first exit criterion; the
+ * second is the catalog's business (`15` A11); the third is the path.
+ */
+const healthFactBodySchema = z
+  .object({
+    kind: z.string(),
+    displayTerm: z.string(),
+    certainty: z.string().nullish(),
+    notedOn: z.string().nullish(),
+  })
+  .strict();
+
+/**
+ * A correction to one (`04` Phase 1.3).
+ *
+ * Absent is unchanged and `null` clears, the same distinction the item edit keeps. There is no
+ * `provenance` here either: a person who could edit a fact into `REVIEWER_CONFIRMED` would have
+ * found the way round the exit criterion the create path closes.
+ */
+const healthFactChangeBodySchema = z
+  .object({
+    expectedVersion: z.number().int().nonnegative(),
+    displayTerm: z.string().nullish(),
+    certainty: z.string().nullish(),
+    notedOn: z.string().nullish(),
+    markReviewed: z.boolean().optional(),
+  })
+  .strict();
 
 /**
  * A manually entered item (`04` Phases 2.2 and 2.3).
@@ -471,6 +528,22 @@ export function createServer(options: ServerOptions): FastifyInstance {
 
   function fail(reply: FastifyReply, error: DomainError, correlationId: string): FastifyReply {
     return reply.status(statusForCode(error.code)).send(toErrorResponse(error, correlationId));
+  }
+
+  /**
+   * A request whose shape this build does not accept.
+   *
+   * The reason code says which gate refused - `13` has clients branch on codes and never on
+   * message text - and the message deliberately says nothing about which field, because a schema
+   * refusal is about the envelope rather than about a value somebody chose. A domain refusal names
+   * the field; this one cannot, and pretending otherwise would point a form at the wrong control.
+   */
+  function badRequest(reply: FastifyReply, ctx: RequestContext, reasonCode: string): FastifyReply {
+    return fail(
+      reply,
+      domainError('VALIDATION_FAILED', 'Invalid request.', { reason_code: reasonCode }),
+      ctx.correlationId,
+    );
   }
 
   /**
@@ -1462,6 +1535,310 @@ export function createServer(options: ServerOptions): FastifyInstance {
         serverTime: ctx.now,
       });
     });
+
+    // -------------------------------------------------------------------------
+    // Health context  (`04` Phase 1.3)
+    // -------------------------------------------------------------------------
+    // Allergy and sensitivity records: the narrow profile context the MVP safety rules actually
+    // consult, and the only profile data the rule engine personalises on.
+    //
+    // WHY NO ROUTE TAKES A PROVENANCE
+    // Phase 1.3's first exit criterion is "no OCR or inferred fact silently becomes a confirmed
+    // diagnosis". None of the bodies below has a `provenance` field and neither does the domain
+    // draft, so there is nothing to validate: it is derived from whether the caller owns the
+    // profile, and `provenanceForRelationship` can only ever answer `USER_REPORTED` or
+    // `CAREGIVER_ENTERED`. `IMPORTED` and `REVIEWER_CONFIRMED` are in the column's vocabulary and
+    // unreachable from this surface. The second exit criterion - "rules can explicitly require a
+    // provenance level" - is already met by `requiredProfileProvenance` in the engine, and the two
+    // only fit together because the first is enforced by absence.
+    //
+    // MANAGE_MEDICINES, NOT MANAGE_SHELF
+    // The policies in migration `0004` say so, and the split is deliberate: `08.2` keeps a
+    // caregiver's safety-alert permission separate from data access, and health context is the
+    // most sensitive profile data there is. A caregiver who may add a shampoo to the shelf must
+    // not thereby be able to read what somebody is allergic to.
+
+    app.post<{ Params: { profileId: string } }>(
+      '/v1/profiles/:profileId/health-facts',
+      async (request, reply) => {
+        const ctx = await contextFor(request, reply);
+        if (!ctx) return;
+
+        const params = profileIdParamsSchema.safeParse(request.params);
+        if (!params.success) return badRequest(reply, ctx, 'params_schema');
+
+        const body = healthFactBodySchema.safeParse(request.body ?? {});
+        if (!body.success) return badRequest(reply, ctx, 'body_schema');
+
+        const normalized = normalizeHealthFactDraft(body.data);
+        if (isErr(normalized)) return fail(reply, normalized.error, ctx.correlationId);
+        const draft = normalized.value;
+
+        // Who is asking, which is the only thing that decides provenance. Read before the write
+        // rather than after, because the value goes into the row.
+        const provenance = provenanceForRelationship(
+          (await ownsProfileHere(ctx, params.data.profileId)) ? 'OWNER' : 'CAREGIVER',
+        );
+
+        // `allergy_insert` requires MANAGE_MEDICINES on this profile and refuses by raising, so
+        // the refusal is caught and answered as absence - a profile this caller may not write to
+        // and one that does not exist are the same answer.
+        const inserted = await insertOrRefusal(ctx, () =>
+          ctx.db((db) =>
+            db.query<{ id: string; version: number }>(
+              // `substance_id` is deliberately absent from the insert. A household typing
+              // "penicillin" is not the catalog learning a substance - the same rule manual entry
+              // keeps (`15` A11) - and an unmapped term cannot drive a rule that matches on
+              // canonical substances, which is the honest state rather than a penalty.
+              `INSERT INTO allergy_record
+                 (profile_id, record_kind, display_term, provenance, certainty, noted_on)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING id, version`,
+              [
+                params.data.profileId,
+                draft.kind,
+                draft.displayTerm,
+                provenance,
+                draft.certainty,
+                draft.notedOn,
+              ],
+            ),
+          ),
+        );
+
+        const created = inserted?.rows[0];
+        if (created === undefined) {
+          return fail(reply, domainError('NOT_FOUND', 'No such profile.'), ctx.correlationId);
+        }
+
+        // `04` Phase 1.3 asks for an edit history. Field names and the derived provenance only -
+        // `14` keeps the content of somebody's health record out of a log, and what an access
+        // history needs is that a fact was added and where it was said to come from.
+        await ctx.privileged('AUDIT_WRITE', (db) =>
+          db.query(
+            `INSERT INTO audit_event
+               (actor_user_id, actor_role, action, target_kind, target_id, target_version,
+                correlation_id, detail)
+             VALUES ($1, 'kynviora_app', 'HEALTH_FACT_ADDED', 'allergy_record', $2, $3, $4,
+                     $5::jsonb)`,
+            [
+              ctx.principal.userId,
+              created.id,
+              String(created.version),
+              ctx.correlationId,
+              JSON.stringify({ record_kind: draft.kind, provenance }),
+            ],
+          ),
+        );
+
+        return reply.status(201).send({
+          id: created.id,
+          version: created.version,
+          kind: draft.kind,
+          displayTerm: draft.displayTerm,
+          certainty: draft.certainty,
+          // Reported back so a screen can say where the fact came from rather than assume. It is
+          // the server's answer about the caller, not an echo of anything they sent.
+          provenance,
+          notedOn: draft.notedOn,
+          lastReviewedAt: null,
+          serverTime: ctx.now,
+        });
+      },
+    );
+
+    app.get<{ Params: { profileId: string } }>(
+      '/v1/profiles/:profileId/health-facts',
+      async (request, reply) => {
+        const ctx = await contextFor(request, reply);
+        if (!ctx) return;
+
+        const params = profileIdParamsSchema.safeParse(request.params);
+        if (!params.success) return badRequest(reply, ctx, 'params_schema');
+
+        // No capability check here. `allergy_select` requires VIEW_MEDICINES, so a caller without
+        // it reads an empty list rather than a refusal - which is the same thing a profile with no
+        // records looks like, and this route is not an oracle for either.
+        const rows = await ctx.db((db) =>
+          db.query<{
+            id: string;
+            record_kind: string;
+            display_term: string;
+            substance_id: string | null;
+            provenance: string;
+            certainty: string;
+            noted_on: Date | string | null;
+            last_reviewed_at: Date | string | null;
+            version: number;
+          }>(
+            `SELECT id, record_kind, display_term, substance_id, provenance, certainty,
+                    noted_on, last_reviewed_at, version
+               FROM allergy_record
+              WHERE profile_id = $1 AND deleted_at IS NULL
+              ORDER BY created_at`,
+            [params.data.profileId],
+          ),
+        );
+
+        return reply.status(200).send({
+          profileId: params.data.profileId,
+          facts: rows.rows.map((row) => ({
+            id: row.id,
+            kind: row.record_kind,
+            displayTerm: row.display_term,
+            provenance: row.provenance,
+            certainty: row.certainty,
+            notedOn: dateOrNull(row.noted_on),
+            lastReviewedAt: isoOrNull(row.last_reviewed_at),
+            version: row.version,
+            // Whether this fact can drive a rule that matches on canonical substances. Reported
+            // rather than left for a screen to infer from a null: `04` Phase 5.2 makes the mapping
+            // the catalog's business, and an unmapped term is a real state a person should see.
+            matchesCanonicalSubstance: row.substance_id !== null,
+          })),
+          serverTime: ctx.now,
+        });
+      },
+    );
+
+    // -------------------------------------------------------------------------
+    // PATCH /v1/health-facts/:factId
+    // -------------------------------------------------------------------------
+    // Conditional on the version, for the reason the item edit is: `sync.ts` sets
+    // `allergy_record`'s conflict policy to `ASK_USER`, and losing a recorded allergy to a stale
+    // offline edit is the case that policy exists for.
+
+    app.patch<{ Params: { factId: string } }>(
+      '/v1/health-facts/:factId',
+      async (request, reply) => {
+        const ctx = await contextFor(request, reply);
+        if (!ctx) return;
+
+        const noSuchFact = domainError('NOT_FOUND', 'No such record.');
+
+        const params = factIdParamsSchema.safeParse(request.params);
+        if (!params.success) return fail(reply, noSuchFact, ctx.correlationId);
+        const factId = params.data.factId;
+
+        const body = healthFactChangeBodySchema.safeParse(request.body ?? {});
+        if (!body.success) return badRequest(reply, ctx, 'body_schema');
+
+        const normalized = normalizeHealthFactChange(body.data);
+        if (isErr(normalized)) return fail(reply, normalized.error, ctx.correlationId);
+        const change = normalized.value;
+
+        if (isEmptyHealthFactChange(change)) {
+          // An ordinary thing to do - open the form, change nothing, press save. Told apart by its
+          // reason code rather than by message text (`13`), so a screen can show a plain note
+          // instead of the panel a malformed date gets. Refused rather than committed because an
+          // empty save moves the version and becomes somebody else's conflict.
+          return fail(
+            reply,
+            domainError('VALIDATION_FAILED', 'Nothing was changed.', {
+              reason_code: 'empty_change',
+            }),
+            ctx.correlationId,
+          );
+        }
+
+        const readStored = () =>
+          ctx.db((db) =>
+            db.query<{ id: string; version: number }>(
+              `SELECT id, version FROM allergy_record WHERE id = $1 AND deleted_at IS NULL`,
+              [factId],
+            ),
+          );
+
+        const before = (await readStored()).rows[0];
+        if (before === undefined) return fail(reply, noSuchFact, ctx.correlationId);
+
+        const written = await ctx.db((db) =>
+          db.query<{ version: number; last_reviewed_at: Date | string | null }>(
+            `UPDATE allergy_record
+                SET display_term = COALESCE($3, display_term),
+                    certainty = COALESCE($4, certainty),
+                    noted_on = CASE WHEN $5 THEN NULL
+                                    WHEN $6::date IS NOT NULL THEN $6::date
+                                    ELSE noted_on END,
+                    -- Stamped by the server, never supplied. A client-set timestamp would let a
+                    -- screen claim somebody checked an allergy at a moment they did not.
+                    last_reviewed_at = CASE WHEN $7 THEN now() ELSE last_reviewed_at END,
+                    version = version + 1
+              WHERE id = $1 AND version = $2 AND deleted_at IS NULL
+          RETURNING version, last_reviewed_at`,
+            [
+              factId,
+              body.data.expectedVersion,
+              change.displayTerm,
+              change.certainty,
+              change.clearNotedOn,
+              change.notedOn,
+              change.markReviewed,
+            ],
+          ),
+        );
+
+        const committed = written.rows[0];
+        if (committed === undefined) {
+          // Zero rows is three facts. Re-read to say which: a refusal reported as a conflict sends
+          // somebody round a retry loop they can never win, and a conflict reported as absence
+          // tells them their own record is gone.
+          const after = (await readStored()).rows[0];
+          if (after === undefined) return fail(reply, noSuchFact, ctx.correlationId);
+
+          if (after.version !== body.data.expectedVersion) {
+            return fail(
+              reply,
+              domainError('VERSION_CONFLICT', 'This record changed while you had it open.', {
+                reason_code: 'health_fact_version',
+                currentVersion: after.version,
+              }),
+              ctx.correlationId,
+            );
+          }
+
+          // Readable and not writable: VIEW_MEDICINES without MANAGE_MEDICINES. Answered as the
+          // same absence every other refusal gives (trap 89).
+          return fail(
+            reply,
+            domainError('PERMISSION_DENIED', 'No such record.'),
+            ctx.correlationId,
+          );
+        }
+
+        const changedFields = [
+          ...(change.displayTerm === null ? [] : ['displayTerm']),
+          ...(change.certainty === null ? [] : ['certainty']),
+          ...(change.notedOn === null && !change.clearNotedOn ? [] : ['notedOn']),
+        ];
+
+        await ctx.privileged('AUDIT_WRITE', (db) =>
+          db.query(
+            `INSERT INTO audit_event
+               (actor_user_id, actor_role, action, target_kind, target_id, target_version,
+                correlation_id, detail)
+             VALUES ($1, 'kynviora_app', 'HEALTH_FACT_UPDATED', 'allergy_record', $2, $3, $4,
+                     $5::jsonb)`,
+            [
+              ctx.principal.userId,
+              factId,
+              String(committed.version),
+              ctx.correlationId,
+              // Field names and whether it was reviewed. Never the term itself (`14`).
+              JSON.stringify({ changed_fields: changedFields, reviewed: change.markReviewed }),
+            ],
+          ),
+        );
+
+        return reply.status(200).send({
+          id: factId,
+          version: committed.version,
+          changedFields,
+          lastReviewedAt: isoOrNull(committed.last_reviewed_at),
+          serverTime: ctx.now,
+        });
+      },
+    );
 
     // -------------------------------------------------------------------------
     // GET /v1/regulatory-lens

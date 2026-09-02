@@ -22,6 +22,7 @@ import {
   asChosenDetailLevel,
   asNotificationDetailLevel,
   messageForFailure,
+  healthContextView,
   notificationPolicyView,
   profileSwitcherView,
   screenStateForFailure,
@@ -34,6 +35,7 @@ import { Screen } from '@/components/Screen';
 import { ResourceState } from '@/components/ScreenState';
 import { DeliveryPolicy } from '@/features/notifications/DeliveryPolicy';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
+import { HealthContext } from '@/features/profiles/HealthContext';
 import { ProfileSwitcher } from '@/features/profiles/ProfileSwitcher';
 import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
 
@@ -69,6 +71,21 @@ export default function YouScreen() {
   const onRetry = useCallback(() => {
     reload();
   }, [reload]);
+
+  // `04` Phase 1.3. A separate read from the notification settings: they answer different
+  // questions, and a screen that composed them into one request would show neither when one
+  // failed - which `06` names as the partial state a page has to be able to express.
+  const loadFacts = useMemo(
+    () =>
+      client === null || activeProfileId === null
+        ? null
+        : () => client.healthFacts(activeProfileId),
+    [client, activeProfileId],
+  );
+
+  const { resource: factsResource, reload: reloadFacts } = useResource(loadFacts, {
+    enabled: activeProfileId !== null,
+  });
 
   // The preference is written to the server and then re-read. Never applied locally first: this
   // dial decides what a notification may reveal on a locked screen, and a client that showed the
@@ -241,6 +258,18 @@ export default function YouScreen() {
             exampleItemName={null}
             onChoose={onChoose}
           />
+
+          {/* `04` Phase 1.3. The only health information Kynviora asks for, and it sits with the
+              person it is about rather than with the notification settings. */}
+          {factsResource.value === null ? (
+            <ResourceState resource={factsResource} onRetry={reloadFacts} />
+          ) : (
+            <HealthContext
+              view={healthContextView(factsResource.value)}
+              profileId={activeProfileId}
+              onChanged={reloadFacts}
+            />
+          )}
 
           {/* `04` Phase 7.5. Below the privacy dial because it answers a different question -
               that one is what a notification may say, this one is whether it arrives at all. */}

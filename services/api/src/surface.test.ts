@@ -142,6 +142,12 @@ describe('a route on the wrong surface is absent, not refused', () => {
     // origin that served them would let a reviewer account create the records it reviews.
     { method: 'POST' as const, url: '/v1/households' },
     { method: 'POST' as const, url: '/v1/profiles' },
+    // `04` Phase 1.3. The most sensitive profile data there is, and a staff origin that served it
+    // would let a reviewer account read what a household is allergic to.
+    {
+      method: 'GET' as const,
+      url: '/v1/profiles/00000000-0000-4000-8000-0000000000bb/health-facts',
+    },
     { method: 'GET' as const, url: '/v1/items?profileId=00000000-0000-4000-8000-0000000000bb' },
     { method: 'GET' as const, url: '/v1/alerts' },
     { method: 'GET' as const, url: '/v1/caregiver-grants' },

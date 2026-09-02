@@ -30,6 +30,7 @@ import {
   lensView,
   manualEntryDraft,
   notificationPolicyView,
+  healthContextView,
   emptyProfileForm,
   profileBodyFrom,
   profileFormRefusal,
@@ -2475,5 +2476,157 @@ describe('making a person, end to end', () => {
     if (listed.kind !== 'OK') throw new Error('expected the profiles to load');
     expect(listed.value.profiles).toEqual([]);
     expect(profileSwitcherView(listed.value.profiles, SEED.profileId).selectionDropped).toBe(true);
+  });
+});
+
+describe('what a household records about a person, end to end', () => {
+  /**
+   * `04` Phase 1.3, through the code path the Expo screen uses.
+   *
+   * Both exit criteria are asserted here as properties of the round trip rather than of a unit:
+   * no client can name a provenance, and what comes back is a phrase a screen can render rather
+   * than a code.
+   */
+
+  it('records a reaction and reads it back as sentences', async () => {
+    const created = await owner.addHealthFact(SEED.profileId, {
+      kind: 'ALLERGY',
+      displayTerm: 'Penicillin',
+      certainty: 'CONFIRMED',
+      notedOn: '2019-04-02',
+    });
+    if (created.kind !== 'OK') throw new Error('expected the fact to be recorded');
+
+    // Derived by the server from who is asking. There is no field on the body for it.
+    expect(created.value.provenance).toBe('USER_REPORTED');
+
+    const listed = await owner.healthFacts(SEED.profileId);
+    if (listed.kind !== 'OK') throw new Error('expected the facts to load');
+
+    const view = healthContextView(listed.value);
+    const row = view.rows.find((line) => line.displayTerm === 'Penicillin');
+    expect(row).toBeDefined();
+    if (row === undefined) return;
+
+    expect(row.kindLabel).toBe('Allergy');
+    expect(row.certaintyLabel).toBe('I am sure');
+    expect(row.provenanceLabel).toBe('You recorded this');
+    // No raw vocabulary member reaches a screen through this view (trap 129).
+    expect(JSON.stringify(row)).not.toContain('USER_REPORTED');
+    expect(JSON.stringify(row)).not.toContain('ALLERGY');
+  });
+
+  it('says on the record that Kynviora cannot check anything against it yet', async () => {
+    // `10`, and the common case: nothing in this build maps a typed term to a substance the
+    // catalog knows, so a rule that matches on canonical substances cannot see it. Discovering
+    // that through an alert that never arrives is the failure the sentence prevents.
+    const listed = await owner.healthFacts(SEED.profileId);
+    if (listed.kind !== 'OK') throw new Error('expected the facts to load');
+
+    const view = healthContextView(listed.value);
+    expect(view.unmatchedCount).toBeGreaterThan(0);
+    for (const row of view.rows) {
+      if (!row.matchesCanonicalSubstance) {
+        expect(row.matchNote).toMatch(/cannot check/i);
+        expect(row.matchNote).toMatch(/not lost/i);
+      }
+    }
+  });
+
+  it('has no way for a client to say where a fact came from', async () => {
+    // Phase 1.3's first exit criterion, at the boundary. The body schema is `.strict()` and there
+    // is no parameter the value could reach if it were not.
+    const refused = await owner.addHealthFact(SEED.profileId, {
+      kind: 'ALLERGY',
+      displayTerm: 'Amoxicillin',
+      provenance: 'REVIEWER_CONFIRMED',
+    } as unknown as Parameters<typeof owner.addHealthFact>[1]);
+    expect(refused.kind).toBe('REFUSED');
+
+    const listed = await owner.healthFacts(SEED.profileId);
+    if (listed.kind !== 'OK') throw new Error('expected the facts to load');
+    for (const line of listed.value.facts) {
+      expect(line.provenance).not.toBe('REVIEWER_CONFIRMED');
+      expect(line.provenance).not.toBe('IMPORTED');
+    }
+  });
+
+  it('refuses a kind rather than choosing one, and names the field', async () => {
+    const refused = await owner.addHealthFact(SEED.profileId, {
+      kind: 'INTOLERANCE',
+      displayTerm: 'Latex',
+    });
+    expect(refused.kind).toBe('REFUSED');
+    if (refused.kind !== 'REFUSED') return;
+    expect(refused.detail?.['field']).toBe('kind');
+  });
+
+  it('marks a record as checked, and says so only after somebody did', async () => {
+    const listed = await owner.healthFacts(SEED.profileId);
+    if (listed.kind !== 'OK') throw new Error('expected the facts to load');
+
+    const row = healthContextView(listed.value).rows[0];
+    expect(row).toBeDefined();
+    if (row === undefined) return;
+    // A fact, not a nag (`02`).
+    expect(row.reviewNote).toMatch(/nobody has checked/i);
+
+    const reviewed = await owner.updateHealthFact(row.id, {
+      expectedVersion: row.version,
+      markReviewed: true,
+    });
+    if (reviewed.kind !== 'OK') throw new Error('expected the review to be recorded');
+    expect(reviewed.value.lastReviewedAt).not.toBeNull();
+
+    const after = await owner.healthFacts(SEED.profileId);
+    if (after.kind !== 'OK') throw new Error('expected the facts to load');
+    const refreshed = healthContextView(after.value).rows.find((line) => line.id === row.id);
+    expect(refreshed?.reviewNote).toBeNull();
+  });
+
+  it('refuses a stale edit rather than letting it win', async () => {
+    // `sync.ts` sets `allergy_record`'s conflict policy to `ASK_USER`. Losing a recorded allergy
+    // to a stale offline edit is the case that policy exists for.
+    const listed = await owner.healthFacts(SEED.profileId);
+    if (listed.kind !== 'OK') throw new Error('expected the facts to load');
+    const row = healthContextView(listed.value).rows[0];
+    if (row === undefined) throw new Error('expected a record');
+
+    const stale = await owner.updateHealthFact(row.id, {
+      expectedVersion: row.version - 1,
+      certainty: 'SUSPECTED',
+    });
+    expect(stale.kind).toBe('REFUSED');
+    if (stale.kind !== 'REFUSED') return;
+    expect(stale.detail?.['reason_code']).toBe('health_fact_version');
+  });
+
+  it('refuses a save that changed nothing, and says which refusal it is', async () => {
+    const listed = await owner.healthFacts(SEED.profileId);
+    if (listed.kind !== 'OK') throw new Error('expected the facts to load');
+    const row = healthContextView(listed.value).rows[0];
+    if (row === undefined) throw new Error('expected a record');
+
+    const empty = await owner.updateHealthFact(row.id, { expectedVersion: row.version });
+    expect(empty.kind).toBe('REFUSED');
+    if (empty.kind !== 'REFUSED') return;
+    // Told apart by the reason code rather than by message text (`13`), so a screen can show the
+    // plain note instead of the panel a malformed date gets.
+    expect(empty.detail?.['reason_code']).toBe('empty_change');
+  });
+
+  it('tells a stranger nothing about anybody’s health context', async () => {
+    // An empty list rather than a refusal, which is what a profile with no records looks like -
+    // so the route is not an oracle for either.
+    const listed = await stranger.healthFacts(SEED.profileId);
+    if (listed.kind !== 'OK') throw new Error('expected the facts to load');
+    expect(listed.value.facts).toEqual([]);
+    expect(healthContextView(listed.value).isEmpty).toBe(true);
+
+    const refused = await stranger.addHealthFact(SEED.profileId, {
+      kind: 'ALLERGY',
+      displayTerm: 'Sneaky',
+    });
+    expect(refused.kind).toBe('UNAVAILABLE');
   });
 });

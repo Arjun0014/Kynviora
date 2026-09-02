@@ -210,6 +210,89 @@ export interface ItemCreated {
 }
 
 // ---------------------------------------------------------------------------
+// Health context (`04` Phase 1.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * A reaction somebody is recording.
+ *
+ * Note what is not here: no `provenance` and no `substanceId`. The first is derived by the server
+ * from whether the caller owns the profile, and its absence is the whole of Phase 1.3's first exit
+ * criterion - "no OCR or inferred fact silently becomes a confirmed diagnosis" - because there is
+ * no field a client could set. The second is the catalog's business: a household typing
+ * "penicillin" is not the catalog learning a substance (`15` A11).
+ */
+export interface HealthFactBody {
+  readonly kind: string;
+  readonly displayTerm: string;
+  readonly certainty?: string | null;
+  readonly notedOn?: string | null;
+}
+
+export interface HealthFactCreated {
+  readonly id: string;
+  readonly version: number;
+  readonly kind: string;
+  readonly displayTerm: string;
+  readonly certainty: string;
+  /** The server's answer about the caller, never an echo of anything they sent. */
+  readonly provenance: string;
+  readonly notedOn: string | null;
+  readonly lastReviewedAt: string | null;
+  readonly serverTime: string;
+}
+
+export interface HealthFactLine {
+  readonly id: string;
+  readonly kind: string;
+  readonly displayTerm: string;
+  readonly provenance: string;
+  readonly certainty: string;
+  readonly notedOn: string | null;
+  readonly lastReviewedAt: string | null;
+  readonly version: number;
+  /**
+   * Whether this fact can drive a rule that matches on canonical substances.
+   *
+   * Reported rather than left for a screen to infer from a missing field: `04` Phase 5.2 makes
+   * the mapping the catalog's business, and an unmapped term is a real state a person should be
+   * told about.
+   */
+  readonly matchesCanonicalSubstance: boolean;
+}
+
+export interface HealthFactsResponse {
+  readonly profileId: string;
+  readonly facts: readonly HealthFactLine[];
+  readonly serverTime: string;
+}
+
+/**
+ * A correction to a fact that already exists.
+ *
+ * Conditional on the version: `sync.ts` sets `allergy_record`'s conflict policy to `ASK_USER`, and
+ * losing a recorded allergy to a stale offline edit is the case that policy exists for. There is
+ * no `provenance` here either - a person who could edit a fact into `REVIEWER_CONFIRMED` would
+ * have found the way round the exit criterion the create path closes.
+ */
+export interface HealthFactChangeBody {
+  readonly expectedVersion: number;
+  readonly displayTerm?: string | null;
+  readonly certainty?: string | null;
+  readonly notedOn?: string | null;
+  /** Whether this edit also counts as looking at the record. Never inferred from an edit. */
+  readonly markReviewed?: boolean;
+}
+
+export interface HealthFactUpdated {
+  readonly id: string;
+  readonly version: number;
+  readonly changedFields: readonly string[];
+  readonly lastReviewedAt: string | null;
+  readonly serverTime: string;
+}
+
+// ---------------------------------------------------------------------------
 // Making a household, and the people in it (`04` Phase 1.2)
 // ---------------------------------------------------------------------------
 
@@ -1010,6 +1093,20 @@ export interface KynvioraClient {
   createItem(body: ManualEntryBody, idempotencyKey: string): Promise<ApiOutcome<ItemCreated>>;
 
   /**
+   * What a household records about a person (`04` Phase 1.3).
+   *
+   * No idempotency key. A retried create would make a second identical allergy row, which is
+   * visible on the list, correctable, and harmless where a second household is none of those -
+   * and it is the honest alternative to a key the server does not enforce.
+   */
+  healthFacts(profileId: string): Promise<ApiOutcome<HealthFactsResponse>>;
+  addHealthFact(profileId: string, body: HealthFactBody): Promise<ApiOutcome<HealthFactCreated>>;
+  updateHealthFact(
+    factId: string,
+    body: HealthFactChangeBody,
+  ): Promise<ApiOutcome<HealthFactUpdated>>;
+
+  /**
    * Make a household, and make a person in it (`04` Phase 1.2).
    *
    * Both take an idempotency key, and both require one at the server. Two households are not a
@@ -1272,6 +1369,21 @@ export function createClient(options: ClientOptions): KynvioraClient {
     // The domain refuses and names the field; this sends what it was given.
     createItem: (body, idempotencyKey) =>
       send<ItemCreated>('POST', '/v1/items', body, idempotencyKey),
+
+    healthFacts: (profileId) =>
+      get<HealthFactsResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/health-facts`),
+
+    addHealthFact: (profileId, body) =>
+      send<HealthFactCreated>(
+        'POST',
+        `/v1/profiles/${encodeURIComponent(profileId)}/health-facts`,
+        body,
+      ),
+
+    // PATCH rather than PUT, because absent and `null` mean different things here and a
+    // whole-document PUT could not express "leave this alone".
+    updateHealthFact: (factId, body) =>
+      send<HealthFactUpdated>('PATCH', `/v1/health-facts/${encodeURIComponent(factId)}`, body),
 
     createHousehold: (body, idempotencyKey) =>
       send<HouseholdCreated>('POST', '/v1/households', body, idempotencyKey),

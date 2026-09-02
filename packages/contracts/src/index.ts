@@ -19,3 +19,4 @@ export * from './lens.js';
 export * from './visitPack.js';
 export * from './reconciliation.js';
 export * from './profileCreation.js';
+export * from './healthContext.js';

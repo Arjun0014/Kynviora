@@ -27,3 +27,4 @@ export * from './shelfAttention.js';
 export * from './manualEntry.js';
 export * from './itemUpdate.js';
 export * from './profileCreation.js';
+export * from './healthContext.js';
