@@ -61,6 +61,7 @@ import { registerReviewInboxRoutes } from './reviewInbox.js';
 import { registerReconciliationRoutes } from './reconciliation.js';
 import { registerAlertDetailRoutes } from './alertDetail.js';
 import { registerSafetyReceiptRoutes } from './safetyReceipt.js';
+import { resolveTermForProfile } from './substanceMapping.js';
 import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
 import { registerOperationsRoutes } from './operations.js';
 import { registerSafetyInboxRoutes } from './safetyInbox.js';
@@ -1763,16 +1764,23 @@ export function createServer(options: ServerOptions): FastifyInstance {
         // `allergy_insert` requires MANAGE_MEDICINES on this profile and refuses by raising, so
         // the refusal is caught and answered as absence - a profile this caller may not write to
         // and one that does not exist are the same answer.
+        // `04` Phase 5.2. The term is looked up in the seeded vocabulary and the outcome is
+        // stored, so whether a rule can see this record is a fact on the row rather than something
+        // a read path re-derives (DEC-098). Nothing here writes to the vocabulary: a household
+        // typing "penicillin" is not the catalog learning a substance (`08`, `15` A11), and an
+        // unresolved term stays unresolved, which is the honest state rather than a penalty.
+        const mapping = await resolveTermForProfile(ctx, draft.displayTerm);
+
         const inserted = await insertOrRefusal(ctx, () =>
           ctx.db((db) =>
             db.query<{ id: string; version: number }>(
-              // `substance_id` is deliberately absent from the insert. A household typing
-              // "penicillin" is not the catalog learning a substance - the same rule manual entry
-              // keeps (`15` A11) - and an unmapped term cannot drive a rule that matches on
-              // canonical substances, which is the honest state rather than a penalty.
+              // `substance_id` and the state are written together; migration `0019` refuses the
+              // pair if they disagree, so a record cannot claim a rule can see it while carrying
+              // no substance.
               `INSERT INTO allergy_record
-                 (profile_id, record_kind, display_term, provenance, certainty, noted_on)
-               VALUES ($1, $2, $3, $4, $5, $6)
+                 (profile_id, record_kind, display_term, provenance, certainty, noted_on,
+                  substance_id, substance_mapping_state)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                RETURNING id, version`,
               [
                 params.data.profileId,
@@ -1781,6 +1789,8 @@ export function createServer(options: ServerOptions): FastifyInstance {
                 provenance,
                 draft.certainty,
                 draft.notedOn,
+                mapping.substanceId,
+                mapping.mappingState,
               ],
             ),
           ),
@@ -1806,7 +1816,14 @@ export function createServer(options: ServerOptions): FastifyInstance {
               created.id,
               String(created.version),
               ctx.correlationId,
-              JSON.stringify({ record_kind: draft.kind, provenance }),
+              // The mapping state as well: it decides whether a rule can act on this record, and
+              // an access history that could not say when that changed would be missing the one
+              // consequence. Never the term itself (`14`).
+              JSON.stringify({
+                record_kind: draft.kind,
+                provenance,
+                substance_mapping_state: mapping.mappingState,
+              }),
             ],
           ),
         );
@@ -1822,6 +1839,9 @@ export function createServer(options: ServerOptions): FastifyInstance {
           provenance,
           notedOn: draft.notedOn,
           lastReviewedAt: null,
+          // `04` Phase 5.2. Whether a rule can see this, and if not, which of the two reasons.
+          substanceMappingState: mapping.mappingState,
+          matchesCanonicalSubstance: mapping.mappingState === 'EXACT',
           serverTime: ctx.now,
         });
       },
@@ -1845,14 +1865,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
             record_kind: string;
             display_term: string;
             substance_id: string | null;
+            substance_mapping_state: string;
             provenance: string;
             certainty: string;
             noted_on: Date | string | null;
             last_reviewed_at: Date | string | null;
             version: number;
           }>(
-            `SELECT id, record_kind, display_term, substance_id, provenance, certainty,
-                    noted_on, last_reviewed_at, version
+            `SELECT id, record_kind, display_term, substance_id, substance_mapping_state,
+                    provenance, certainty, noted_on, last_reviewed_at, version
                FROM allergy_record
               WHERE profile_id = $1 AND deleted_at IS NULL
               ORDER BY created_at`,
@@ -1875,6 +1896,13 @@ export function createServer(options: ServerOptions): FastifyInstance {
             // rather than left for a screen to infer from a null: `04` Phase 5.2 makes the mapping
             // the catalog's business, and an unmapped term is a real state a person should see.
             matchesCanonicalSubstance: row.substance_id !== null,
+            // And *why*, for the two ways of not being mapped. "Kynviora does not know that word"
+            // is a gap in a licensed vocabulary and nothing the person can act on; "that word
+            // means more than one thing here" is something they can fix by being more specific,
+            // and telling them apart is what `10` asks for (DEC-098). Read from the column rather
+            // than resolved again, because a re-resolution can disagree with the mapping actually
+            // stored on the row - which is what `DEV-028` was closed for one level up.
+            substanceMappingState: row.substance_mapping_state,
           })),
           serverTime: ctx.now,
         });
@@ -1932,8 +1960,20 @@ export function createServer(options: ServerOptions): FastifyInstance {
         const before = (await readStored()).rows[0];
         if (before === undefined) return fail(reply, noSuchFact, ctx.correlationId);
 
+        // `04` Phase 5.2. A new term is a new lookup, and it must be: a record whose wording
+        // changed while keeping the mapping the old wording earned would drive a rule on a
+        // substance nobody typed - which is the silent becoming Phase 1.3's exit criterion is
+        // written against, one level down. Resolved only where the term actually changed, so
+        // marking a record as checked is not a re-resolution against a vocabulary that has moved.
+        const remapped =
+          change.displayTerm === null ? null : await resolveTermForProfile(ctx, change.displayTerm);
+
         const written = await ctx.db((db) =>
-          db.query<{ version: number; last_reviewed_at: Date | string | null }>(
+          db.query<{
+            version: number;
+            last_reviewed_at: Date | string | null;
+            substance_mapping_state: string;
+          }>(
             `UPDATE allergy_record
                 SET display_term = COALESCE($3, display_term),
                     certainty = COALESCE($4, certainty),
@@ -1943,9 +1983,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
                     -- Stamped by the server, never supplied. A client-set timestamp would let a
                     -- screen claim somebody checked an allergy at a moment they did not.
                     last_reviewed_at = CASE WHEN $7 THEN now() ELSE last_reviewed_at END,
+                    -- Both together, or neither. Migration 0019 refuses the pair if they
+                    -- disagree, so there is no ordering of these two assignments that can leave
+                    -- the row claiming a rule can see it while carrying no substance.
+                    substance_id = CASE WHEN $8 THEN $9::uuid ELSE substance_id END,
+                    substance_mapping_state =
+                      CASE WHEN $8 THEN $10 ELSE substance_mapping_state END,
                     version = version + 1
               WHERE id = $1 AND version = $2 AND deleted_at IS NULL
-          RETURNING version, last_reviewed_at`,
+          RETURNING version, last_reviewed_at, substance_mapping_state`,
             [
               factId,
               body.data.expectedVersion,
@@ -1954,6 +2000,9 @@ export function createServer(options: ServerOptions): FastifyInstance {
               change.clearNotedOn,
               change.notedOn,
               change.markReviewed,
+              remapped !== null,
+              remapped?.substanceId ?? null,
+              remapped?.mappingState ?? 'UNRESOLVED',
             ],
           ),
         );
@@ -2004,8 +2053,13 @@ export function createServer(options: ServerOptions): FastifyInstance {
               factId,
               String(committed.version),
               ctx.correlationId,
-              // Field names and whether it was reviewed. Never the term itself (`14`).
-              JSON.stringify({ changed_fields: changedFields, reviewed: change.markReviewed }),
+              // Field names, whether it was reviewed, and where the mapping ended up. Never the
+              // term itself (`14`).
+              JSON.stringify({
+                changed_fields: changedFields,
+                reviewed: change.markReviewed,
+                substance_mapping_state: committed.substance_mapping_state,
+              }),
             ],
           ),
         );
@@ -2015,6 +2069,10 @@ export function createServer(options: ServerOptions): FastifyInstance {
           version: committed.version,
           changedFields,
           lastReviewedAt: isoOrNull(committed.last_reviewed_at),
+          // Read back from the row rather than from `remapped`, so an edit that did not touch the
+          // term reports what the record actually carries instead of a default this handler chose.
+          substanceMappingState: committed.substance_mapping_state,
+          matchesCanonicalSubstance: committed.substance_mapping_state === 'EXACT',
           serverTime: ctx.now,
         });
       },

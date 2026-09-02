@@ -271,8 +271,12 @@ export function registerShadowModeRoutes(app: FastifyInstance, deps: ShadowModeR
         list.push({
           id: row.id,
           kind: row.record_kind as ProfileFact['kind'],
-          // The canonical key is not joined here, which is why substance-matching rules are
-          // refused for a historical run rather than under-reported.
+          // Still null, and both halves of `DEV-018` are why. Since `04` Phase 5.2 the fact side
+          // is available - `allergy_record.substance_id` now carries a mapping - but the *item*
+          // side does not: `substanceKeys` below is empty because this join does not reach the
+          // confirmed declaration. Supplying one half would let a rule that matches on the
+          // intersection report zero matches with a straight face, so both stay empty and
+          // `HISTORICAL_UNSUPPORTED_KINDS` refuses the rules outright.
           substanceCanonicalKey: null,
           displayTerm: row.display_term,
           provenance: row.provenance as ProvenanceKind,

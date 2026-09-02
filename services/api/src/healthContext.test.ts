@@ -129,7 +129,10 @@ interface FactBody {
 }
 
 interface ListBody {
-  readonly facts: readonly (FactBody & { readonly matchesCanonicalSubstance: boolean })[];
+  readonly facts: readonly (FactBody & {
+    readonly matchesCanonicalSubstance: boolean;
+    readonly substanceMappingState: string;
+  })[];
 }
 
 interface WireBody {
@@ -534,5 +537,215 @@ describe('saying somebody looked at a record', () => {
       ),
     );
     expect(audit.rows[0]?.detail['reviewed']).toBe(true);
+  });
+});
+
+describe('mapping a typed term to a canonical substance (04 Phase 5.2)', () => {
+  /**
+   * `allergy_record.substance_id` has been nullable since migration `0004` and nothing had ever
+   * set it, so every recorded allergy in this build was invisible to
+   * `evaluateIngredientSensitivity` - which filters facts to those carrying a canonical key. What
+   * is asserted here is that the mapping happens at write time, against the seeded vocabulary,
+   * and that nothing a person types ever adds to that vocabulary.
+   */
+
+  const SUBSTANCE = testUuid(80);
+  const BALSAM_A = testUuid(81);
+  const BALSAM_B = testUuid(82);
+
+  beforeAll(async () => {
+    await t.asService(async (db) => {
+      for (const [id, key, name] of [
+        [SUBSTANCE, 'synthetic.salicylic_acid', 'Salicylic acid'],
+        [BALSAM_A, 'synthetic.balsam_peru', 'Balsam of Peru'],
+        [BALSAM_B, 'synthetic.balsam_tolu', 'Balsam of Tolu'],
+      ] as const) {
+        await db.query(
+          `INSERT INTO normalized_substance
+             (id, canonical_key, preferred_name, substance_kind, vocabulary_version, review_state)
+           VALUES ($1, $2, $3, 'ACTIVE_PHARMACEUTICAL', 'norm-1', 'PUBLISHED')`,
+          [id, key, name],
+        );
+      }
+
+      for (const [substanceId, alias, state] of [
+        [SUBSTANCE, 'salicylic acid', 'EXACT'],
+        // One term, two substances: genuine ambiguity, represented rather than resolved.
+        [BALSAM_A, 'balsam', 'AMBIGUOUS'],
+        [BALSAM_B, 'balsam', 'AMBIGUOUS'],
+        // A mapping a reviewer looked at and refused. It must not count towards anything.
+        [SUBSTANCE, 'aspirin', 'REJECTED'],
+      ] as const) {
+        await db.query(
+          `INSERT INTO substance_alias
+             (substance_id, alias_text, alias_normalized, provenance, mapping_state)
+           VALUES ($1, $2, $2, 'REVIEWER_CONFIRMED', $3)`,
+          [substanceId, alias, state],
+        );
+      }
+    });
+  });
+
+  it('maps a term the vocabulary knows, and says a rule can see it', async () => {
+    const created = await add(principalFor(OWNER), {
+      kind: 'ALLERGY',
+      displayTerm: 'Salicylic Acid',
+    });
+    expect(created.statusCode).toBe(201);
+    const body = created.json<FactBody & { substanceMappingState: string }>();
+    expect(body.substanceMappingState).toBe('EXACT');
+
+    const listed = (await list(principalFor(OWNER))).json<ListBody>();
+    const row = listed.facts.find((fact) => fact.id === body.id);
+    expect(row?.matchesCanonicalSubstance).toBe(true);
+    expect(row?.substanceMappingState).toBe('EXACT');
+
+    // And the term is stored exactly as typed. Mapping it is not correcting it.
+    expect(row?.displayTerm).toBe('Salicylic Acid');
+  });
+
+  it('does not choose when a term means more than one thing', async () => {
+    // Spec 04 Phase 5.2 asks for a review queue for material unresolved mappings; picking one
+    // would decide, on somebody's behalf, which of two substances they react to.
+    const created = await add(principalFor(OWNER), { kind: 'ALLERGY', displayTerm: 'balsam' });
+    expect(created.statusCode).toBe(201);
+    const body = created.json<FactBody & { substanceMappingState: string }>();
+    expect(body.substanceMappingState).toBe('AMBIGUOUS');
+
+    const listed = (await list(principalFor(OWNER))).json<ListBody>();
+    const row = listed.facts.find((fact) => fact.id === body.id);
+    expect(row?.matchesCanonicalSubstance).toBe(false);
+    expect(row?.substanceMappingState).toBe('AMBIGUOUS');
+  });
+
+  it('leaves a term the vocabulary does not carry unresolved, and records it anyway', async () => {
+    // The common case in this build, because the vocabulary needs a licensed source (`BLK-003`).
+    // Not knowing the word is not a reason to refuse the record.
+    const created = await add(principalFor(OWNER), { kind: 'ALLERGY', displayTerm: 'penicillin' });
+    expect(created.statusCode).toBe(201);
+    expect(created.json<{ substanceMappingState: string }>().substanceMappingState).toBe(
+      'UNRESOLVED',
+    );
+  });
+
+  it('ignores an alias a reviewer refused', async () => {
+    // A rejected mapping is one somebody looked at and said no to. Counting it would let a refusal
+    // become a match, which is the opposite of what refusing it meant.
+    const created = await add(principalFor(OWNER), { kind: 'ALLERGY', displayTerm: 'aspirin' });
+    expect(created.json<{ substanceMappingState: string }>().substanceMappingState).toBe(
+      'UNRESOLVED',
+    );
+  });
+
+  it('never adds to the vocabulary from what somebody typed', async () => {
+    // `08` and threat A11: crowd observations never create or modify a canonical substance. The
+    // same rule manual entry keeps for products, here for the thing a rule matches on.
+    const before = await t.asService((db) =>
+      db.query<{ substances: string; aliases: string }>(
+        `SELECT (SELECT count(*) FROM normalized_substance) AS substances,
+                (SELECT count(*) FROM substance_alias) AS aliases`,
+      ),
+    );
+
+    await add(principalFor(OWNER), { kind: 'ALLERGY', displayTerm: 'Unheardofium' });
+
+    const after = await t.asService((db) =>
+      db.query<{ substances: string; aliases: string }>(
+        `SELECT (SELECT count(*) FROM normalized_substance) AS substances,
+                (SELECT count(*) FROM substance_alias) AS aliases`,
+      ),
+    );
+    expect(after.rows[0]).toEqual(before.rows[0]);
+  });
+
+  it('re-resolves when the term is corrected', async () => {
+    // The one that matters. A record whose wording changed while keeping the mapping the old
+    // wording earned would drive a rule on a substance nobody typed - which is Phase 1.3's
+    // "silently becomes" one level down.
+    const created = await add(principalFor(OWNER), {
+      kind: 'ALLERGY',
+      displayTerm: 'Salicylic Acid',
+    });
+    const fact = created.json<FactBody>();
+
+    const edited = await patch(principalFor(OWNER), fact.id, {
+      expectedVersion: fact.version,
+      displayTerm: 'penicillin',
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json<{ substanceMappingState: string }>().substanceMappingState).toBe(
+      'UNRESOLVED',
+    );
+
+    const listed = (await list(principalFor(OWNER))).json<ListBody>();
+    const row = listed.facts.find((line) => line.id === fact.id);
+    expect(row?.matchesCanonicalSubstance).toBe(false);
+  });
+
+  it('re-resolves the other way too', async () => {
+    const created = await add(principalFor(OWNER), { kind: 'ALLERGY', displayTerm: 'penicillin' });
+    const fact = created.json<FactBody>();
+
+    const edited = await patch(principalFor(OWNER), fact.id, {
+      expectedVersion: fact.version,
+      displayTerm: 'salicylic acid',
+    });
+    expect(edited.json<{ substanceMappingState: string }>().substanceMappingState).toBe('EXACT');
+  });
+
+  it('leaves the mapping alone when the term did not change', async () => {
+    // Marking a record as checked is not a re-resolution. A vocabulary that moved between the two
+    // moments must not silently change what a rule can see, on an edit that never touched the word.
+    const created = await add(principalFor(OWNER), {
+      kind: 'ALLERGY',
+      displayTerm: 'Salicylic Acid',
+    });
+    const fact = created.json<FactBody>();
+
+    const reviewed = await patch(principalFor(OWNER), fact.id, {
+      expectedVersion: fact.version,
+      markReviewed: true,
+    });
+    expect(reviewed.statusCode).toBe(200);
+    expect(reviewed.json<{ substanceMappingState: string }>().substanceMappingState).toBe('EXACT');
+
+    const listed = (await list(principalFor(OWNER))).json<ListBody>();
+    expect(listed.facts.find((line) => line.id === fact.id)?.matchesCanonicalSubstance).toBe(true);
+  });
+
+  it('has no field a client could use to set the mapping', async () => {
+    // The same absence that keeps provenance out of a client's hands (DEC-091). A screen that
+    // could claim a match would be claiming a rule watches something it does not.
+    for (const extra of [
+      { substanceId: SUBSTANCE },
+      { substanceMappingState: 'EXACT' },
+      { canonicalKey: 'synthetic.salicylic_acid' },
+    ]) {
+      const refused = await add(principalFor(OWNER), {
+        kind: 'ALLERGY',
+        displayTerm: 'penicillin',
+        ...extra,
+      });
+      expect(refused.statusCode, JSON.stringify(extra)).toBe(400);
+    }
+  });
+
+  it('records where the mapping ended up in the audit log, and never the term', async () => {
+    const created = await add(principalFor(OWNER), {
+      kind: 'ALLERGY',
+      displayTerm: 'Salicylic Acid',
+    });
+    const fact = created.json<FactBody>();
+
+    const events = await t.asService((db) =>
+      db.query<{ detail: Record<string, unknown> }>(
+        `SELECT detail FROM audit_event
+          WHERE target_id = $1 AND action = 'HEALTH_FACT_ADDED'`,
+        [fact.id],
+      ),
+    );
+    expect(events.rows[0]?.detail['substance_mapping_state']).toBe('EXACT');
+    // `14`: the content of somebody's health record never reaches a log.
+    expect(JSON.stringify(events.rows[0]?.detail)).not.toContain('Salicylic');
   });
 });

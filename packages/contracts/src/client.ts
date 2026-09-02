@@ -314,6 +314,15 @@ export interface HealthFactLine {
    * told about.
    */
   readonly matchesCanonicalSubstance: boolean;
+  /**
+   * Why it is or is not matched (`04` Phase 5.2).
+   *
+   * `EXACT`, `AMBIGUOUS` or `UNRESOLVED`. Reported alongside the boolean rather than instead of
+   * it: the boolean is what decides whether a rule can see the record, and this is what decides
+   * which sentence the person reads about why. A value this build cannot read is treated as
+   * `UNRESOLVED`, which is the sentence that promises least.
+   */
+  readonly substanceMappingState?: string;
 }
 
 export interface HealthFactsResponse {

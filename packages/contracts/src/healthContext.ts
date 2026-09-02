@@ -17,10 +17,16 @@
  * wrote, and a row without it would be a record they could not find again.
  *
  * "NOT MATCHED" IS A SENTENCE, NOT A MISSING FIELD
- * `matchesCanonicalSubstance` decides which of two sentences a record carries. A person typing
+ * `matchesCanonicalSubstance` decides whether a record can drive a check. A person typing
  * "penicillin" has every reason to assume Kynviora checks it against everything they own, and
- * until the catalog maps the term it does not. Left to a null, that becomes a fact discovered
- * through an alert that never arrives (`10`).
+ * where the catalog has not mapped the term it does not. Left to a null, that becomes a fact
+ * discovered through an alert that never arrives (`10`).
+ *
+ * AND THERE ARE TWO WAYS OF NOT BEING MATCHED
+ * `substanceMappingState` separates them (`04` Phase 5.2). "Kynviora does not know that word" is a
+ * gap in a vocabulary that needs a licensed source (`BLK-003`) and nothing the person can act on;
+ * "that word means more than one thing here" is something they can fix by being more specific. A
+ * state this build cannot read falls to the first, which is the sentence that promises least.
  */
 
 import { isFactCertainty, isHealthFactKind, type FactCertainty } from '@kynviora/domain';
@@ -52,6 +58,8 @@ export interface HealthFactRowView {
    */
   readonly matchNote: string;
   readonly matchesCanonicalSubstance: boolean;
+  /** Whether the term resolved to more than one substance, so the person can act on it. */
+  readonly isAmbiguous: boolean;
   /** Said where nobody has looked at the record since it was added. `null` once somebody has. */
   readonly reviewNote: string | null;
   readonly lastReviewedAt: string | null;
@@ -72,6 +80,9 @@ export interface HealthContextView {
 /** One recorded reaction, as a row. */
 export function healthFactRowView(line: HealthFactLine): HealthFactRowView {
   const matched = line.matchesCanonicalSubstance === true;
+  // Only where the server said so, and only where the record is not matched: a row carrying both
+  // would be describing a substance it also says it could not choose between.
+  const ambiguous = !matched && line.substanceMappingState === 'AMBIGUOUS';
   const certainty: FactCertainty | null = isFactCertainty(line.certainty) ? line.certainty : null;
 
   return {
@@ -83,8 +94,13 @@ export function healthFactRowView(line: HealthFactLine): HealthFactRowView {
     provenanceLabel:
       typeof line.provenance === 'string' ? presentProvenance(line.provenance) : null,
     notedOn: typeof line.notedOn === 'string' ? line.notedOn : null,
-    matchNote: matched ? HEALTH_CONTEXT_COPY.matchedNote : HEALTH_CONTEXT_COPY.notMatchedNote,
+    matchNote: matched
+      ? HEALTH_CONTEXT_COPY.matchedNote
+      : ambiguous
+        ? HEALTH_CONTEXT_COPY.ambiguousNote
+        : HEALTH_CONTEXT_COPY.notMatchedNote,
     matchesCanonicalSubstance: matched,
+    isAmbiguous: ambiguous,
     // A fact, not a nag. `02`: no overdue badge and no count of things to do.
     reviewNote: line.lastReviewedAt === null ? HEALTH_CONTEXT_COPY.neverReviewedNote : null,
     lastReviewedAt: typeof line.lastReviewedAt === 'string' ? line.lastReviewedAt : null,

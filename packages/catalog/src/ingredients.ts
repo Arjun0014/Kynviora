@@ -210,6 +210,60 @@ export function aliasResolverFrom(
   return { resolve: (key) => entries.get(key) ?? [] };
 }
 
+/** One resolution outcome, with no token attached. */
+export interface SubstanceResolution {
+  readonly substanceId: string | null;
+  readonly canonicalKey: string | null;
+  readonly mappingState: MappingState;
+}
+
+/**
+ * Resolve one already-computed lookup key.
+ *
+ * The single place the three-way decision is made, so an ingredient on a label and a term somebody
+ * typed about their own body cannot be resolved by two rules that agree today. A match only means
+ * anything if both sides went through the same vocabulary and the same key function - two
+ * resolvers that drifted would produce a rule that fires on one spelling and not the other.
+ */
+export function resolveLookupKey(lookupKey: string, resolver: AliasResolver): SubstanceResolution {
+  const matches = resolver.resolve(lookupKey);
+
+  if (matches.length === 1) {
+    const match = matches[0]!;
+    return {
+      substanceId: match.substanceId,
+      canonicalKey: match.canonicalKey,
+      mappingState: 'EXACT',
+    };
+  }
+
+  if (matches.length > 1) {
+    // Spec 04 Phase 5.2 requires a human review queue for material unresolved mappings.
+    // Picking the first match here would be exactly the silent guess the spec forbids.
+    return { substanceId: null, canonicalKey: null, mappingState: 'AMBIGUOUS' };
+  }
+
+  return { substanceId: null, canonicalKey: null, mappingState: 'UNRESOLVED' };
+}
+
+/**
+ * Resolve a term a person typed about themselves (`04` Phase 5.2, `04` Phase 1.3).
+ *
+ * The same function as the one behind an ingredient label, deliberately: `evaluateIngredientSensitivity`
+ * intersects a declaration's canonical keys with a profile fact's, so a term resolved by a different
+ * rule would produce a rule that matches on one spelling of a substance and not another.
+ *
+ * `Untrusted` because it is free text a person typed. Nothing here writes to the vocabulary: an
+ * unrecognised term stays unrecognised, because a household typing a word is not the catalog
+ * learning a substance (`08`, `15` A11).
+ */
+export function resolveRecordedTerm(
+  term: Untrusted<string>,
+  resolver: AliasResolver,
+): SubstanceResolution {
+  return resolveLookupKey(ingredientLookupKey(exposeUntrusted(term)), resolver);
+}
+
 /**
  * Map parsed tokens onto canonical substances.
  *
@@ -221,37 +275,7 @@ export function normalizeIngredients(
   tokens: readonly IngredientToken[],
   resolver: AliasResolver,
 ): readonly NormalizedIngredient[] {
-  return tokens.map((token) => {
-    const matches = resolver.resolve(token.lookupKey);
-
-    if (matches.length === 1) {
-      const match = matches[0]!;
-      return {
-        ...token,
-        substanceId: match.substanceId,
-        canonicalKey: match.canonicalKey,
-        mappingState: 'EXACT' as const,
-      };
-    }
-
-    if (matches.length > 1) {
-      // Spec 04 Phase 5.2 requires a human review queue for material unresolved mappings.
-      // Picking the first match here would be exactly the silent guess the spec forbids.
-      return {
-        ...token,
-        substanceId: null,
-        canonicalKey: null,
-        mappingState: 'AMBIGUOUS' as const,
-      };
-    }
-
-    return {
-      ...token,
-      substanceId: null,
-      canonicalKey: null,
-      mappingState: 'UNRESOLVED' as const,
-    };
-  });
+  return tokens.map((token) => ({ ...token, ...resolveLookupKey(token.lookupKey, resolver) }));
 }
 
 /**

@@ -2525,6 +2525,52 @@ describe('what a household records about a person, end to end', () => {
     expect(JSON.stringify(row)).not.toContain('ALLERGY');
   });
 
+  it('reports why a term is unmatched, and it is the same reason for everything here', async () => {
+    // `04` Phase 5.2. The mapping now happens at write time against the seeded vocabulary, and
+    // this build seeds none - `08` makes a substance vocabulary a licensed artifact and `BLK-003`
+    // says nobody has licensed one. So every record is `UNRESOLVED`, which is a gap with a name
+    // rather than a feature that quietly does nothing.
+    const listed = await owner.healthFacts(SEED.profileId);
+    if (listed.kind !== 'OK') throw new Error('expected the facts to load');
+    expect(listed.value.facts.length).toBeGreaterThan(0);
+
+    for (const line of listed.value.facts) {
+      expect(line.substanceMappingState, line.displayTerm).toBe('UNRESOLVED');
+      expect(line.matchesCanonicalSubstance, line.displayTerm).toBe(false);
+    }
+
+    // And the row carries the sentence for a term nothing knows, not the one for an ambiguous
+    // term - two different things to be told, and only one of them has a next step.
+    for (const row of healthContextView(listed.value).rows) {
+      expect(row.isAmbiguous, row.displayTerm).toBe(false);
+      expect(row.matchNote, row.displayTerm).toMatch(/has not matched/i);
+      expect(row.matchNote, row.displayTerm).not.toMatch(/more than one thing/i);
+    }
+  });
+
+  it('re-resolves the mapping when somebody corrects the term', async () => {
+    // A record whose wording changed while keeping the mapping the old wording earned would drive
+    // a rule on a substance nobody typed. Both spellings are unmapped in this build, so what is
+    // asserted here is that the round trip reports a state at all and that correcting a term does
+    // not leave the field behind.
+    const listed = await owner.healthFacts(SEED.profileId);
+    if (listed.kind !== 'OK') throw new Error('expected the facts to load');
+    const row = healthContextView(listed.value).rows[0];
+    if (row === undefined) throw new Error('expected a record');
+
+    const edited = await owner.updateHealthFact(row.id, {
+      expectedVersion: row.version,
+      displayTerm: `${row.displayTerm} (corrected)`,
+    });
+    if (edited.kind !== 'OK') throw new Error('expected the correction to be recorded');
+
+    const after = await owner.healthFacts(SEED.profileId);
+    if (after.kind !== 'OK') throw new Error('expected the facts to load');
+    const refreshed = after.value.facts.find((line) => line.id === row.id);
+    expect(refreshed?.substanceMappingState).toBe('UNRESOLVED');
+    expect(refreshed?.matchesCanonicalSubstance).toBe(false);
+  });
+
   it('says on the record that Kynviora cannot check anything against it yet', async () => {
     // `10`, and the common case: nothing in this build maps a typed term to a substance the
     // catalog knows, so a rule that matches on canonical substances cannot see it. Discovering

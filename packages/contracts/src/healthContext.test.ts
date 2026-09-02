@@ -144,3 +144,53 @@ describe('the whole list', () => {
     expect(view.unmatchedCount).toBe(0);
   });
 });
+
+describe('which of the three sentences a row carries (04 Phase 5.2)', () => {
+  it('says Kynviora can check a matched record', () => {
+    const row = healthFactRowView(
+      line({ matchesCanonicalSubstance: true, substanceMappingState: 'EXACT' }),
+    );
+    expect(row.matchNote).toMatch(/can check/i);
+    expect(row.isAmbiguous).toBe(false);
+  });
+
+  it('says a term meaning several things was deliberately not matched to any', () => {
+    const row = healthFactRowView(
+      line({ matchesCanonicalSubstance: false, substanceMappingState: 'AMBIGUOUS' }),
+    );
+    expect(row.isAmbiguous).toBe(true);
+    expect(row.matchNote).toMatch(/more than one thing/i);
+    expect(row.matchNote).toMatch(/more precisely/i);
+  });
+
+  it('keeps the plain unmatched sentence for a term nothing knows', () => {
+    const row = healthFactRowView(
+      line({ matchesCanonicalSubstance: false, substanceMappingState: 'UNRESOLVED' }),
+    );
+    expect(row.isAmbiguous).toBe(false);
+    expect(row.matchNote).toMatch(/has not matched/i);
+  });
+
+  it('falls to the sentence that promises least where the server said nothing it can read', () => {
+    for (const state of [undefined, null, '', 'SOMETHING_NEW', 'ambiguous']) {
+      const row = healthFactRowView(
+        line({
+          matchesCanonicalSubstance: false,
+          substanceMappingState: state as unknown as string,
+        }),
+      );
+      expect(row.isAmbiguous, String(state)).toBe(false);
+      expect(row.matchNote, String(state)).toMatch(/has not matched/i);
+    }
+  });
+
+  it('never calls a matched record ambiguous, whatever the state says', () => {
+    // A row carrying both would be describing a substance it also says it could not choose
+    // between. The boolean is what decides whether a rule can see it, and it wins.
+    const row = healthFactRowView(
+      line({ matchesCanonicalSubstance: true, substanceMappingState: 'AMBIGUOUS' }),
+    );
+    expect(row.isAmbiguous).toBe(false);
+    expect(row.matchNote).toMatch(/can check/i);
+  });
+});

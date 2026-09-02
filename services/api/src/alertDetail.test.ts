@@ -138,9 +138,13 @@ beforeAll(async () => {
       [SUBSTANCE, SUBSTANCE_KEY],
     );
     await db.query(
+      // `substance_mapping_state` is written with the substance, not after it: migration `0019`
+      // refuses the pair if they disagree, which is how a fixture that set one and forgot the
+      // other fails here rather than shipping a record claiming a rule can see it.
       `INSERT INTO allergy_record
-         (id, profile_id, record_kind, display_term, substance_id, provenance, certainty)
-       VALUES ($1, $2, 'SENSITIVITY', 'salicylates', $3, 'USER_REPORTED', 'REPORTED')`,
+         (id, profile_id, record_kind, display_term, substance_id, substance_mapping_state,
+          provenance, certainty)
+       VALUES ($1, $2, 'SENSITIVITY', 'salicylates', $3, 'EXACT', 'USER_REPORTED', 'REPORTED')`,
       [ALLERGY_FACT, PROFILE, SUBSTANCE],
     );
 

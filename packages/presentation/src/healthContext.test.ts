@@ -172,3 +172,31 @@ describe('every sentence on this screen', () => {
     expect(HEALTH_CONTEXT_COPY.unchangedNote).not.toMatch(/changed somewhere else/i);
   });
 });
+
+describe('the two ways of not being matched (04 Phase 5.2)', () => {
+  it('tells an unknown word apart from an ambiguous one', () => {
+    // Different things to be told: one is a gap in a licensed vocabulary and nothing the person
+    // can act on, the other they can fix in ten seconds by being more specific. A screen showing
+    // one sentence for both hides the half that has a next step (`10`).
+    expect(HEALTH_CONTEXT_COPY.ambiguousNote).not.toBe(HEALTH_CONTEXT_COPY.notMatchedNote);
+    expect(HEALTH_CONTEXT_COPY.notMatchedNote).toMatch(/has not matched/i);
+    expect(HEALTH_CONTEXT_COPY.ambiguousNote).toMatch(/more than one thing/i);
+  });
+
+  it('says what the person can do about an ambiguous one', () => {
+    expect(HEALTH_CONTEXT_COPY.ambiguousNote).toMatch(/more precisely/i);
+  });
+
+  it('says the record is kept either way', () => {
+    // "Not being used" without "not lost" reads as the record having been rejected (DEC-093).
+    for (const note of [HEALTH_CONTEXT_COPY.notMatchedNote, HEALTH_CONTEXT_COPY.ambiguousNote]) {
+      expect(note, note).toMatch(/not lost/i);
+    }
+  });
+
+  it('never names the substances a term could have meant', () => {
+    // Listing them would be Kynviora suggesting what somebody is allergic to, and a record picked
+    // from a list Kynviora offered is a different record from one they wrote.
+    expect(HEALTH_CONTEXT_COPY.ambiguousNote).not.toMatch(/did you mean|for example|such as/i);
+  });
+});

@@ -172,6 +172,21 @@ export const HEALTH_CONTEXT_COPY = Object.freeze({
     'Kynviora has not matched this to an ingredient it knows, so it cannot check your products against it yet. It is recorded and it is not lost.',
   matchedNote: 'Kynviora can check what you own against this.',
 
+  /**
+   * `04` Phase 5.2. A term that means more than one thing in the vocabulary.
+   *
+   * Kept apart from `notMatchedNote` because the two are different things to be told. Not knowing
+   * a word is a gap in the vocabulary and nothing the person can act on; a word meaning two things
+   * is something they can fix in ten seconds by being more specific. Merging them would hide the
+   * one of the two that has a next step, which is the failure `10` is about.
+   *
+   * It does not say which substances, and it will not: listing them would be Kynviora suggesting
+   * what somebody is allergic to, and a person picking from a list Kynviora offered is a different
+   * record from one they wrote themselves.
+   */
+  ambiguousNote:
+    'That word means more than one thing here, so Kynviora has not matched it to any of them and cannot check your products against it. Writing it more precisely may help. It is recorded either way and it is not lost.',
+
   /** `04` Phase 1.3's last-reviewed date, said as a fact rather than as a prompt. */
   neverReviewedNote: 'Nobody has checked this since it was added.',
   reviewLabel: 'This is still right',
