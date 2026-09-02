@@ -2499,3 +2499,167 @@ ceiling on the server, so a client cannot describe a policy the server does not 
 urgency the client cannot read is dropped rather than rendered as its code (trap 129).
 
 **Sources.** `04` Phase 7.5; `02`; `10`; `14`; `16`; DEC-078; `DEV-030`; `BLK-009`; trap 129.
+
+---
+
+## DEC-087 - A profile a person no longer has access to becomes no selection, never a different one
+
+**Date:** 2026-09-02
+**Phase:** 1.2
+
+**Status:** Accepted
+
+`04` Phase 1.2's second exit criterion is "screens cannot accidentally display one profile's data
+under another profile identity". It is a property of what is on a screen, and there is exactly one
+place it can be decided.
+
+**A selection the server does not offer is dropped, and said.** `profileSwitcherView` honours the
+requested profile only if the server's list still contains it. Nothing falls back to the first one.
+A caregiver grant can be revoked between launches, and a fallback is precisely how a screen ends up
+showing one person's medicines under another person's name with the heading unchanged - the failure
+is silent, which is what makes it the one worth building the type around.
+
+**The decision lives in `@kynviora/contracts`, not in a screen.** `apps/**` is outside the test run
+(`BLK-002`), so a screen that did `profiles.find(...)` for itself would hold an untested
+authorization-shaped decision in the one place nothing scans. The view answers four separate
+questions - which profile is selected, whether a selection was dropped, whether the list is empty at
+all, and which household to add somebody to - and each of them is a different sentence on the
+screen.
+
+**"Empty" and "your selection is gone" are different states.** The first is somebody who has not set
+up yet and needs the creation screen; the second is somebody whose access changed and needs telling.
+One screen for both would invite a person to create a second profile for somebody who already has
+one.
+
+**"Persistent identity context" persists for the session and is re-derived on launch.** Phase 1.2
+asks for a persistent one and the `ProfileProvider` has never stored the selection on the device.
+That is kept: a stored "last used profile" that outlived a revoked grant is exactly the code path
+`13` forbids, and a client cannot know a grant has gone without asking. Persistence here means the
+selection survives navigation, not that it survives an authorization change nobody re-checked.
+
+**The name is on the screen whether or not the switcher is open.** A switcher that only labelled
+things while it was open would leave every other screen unlabelled, which is the criterion's own
+failure with an extra step.
+
+**Sources.** `04` Phase 1.2; `13`; `16`; `BLK-002`; `ProfileProvider.tsx`.
+
+---
+
+## DEC-088 - Who a profile is for is the caller's claim about themselves, and nothing else
+
+**Date:** 2026-09-02
+**Phase:** 1.2
+
+**Status:** Accepted
+
+`04` Phase 1.2 asks for "a clear distinction between account holder and managed profile". The schema
+has drawn it since migration `0002` with two columns, and until now nothing wrote either.
+
+**`owner_user_id` is who controls it; `self_user_id` is who it is about.** An older adult using
+Kynviora directly has both set to themselves. A relative's profile has an owner and no
+`self_user_id` until they claim it - null rather than the owner, because "this is my mother's
+profile" and "this is mine" are different facts and the second must not be produced by the first.
+Conflating the two is the mistake `isOwner` was added to `GET /v1/profiles` to remove.
+
+**There is no field that can name anybody else.** The route's body has no `selfUserId` and no
+`ownerUserId`, `.strict()` refuses both, and there is no query parameter they could reach if it did
+not. A profile asserting that another user is its subject would be an authorization statement
+written by the wrong person - and `self_user_id` is unique, so it would also take a name that person
+could never claim. The absence is the enforcement, and a test asserts the built body's key set.
+
+**`isSelf` is `false` unless the exact boolean arrived.** Deny by default (`14`) applied to a claim
+about identity. A truthy `'true'` over the wire does not become one.
+
+**The screen never says "managed".** It asks "This is me" or "Someone I look after", and says the
+second can be taken over later. A person setting up a profile for their mother is not administering
+a managed entity, and the word would make them wonder what else Kynviora thinks about her. A copy
+test asserts no sentence in the module contains it.
+
+**Sources.** `04` Phase 1.2; `13`; `14`; `16`; `18`; migration `0002`; DEC-052.
+
+---
+
+## DEC-089 - The age band is the narrowest thing that answers the question, and every field says why
+
+**Date:** 2026-09-02
+**Phase:** 1.2
+
+**Status:** Accepted
+
+`04` Phase 1.2 lists "date of birth/age range" as expected output, and `16` asks for the narrowest
+thing that answers the question. The MVP safety rules draw paediatric, adolescent, adult and
+older-adult distinctions, so a band answers it and a date of birth is a stronger identifier than the
+product needs.
+
+**A band, and separately an optional year.** `AGE_BANDS` is the domain vocabulary and it is exactly
+migration `0002`'s CHECK constraint - a test transcribes the constraint and asserts they agree, and
+an API test posts every band, because a band the form offers and the database refuses is a 500 in
+front of somebody setting up their family. A birth **year** stays available for the rules that want
+one. Neither is required: a person setting up a profile for a relative may know a name and nothing
+else, and that is a complete record.
+
+**Every optional field says why it is being asked for and what leaving it out costs.** "Optional"
+with no consequence stated reads as "required, but we will let you off". The age help says Kynviora
+uses it to notice when a medicine says something different for someone that age, and then says
+leaving it out changes nothing else. "Rather not say" is a control, not the absence of one, and it
+stays reachable after somebody has already picked a band.
+
+**A band that disagrees with the year is a question, not a refusal.** `bandMatchesBirthYear` exists
+and is deliberately not part of `normalizeProfileDraft`. Somebody who knows their mother was born in
+1958 and taps the wrong band has made a correctable mistake, and refusing the submission would throw
+away everything else they typed. The screen shows a note saying both will be saved as entered; the
+domain function takes the current year as a parameter rather than reading the clock, for DEC-024's
+reason.
+
+**A year is refused, not repaired.** `58` is not read as `1958`, the same rule DEC-085 applies to a
+clock time, and the field states the format before somebody types.
+
+**The default language lives in the domain and matches the column default.** One value, and an API
+test reads `information_schema` and asserts they agree - the app rendering one language while the
+database recorded another for the same profile is the kind of drift nobody notices until a screen is
+in the wrong script.
+
+**Sources.** `04` Phase 1.2; `16`; `18`; `09`; migration `0002`; DEC-024; DEC-085.
+
+---
+
+## DEC-090 - Creating a household and creating a person are two writes, and each commits once
+
+**Date:** 2026-09-02
+**Phase:** 1.2
+
+**Status:** Accepted
+
+**Both routes require an idempotency key.** `13` asks for one on a mutation that can be retried, and
+this is the retry: a person on a train taps "Create", sees nothing, and taps again. Two households
+are not a duplicate row on a list. Every later record hangs off a profile, so two households collect
+their own items, caregivers and safety history, nothing in this build merges them, and there is no
+delete control to undo it (`DEV-032`). Required rather than optional, for the reason the item route
+requires it - a caller that may omit it is a caller that will.
+
+**Each key is scoped, not global.** DEC-079's reasoning twice over: `household` on
+`(owner_user_id, client_operation_id)` and `profile` on `(household_id, client_operation_id)`. Under
+a global index a key another user already used makes the insert conflict, the replay read then runs
+under row-level security and finds nothing, and the caller is answered with a success carrying no
+row. Each scope above is one the caller is guaranteed to be able to read back, and a test drives two
+users through the same key. `dose_event` stays globally unique (`DEV-031`).
+
+**A replay answers with the row that exists, not with the body that was re-sent.** A retry carrying
+a changed name would otherwise be told what its second body implies while the first one is what is
+stored.
+
+**Two steps on the screen, because they are two writes.** One form would mean either holding a
+half-finished household while somebody fills in a name, or writing both on one press with no honest
+answer when the second fails. The household step is skipped entirely where the caller already has
+one: `GET /v1/profiles` now carries `householdId`, so "add someone" adds them beside the person
+already there. That field discloses nothing - an opaque ID on a row RLS already admitted, and a
+caregiver who posted it back would be refused by `profile_insert` because they do not own the
+household.
+
+**Ownership is never read from a body.** `household_insert` requires `owner_user_id` to be the
+caller and `profile_insert` requires both that the caller owns the profile and that they own the
+household it goes in. A household belonging to somebody else is refused by the database and answered
+as absence, so the route is not an oracle for whether it exists.
+
+**Sources.** `04` Phase 1.2; `13`; migration `0017`; migration `0002`'s `household_insert` and
+`profile_insert`; DEC-079; `DEV-031`; `DEV-032`.

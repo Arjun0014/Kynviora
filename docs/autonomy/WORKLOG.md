@@ -2359,3 +2359,81 @@ end through the client the app ships.
 `04` Phase 7.5's deduplication, quiet hours and revalidation-on-open are complete and settable. Its
 digest is not, and `DEV-033` says why. Quiet hours are configured and enforce nothing, which the
 screen states in the place a person reads before deciding to depend on them.
+
+---
+
+### Phase 1.2 - the people every other record hangs off
+
+**Why this and not something else.** `04` defines fifty-one phases and Phase 1.2 was the oldest one
+with an unbuilt surface. Every route in the build takes a `profileId` and every test seeds one;
+nothing had ever created a household or a profile from a screen. That made Phase 1.2's first exit
+criterion - "every item created later must require a profile" - true by accident rather than by
+construction: items require a profile because there was no way to have anything at all.
+
+**What landed.** Two routes, `POST /v1/households` and `POST /v1/profiles`, both behind an
+idempotency key the server requires; migration `0017` for the two keys; `AGE_BANDS` in the domain,
+with a clock-parser-shaped validator that refuses rather than repairs; a `profileSwitcherView` in
+contracts; the copy in presentation; and two screens - setting up, and switching between people -
+wired into the You tab above everything else on it.
+
+**The exit criterion is a function, not a screen.** "Screens cannot accidentally display one
+profile's data under another profile identity" is a property of what is rendered, and the failure is
+silent: somebody reads their mother's medicine list under their own name and nothing contradicts
+them. So `profileSwitcherView` owns it. A requested profile is honoured only if the server's list
+still contains it, and otherwise the view reports **no** selection and says it dropped one - it
+never falls back to whoever is first, which is exactly how a caregiver grant revoked between
+launches turns into the wrong person's records under an unchanged heading (DEC-087). `apps/**` is
+outside the test run (`BLK-002`), so leaving that decision in a `.tsx` would have put an
+authorization-shaped choice in the one place nothing scans.
+
+**Who a profile is about is a claim about the caller, and cannot be about anybody else.** The schema
+has had `owner_user_id` and `self_user_id` since migration `0002` and nothing had ever written
+either. The body has no field that could name another user, `.strict()` refuses one, and there is no
+parameter it could reach if it did not: a profile asserting somebody else as its subject would be an
+authorization statement written by the wrong person, and `self_user_id` is unique, so it would also
+take a name that person could never claim (DEC-088).
+
+**A caught mistake, in the wiring rather than in a rule.** The first version of the setup screen
+always created a household before asking for a name, so "Add someone" from the switcher would have
+made a second household every time - and a family split across two collects separate items,
+caregivers and safety history, with nothing in this build merging them and no delete control to undo
+it. `GET /v1/profiles` now carries `householdId` and the switcher hands it to the screen, so the
+household step happens only when there is no household at all. The field discloses nothing: an
+opaque ID on a row RLS already admitted, and a caregiver who posted it back would be refused by
+`profile_insert`.
+
+**Every optional field says why it is being asked for.** `16` asks for the narrowest thing that
+answers the question, and a person handing over a relative's age is entitled to know what it does.
+The age help says what Kynviora notices with it and then says leaving it out changes nothing else -
+"optional" with no stated consequence reads as "required, but we will let you off". "Rather not say"
+is a control rather than the absence of one, and it stays reachable after somebody has picked a
+band.
+
+**A band that disagrees with the year is a question, not a refusal.** `bandMatchesBirthYear` exists
+and is deliberately outside the validator. Somebody who knows their mother was born in 1958 and taps
+the wrong band has made a correctable mistake; refusing the submission would throw away everything
+else they typed (DEC-089).
+
+**What is deliberately not built.** Emergency information. `04` Phase 1.2 lists it and it is
+personal data about a **third party** - a name and a number belonging to somebody who is not a
+Kynviora user, never consented, and has no way to ask for it to be removed. `profile` is readable by
+every caregiver holding any viewing capability and has no column-level grant, so shipping the column
+would send a stranger's contact details to everybody the owner ever granted `VIEW_SHELF`. `DEV-034`,
+and the form says out loud that Kynviora does not hold one - a form that asked for everything else
+and silently omitted it would leave somebody assuming otherwise.
+
+**Two small things worth recording.** The API fixture's `beforeEach` failed with "permission denied
+for table profile" until it cleaned up as the database owner: neither application role holds DELETE,
+which is trap 105 for the third time in a different file. And lint caught two `as AgeBand`
+assertions that TypeScript had already narrowed - harmless, but the kind of cast that later hides a
+real widening.
+
+### State
+
+3230 tests passing across 108 files, up from 3140 across 104. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 90 new tests across five suites - the domain's draft
+validator, the presentation copy, the contracts switcher and form, the API against real PostgreSQL,
+and eight end to end through the client the app ships.
+
+`04` Phase 1.2's expected output now reads true except for emergency information. Both exit criteria
+hold, and the second one holds as a tested function rather than as a habit.

@@ -57,12 +57,39 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 | Phase | Title                                | Status        |
 | ----- | ------------------------------------ | ------------- |
 | 1.1   | Authentication and session lifecycle | `NOT_STARTED` |
-| 1.2   | Household and profile creation       | `IN_PROGRESS` |
+| 1.2   | Household and profile creation       | `COMPLETE`    |
 | 1.3   | Health-context facts and provenance  | `NOT_STARTED` |
 | 1.4   | Consent and privacy controls         | `IN_PROGRESS` |
 
-- **1.2**: schema, RLS policies and the full authorization test suite are complete
-  (threat A1 and A2 covered). API and UI surfaces outstanding.
+- **1.2**: complete. The schema, the RLS policies and the authorization suite have been there since
+  Stage 1 (threat A1 and A2 covered); what landed now is everything that writes to them.
+  `POST /v1/households` and `POST /v1/profiles`, both behind an idempotency key the server requires
+  (migration `0017`, DEC-090); `AGE_BANDS` in the domain, matching migration `0002`'s CHECK and
+  refusing a band rather than dropping it; and two screens on the You tab - setting a household and
+  its first person up, and switching between people.
+
+  **Exit criterion 1** - "every item created later must require a profile" - was true by accident
+  until now, because there was no way to have a profile at all. It is now true by construction: an
+  item is created against a profile the server offered, and the only thing that creates a profile
+  is a route whose insert `profile_insert` checks against the caller's ownership of the household.
+
+  **Exit criterion 2** - "screens cannot accidentally display one profile's data under another
+  profile identity" - is a tested function rather than a habit. `profileSwitcherView` honours a
+  requested profile only if the server still offers it and otherwise reports **no** selection and
+  says it dropped one; nothing falls back to whoever is first, which is how a caregiver grant
+  revoked between launches would otherwise become the wrong person's records under an unchanged
+  heading (DEC-087). It lives in `@kynviora/contracts` because `apps/**` is outside the test run.
+
+  Who a profile is _about_ is a claim the caller makes about themselves and can never be about
+  anybody else: no body field names another user, and there is no parameter one could reach if it
+  did (DEC-088). Every optional field says why it is asked for and that leaving it out costs
+  nothing, and a band that disagrees with a birth year is a question rather than a refusal
+  (DEC-089).
+
+  90 tests across the domain (23), presentation (16), contracts (20), the API against real
+  PostgreSQL (21) and eight end to end. Outstanding: emergency information, which is third-party
+  personal data with no consent or retention shape in this build (`DEV-034`).
+
 - **1.4**: `consent_receipt` is append-only with supersession-based withdrawal and is tested.
   Consent _enforcement_ wiring and the export/deletion shell are outstanding.
 - **1.1**: blocked on an auth provider decision (`23` lists it as required before Stage 1
@@ -659,26 +686,28 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
-1. Phase 1.2's profile creation surface. Every route takes a `profileId` and every test seeds one;
-   nothing creates a household or a profile from a screen, which is the oldest instance of the gap
-   Phases 2.2, 2.3 and 7.5 have each now closed for their own feature. It is also the first screen
-   a real person would meet, and today there is no way to reach any of the others without a seeded
-   row.
-2. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
-   dispatch, its authorization and now its delivery policy all exist; nothing calls them with a
+1. **A missed-dose scheduler**, once the grace window is a decided product question (`DEV-011`).
+   The dispatch, its authorization and its delivery policy all exist; nothing calls them with a
    real occurrence. It is the same missing piece the digest needs (`DEV-033`), and supplying a
-   local minute at the same time would close `DEV-030`.
-3. Phase 1.4's consent enforcement and the export-and-deletion shell. `consent_receipt` is written
-   and never read as a precondition, and the deletion half is where `DEV-032`'s missing control
-   belongs once a retention matrix exists.
+   recipient's local minute at the same time would close `DEV-030` and make quiet hours hold.
+   Three unbuilt things, one wiring gap.
+2. **Phase 1.4's consent enforcement and the export-and-deletion shell.** `consent_receipt` is
+   written and never read as a precondition. The deletion half is where three deviations converge:
+   `DEV-032`'s missing item delete, `DEV-009`'s Visit Pack retention, and `DEV-034`'s emergency
+   information, which needs the third-party consent shape that phase has to define anyway.
+3. **Phase 1.3's health-context facts.** The narrow profile context the MVP safety rules need -
+   which is also what `DEV-028` wants, since an assessment records versions and reason codes but
+   not which recorded sensitivity matched which ingredient.
 
 Done since this list was last written: Phase 7.5's client half - the clock parser, the policy view,
-the delivery screen and the whole-policy write - with the truthfulness rule moved out of the screen
-so it is tested once (DEC-085, DEC-086, `DEV-033`).
+the delivery screen and the whole-policy write, with the truthfulness rule moved out of the screen
+so it is tested once (DEC-085, DEC-086, `DEV-033`) - and then Phase 1.2 entire: the two creation
+routes, the switcher that owns its exit criterion, and the two screens (DEC-087 to DEC-090,
+`DEV-034`).
 
 ## What "complete" means here, and what it does not
 
-Thirty phases are marked `COMPLETE` above. In every case that means the logic is
+Thirty-one phases are marked `COMPLETE` above. In every case that means the logic is
 implemented, tested, documented and committed - and in most cases the tests execute against a real
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
@@ -687,7 +716,7 @@ device, a credential, a labelled dataset, human participants, or a qualified hum
 those are marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even
 where all buildable work is finished. `BLOCKERS.md` records what each one needs.
 
-The counts above are the tables' own, recounted whenever a status changes: 30 `COMPLETE`, 8
+The counts above are the tables' own, recounted whenever a status changes: 31 `COMPLETE`, 7
 `IN_PROGRESS`, 4 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
 `04` defines. A prose count that drifts from the table it describes is the quiet way a status
 document stops being one - and the first version of this paragraph drifted immediately, because it

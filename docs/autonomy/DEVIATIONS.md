@@ -778,3 +778,35 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   time - `revalidate` already exists, and a summary that reported a withdrawn alert as current
   would breach `04` Phase 7.5's own second exit criterion. Quiet hours and the digest want the same
   missing input, a local time (`DEV-030`), so the two are best done together.
+
+---
+
+## DEV-034 - A profile holds no emergency information
+
+- **Affected specification**: `04` Phase 1.2 lists "display identity, date of birth/age range,
+  language, and optional emergency information" among its expected output.
+- **Expected behaviour**: a profile can optionally carry whatever a household would want reachable
+  in an emergency - typically a name and a phone number for somebody to call.
+- **Implemented behaviour**: everything else. Display name, age band, birth year and language are
+  writable from a screen and stored on `profile`; there is no emergency-information column, no
+  field on the form, and no route that would accept one. The profile form says so in words
+  (`PROFILE_LIMITS_COPY.noEmergencyContact`), because a form that asked for everything else and
+  silently omitted it would leave somebody assuming Kynviora holds one.
+- **Reason**: it is personal data about a **third party**. An emergency contact is a name and a
+  phone number belonging to somebody who is not a Kynviora user, never consented to being in it,
+  and has no way to ask for it to be removed - `16`'s consent model has no shape for a person who
+  is not an account holder, and `DEV-009` and `DEV-032` already record that the retention matrix
+  `16` requires does not exist. The disclosure question is worse than the collection one: `profile`
+  is readable by every caregiver holding any viewing capability, so shipping the column as it
+  stands would send a third party's contact details to everybody the owner ever granted
+  `VIEW_SHELF`. There is no column-level grant on `profile` and no policy that narrows a subset of
+  its columns, so "store it but show it to fewer people" is not a small change.
+- **Temporary or permanent**: temporary.
+- **Risk**: low, and stated rather than hidden. Nothing about the safety rules depends on it, and
+  the failure it leaves is a person believing Kynviora holds a contact it does not - which is why
+  the copy says the opposite on the screen where they would otherwise assume it, and a test asserts
+  no sentence in the module implies Kynviora would reach anybody.
+- **Required future work**: a decision on third-party personal data in a profile (who may see it,
+  how long it is kept, and how somebody who is not a user asks for it to go), then a column with
+  its own grant or its own table with its own policy, then the field. The consent and retention half
+  belongs with `04` Phase 1.4, which is where the export-and-deletion shell lands.

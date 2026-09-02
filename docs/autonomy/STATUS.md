@@ -9,18 +9,18 @@ Last updated: 2026-09-02
 
 ## Current position
 
-|                    |                                                      |
-| ------------------ | ---------------------------------------------------- |
-| **Current stage**  | Stage 7 (Safety Watch), notification policy included |
-| **Current phase**  | No unblocked phase left in Stage 2 or Stage 7        |
-| **Last completed** | Phase 7.5's client half - setting quiet hours        |
-| **Branch**         | `master`                                             |
-| **Latest commit**  | `feat(safety): choosing when Kynviora may interrupt` |
-| **Baseline tag**   | `baseline-spec-only`                                 |
+|                    |                                                     |
+| ------------------ | --------------------------------------------------- |
+| **Current stage**  | Stage 1 (Identity, Profiles, Consent)               |
+| **Current phase**  | 1.2 complete; 1.1 blocked, 1.3 and 1.4 open         |
+| **Last completed** | Phase 1.2 - household and profile creation          |
+| **Branch**         | `master`                                            |
+| **Latest commit**  | `feat(identity): a household, and the people in it` |
+| **Baseline tag**   | `baseline-spec-only`                                |
 
 ## Verification state
 
-- **3140 tests passing**, 0 failing, across 104 files.
+- **3230 tests passing**, 0 failing, across 108 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -69,7 +69,7 @@ the API will not distinguish them.
 | Area                                                       | State                                                      |
 | ---------------------------------------------------------- | ---------------------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                         |
-| Database schema, 16 migrations, full RLS                   | Complete, 302 tests incl. threats A1/A2/A3                 |
+| Database schema, 17 migrations, full RLS                   | Complete, 302 tests incl. threats A1/A2/A3                 |
 | Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                        |
 | Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                         |
 | Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                         |
@@ -86,6 +86,7 @@ the API will not distinguish them.
 | Staff surface split, console package, console process      | Complete, 172 tests; **authenticates nobody** (BLK-010)    |
 | Alert detail, explainability, report-incorrect             | Complete, 89 tests; **no alert to open** (BLK-006)         |
 | Notification delivery policy, quiet hours, revalidation    | Complete, 139 tests; **holds nothing** (`DEV-030`)         |
+| Household and profile creation, the profile switcher       | Complete, 90 tests; no emergency contact (`DEV-034`)       |
 | Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)             |
 | Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                         |
 | Manual entry: the write path, the form and the screen      | Complete, 105 tests; the only surface that creates an item |
@@ -126,34 +127,52 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Phase 7.5 is finished, both halves.** The route has reported quiet hours, the urgency-to-channel
-table and the copy since the phase's first half; a person can now set a window from the You tab,
-behind step-up, with the whole policy written on every request so a partial body cannot silently
-clear one (DEC-085).
+**Phase 1.2 is finished**, which closes the oldest unbuilt surface in the plan. `POST /v1/households`
+and `POST /v1/profiles` exist, both behind an idempotency key the server requires, and the You tab
+carries the two screens: setting up a household with its first person, and switching between people.
 
-Three things about it are worth not undoing. **A typed time is refused, not repaired** - `9:5` is
-not read as `09:05` and `24:00` is not read as midnight, because a window Kynviora reinterpreted is
-one a person cannot check against what they meant. **A window this build cannot read is a third
-state**, not "none": the label still shows and the editor is absent, because an editor prefilled
-with nothing would clear a real window the moment somebody pressed save. And **the screen says
-quiet hours do not hold anything yet, before somebody sets their first one** - `QUIET_HOURS_APPLIED`
-is a server constant checked against the dispatcher's actual behaviour by a test, and
-`notificationPolicyView` turns it into the sentence, so no surface can forget it and there is one
-constant to flip on the day it becomes true (DEC-086).
+Phase 1.2's first exit criterion - "every item created later must require a profile" - had been true
+by accident, because there was no way to have a profile at all. It is true by construction now.
 
-`DEV-033` records what 7.5 does **not** include: the digest. `MEDIUM` and `LOW` are classified onto
-the digest channel and recorded on `alert_delivery`, and nothing assembles them into a summary.
-There is no scheduler in this build - the same gap `DEV-011` records for missed doses - and a
-summary nothing can deliver cannot be checked against reality.
+Four things about it are worth not undoing:
+
+- **A selection the server no longer offers becomes no selection, never a different one.**
+  `profileSwitcherView` owns the second exit criterion, and it never falls back to whoever is first.
+  A caregiver grant revoked between launches would otherwise turn into the wrong person's records
+  under an unchanged heading, and the failure is silent (DEC-087). It lives in
+  `@kynviora/contracts` because `apps/**` is outside the test run.
+- **Who a profile is for is a claim about the caller and can never be about anybody else.** No body
+  field names another user and there is no parameter one could reach if it did. `self_user_id` is
+  unique, so a wrong claim would also take a name that person could never make (DEC-088).
+- **A band that disagrees with a birth year is a question, not a refusal.** `bandMatchesBirthYear`
+  is deliberately outside the validator: refusing would throw away everything else somebody typed
+  over a correctable mistake (DEC-089).
+- **Both creation routes require an idempotency key, scoped rather than global.** Two households are
+  not a duplicate row - every later record hangs off one, nothing merges them, and there is no
+  delete control to undo it (DEC-090, `DEV-032`).
+
+`DEV-034` records what Phase 1.2 does **not** include: emergency information. It is personal data
+about a third party who is not a Kynviora user and never consented, and `profile` is readable by
+every caregiver holding any viewing capability with no column-level grant - so shipping the column
+as it stands would send a stranger's contact details to everybody the owner ever granted
+`VIEW_SHELF`. The form says out loud that Kynviora does not hold one.
 
 ### What landed before it
 
-**Stage 2 now reads true except for deletion.** Phases 2.2 and 2.3 gave manual entry a write path,
-a client and a screen; Stage 2's remaining three words gave an item a version-conditional edit, the
+**Phase 7.5, both halves.** The route has reported quiet hours, the urgency-to-channel table and the
+copy since the phase's first half; a person can now set a window from the You tab, behind step-up,
+with the whole policy written on every request so a partial body cannot silently clear one
+(DEC-085). A typed time is refused rather than repaired, a window this build cannot read is a third
+state rather than "none", and the screen says quiet hours do not hold anything yet **before**
+somebody sets their first one - `QUIET_HOURS_APPLIED` is a server constant checked against the
+dispatcher by a test, and `notificationPolicyView` turns it into the sentence (DEC-086). What 7.5
+still lacks is the digest (`DEV-033`).
+
+**Stage 2 now reads true except for deletion.** Phases 2.2 and 2.3 gave manual entry a write path, a
+client and a screen; Stage 2's remaining three words gave an item a version-conditional edit, the
 three lifecycle states and "I have checked this" (DEC-082, DEC-083, DEC-084). Every lifecycle state
 says what Kynviora **stops** doing - archiving turns the safety watch off, and that sentence sits
-above the control. Deletion is deliberately absent: it is a retention decision, not a fourth state,
-and the matrix `16` requires does not exist (`DEV-032`).
+above the control. Deletion is deliberately absent (`DEV-032`).
 
 **Phase 7.6 and 7.4's attribution half** landed before that - the versioned Safety Receipt, and a
 change attributed from what was _recorded_ rather than from what two versions look like (DEC-074,
@@ -161,16 +180,17 @@ DEC-075, DEC-076).
 
 Next, in the order they build on each other:
 
-1. **Phase 1.2's profile creation surface.** Every route takes a `profileId` and every test seeds
-   one; nothing creates a household or a profile from a screen. It is the oldest instance of the
-   gap Phases 2.2, 2.3 and 7.5 have each now closed for their own feature, and it is the first
-   screen a real person would meet - today no other screen is reachable without a seeded row.
-2. **A missed-dose scheduler** (`DEV-011`), once the grace window is a decided product question.
-   It is the same missing piece the digest needs (`DEV-033`), and supplying a recipient's local
-   minute at the same time would close `DEV-030` and make quiet hours actually hold.
-3. **Phase 1.4's consent enforcement and the export-and-deletion shell.** `consent_receipt` is
-   written and never read as a precondition, and the deletion half is where `DEV-032`'s missing
-   control belongs once a retention matrix exists.
+1. **A missed-dose scheduler** (`DEV-011`), once the grace window is a decided product question. It
+   is one wiring gap standing in front of three unbuilt things: the scheduler itself, the digest
+   (`DEV-033`), and quiet hours actually holding (`DEV-030`) if a recipient's local minute is
+   supplied at the same time.
+2. **Phase 1.4's consent enforcement and the export-and-deletion shell.** `consent_receipt` is
+   written and never read as a precondition. The deletion half is where three deviations converge -
+   `DEV-032`, `DEV-009` and now `DEV-034`, which needs the third-party consent shape that phase has
+   to define anyway.
+3. **Phase 1.3's health-context facts.** The narrow profile context the MVP safety rules need, which
+   is also what `DEV-028` wants: an assessment records versions and reason codes but not which
+   recorded sensitivity matched which ingredient.
 
 Note what none of this clears: `BLK-006`. The reviewer console is the workflow a qualified reviewer
 would use, the shadow run is what they would look at, and no qualified reviewer exists. Nothing in
@@ -178,12 +198,26 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 
 ## Next three planned tasks
 
-1. Phase 1.2's household and profile creation surface.
-2. A missed-dose scheduler, which also unblocks the digest and quiet hours enforcement.
-3. Phase 1.4's consent enforcement and the export-and-deletion shell.
+1. A missed-dose scheduler, which also unblocks the digest and quiet-hours enforcement.
+2. Phase 1.4's consent enforcement and the export-and-deletion shell.
+3. Phase 1.3's health-context facts and provenance.
 
 ## Recent decisions worth knowing
 
+- **DEC-087** - a profile the server no longer offers becomes **no selection**, never a different
+  one. `profileSwitcherView` owns Phase 1.2's second exit criterion and never falls back to whoever
+  is first; "the list is empty" and "your selection is gone" are separate states with separate
+  sentences. It lives in `@kynviora/contracts` because `apps/**` is outside the test run.
+- **DEC-088** - who a profile is _for_ is a claim the caller makes about themselves. No body field
+  can name another user and there is no parameter one could reach if it did - the absence is the
+  enforcement. The screen never says "managed"; it says "someone I look after", and says they can
+  take it over later.
+- **DEC-089** - an age **band**, not a date of birth (`16`), and every optional field says why it is
+  asked for and that leaving it out costs nothing. A band that disagrees with a birth year is a
+  question rather than a refusal: refusing would throw away everything else somebody typed.
+- **DEC-090** - both creation routes require an idempotency key, scoped to the owner and to the
+  household rather than globally (DEC-079's reasoning twice). Two households are not a duplicate
+  row: every later record hangs off one, nothing merges them, and there is no delete control.
 - **DEC-086** - the settings screen says quiet hours do not hold anything yet, **before** somebody
   sets their first window rather than after. The server reports it (`QUIET_HOURS_APPLIED`, checked
   against the dispatcher by a test, not trusted), `notificationPolicyView` turns it into the
