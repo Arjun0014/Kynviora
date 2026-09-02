@@ -110,6 +110,14 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
   against real PostgreSQL including the `03` group H boundary - a caregiver holding `VIEW_SAFETY`
   and not `VIEW_MEDICINES` reads an alert about a medicine and gets a not-found for the medicine.
 
+  **The lifecycle became reachable later**, in the same pass that closed Stage 2's "update,
+  archive, and review". This phase's expected output lists "common item lifecycle: active,
+  stopped, archived, deleted according to retention policy", and until `PATCH /v1/items/:itemId`
+  existed it was a column nobody could move. Three of the four are reachable now, in both
+  directions, and each says what Kynviora stops doing about the item - archiving turns the safety
+  watch off, which is a consequence nobody would guess (DEC-084). Deletion is not a fourth state
+  and is `DEV-032`.
+
 - **2.2 / 2.3**: complete as of 2026-09-02, in two commits - the write path, then the surface that
   reaches it. Until the first, nothing in this build created an `owned_item` from a user surface,
   so every shelf in every test and every dogfood run was seeded.
@@ -635,17 +643,18 @@ become two deployments unchanged when `BLK-001` clears.
 
 1. The notification settings screen. The route reports quiet hours, the urgency-to-channel table
    and the copy that explains both; no client renders any of it, so a person cannot set a window
-   they can already be governed by.
-2. Editing an item, and stopping one. `owned_item` has an UPDATE policy, a `lifecycle_state` and a
-   `version` column, and the shelf now says out loud that a person can "add anything missing
-   later from the item itself" - which is currently not true of any surface. Phase 2.1's detail is
-   where it belongs.
+   they can already be governed by. `DEV-030` is the other half of the same gap.
+2. Phase 1.2's profile creation surface. Every route takes a `profileId` and every test seeds one;
+   nothing creates a profile from a screen, which is now the oldest instance of the gap Phases
+   2.2 and 2.3 just closed for items.
 3. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch, its authorization and now its delivery policy all exist; nothing calls them with a
    real occurrence.
 
 Done since this list was last written: Phases 2.2 and 2.3 end to end - the write path, the client,
-the screen, and the five fields Phase 2.1's detail had never shown back.
+the screen, and the five fields Phase 2.1's detail had never shown back - then Stage 2's "update,
+archive, and review": a version-conditional edit, the three lifecycle states, and "I have checked
+this" (DEC-082, DEC-083, DEC-084).
 
 ## What "complete" means here, and what it does not
 

@@ -2266,3 +2266,135 @@ something. The label is what prevents that, because the value cannot.
 manufacturer's words off the pack, kept exactly as printed and never normalized (`05.1`).
 
 **Sources.** `04` Phases 2.1, 2.2 and 2.3; `05.1`; `08`; `15` A11; `DEV-026`; migration `0015`.
+
+---
+
+## DEC-082 - An edit is conditional on the version, and needs no idempotency key
+
+**Date:** 2026-09-02
+**Phase:** Stage 2 (update, archive, review)
+**Status:** Accepted
+
+`13` sets `owned_item`'s conflict policy to `ASK_USER` - `sync.ts` has held that value since Stage
+1 - and `owned_item.version` has existed since migration `0004` with nothing reading it. This is
+the route that makes both real. `expectedVersion` is required on the body, the write is
+`WHERE id = $1 AND version = $2`, and `version = version + 1` is in the same statement, because a
+condition and an increment in two statements is the race the whole mechanism exists to close.
+
+**No idempotency key, and that is not an omission.** A conditional write is already exactly-once
+for the intent it describes: a retry either lands or comes back as a conflict. Adding a key beside
+it would be a second answer to the same question, and the two would eventually disagree.
+`POST /v1/items` needs one because creation has no prior state to condition on; this does.
+
+**Zero rows is three different facts.** `owned_item_update`'s USING clause filters rather than
+raising, so a caregiver who may read an item and not change it produces the same empty result as a
+version that has moved and as an item that is gone. The route re-reads to tell them apart. Getting
+this wrong in either direction is worse than a generic failure: a refusal reported as a conflict
+sends somebody round a retry loop they can never win, and a conflict reported as absence tells them
+their own medicine record has disappeared.
+
+**The refusal is still a 404.** There is no outcome in this API meaning "you are not allowed"
+(trap 89), and this route does not become the exception. What prevents a person meeting it is
+`mayEdit` on the item detail: computed on the server with the _same predicate_ the update policy
+uses - `kynviora.has_capability(profile_id, CASE WHEN item_kind = 'MEDICINE' THEN
+'MANAGE_MEDICINES' ELSE 'MANAGE_SHELF' END)` - so the screen and the policy cannot disagree. The
+control is absent rather than disabled (DEC-045).
+
+**The conflict says three things.** That nothing was saved, that somebody else changed it, and that
+the person is now looking at the new version. A message with only the first would leave them
+retyping over a change they never saw. It does not say _who_ changed it: the same rule the Safety
+Receipt keeps (DEC-076), because a caregiver's identity belongs on the caregiver-audit screen.
+
+**Sources.** `13`; `12`; `04` Stage 2 stage output; `sync.ts`; migration `0004`; DEC-045; DEC-076.
+
+---
+
+## DEC-083 - What an edit may not do, and the prefill that lets a form do the rest
+
+**Date:** 2026-09-02
+**Phase:** Stage 2 (update, archive, review)
+**Status:** Accepted
+
+**An update is validated as the record it would produce.** The patch is merged over the stored
+values and the whole thing goes through `normalizeManualEntry`. There is deliberately no second
+set of rules: a field that could not be entered on the form must not become enterable by editing,
+and two validators that agree today are two validators that disagree later. It is why giving a
+medicine a personal-care category is refused by the same message on both paths.
+
+**Absent and `null` are different answers.** Absent leaves a field alone; `null` clears it, and
+clearing stores an absence rather than an empty string. Collapsing them would mean either that
+nothing can ever be un-entered - so a value typed by mistake is permanent - or that every save
+wipes every field the screen did not happen to send.
+
+**Nothing here can claim something was checked.** `ItemUpdate` has no field for a verification
+state, a catalog identifier, a match confidence or an `itemKind`, and the body schema is
+`.strict()`, so an attempt is a refusal rather than a key that is quietly ignored. Editing a
+record is not evidence about a pack (`08`); `itemKind` is absent for a second reason, that a
+medicine which became a shampoo would take its strength and its written directions with it.
+
+**And no timestamp asserting somebody did something.** `markReviewed` is a boolean and the server
+stamps `now()`. A client-supplied `lastReviewedAt` would let a screen claim a person reviewed a
+medicine at a moment they did not - on the exact value the Shelf's "not yet looked at" filter
+reads. The copy on the control also says it confirms nothing about the product, because a person
+who believed otherwise would have a Trust Passport that means less than they think.
+
+**`editableValues` is a second representation, and that is deliberate.** `categoryFields` and
+`sharedFields` are presentation - labels, absent notes, and which text is somebody else's words -
+and an editor can use none of it. A form built from rendered labels would have to match on the
+label text, which is the "branch on message text" `13` forbids one layer down; and the category
+renders as "Hair care" where the field holds `HAIR_CARE`, so such a form would send a value the
+domain refuses, naming a field the person never edited. Two representations for two purposes.
+
+The agreement between them is a test, not care: every field `manualEntryForm` offers has an entry
+in `editableValues`, and the whole prefill sent back unchanged must be refused as "nothing to
+change". The failure that catches is silent - a field with no entry opens blank, the person saves,
+and a value they never touched is cleared, with the write succeeding and the column legitimately
+nullable.
+
+**Sources.** `04` Phases 2.1, 2.2, 2.3; `08`; `13`; `14`; `manualEntry.ts`.
+
+---
+
+## DEC-084 - Every lifecycle state says what Kynviora stops doing
+
+**Date:** 2026-09-02
+**Phase:** Stage 2 (update, archive, review)
+**Status:** Accepted
+
+`04` Phase 2.1 lists the lifecycle as expected output and migration `0004` has carried the column
+since; nothing had ever changed it. The states are the schema's three - deletion is not a fourth
+here, because it is a retention decision with its own rules (`DEV-032`).
+
+**Each one is described by its consequence, not only by what it records.** A person choosing
+"I have stopped using this" is choosing something they cannot see: the Shelf stops asking about it
+(`shelfAttention` returns nothing for a non-`ACTIVE` item), the Review Inbox stops raising it, and
+a reconciliation stops counting it. **Archiving stops the safety watch as well** - the safety inbox
+filters on `lifecycle_state <> 'ARCHIVED'` - and somebody who archived a medicine believing
+Kynviora would still tell them about a recall would be relying on it for something it had stopped
+doing. That sentence is on the screen, above the control rather than under it (`10`).
+
+The wording is checked against the code rather than written beside it, and a test loops the whole
+vocabulary: a state added later fails rather than shipping with a blank line where its consequence
+should be. That is trap 109's lesson, applied before it could happen again.
+
+**Nothing is one-way.** Every state out of use offers a way back. A person who archived something
+by mistake and could not undo it would have lost a record Kynviora is meant to be keeping.
+
+**The stopped date is not invented and is cleared on return.** Stopping without a date is allowed,
+because "missing fields remain explicitly unknown rather than receiving defaults" applies to
+somebody who stopped a medicine months ago and does not remember when. And moving back to `ACTIVE`
+clears it: the column holds the current fact, not a history, and "Stopped 1 June" on a medicine
+somebody is taking is a false statement on the screen a household reads most. The history is in
+`audit_event`, which is append-only by trigger and refused to every role.
+
+**A date before the started date is refused by the domain, not only by the engine.**
+`owned_item_dates_ordered` has always said so, and without a domain rule the refusal arrived as a
+500 rather than as a sentence naming the field. An API test found it; nothing in the domain had
+covered it.
+
+**The labels are what the person did.** "I have stopped using this", not "Mark as discontinued".
+`09` forbids Kynviora saying anything about whether to take a medicine, and a test asserts no
+sentence in the vocabulary reads as advice.
+
+**Sources.** `04` Phase 2.1; `02`; `09`; `10`; `shelfAttention.ts`; `safetyInbox.ts`; migrations
+`0004` and `0001`; trap 109.

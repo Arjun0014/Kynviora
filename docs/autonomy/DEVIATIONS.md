@@ -714,3 +714,32 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   `(owned_item_id, client_operation_id)` or on the profile, whichever the dose route can scope to
   without a second query, and the same replay-read behaviour `POST /v1/items` now has. The route
   change is small; the migration is the part that needs care.
+
+---
+
+## DEV-032 - An item can be archived and not deleted
+
+- **Affected specification**: `04` Phase 2.1 lists the common item lifecycle as "active, stopped,
+  archived, deleted according to retention policy"; `16` requires deletion and export controls.
+- **Expected behaviour**: a person can have an item removed, and what "removed" means is governed
+  by an approved retention policy.
+- **Implemented behaviour**: three of the four. `ACTIVE`, `STOPPED` and `ARCHIVED` are reachable
+  from the item detail, in both directions, and every one of them says what Kynviora stops doing
+  (DEC-084). `owned_item.deleted_at` exists, every read path already excludes a row that has one,
+  and nothing sets it: there is no route and no control.
+- **Reason**: deletion is not a fourth lifecycle state, it is a retention decision, and the
+  retention matrix `16` requires does not exist - `DEV-009` records the same gap for Visit Packs
+  and `23` lists retention and lifetime policy among the decisions needing approval. The questions
+  a delete control has to answer are all unanswered: whether the row goes at once or after a
+  window, whether the audit rows about it survive it (they are append-only and refused to every
+  role, so they do), and whether a caregiver who could add an item can remove one. Shipping a
+  control that guessed would put an irreversible action on somebody's medicine record on the
+  strength of a number nobody approved.
+- **Temporary or permanent**: temporary.
+- **Risk**: low, and the safe direction. Archiving is reversible and loses nothing; the failure it
+  leaves is that a person who wants a record gone cannot yet make it gone, which is a privacy
+  obligation deferred rather than a safety one broken. It matters more once `04` Phase 1.4's
+  export-and-deletion shell lands, because that is where a person expects to find it.
+- **Required future work**: the retention matrix, then a delete route that sets `deleted_at`, an
+  audit row, and copy that says plainly what survives - the audit log does, and a person told
+  "deleted" while a row about them remains has been misled. `04` Phase 1.4 is the natural home.

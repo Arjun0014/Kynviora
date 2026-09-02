@@ -11,16 +11,16 @@ Last updated: 2026-09-02
 
 |                    |                                                              |
 | ------------------ | ------------------------------------------------------------ |
-| **Current stage**  | Stage 2 (Unified Health Shelf), after manual entry           |
+| **Current stage**  | Stage 2 (Unified Health Shelf), lifecycle included           |
 | **Current phase**  | No unblocked phase left in Stage 2 or Stage 7                |
-| **Last completed** | Phases 2.2 and 2.3 - manual medicine and personal-care entry |
+| **Last completed** | Stage 2's update, archive and review half                    |
 | **Branch**         | `master`                                                     |
-| **Latest commit**  | `feat(shelf): the form for a pack you are holding`           |
+| **Latest commit**  | `feat(shelf): correcting a record, and putting an item away` |
 | **Baseline tag**   | `baseline-spec-only`                                         |
 
 ## Verification state
 
-- **3000 tests passing**, 0 failing, across 100 files.
+- **3088 tests passing**, 0 failing, across 103 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -88,6 +88,7 @@ the API will not distinguish them.
 | Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)             |
 | Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                         |
 | Manual entry: the write path, the form and the screen      | Complete, 105 tests; the only surface that creates an item |
+| Item update, the three lifecycle states, mark-as-checked   | Complete, 105 tests; no deletion (`DEV-032`)               |
 | End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                         |
 | Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                        |
 | Caregiver, export, inbox, reconciliation, add-an-item UI   | Wired; **not device-verified** (`DEV-007`)                 |
@@ -835,3 +836,61 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
      were adding cannot be submitted; and a `satisfies Record<ManualEntryField, true>` map checks
      both directions at compile time - a form key the body cannot carry, and a body field no form
      asks for.
+144. Do not add an idempotency key to a route whose write is already conditional on a version. A
+     conditional write is exactly-once for the intent it describes; a key beside it is a second
+     answer to the same question, and the two eventually disagree (DEC-082).
+145. Do not read zero affected rows from an UPDATE as one fact. `owned_item_update`'s USING clause
+     filters rather than raising, so "may not change it", "the version moved" and "it is gone" are
+     the same empty result. Re-read to tell them apart: a refusal reported as a conflict sends
+     somebody round a retry loop they can never win.
+146. Do not compute "may this person edit" on the client from a capability list. The detail asks
+     the database with `kynviora.has_capability`, the same predicate the update policy uses, so
+     the screen and the policy cannot disagree. A screen that inferred it would eventually offer a
+     control the write refuses.
+147. Do not build an edit form from the rendered fields. `categoryFields` carries labels and
+     phrases - the category renders "Hair care" where the column holds `HAIR_CARE` - so a form
+     built from them sends a value the domain refuses, naming a field the person never edited.
+     `editableValues` is keyed as the form is keyed (DEC-083).
+148. Do not let the prefill and the form drift. Every field `manualEntryForm` offers has an entry
+     in `editableValues`, and the whole prefill sent back unchanged must be refused as "nothing to
+     change". Without both, a field with no entry opens blank, the person saves, and a value they
+     never touched is cleared - with the write succeeding and the column legitimately nullable.
+149. Do not treat blank the same way on creating and on editing. On creation blank means "not
+     entered"; on an edit it has to mean "empty this", or a value typed by mistake is permanent.
+     Absent and `null` are different answers and the patch type keeps them apart.
+150. Do not accept a `lastReviewedAt` from a client. `markReviewed` is a boolean and the server
+     stamps the time - a supplied timestamp would let a screen claim somebody reviewed a medicine
+     at a moment they did not, on the value the Shelf's "not yet looked at" filter reads.
+151. Do not write a second validator for an update. The patch is merged over the stored row and
+     goes through `normalizeManualEntry`, so a field that could not be entered on the form cannot
+     become enterable by editing. Two validators that agree today disagree later.
+152. Do not describe a lifecycle state by what it records without saying what it stops. Archiving
+     turns the safety watch off - the safety inbox filters `lifecycle_state <> 'ARCHIVED'` - and
+     somebody who archived a medicine expecting to still hear about a recall is relying on
+     something Kynviora stopped doing (DEC-084). Above the control, never under it.
+153. Do not keep `stopped_on` when an item goes back into use. The column holds the current fact,
+     not a history; "Stopped 1 June" on a medicine somebody is taking is a false statement on the
+     screen a household reads most. The history is `audit_event`, which nobody can rewrite.
+154. Do not leave a schema CHECK as the only enforcement of something a person can type.
+     `owned_item_dates_ordered` refused a stopped date before the started date and the domain had
+     no rule, so it arrived as a 500 instead of a sentence naming the field. An API test found it.
+155. Do not put a backtick in a SQL comment inside a template literal. It closes the string, and
+     the parse error lands lines away from the cause.
+156. Do not assert an `audit_event` count against a fixture whose ID is reused across tests. The
+     table is append-only and refuses DELETE to every role, the owner role included, so rows from
+     the previous test are still there. Give each test its own target (trap 105, second time).
+157. Do not answer an ordinary action with an error panel. A save that changed nothing is refused
+     on purpose - an empty save moves the version and becomes a conflict for whoever else has the
+     item open - but showing it in the state a malformed barcode gets teaches people that the
+     screen fails, and that is how they stop reading the panel on the occasion it matters. Tell
+     them apart by the reason code, never by the message text (`13`).
+158. Do not tell somebody the screen shows the other person's version when the form still holds
+     theirs. The first conflict copy did. Taking the saved version is a control the person
+     presses, which says what it costs beforehand and says their draft was replaced afterwards -
+     replacing it silently answers the question on their behalf, which is the same failure as
+     overwriting the other change.
+159. Do not leave a test that boots a whole process on the suite's default 30s timeout. A PGlite
+     instance plus every migration plus the seed takes most of that alone, and under the full
+     suite - files in parallel, several holding their own engine - it crosses the line: one run
+     failed and the next passed with nothing changed. `main.test.ts` names the allowance and says
+     why. The migration count only grows.

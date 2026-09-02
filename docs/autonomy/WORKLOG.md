@@ -2169,3 +2169,121 @@ Phases 2.2 and 2.3 are `COMPLETE`. Neither has an exit criterion needing a devic
 a human reviewer, and the screen is reachable in a way the safety surfaces are not: a person
 running the dev seed can add a medicine and see it on their own shelf. Stage 2 has no unblocked
 phase left.
+
+### Stage 2's other three words - update, archive, review
+
+Phases 2.2 and 2.3 closed "create". Reading Stage 2's expected output back afterwards - "users can
+create, view, update, archive, and review medicine and personal-care items" - made the next gap
+obvious: nothing in the build had ever changed an `owned_item` after it was written. Phase 2.1 was
+marked `COMPLETE` on the strength of a schema that carried `lifecycle_state`, `version` and
+`stopped_on`, and a detail screen that rendered them. Nothing moved any of them.
+
+The manual-entry screen had also just started telling people "you can add anything missing later
+from the item itself", which was not true of any surface. A promise the product makes and cannot
+keep is worse than a missing feature.
+
+**The mechanism was already specified and unread.** `sync.ts` has set `owned_item`'s conflict
+policy to `ASK_USER` since Stage 1, and `owned_item.version` has existed since migration `0004`
+with no reader. So the write is conditional on the version the editor was looking at, and the
+increment is in the same statement as the condition - two statements would be the race the
+mechanism exists to close. No idempotency key: a conditional write is already exactly-once for the
+intent it describes, and a key beside it would be a second answer to the same question (DEC-082).
+
+**Zero affected rows turned out to be three different facts.** `owned_item_update`'s USING clause
+filters rather than raising, so a caregiver who may read an item and not change it produces the
+same empty result as a version that has moved and as an item that is gone. Both wrong answers are
+worse than a generic failure: a refusal reported as a conflict sends somebody round a retry loop
+they can never win, and a conflict reported as absence tells them their own medicine record has
+disappeared. The route re-reads and says which.
+
+**The refusal is still a 404, and the screen is what stops anybody meeting it.** There is no
+outcome in this API meaning "you are not allowed" (trap 89) and this route did not become the
+exception. The item detail reports `mayEdit`, computed with the same predicate the update policy
+uses, so the screen and the policy cannot disagree - and the control is absent rather than
+disabled.
+
+**The edit form needed a second representation of the row, which is not duplication.**
+`categoryFields` and `sharedFields` are presentation: labels, absent notes, and which text is
+somebody else's words. An editor can use none of it, and the category renders as "Hair care" where
+the column holds `HAIR_CARE` - so a form prefilled from the rendered fields would send a value the
+domain refuses, naming a field the person never edited. `editableValues` is keyed as the form is
+keyed, and two tests hold them together: every form field has an entry, and the whole prefill sent
+back unchanged must be refused as "nothing to change". That second one matters because the failure
+it catches is silent - a field with no entry opens blank, the person saves, and a value they never
+touched is cleared, with the write succeeding and the column legitimately nullable.
+
+**Blank means different things on the two forms.** On creation it means "not entered". On an edit
+it has to mean "empty this", or a value typed by mistake is permanent. Absent and `null` stay
+different answers all the way down, and there is a test for each direction.
+
+**No second validator.** The patch is merged over the stored row and goes through
+`normalizeManualEntry`, so a field that could not be entered on the form cannot become enterable
+by editing - and giving a medicine a personal-care category is refused with the same sentence on
+both paths. Two validators that agree today are two validators that disagree later.
+
+**Marking something looked at is a request, not a timestamp.** `markReviewed` is a boolean and the
+server stamps `now()`. A client-supplied `lastReviewedAt` would let a screen claim a person
+reviewed a medicine at a moment they did not, on the exact value the Shelf's "not yet looked at"
+filter reads. The copy also says it confirms nothing about the product, because `08` reserves that
+for something read off the pack and a person who believed otherwise would have a Trust Passport
+that means less than they think.
+
+**The lifecycle copy is the part worth the most care.** Every state says what Kynviora stops
+doing, not only what it records. Stopping ends the Shelf's questions, the Review Inbox's tasks and
+the reconciliation's count. **Archiving ends the safety watch** - the safety inbox filters
+`lifecycle_state <> 'ARCHIVED'` - and somebody who archived a medicine believing Kynviora would
+still tell them about a recall would be relying on it for something it had stopped doing. That
+sentence sits above the control rather than under it, and a test loops the whole vocabulary so a
+state added later fails rather than shipping with a blank line where its consequence belongs. That
+is trap 109's lesson applied before it could happen a second time.
+
+Nothing is one-way, the stopped date is not invented, and it is cleared when an item goes back into
+use: the column holds the current fact and "Stopped 1 June" on a medicine somebody is taking is a
+false statement on the screen a household reads most. The history is in `audit_event`, which is
+append-only by trigger and refused to every role.
+
+**Two defects the tests found and review had not.** `owned_item_dates_ordered` has always refused a
+stopped date before the started date, and the domain had no rule at all - so it arrived as a 500
+rather than as a sentence naming the field somebody has to correct. And an audit-count assertion
+passed locally and failed in the suite because `audit_event` refuses DELETE to every role and the
+fixture reused one item ID across tests: trap 105 for the second time, in a different file.
+
+**What is deliberately not built.** Deletion. `04` Phase 2.1 lists it as the fourth lifecycle
+state and it is not one - it is a retention decision, and the matrix `16` requires does not exist
+(`DEV-032`, alongside `DEV-009`). Every question a delete control has to answer is unanswered, and
+shipping one that guessed would put an irreversible action on somebody's medicine record on the
+strength of a number nobody approved. Archiving is reversible and loses nothing, which is the
+honest half of the lifecycle this build can offer.
+
+**A conflict does not throw away what somebody typed.** The first version of the copy said the
+screen already showed the other person's change; it did not, because the form still held what the
+person had entered. Rather than replacing their work silently - which answers the question on
+their behalf, the same failure as overwriting the other change - the panel offers loading the
+saved version as a control, says what pressing it costs before it is pressed, and says afterwards
+that their draft was replaced. That is what `ASK_USER` means on a screen.
+
+**A save that changed nothing is not an error.** Opening the form, changing nothing and pressing
+Save is an ordinary thing to do, and the route refuses it deliberately - an empty save moves the
+version and becomes a conflict for whoever else has the item open. The screen tells them apart by
+the reason code rather than by the message text (`13`): a plain note, not the red panel a
+malformed barcode gets. A screen that failed on an ordinary action teaches people to stop reading
+the panel on the occasion it says something that matters.
+
+**A flake, and what it actually was.** The full suite failed once on
+`main.test.ts > starts with no authenticator when that is stated explicitly` - a 30-second timeout
+
+- and passed on a re-run with nothing changed. Not a regression, and not nothing either: that test
+  boots a whole process, and booting one now costs a PGlite instance plus sixteen migrations, which
+  takes most of thirty seconds on its own. Under the full suite, with files in parallel and several
+  holding their own engine, it crosses the line. The two tests that boot a process in their own body
+  now name their allowance and say why, rather than the suite failing one run in some number.
+
+### State
+
+3088 tests passing across 103 files, up from 3000 across 100. Typecheck, mobile typecheck, lint
+and format all clean via `npm run verify`, exit 0. 88 new tests across six suites - domain,
+presentation, the database schema, contracts, the API against real PostgreSQL, and ten end to end
+through the client the app ships.
+
+Stage 2's expected output now reads true except for deletion. `04` Phase 2.1's "common item
+lifecycle" is a thing a person can actually move an item through rather than a column.
