@@ -2629,3 +2629,75 @@ property of `selectRecipients` rather than of a row, asserted through the real d
 real receipts. The second - "consent state is auditable and localizable" - is the append-only trigger
 and the stored `policy_version` and `locale`, which are the database's properties rather than this
 phase's promises.
+
+### `DEV-028` - which ingredient, and which recorded sensitivity
+
+`profile_assessment` has stored `reasons`, `profile_fact_versions` and `formulation_version` since
+migration `0006`. A version says **what state** an evaluation ran against; it does not say **which
+row** out of that state was the reason. So the alert detail could say that a substance in the
+declaration matched a recorded fact and could not say which, and the approved
+`tpl.ingredient_sensitivity` wording - which names the exact ingredient and the exact recorded
+sensitivity - refused to render rather than guess. That refusal was the right call and it left the
+most explainable alert type in the build as a list of codes.
+
+**The identity is frozen at evaluation, beside the versions that were already frozen there.**
+`Assessment.matchedInputs` carries the canonical substance key and the profile fact ID, written by
+`evaluateRule` and by nothing else. It is a required field on the type, so a future writer cannot
+omit it and a rule with nothing of this shape to name has to say `null` rather than inherit a
+neighbouring rule's shape. Migration `0018` adds the two columns with three CHECKs: both or neither,
+never on a non-match, and no blank key.
+
+**The alternative was the read path, and refusing it is the decision.** Joining the item's
+formulation to the profile's allergy records and taking the intersection is a _different
+computation_ from the one the rule ran - both may have moved since - so it could name a substance
+the rule did not match on. A confident, specific, approved-looking sentence about the wrong
+ingredient is worse than no sentence, which is what DEC-064 already decided for the Lens (DEC-097).
+The test that matters here is the one with two eligible facts and one of them in the declaration:
+re-deriving would be right today and wrong the moment either list moved.
+
+**No foreign key on the fact ID.** The mechanical reason is that `profile_assessment` carries a
+BEFORE UPDATE OR DELETE trigger that raises unconditionally, so no referential action could fire -
+`ON DELETE SET NULL` would attempt an UPDATE and `ON DELETE CASCADE` a DELETE, and both would trip
+the trigger and fail the parent delete instead of tidying anything. `ON DELETE RESTRICT` would work
+and would make an allergy record undeletable forever, which is a retention decision this build has
+not made (`DEV-036`, a day old). The better reason is the column's purpose: a reference a later
+event can rewrite is not a frozen record.
+
+**Row-level security does the disclosure work, and it does it by accident of being right.** Both
+lookups are LEFT joins on the caller's own connection, and `allergy_select` requires
+`VIEW_MEDICINES` - so a caregiver holding `VIEW_SAFETY` alone reads the alert and not what the
+person is allergic to. `03` group H asks for exactly that separation, and the narrative declines
+rather than the route refusing, which is the shape the withheld person and item names already have.
+
+**The recorded term is version-gated; the substance name is not.** `display_term` is the person's
+own account and Phase 1.3 lets them edit it, so quoting today's wording as what the rule matched
+would be a false statement about what happened. The assessment froze the fact's version beside its
+ID, so the check is cheap and the failure is honest: neither the old wording nor the new one, since
+the point is that Kynviora cannot say which the rule matched. A `preferred_name` change is the
+catalog renaming a fixed identity, which is why the assessment stores the **key** and not the
+substance row's ID.
+
+**A replay has to reproduce it too.** `replayAssessment` compares the matched identities, so a
+recomputation that reached the same verdict while naming a different recorded sensitivity is a
+difference rather than a reproduction - it got there for another reason, and the sentence a person
+reads is built from those two values. The replay route reads the columns back for the same reason:
+without them every recomputed ingredient match would have reported a difference against an original
+that had simply never been asked.
+
+**Two things this does not change.** Nothing in this build writes an assessment in production -
+`BLK-006` means no rule is publishable, so `profile_assessment` is written by fixtures and read by
+the replay route. And trap 155 caught a backtick in a SQL comment inside a template literal for the
+second time, with the parse error landing forty lines from the cause exactly as it says it does.
+
+### State
+
+3419 tests passing across 116 files, up from 3403. Typecheck, mobile typecheck, lint and format all
+clean via `npm run verify`, exit 0 read from the log.
+
+16 new tests: five on the rule engine, including the two-eligible-facts case and the replay
+difference; five on the alert detail against real PostgreSQL, including a caregiver who may read the
+alert and not the sensitivity, and a term the person edited after the fact; and six on the schema,
+including that neither new column can be edited afterwards.
+
+`DEV-028` is closed. The remaining gap it named - that nothing publishes an ingredient rule - is
+`BLK-006` and is not an engineering one.

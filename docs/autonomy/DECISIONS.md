@@ -2941,3 +2941,70 @@ And `granted` is not coerced: "yes" and "on" are not answers to a consent questi
 value arriving over the wire must not become agreement.
 
 **Sources.** `04` Phase 1.4; `14`; `16`; `18`; `02`; `19`; migration `0002`; DEC-013; DEC-045.
+
+---
+
+## DEC-097 - The match names its own inputs, and the read path resolves them rather than deriving them
+
+**Date:** 2026-09-02
+**Phase:** 7.3 (`DEV-028`)
+
+**Status:** Accepted
+
+`profile_assessment` has stored `reasons`, `profile_fact_versions` and `formulation_version` since
+migration `0006`. A version says **what state** an evaluation ran against; it does not say **which
+row** out of that state was the reason. So the alert detail could say that a substance in the
+declaration matched a recorded fact and could not say which - and the approved
+`tpl.ingredient_sensitivity` wording, which names the exact ingredient and the exact recorded
+sensitivity, refused to render rather than guess.
+
+**The identity is frozen at evaluation, beside the versions that were already frozen there.**
+`Assessment.matchedInputs` carries the canonical substance key and the profile fact ID the rule
+matched on, written by `evaluateRule` and nothing else. Migration `0018` adds the two columns, with
+three CHECKs: both or neither (either alone renders as a sentence with a hole in it), never on a
+non-match (a sentence about something that did not happen), and no blank key.
+
+**The alternative was to re-derive it on the read path, and that is the decision.** Joining the
+item's formulation to the profile's allergy records and taking the intersection is a _different
+computation_ from the one the rule ran: the declaration and the facts may both have moved, so it
+could name a substance the rule did not match on. A confident, specific, approved-looking sentence
+about the wrong ingredient is worse than no sentence - which is exactly what DEC-064 decided for the
+Lens, and what `DEV-028` recorded as the reason for leaving the gap open rather than closing it
+badly.
+
+**No foreign key on the fact ID, for two reasons.** The first is mechanical: `profile_assessment`
+carries a BEFORE UPDATE OR DELETE trigger that raises unconditionally (DEC-013), so no referential
+action can fire - `ON DELETE SET NULL` would attempt an UPDATE and `ON DELETE CASCADE` a DELETE, and
+both would trip the trigger and fail the parent delete instead of tidying anything. `ON DELETE
+RESTRICT` would work and would make an allergy record undeletable forever, which is a retention
+decision this build has not made (`DEV-036`). The second is the point of the column: this records
+what the rule _saw_, and a reference a later event can null or cascade is one a later event can
+quietly rewrite. A dangling ID resolves to no name and the template declines, which is the same
+honest outcome as never having had one.
+
+**Both lookups are LEFT joins under row-level security, and that is load-bearing.**
+`allergy_select` requires `VIEW_MEDICINES`, so a caregiver holding `VIEW_SAFETY` alone reads the
+alert and **not** what the person is allergic to - `03` group H keeps the two apart, and the
+narrative declines rather than the route refusing. It is the same shape the withheld person and item
+names already have (DEC-026).
+
+**The recorded term is version-gated; the substance name is not.** `display_term` is the person's
+own account and they may edit it, so quoting today's wording as what the rule matched would be a
+statement about what happened that is not true - the assessment froze the fact's version alongside
+its ID, and a mismatch drops the narrative rather than quoting either version. A `preferred_name`
+change is the catalog renaming the same identity, not a person changing what they said, which is why
+the assessment stores the **key** rather than the substance row's ID.
+
+**A replay must reproduce the matched inputs too.** `replayAssessment` compares them, so a
+recomputation that reached the same verdict while naming a different recorded sensitivity is a
+_difference_ rather than a reproduction. It reached the same conclusion for another reason, and the
+sentence a person reads is built from exactly these two values.
+
+**Nothing in this build writes an assessment in production**, and that does not change here.
+`evaluateRule` is called by the shadow runner and the replay route; `profile_assessment` is written
+only by fixtures, because `BLK-006` means no rule is publishable. What has changed is that whatever
+eventually persists one cannot forget these two fields: they are required on the type, and the
+schema refuses the half-filled pair.
+
+**Sources.** `04` Phase 7.3; `09`; `10`; `03` group H; DEC-013; DEC-026; DEC-064; `DEV-028`;
+`DEV-036`; migrations `0006` and `0018`.

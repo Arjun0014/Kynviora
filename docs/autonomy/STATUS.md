@@ -9,18 +9,18 @@ Last updated: 2026-09-02
 
 ## Current position
 
-|                    |                                                      |
-| ------------------ | ---------------------------------------------------- |
-| **Current stage**  | Stage 1 (Identity, Profiles, Consent)                |
-| **Current phase**  | 1.2, 1.3 and 1.4 complete; 1.1 blocked               |
-| **Last completed** | Phase 1.4 - consent state, routes, screen, gating    |
-| **Branch**         | `master`                                             |
-| **Latest commit**  | `feat(identity): what you agreed to, and what stops` |
-| **Baseline tag**   | `baseline-spec-only`                                 |
+|                    |                                                    |
+| ------------------ | -------------------------------------------------- |
+| **Current stage**  | Stage 1 (Identity, Profiles, Consent)              |
+| **Current phase**  | Stage 1 complete except 1.1; `DEV-028` closed      |
+| **Last completed** | `DEV-028` - which inputs produced a match          |
+| **Branch**         | `master`                                           |
+| **Latest commit**  | `feat(safety): which ingredient, and whose record` |
+| **Baseline tag**   | `baseline-spec-only`                               |
 
 ## Verification state
 
-- **3403 tests passing**, 0 failing, across 116 files.
+- **3419 tests passing**, 0 failing, across 116 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -69,7 +69,7 @@ the API will not distinguish them.
 | Area                                                       | State                                                      |
 | ---------------------------------------------------------- | ---------------------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                         |
-| Database schema, 17 migrations, full RLS                   | Complete, 302 tests incl. threats A1/A2/A3                 |
+| Database schema, 18 migrations, full RLS                   | Complete, 311 tests incl. threats A1/A2/A3                 |
 | Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                        |
 | Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                         |
 | Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                         |
@@ -129,8 +129,8 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Phase 1.4 is finished**, and with it Stage 1 has everything that is not blocked on an auth
-provider or on a document nobody has written. `GET` and `PUT /v1/consents` are the whole of it,
+**Phase 1.4 is finished and `DEV-028` is closed**, and with it Stage 1 has everything that is not
+blocked on an auth provider or on a document nobody has written. `GET` and `PUT /v1/consents` are the whole of it,
 neither taking a user, plus the consent list on the You tab and the check that sits first in
 `selectRecipients`.
 
@@ -163,6 +163,15 @@ Readonly<Record<ConsentPurpose, ConsentEnforcement>>`, so a purpose added later 
   cannot record that the person they look after agreed to something - asserted in SQL, three cases,
   so a future route that named a user fails at the table (DEC-096).
 
+**`DEV-028` closed with it.** `profile_assessment` stored versions and reason codes but not
+identities, so the alert detail could say _that_ a substance in the declaration matched a recorded
+fact and not _which_ - and the approved ingredient-sensitivity wording refused to render rather than
+guess. Migration `0018` freezes the substance key and the profile fact ID at evaluation, and the
+detail resolves them by that identity under row-level security. It never re-intersects the
+declaration with the profile's facts: that is a different computation over state that may have
+moved (DEC-097). Phase 1.3 is what made it reachable - there are now real recorded sensitivities to
+name.
+
 `DEV-036` records what Phase 1.4 does **not** include: the export and deletion shell. There is no
 row, because a shell is a control that opens something and a settings row that opens nothing tells
 somebody a control exists - on the screen where they would look for it in the situation that matters.
@@ -192,16 +201,16 @@ before that.
 
 Next, in the order they build on each other:
 
-1. **`DEV-028`'s write-path fix.** An assessment stores versions and reason codes but not which
-   recorded sensitivity matched which ingredient, so the approved sensitivity template cannot be
-   filled from stored data. Phase 1.3 makes this reachable for the first time: there are now real
-   recorded sensitivities to name. A write-path change that must not become a read-path one.
-2. **Phase 5.2's substance normalization for a typed term.** Every hand-entered allergy is unmatched
+1. **Phase 5.2's substance normalization for a typed term.** Every hand-entered allergy is unmatched
    and therefore invisible to the one rule that would use it. This is the difference between Phase
-   1.3's records existing and working - and now also the difference between Phase 1.4's
-   `NOTIFICATIONS` consent governing a real alert stream and governing an empty one.
-3. **Phase 2.5's item deletion**, the moment the retention matrix exists. `DEV-032` has been waiting
+   1.3's records existing and working; the difference between Phase 1.4's `NOTIFICATIONS` consent
+   governing a real alert stream and governing an empty one; and now the difference between
+   `DEV-028`'s columns holding an identity and holding NULL, because a rule that matches nothing
+   names nothing.
+2. **Phase 2.5's item deletion**, the moment the retention matrix exists. `DEV-032` has been waiting
    on the same document as `DEV-036` and is the smallest thing that unblocks with it.
+3. **`DEV-033`'s notification digest**, the last piece of Phase 7.5, which needs no decision nobody
+   has made - only a grouping rule, which `18` constrains rather than leaves open.
 
 **Not next, and why.** The export-and-deletion shell (`DEV-036`) is a document, not a feature. "Get
 me a copy" and "remove it" cannot be answered without a retention matrix saying what is kept
@@ -222,12 +231,20 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 
 ## Next three planned tasks
 
-1. `DEV-028`'s write-path fix - which sensitivity matched which ingredient.
-2. Phase 5.2's substance normalization, so a typed allergy becomes one a rule can see.
-3. Phase 2.5's item deletion, once the retention matrix exists.
+1. Phase 5.2's substance normalization, so a typed allergy becomes one a rule can see.
+2. Phase 2.5's item deletion, once the retention matrix exists.
+3. `DEV-033`'s notification digest, the last piece of Phase 7.5.
 
 ## Recent decisions worth knowing
 
+- **DEC-097** - a match names its own inputs, and the read path **resolves** them rather than
+  deriving them. `Assessment.matchedInputs` freezes the substance key and the profile fact ID at
+  evaluation; migration `0018` stores them with three CHECKs. Re-intersecting the declaration with
+  the profile's facts is a different computation over state that may have moved, so it could name a
+  substance the rule did not match on (DEC-064's reasoning). No foreign key on the fact ID: the
+  table is append-only, so no referential action could fire without tripping its trigger. The
+  recorded term is version-gated against what the assessment froze; the substance name is not,
+  because a rename is the catalog's and an edit is the person's.
 - **DEC-094** - consent is a **state**, not a log. `CONSENT_ENFORCEMENT` answers for all eight
   purposes under a `satisfies Record<ConsentPurpose, ConsentEnforcement>`, so a purpose added later
   without an answer fails to compile. Two are `ENFORCED`, five govern behaviour this build does not
@@ -1037,3 +1054,19 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
      requests with `method === 'POST' ? {payload} : {}` and had only ever listed `GET` and `POST`,
      so the first `PUT` route in the codebase would have been checked against nothing. Extend the
      helper with the verb, not only the list.
+167. Do not close a "we cannot say which" gap by deriving the answer on the read path. Intersecting
+     the item's declaration with the profile's facts is a different computation from the one the
+     rule ran, over state that may have moved since - so it can name a substance the rule did not
+     match on, confidently and in approved wording. Freeze the identity where the versions are
+     already frozen, and let a missing one refuse the template (DEC-097, DEC-064's reasoning).
+168. Do not put a foreign key on an append-only table without checking that its referential action
+     can fire. `profile_assessment` raises on UPDATE and DELETE unconditionally, so ON DELETE SET
+     NULL and ON DELETE CASCADE would both trip the trigger and fail the _parent_ delete rather
+     than tidy anything. `supersedes_assessment_id` already carries this shape from `0006`; do not
+     copy it.
+169. Do not resolve a person's own words by ID and show today's version. `display_term` is editable
+     and the approved template quotes it as what the rule matched, so a corrected term quoted that
+     way is a false statement about what happened. Gate it on the fact version the assessment
+     froze, and show neither wording when they disagree. A catalog `preferred_name` is different:
+     a rename is the catalog's and the canonical key did not move, which is why the key is what
+     gets stored.

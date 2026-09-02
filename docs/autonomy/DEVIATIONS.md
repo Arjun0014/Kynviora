@@ -597,7 +597,7 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Required future work**: a security owner sets the three values; they move to configuration if
   they need to differ per environment.
 
-## DEV-028 - An assessment does not record which inputs produced the match
+## DEV-028 - An assessment does not record which inputs produced the match — RESOLVED 2026-09-02
 
 - **Affected specification**: `04` Phase 7.3 requires an alert to be independently understandable,
   and the approved ingredient-sensitivity template names the exact ingredient and the exact
@@ -616,14 +616,36 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
     sentence about the wrong ingredient is worse than no sentence, which is exactly what DEC-064
     decided for the Lens.
 - **Temporary or permanent**: temporary.
-- **Risk**: moderate, and it is why this is written down. The affected alerts are readable but
-  less useful than the spec intends, and the gap is invisible until an ingredient rule is actually
-  published - which `BLK-006` currently prevents, so nobody has seen it yet.
+- **Risk**: moderate, and it is why this was written down. The affected alerts were readable but
+  less useful than the spec intends, and the gap was invisible until an ingredient rule is actually
+  published - which `BLK-006` currently prevents, so nobody had seen it.
 - **Required future work**: add the matched identifiers to `profile_assessment` - the substance
   key and the profile fact ID the rule matched on - written by `evaluateRule` at evaluation time
   and frozen like every other field on that row. It is a migration, a change to the `Assessment`
   type, and a change to every fixture that builds one; it is not a read-path change, and it must
   not become one.
+
+### Resolved, 2026-09-02
+
+Exactly as the paragraph above specified, and it did not become a read-path change (DEC-097).
+
+- Migration `0018` adds `matched_substance_key` and `matched_profile_fact_id` to
+  `profile_assessment`, with three CHECKs: both or neither, never on a non-match, and no blank key.
+  No foreign key on the fact ID - the table's append-only trigger means no referential action could
+  fire without tripping it, and a reference a later delete could rewrite is not a frozen record.
+- `Assessment.matchedInputs` is a required field, so every future writer carries it and a rule with
+  nothing of this shape to name reports `null` rather than inheriting a neighbour's shape.
+  `evaluateIngredientSensitivity` fills it from the fact its own filter selected.
+- `replayAssessment` compares it: a recomputation that reached the same verdict while naming a
+  different recorded sensitivity is a difference, not a reproduction.
+- The alert detail resolves both by the frozen identity, under row-level security, so a caregiver
+  holding `VIEW_SAFETY` and not `VIEW_MEDICINES` still gets no narrative. The recorded term is
+  version-gated against the fact version the assessment froze; the substance name is not, because a
+  canonical key is a fixed identity and a rename is the catalog's, not the person's.
+
+Still true, and unchanged by this: nothing in this build writes an assessment in production, because
+`BLK-006` means no rule is publishable. The columns are exercised by fixtures and by the replay
+route.
 
 ---
 

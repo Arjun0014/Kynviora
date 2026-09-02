@@ -775,8 +775,10 @@ the delivery screen and the whole-policy write, with the truthfulness rule moved
 so it is tested once (DEC-085, DEC-086, `DEV-033`); Phase 1.2 entire - the two creation routes, the
 switcher that owns its exit criterion, and the two screens (DEC-087 to DEC-090, `DEV-034`); Phase
 1.3 - allergy and sensitivity records whose provenance no client can name (DEC-091 to DEC-093,
-`DEV-035`); and Phase 1.4 - the consent state, its two routes, the screen, and the enforcement that
-turned an append-only log into something that stops a notification (DEC-094 to DEC-096, `DEV-036`).
+`DEV-035`); Phase 1.4 - the consent state, its two routes, the screen, and the enforcement that
+turned an append-only log into something that stops a notification (DEC-094 to DEC-096, `DEV-036`);
+and `DEV-028` - the two identities behind an ingredient match, frozen at evaluation so the approved
+wording can be filled without re-deriving anything (DEC-097, migration `0018`).
 
 ## What "complete" means here, and what it does not
 
