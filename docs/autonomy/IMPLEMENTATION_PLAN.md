@@ -59,7 +59,7 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 | 1.1   | Authentication and session lifecycle | `NOT_STARTED` |
 | 1.2   | Household and profile creation       | `COMPLETE`    |
 | 1.3   | Health-context facts and provenance  | `COMPLETE`    |
-| 1.4   | Consent and privacy controls         | `IN_PROGRESS` |
+| 1.4   | Consent and privacy controls         | `COMPLETE`    |
 
 - **1.2**: complete. The schema, the RLS policies and the authorization suite have been there since
   Stage 1 (threat A1 and A2 covered); what landed now is everything that writes to them.
@@ -115,8 +115,38 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
   PostgreSQL (24) and eight end to end. Outstanding: conditions, which no shipped rule reads, so
   collecting them would be storing health data that changes nothing (`DEV-035`).
 
-- **1.4**: `consent_receipt` is append-only with supersession-based withdrawal and is tested.
-  Consent _enforcement_ wiring and the export/deletion shell are outstanding.
+- **1.4**: complete. `consent_receipt` has been append-only with supersession since migration
+  `0002`, with its own authorization tests, and nothing had ever read it - a consent _log_, not a
+  consent _state_. What landed is the state, the routes, the screen, and the enforcement.
+
+  **Exit criterion 1** - "revoking optional consent disables the associated behavior" - is a
+  property of `selectRecipients` rather than of a row. The consent check sits first, before the
+  owner short-circuit and before every grant-shaped check, and nothing pierces it: a `CRITICAL`
+  alert passes quiet hours (DEC-078) because those are a timing preference, and consent is the
+  basis on which Kynviora may contact somebody at all. Withdrawing `NOTIFICATIONS` stops everything
+  to that person, owner included; withdrawing `CAREGIVER_SHARING` stops caregivers and never the
+  owner. Two new exclusion reasons keep "they asked not to be contacted" out of the same audit
+  bucket as "their grant was never wide enough" (DEC-095). The proof it is enforcement rather than
+  decoration is that four existing dispatch suites went red until their fixtures were given consent.
+
+  **Exit criterion 2** - "consent state is auditable and localizable" - is the database's property.
+  A withdrawal is a **new** receipt pointing at the one it supersedes; the append-only trigger
+  refuses UPDATE and DELETE to every role including the database owner. `policy_version` and
+  `locale` are stored on every row and both come from the server, because a client that could name
+  the policy version it agreed to could record agreement to a text nobody showed them (DEC-096).
+
+  `CONSENT_ENFORCEMENT` is a total record over the eight purposes saying, for each, whether
+  withdrawing it stops anything **here**: two do, five govern behaviour this build does not have,
+  and one is not offered as a choice. The five say so on their own row rather than looking like the
+  two that work - a switch that stops nothing while the screen implies otherwise is the `10` failure
+  this codebase spends the most care avoiding (DEC-094). Neither route takes a user and neither
+  could: `consent_select` and `consent_insert` name no household, no grant and no capability.
+
+  87 tests across the domain (21), presentation (14), contracts (20), the API against real
+  PostgreSQL including the enforcement through the real dispatcher (15), three RLS cases in SQL,
+  two on the surface partition and twelve end to end. Outstanding: the export and deletion shell,
+  which needs a retention matrix that does not exist (`DEV-036`).
+
 - **1.1**: blocked on an auth provider decision (`23` lists it as required before Stage 1
   completion) - the schema deliberately holds no password hash, delegating to a managed provider.
 
@@ -711,20 +741,30 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
-1. **Phase 1.4's consent enforcement and the export-and-deletion shell.** `consent_receipt` is
-   append-only, tested, and never read as a precondition by anything. The deletion half is where
-   four deviations converge: `DEV-032`'s missing item delete, `DEV-009`'s Visit Pack retention,
-   `DEV-034`'s emergency information, and the retention question `DEV-035` inherits - all of them
-   waiting on the retention matrix `16` requires, which that phase has to define anyway.
-2. **`DEV-028`'s write-path fix.** An assessment stores versions and reason codes but not _which_
+1. **`DEV-028`'s write-path fix.** An assessment stores versions and reason codes but not _which_
    recorded sensitivity matched _which_ ingredient, so the approved sensitivity template cannot be
    filled from stored data. Phase 1.3 makes this reachable for the first time: there are now real
    recorded sensitivities to name. It is a write-path change and must not become a read-path one.
-3. **Phase 5.2's substance normalization for a typed term.** Every hand-entered allergy is unmatched
+2. **Phase 5.2's substance normalization for a typed term.** Every hand-entered allergy is unmatched
    (DEC-093) and therefore invisible to the one rule that would use it. Mapping a term to a
-   canonical substance is the difference between Phase 1.3's records existing and working.
+   canonical substance is the difference between Phase 1.3's records existing and working - and it
+   is now the difference between Phase 1.4's `NOTIFICATIONS` consent governing a real alert stream
+   and governing an empty one.
+3. **Phase 2.5's item deletion, if the retention matrix lands.** `DEV-032` has been waiting on the
+   same document as `DEV-036`; it is the smallest thing that becomes buildable the moment somebody
+   writes what is kept after a deletion request and on what basis.
 
-**Not next, and why:** a missed-dose scheduler (`DEV-011`) is blocked on a product decision rather
+**Not next, and why:** the export-and-deletion shell (`DEV-036`) is a document, not a feature. "Get
+me a copy" and "remove it" cannot be answered without a retention matrix saying what is kept
+regardless, and this build has records that must survive a deletion request with no approved
+statement of which - `audit_event` and `consent_receipt` both refuse DELETE to every role, and
+`dose_event` is what a Visit Pack is built from. Five deviations now converge on that one missing
+document (`DEV-009`, `DEV-032`, `DEV-034`, `DEV-035`, `DEV-036`), and writing it is the largest
+single unblocking left in Stage 1 - but it is a retention and disclosure decision, not an
+engineering one, and inventing it would embed an unapproved answer to "what does Kynviora keep about
+you after you ask it to stop".
+
+Likewise, a missed-dose scheduler (`DEV-011`) is blocked on a product decision rather
 than on work. The grace window - how long before a dose counts as unrecorded - has no answer, and
 `18` forbids shaming copy, which makes "how long before we tell a relative" a question with a wrong
 answer rather than a missing one. Inventing the number would embed an unapproved judgement about
@@ -733,13 +773,14 @@ somebody's medication routine.
 Done since this list was last written: Phase 7.5's client half - the clock parser, the policy view,
 the delivery screen and the whole-policy write, with the truthfulness rule moved out of the screen
 so it is tested once (DEC-085, DEC-086, `DEV-033`); Phase 1.2 entire - the two creation routes, the
-switcher that owns its exit criterion, and the two screens (DEC-087 to DEC-090, `DEV-034`); and
-Phase 1.3 - allergy and sensitivity records whose provenance no client can name (DEC-091 to
-DEC-093, `DEV-035`).
+switcher that owns its exit criterion, and the two screens (DEC-087 to DEC-090, `DEV-034`); Phase
+1.3 - allergy and sensitivity records whose provenance no client can name (DEC-091 to DEC-093,
+`DEV-035`); and Phase 1.4 - the consent state, its two routes, the screen, and the enforcement that
+turned an append-only log into something that stops a notification (DEC-094 to DEC-096, `DEV-036`).
 
 ## What "complete" means here, and what it does not
 
-Thirty-two phases are marked `COMPLETE` above. In every case that means the logic is
+Thirty-three phases are marked `COMPLETE` above. In every case that means the logic is
 implemented, tested, documented and committed - and in most cases the tests execute against a real
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
@@ -748,7 +789,7 @@ device, a credential, a labelled dataset, human participants, or a qualified hum
 those are marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even
 where all buildable work is finished. `BLOCKERS.md` records what each one needs.
 
-The counts above are the tables' own, recounted whenever a status changes: 32 `COMPLETE`, 7
+The counts above are the tables' own, recounted whenever a status changes: 33 `COMPLETE`, 6
 `IN_PROGRESS`, 3 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
 `04` defines. A prose count that drifts from the table it describes is the quiet way a status
 document stops being one - and the first version of this paragraph drifted immediately, because it

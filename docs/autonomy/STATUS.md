@@ -12,15 +12,15 @@ Last updated: 2026-09-02
 |                    |                                                      |
 | ------------------ | ---------------------------------------------------- |
 | **Current stage**  | Stage 1 (Identity, Profiles, Consent)                |
-| **Current phase**  | 1.2 and 1.3 complete; 1.1 blocked, 1.4 open          |
-| **Last completed** | Phase 1.3 - health-context facts and provenance      |
+| **Current phase**  | 1.2, 1.3 and 1.4 complete; 1.1 blocked               |
+| **Last completed** | Phase 1.4 - consent state, routes, screen, gating    |
 | **Branch**         | `master`                                             |
-| **Latest commit**  | `feat(identity): what a household records about you` |
+| **Latest commit**  | `feat(identity): what you agreed to, and what stops` |
 | **Baseline tag**   | `baseline-spec-only`                                 |
 
 ## Verification state
 
-- **3316 tests passing**, 0 failing, across 112 files.
+- **3403 tests passing**, 0 failing, across 116 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -88,6 +88,7 @@ the API will not distinguish them.
 | Notification delivery policy, quiet hours, revalidation    | Complete, 139 tests; **holds nothing** (`DEV-030`)         |
 | Household and profile creation, the profile switcher       | Complete, 90 tests; no emergency contact (`DEV-034`)       |
 | Allergy and sensitivity records, provenance, review date   | Complete, 86 tests; no conditions (`DEV-035`)              |
+| Consent state, withdrawal, and what withdrawing stops      | Complete, 87 tests; no export/deletion (`DEV-036`)         |
 | Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)             |
 | Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                         |
 | Manual entry: the write path, the form and the screen      | Complete, 105 tests; the only surface that creates an item |
@@ -128,72 +129,92 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Phase 1.3 is finished**, and with it Stage 1 has everything that is not blocked on an auth
-provider. `POST` and `GET /v1/profiles/:profileId/health-facts` and a version-conditional
-`PATCH /v1/health-facts/:factId` are the write path for allergy and sensitivity records - behind
-`MANAGE_MEDICINES` rather than `MANAGE_SHELF`, because health context is the most sensitive profile
-data there is.
+**Phase 1.4 is finished**, and with it Stage 1 has everything that is not blocked on an auth
+provider or on a document nobody has written. `GET` and `PUT /v1/consents` are the whole of it,
+neither taking a user, plus the consent list on the You tab and the check that sits first in
+`selectRecipients`.
 
-The tables have been in migration `0004` since Stage 1 with provenance, certainty, `noted_on`,
-`last_reviewed_at`, `version` and full RLS, and nothing had ever written one.
+`consent_receipt` has been in migration `0002` since Stage 1 - append-only by trigger, superseding
+through `supersedes_id`, refusing UPDATE and DELETE to every role including the database owner, with
+its own authorization tests - and nothing had ever read it. That is a consent **log**. Phase 1.4's
+exit criterion is about a consent **state**.
 
-Four things about it are worth not undoing:
+Five things about it are worth not undoing:
 
-- **Provenance is derived from who is writing, and there is no field to send it.** Phase 1.3's first
-  exit criterion is a sentence about what cannot happen, so the draft has no `provenance`, the body
-  schema is `.strict()`, and there is no parameter the value could reach. It comes from
-  `provenanceForRelationship`, which has two possible answers and can never produce `IMPORTED` or
-  `REVIEWER_CONFIRMED` (DEC-091). This is what makes the second criterion mean anything: a rule
-  filtering on a value a client could set filters on nothing.
-- **Certainty and provenance are separate axes.** "I am sure" is how sure the _person_ is; the
-  record still reads `USER_REPORTED`. A person may say `CONFIRMED` - refusing it would be
-  second-guessing their account of their own body - and it still claims no clinician said so
-  (DEC-092).
-- **Every row says whether Kynviora can check anything against it, and in this build none can.**
-  Nothing maps a typed term to a catalog substance, so no rule can see any hand-entered fact. The
-  sentence says both halves - not being checked, **and** not lost (DEC-093).
-- **A review is something somebody did.** Stamped by the server, only when asked for, never inferred
-  from an edit - and shown as a fact rather than a nag: no count, no badge, no ordering by
-  staleness.
+- **The enforcement is a total record over the vocabulary, not a habit.** `CONSENT_ENFORCEMENT`
+  answers for all eight purposes - `ENFORCED`, `NOTHING_TO_STOP` or `REQUIRED` - under a `satisfies
+Readonly<Record<ConsentPurpose, ConsentEnforcement>>`, so a purpose added later without an answer
+  fails to compile rather than shipping as a switch nobody classified (DEC-094).
+- **The five switches that stop nothing say so on their own row.** No analytics, no OCR, no
+  connected health, no research programme, and manual entry never reaches the shared catalog either
+  way. Both halves of the sentence - Kynviora does not do this at all at the moment, **and** your
+  answer is recorded and will apply if it ever does - because the first alone reads as the answer
+  being thrown away.
+- **Withdrawing notifications stops every notification, a critical safety alert included.** Quiet
+  hours are a timing preference and a `CRITICAL` alert pierces them (DEC-078); consent is the basis
+  on which Kynviora may contact somebody at all, and continuing to send to a person who said stop is
+  sending without consent. The check is first, the owner is not exempt from their own answer, and
+  the sentence saying so is **above** the control and is also its accessibility hint (DEC-095).
+- **`CAREGIVER_SHARING` excludes caregivers and never the owner, and it does not revoke read
+  access.** The copy says which half it does not do and names the Care screen, rather than leaving
+  somebody believing they had cut a caregiver off.
+- **Nobody answers or reads consent for anybody else.** `consent_select` and `consent_insert` name
+  no household, no grant and no capability. A caregiver holding every capability there is still
+  cannot record that the person they look after agreed to something - asserted in SQL, three cases,
+  so a future route that named a user fails at the table (DEC-096).
 
-`DEV-035` records what Phase 1.3 does **not** include: conditions. `04` lists them qualified - "only
-where approved rules require them" - and no shipped rule reads a `CONDITION` fact at all, so
-collecting them would be storing health data that changes nothing.
+`DEV-036` records what Phase 1.4 does **not** include: the export and deletion shell. There is no
+row, because a shell is a control that opens something and a settings row that opens nothing tells
+somebody a control exists - on the screen where they would look for it in the situation that matters.
+One sentence stands in its place and says why.
 
 ### What landed before it
 
-**Phase 1.2 - household and profile creation.** The oldest unbuilt surface in the plan. Both exit
-criteria hold, and the second one - "screens cannot accidentally display one profile's data under
-another profile identity" - holds as a tested function rather than a habit: `profileSwitcherView`
-drops a selection the server no longer offers rather than falling back to whoever is first
-(DEC-087). Who a profile is _for_ is a claim the caller makes about themselves and can never be
-about anybody else (DEC-088). No emergency information (`DEV-034`).
+**Phase 1.3 - allergy and sensitivity records.** Provenance is derived from who is writing and there
+is no field to send it: the draft has none, the body schema is `.strict()`, and
+`provenanceForRelationship` can never produce `IMPORTED` or `REVIEWER_CONFIRMED` (DEC-091). Certainty
+and provenance are separate axes - "I am sure" is the person's, `USER_REPORTED` is the record's
+(DEC-092). Every row says whether Kynviora can check anything against it, and in this build none can
+(DEC-093). No conditions (`DEV-035`).
 
-**Phase 7.5, both halves.** A person can set quiet hours from the You tab, behind step-up, with the
-whole policy written on every request (DEC-085). The screen says quiet hours do not hold anything
-yet **before** somebody sets their first one - a server constant checked against the dispatcher by a
-test, turned into a sentence by the view (DEC-086). What 7.5 still lacks is the digest (`DEV-033`).
+**Phase 1.2 - household and profile creation.** The oldest unbuilt surface in the plan. Both exit
+criteria hold, and the second - "screens cannot accidentally display one profile's data under another
+profile identity" - holds as a tested function: `profileSwitcherView` drops a selection the server no
+longer offers rather than falling back to whoever is first (DEC-087). No emergency information
+(`DEV-034`).
+
+**Phase 7.5, both halves.** Quiet hours from the You tab, behind step-up, whole policy on every
+request (DEC-085), with the screen saying they hold nothing yet **before** the first one is set
+(DEC-086). No digest (`DEV-033`).
 
 **Stage 2 reads true except for deletion**, and **Phase 7.6 and 7.4's attribution half** landed
 before that.
 
 Next, in the order they build on each other:
 
-1. **Phase 1.4's consent enforcement and the export-and-deletion shell.** `consent_receipt` is
-   append-only, tested, and never read as a precondition by anything. The deletion half is where
-   four deviations converge - `DEV-032`, `DEV-009`, `DEV-034` and the retention question `DEV-035`
-   inherits - all waiting on the retention matrix `16` requires, which that phase must define
-   anyway.
-2. **`DEV-028`'s write-path fix.** An assessment stores versions and reason codes but not which
-   recorded sensitivity matched which ingredient. Phase 1.3 makes this reachable for the first
-   time: there are now real recorded sensitivities to name.
-3. **Phase 5.2's substance normalization for a typed term.** Every hand-entered allergy is unmatched
+1. **`DEV-028`'s write-path fix.** An assessment stores versions and reason codes but not which
+   recorded sensitivity matched which ingredient, so the approved sensitivity template cannot be
+   filled from stored data. Phase 1.3 makes this reachable for the first time: there are now real
+   recorded sensitivities to name. A write-path change that must not become a read-path one.
+2. **Phase 5.2's substance normalization for a typed term.** Every hand-entered allergy is unmatched
    and therefore invisible to the one rule that would use it. This is the difference between Phase
-   1.3's records existing and working.
+   1.3's records existing and working - and now also the difference between Phase 1.4's
+   `NOTIFICATIONS` consent governing a real alert stream and governing an empty one.
+3. **Phase 2.5's item deletion**, the moment the retention matrix exists. `DEV-032` has been waiting
+   on the same document as `DEV-036` and is the smallest thing that unblocks with it.
 
-**Not next, and why.** A missed-dose scheduler (`DEV-011`) is blocked on a product decision rather
-than on work: the grace window has no answer, and `18` forbids shaming copy, so "how long before we
-tell a relative" is a question with a wrong answer rather than a missing one.
+**Not next, and why.** The export-and-deletion shell (`DEV-036`) is a document, not a feature. "Get
+me a copy" and "remove it" cannot be answered without a retention matrix saying what is kept
+regardless, and this build has records that must survive a deletion request with no approved
+statement of which: `audit_event` and `consent_receipt` both refuse DELETE to every role, and
+`dose_event` is what a Visit Pack is built from. Five deviations now converge on that one missing
+document - `DEV-009`, `DEV-032`, `DEV-034`, `DEV-035`, `DEV-036` - and it is a retention and
+disclosure decision rather than an engineering one. Inventing it would embed an unapproved answer to
+"what does Kynviora keep about you after you ask it to stop".
+
+A missed-dose scheduler (`DEV-011`) is blocked the same way: the grace window has no answer, and `18`
+forbids shaming copy, so "how long before we tell a relative" is a question with a wrong answer
+rather than a missing one.
 
 Note what none of this clears: `BLK-006`. The reviewer console is the workflow a qualified reviewer
 would use, the shadow run is what they would look at, and no qualified reviewer exists. Nothing in
@@ -201,12 +222,31 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 
 ## Next three planned tasks
 
-1. Phase 1.4's consent enforcement and the export-and-deletion shell.
-2. `DEV-028`'s write-path fix - which sensitivity matched which ingredient.
-3. Phase 5.2's substance normalization, so a typed allergy becomes one a rule can see.
+1. `DEV-028`'s write-path fix - which sensitivity matched which ingredient.
+2. Phase 5.2's substance normalization, so a typed allergy becomes one a rule can see.
+3. Phase 2.5's item deletion, once the retention matrix exists.
 
 ## Recent decisions worth knowing
 
+- **DEC-094** - consent is a **state**, not a log. `CONSENT_ENFORCEMENT` answers for all eight
+  purposes under a `satisfies Record<ConsentPurpose, ConsentEnforcement>`, so a purpose added later
+  without an answer fails to compile. Two are `ENFORCED`, five govern behaviour this build does not
+  have and say so on their own row, one is not offered as a choice at all. The server reports the
+  enforcement; the client never infers it, and defaults an unrecognised value to "stops nothing" -
+  the pessimistic reading. An absent receipt is not agreement, and "never answered" is a different
+  sentence from "answered no".
+- **DEC-095** - withdrawing notifications stops **every** notification, a critical safety alert
+  included. The check sits first in `selectRecipients`, before the owner short-circuit and before
+  every grant-shaped check, and nothing pierces it: quiet hours are a timing preference (DEC-078),
+  consent is whether Kynviora may contact somebody at all. `CAREGIVER_SHARING` excludes caregivers
+  and never the owner, is checked before the grant state, and does not revoke read access - the copy
+  says which half it does not do. Two new exclusion reasons keep "they asked not to be contacted" out
+  of `CAPABILITY_MISSING`.
+- **DEC-096** - consent is strictly the caller's own and there is no step-up on it. Neither route
+  takes a user and neither could; the body carries no policy version and no timestamp, because a
+  client that could name the policy version it agreed to could record agreement to a text nobody
+  showed them. No confirmation step either: friction on withdrawal and not on granting is a design
+  that has taken a side. Withdrawing writes a row and never changes one.
 - **DEC-091** - provenance is derived from **who is writing** and there is no field to send it. The
   draft has none, the body schema is `.strict()`, and `provenanceForRelationship` has two possible
   answers - so `IMPORTED` and `REVIEWER_CONFIRMED` are unreachable from a phone. Phase 1.3's first
@@ -962,3 +1002,38 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
      suite - files in parallel, several holding their own engine - it crosses the line: one run
      failed and the next passed with nothing changed. `main.test.ts` names the allowance and says
      why. The migration count only grows.
+160. Do not treat an existing append-only table as a feature. `consent_receipt` had a trigger,
+     supersession, RLS policies and its own authorization tests since Stage 1, and **nothing read
+     it** - so the exit criterion "revoking optional consent disables the associated behavior" was
+     zero per cent met by a table that looked finished. Grep for a reader before believing a status
+     line. The same question is worth asking of every other table that has never appeared in a
+     `SELECT` outside its own test.
+161. Do not add a consent switch without saying what withdrawing it stops **in this build**. Five of
+     the eight purposes govern behaviour that does not exist here; a screen where all eight look
+     alike is a screen where somebody turns off "analytics" and believes they stopped something.
+     `CONSENT_ENFORCEMENT` is a total record so the question cannot be skipped, and the sentence
+     says both halves - nothing happens yet, **and** your answer is kept.
+162. Do not let an urgency pierce consent the way it pierces quiet hours. A `CRITICAL` alert passes
+     a quiet window (DEC-078) because that is a timing preference and the alert still arrives.
+     Continuing to send to somebody who withdrew consent is not a safety feature; it is sending
+     without consent. The check goes first in `selectRecipients`, before the owner short-circuit,
+     and the owner is not exempt from their own answer about their own device.
+163. Do not add a consent check without giving every existing fixture a receipt. Four dispatch
+     suites went red at once and each failure read as "nobody was selected" - which is what a broken
+     selector looks like too. That they went red is the enforcement working; a suite that stayed
+     green would have meant the check was not on the path. And seed it in `beforeAll`, not
+     `beforeEach`: `consent_receipt` refuses DELETE to every role, so there is no cleanup for
+     anybody (trap 105, fifth time).
+164. Do not compute "which sentence goes beside this control" in `apps/**`. The chip that says a
+     switch stops nothing, and whether the button reads "Agree" or "Turn this off", are decisions
+     with a wrong answer - and `apps/**` is outside the test run (`BLK-002`), so a decision made
+     there is one nothing checks. Both moved into `consentRowView` and are asserted there.
+165. Do not ship a request form for something nothing acts on. `04` Phase 1.4 asks for an export and
+     deletion "shell", and a settings row that opens nothing tells somebody a control exists - on
+     the screen where they would go looking for it in the situation that matters. The sentence
+     saying it is not built is the honest version, and it is the same choice `04` Phase 1.1's
+     missing account row already made (`DEV-036`).
+166. Do not assume the surface partition test covers a verb it has never injected. It built its
+     requests with `method === 'POST' ? {payload} : {}` and had only ever listed `GET` and `POST`,
+     so the first `PUT` route in the codebase would have been checked against nothing. Extend the
+     helper with the verb, not only the list.

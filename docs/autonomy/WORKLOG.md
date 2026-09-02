@@ -2514,3 +2514,118 @@ real PostgreSQL, and eight end to end through the client the app ships.
 `04` Phase 1.3's expected output now reads true except for conditions, and both exit criteria hold.
 The first is enforced by a field that does not exist rather than by a check, which is what makes the
 second - already met by the rule engine - mean anything at all.
+
+### Phase 1.4 - the log that became a state
+
+`consent_receipt` has been in migration `0002` since Stage 1: append-only by trigger, superseding
+through `supersedes_id`, refusing UPDATE and DELETE to every role including the database owner, with
+a policy pair requiring the row to be the caller's own and its own authorization tests. And nothing
+had ever read it. That is a consent **log**, and `04` Phase 1.4's exit criterion - "revoking optional
+consent disables the associated behavior" - is about a consent **state**. Writing a row satisfies
+none of it.
+
+**What makes it a state is a total record over the vocabulary.** `CONSENT_ENFORCEMENT` gives each of
+the eight purposes one of three answers - `ENFORCED`, `NOTHING_TO_STOP`, `REQUIRED` - under a
+`satisfies Readonly<Record<ConsentPurpose, ConsentEnforcement>>`, so a purpose added later without an
+answer fails to compile rather than shipping as a switch nobody classified. Two are `ENFORCED`. Five
+govern behaviour this build does not have. One is not a choice.
+
+**The five that stop nothing say so, on their own row.** No analytics, no OCR (`BLK-007`), no
+connected-health integration, no research programme, and manual entry never reaches the shared
+catalog whichever way the switch is set (`15` A11). A consent screen where all eight switches look
+alike is a screen where somebody turns off "analytics", believes they have stopped something, and
+has been told a comforting untruth by a control. Each of those rows carries both halves - Kynviora
+does not do this at all at the moment, **and** your answer is recorded and will apply if it ever does
+
+- because the first alone reads as the answer being discarded (DEC-094).
+
+**The enforcement comes off the wire.** The client never computes it. A screen that did would still
+be saying "nothing happens yet" on the day a purpose became enforceable, and one that guessed
+optimistically would tell somebody they had stopped something they had not; `consentRowView` defaults
+an unrecognised value to `NOTHING_TO_STOP`, which is the pessimistic reading and the safe one. An end
+to end test asserts the server's answer equals `consentEnforcement()` for every purpose, so the two
+cannot drift apart quietly.
+
+**Withdrawing notifications stops all of them, a critical alert included.** This is the decision that
+could have gone the other way. A `CRITICAL` alert pierces quiet hours (DEC-078) because quiet hours
+are a timing preference - it still arrives. Consent is the basis on which Kynviora may contact
+somebody at all, and continuing to send to a person who said stop is not a safety feature, it is
+sending without consent. So the check sits first in `selectRecipients`, before the owner
+short-circuit and before every grant-shaped check, and the owner is not exempt from their own answer
+about their own device. The sentence saying so is above the control and is also the button's
+accessibility hint - the same rule DEC-084 keeps for archiving an item (DEC-095).
+
+**`CAREGIVER_SHARING` excludes caregivers and never the owner.** It is the profile owner's answer
+about their information reaching other people, read once and carried on every candidate, checked
+before the grant state - "I have stopped sharing" is a stronger statement than "your grant expired",
+and reporting the weaker one would put the wrong thing in the delivery record. It does not revoke
+read access, and the copy says which half it does not do and where the other control is, rather than
+leaving somebody believing they had cut a caregiver off.
+
+**Two new exclusion reasons, and neither is `CAPABILITY_MISSING`.** Putting a person who exercised a
+right into the same audit bucket as one whose grant was never wide enough would make the delivery
+record unable to answer the only question anybody asks it afterwards.
+
+**No receipt is not consent, in SQL as much as in the domain.** `loadCandidates` reads the newest
+receipt per user with `DISTINCT ON` - the index on `(user_id, purpose, recorded_at DESC)` serves it
+directly - and `COALESCE`s both values to `false`, with the mapper reading `=== true` rather than
+truthily so a driver returning `'t'` cannot become agreement. The proof that this is enforcement
+rather than decoration is that four existing suites went red at once: every dispatch fixture in the
+repository had to be given consent rows before its recipient assertions meant anything again.
+
+**Nobody answers for anybody else.** `consent_select` and `consent_insert` name no household, no
+grant and no capability - only `user_id = kynviora.current_user_id()` - so `GET /v1/consents` needs
+no `WHERE` clause and `PUT` takes the user from the request context. Three new SQL-level tests assert
+it at the table: a caregiver holding every capability there is still cannot record that the person
+they look after agreed to something. That is the one write in this product with no delegation path at
+all, and it has to be impossible rather than audited, because a receipt written in somebody's name
+leaves no trace distinguishable from the real thing (DEC-096).
+
+**The body carries no policy version and no timestamp**, and the schema is `.strict()` so all three
+of `userId`, `policyVersion` and `recordedAt` are refused rather than ignored. A client that could
+name the policy version it agreed to could record agreement to a text nobody showed them; a
+client-set timestamp is an audit trail written by the thing being audited.
+
+**No step-up, and no confirmation step.** `14` puts caregiver administration behind
+re-authentication and this is not that. Withdrawing is the safe direction, and granting widens
+nothing on its own because the grant that carries information to another person is itself behind
+step-up. Friction placed on withdrawal and not on granting is a design that has taken a side, which
+`16` and `02` both forbid; the consequence is stated before the control, and that is what `18` asks
+for here.
+
+**What is deliberately not built.** The export and deletion shell. `04` asks for one and there is no
+row, because a shell is a control that opens something and a settings row that opens nothing tells
+somebody a control exists - on the screen where they would look for it in exactly the situation that
+matters. The blocker underneath it is that "delete my data" cannot be answered without a retention
+matrix, and this build has records that must survive a deletion request with no approved statement of
+which: `audit_event` and `consent_receipt` both refuse DELETE to every role, and `dose_event` is what
+a Visit Pack is built from. `DEV-036` records it, and notes that the same missing document is what
+`DEV-009`, `DEV-032`, `DEV-034` and `DEV-035` are all waiting on - the largest single unblocking left
+in Stage 1.
+
+**Three small things.** The two label decisions on a consent row - the chip that says "nothing to
+turn off yet" and whether the button reads "Agree" or "Turn this off" - moved out of the Expo screen
+into `consentRowView`, because `apps/**` is outside the test run (`BLK-002`) and a choice made there
+is a choice nothing checks. The surface partition test grew a `PUT` case, since it had only ever
+injected `GET` and `POST` and the consent write is neither. And an `as unknown as` cast in an end to
+end test was unnecessary and lint said so: a spread is not excess-property checked, so the body a
+client could send by accident is exactly the body the test now sends.
+
+### State
+
+3403 tests passing across 116 files, up from 3316 across 112. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0 read from the log rather than from a wrapper (trap
+142 - the first run this session reported exit 0 to the task notification and 1 in the log, on a
+format check).
+
+87 new tests across seven suites: the domain state machine and decision validator (21), the
+presentation copy (14), the contracts row and list views (20), the API against real PostgreSQL
+including the enforcement through the real dispatcher (15), three RLS cases in SQL, two on the
+surface partition, and twelve end to end through the client the app ships.
+
+`04` Phase 1.4's expected output now reads true except for the export and deletion shell, and both
+exit criteria hold. The first - "revoking optional consent disables the associated behavior" - is a
+property of `selectRecipients` rather than of a row, asserted through the real dispatcher against
+real receipts. The second - "consent state is auditable and localizable" - is the append-only trigger
+and the stored `policy_version` and `locale`, which are the database's properties rather than this
+phase's promises.

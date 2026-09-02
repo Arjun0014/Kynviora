@@ -2787,3 +2787,157 @@ conflict.
 
 **Sources.** `04` Phase 1.3; `04` Phase 5.2; `02`; `10`; `15` A11; `sync.ts`; migration `0004`;
 DEC-082.
+
+---
+
+## DEC-094 - Consent is a state, and the screen says which of the eight switches do anything
+
+**Date:** 2026-09-02
+**Phase:** 1.4
+
+**Status:** Accepted
+
+`04` Phase 1.4's exit criterion is "revoking optional consent disables the associated behavior".
+Writing a row does not satisfy it. `consent_receipt` had been append-only, superseding and tested
+since migration `0002` and **nothing had ever read it** - which is a consent _log_, not a consent
+_state_.
+
+**What makes it a state is a total record over the vocabulary.** `CONSENT_ENFORCEMENT` gives every
+one of the eight purposes one of three answers: `ENFORCED` (something in the code path checks it),
+`NOTHING_TO_STOP` (the behaviour it would govern does not exist in this build), or `REQUIRED` (the
+product cannot run without it, so it is not offered as a choice at all). It is `satisfies
+Readonly<Record<ConsentPurpose, ConsentEnforcement>>`, so a purpose added to the vocabulary without
+an answer here fails to compile rather than shipping as a switch nobody classified.
+
+**Two of the eight enforce something, and the screen says so on the row.** `NOTIFICATIONS` and
+`CAREGIVER_SHARING` change what `selectRecipients` does. The other five govern behaviour this build
+does not have - no analytics, no OCR (`BLK-007`), no connected-health integration, no research
+programme, and manual entry never reaches the shared catalog by construction (`15` A11). Offering a
+person a switch that stops nothing while the screen implies otherwise is the `10` failure this
+codebase spends the most care avoiding: they would believe they had turned something off. Each such
+row carries "Kynviora does not do this at all at the moment. Your answer is recorded and will apply
+if it ever does" - both halves, because the first alone reads as the answer being discarded.
+
+**The server reports the enforcement; the client never infers it.** `ConsentStandingLine.enforcement`
+comes off the wire and `consentRowView` reads it, defaulting an unrecognised value to
+`NOTHING_TO_STOP` - the pessimistic reading. A screen that computed this would keep saying "nothing
+happens yet" on the day a purpose became enforceable, and a client that guessed optimistically would
+tell somebody they had stopped something they had not. An end-to-end test asserts the server's
+answer equals `consentEnforcement()` for every purpose, so the two cannot drift.
+
+**Deny by default, and "never answered" is not "answered no".** An absent receipt is `granted:
+false` for every purpose including the required one - "required" is a statement about what the
+product needs, not a licence to assume an answer - and `everAnswered` is reported separately so the
+screen can say "you have not answered this yet, so Kynviora treats it as not agreed" instead of
+letting somebody discover it. `PROFILE_DATA` is not exempt.
+
+**The standing answer is the newest receipt, not the end of the supersession chain.** The table
+records `supersedes_id` and `consentStateFrom` deliberately does not follow it: a chain with a
+broken link would produce no answer at all, and "no answer" here means "not granted" - the safe
+direction, but for the wrong reason. Reading the newest row by `recorded_at` stays correct when the
+chain does not. A tie goes to the **withdrawal**, because somebody who both granted and withdrew at
+the same instant has said something Kynviora must not resolve in its own favour.
+
+**Sources.** `04` Phase 1.4; `16`; `14`; `10`; `02`; `15` A11; migration `0002`; DEC-045; `BLK-007`.
+
+---
+
+## DEC-095 - Withdrawing notifications stops every notification, a critical safety alert included
+
+**Date:** 2026-09-02
+**Phase:** 1.4
+
+**Status:** Accepted
+
+This is the decision on this phase that could reasonably have gone the other way, and it did not.
+
+**Consent is checked first in `selectRecipients`, before the owner short-circuit and before every
+grant-shaped check.** A `CRITICAL` alert pierces quiet hours (DEC-078) because quiet hours are a
+_timing_ preference - the alert still arrives, later or on another channel. Consent is the basis on
+which Kynviora may contact somebody **at all**, and continuing to send to a person who said stop is
+not a safety feature; it is sending without consent. So there is no urgency that pierces it, and the
+check is not grant-shaped: the profile owner is not exempt from their own answer, because it is
+their own device and their own decision about it.
+
+**The sentence is above the control, not under it.** "Nothing will be sent to your device at all -
+including a critical safety alert about a medicine in this household. Everything is still recorded
+and waiting when you open Kynviora." Both halves, and before the button, which is the same rule
+DEC-084 keeps for archiving an item (archiving turns the safety watch off). It is also the button's
+accessibility hint, so it is not sight-only. A person who believed a recall would still reach them
+would find out on the night it mattered.
+
+**`CAREGIVER_SHARING` is the profile owner's answer about their information reaching other people,
+and it excludes caregivers only.** It is carried on every candidate because that is where the
+decision is made, but it is a property of the profile rather than of the person being considered -
+withdrawing it is "stop telling other people about me", never "stop telling me". It is checked
+before the grant state, because "I have stopped sharing" is a stronger statement than "your grant
+expired", and reporting the weaker one would describe the wrong thing in the audit trail.
+
+**It does not revoke read access, and the copy says so.** "They stop being sent anything about you.
+They can still see what you have already shared with them - to change that, remove their access on
+the Care screen." Stopping notifications is not removing access; a sentence implying otherwise would
+leave somebody believing they had cut off a caregiver they had not. Removing access is a separate
+control that is behind step-up (`14`), and this one names it rather than leaving them looking.
+
+**Two new exclusion reasons rather than one, and neither is `CAPABILITY_MISSING`.**
+`CONSENT_WITHDRAWN` and `CAREGIVER_SHARING_WITHDRAWN` are distinct from each other and from every
+existing reason. Reporting a person who exercised a right in the same audit bucket as one whose
+grant was never wide enough would make the delivery record unable to answer the only question anyone
+would ask it afterwards.
+
+**No receipt is not consent, in SQL as well as in the domain.** `loadCandidates` `COALESCE`s both
+values to `false` and the mapper reads `=== true` rather than truthily, so a driver returning `'t'`
+or `1` cannot become agreement. Every existing dispatch fixture had to be given consent rows before
+its recipient assertions meant anything again - which is the enforcement working, found by four
+suites going red at once.
+
+**Sources.** `04` Phase 1.4; `14`; `16`; `10`; `02`; DEC-078; DEC-084; `15` A6.
+
+---
+
+## DEC-096 - Consent is strictly the caller's own, and no step-up stands between a person and withdrawing it
+
+**Date:** 2026-09-02
+**Phase:** 1.4
+
+**Status:** Accepted
+
+**Neither route takes a user, and neither could accept one.** `consent_select` and `consent_insert`
+have required `user_id = kynviora.current_user_id()` since migration `0002`, with no relationship
+clause of any kind - no household, no grant, no capability. So `GET /v1/consents` needs no `WHERE`
+at all and `PUT /v1/consents` takes `user_id` from the request context. Consent is the one thing in
+this product nobody may exercise or read on somebody else's behalf: not a profile owner for a
+caregiver, not a caregiver holding every capability there is for the person they look after. Three
+SQL-level tests assert it at the table, so a future route that named a user would fail there rather
+than succeed quietly.
+
+**The body carries no policy version and no timestamp.** Both are the server's. A client that could
+name the policy version it agreed to could record agreement to a text nobody showed them, and a
+client-set `recorded_at` is an audit trail written by the thing being audited. The schema is
+`.strict()`, so `userId`, `policyVersion` and `recordedAt` are all refused rather than ignored - and
+an end-to-end test sends each of the three and then asserts nothing was written.
+
+**There is no step-up on consent, and that is deliberate.** `14` puts _caregiver administration_
+behind re-authentication, and this is not that: withdrawing is the safe direction, and granting
+widens nothing on its own, because the grant that would carry information to another person is
+itself behind step-up. Friction placed on withdrawal and not on granting is a design that has taken
+a side, which `16` and `02` both forbid. For the same reason there is no confirmation step: the
+consequence is stated before the control, and that is the whole of what `18` asks for here.
+
+**Withdrawing writes a row; it never changes one.** The route reads the previous standing receipt
+and points the new one at it through `supersedes_id`, and the append-only trigger refuses UPDATE and
+DELETE to **every** role, the database owner included. That is the "auditable" half of the second
+exit criterion, and it is the database's property rather than a handler's promise. It is also why
+the API and dispatch suites seed consent once in `beforeAll` rather than cleaning up per test: there
+is no cleanup available, to anybody (trap 105, again).
+
+**The audit event names the purpose and the answer, and nothing else.** `CONSENT_GRANTED` or
+`CONSENT_WITHDRAWN` against the receipt ID, with the purpose, the policy version and the locale.
+Both are closed vocabularies and neither says anything about anybody's health (`14`).
+
+**A purpose this build does not know is refused rather than stored.** A receipt naming a purpose
+nothing can enforce is a record of agreement to something undefined, which is worse than no record.
+And `granted` is not coerced: "yes" and "on" are not answers to a consent question, and a truthy
+value arriving over the wire must not become agreement.
+
+**Sources.** `04` Phase 1.4; `14`; `16`; `18`; `02`; `19`; migration `0002`; DEC-013; DEC-045.

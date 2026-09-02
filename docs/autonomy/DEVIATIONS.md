@@ -840,3 +840,49 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   closed vocabulary of exactly those (free text is not acceptable here - an open condition field is
   a diagnosis box, which `04` Phase 1.3's first exit criterion is written against), then the same
   four layers allergies now have. The provenance mechanism (DEC-091) transfers unchanged.
+
+---
+
+## DEV-036 - There is no export or deletion control, and the screen says so instead of showing one
+
+- **Affected specification**: `04` Phase 1.4 lists "initial data export / deletion request workflow
+  shell" among its expected output, and `16` requires a person to be able to get a copy of what is
+  held about them and to have it removed.
+- **Expected behaviour**: a row on the consent screen that starts a request for a copy of
+  everything, and a row that starts a request for it all to be removed - even if the fulfilment
+  behind them is manual at this stage.
+- **Implemented behaviour**: neither row exists. The consent screen carries one sentence in its
+  place: "Getting a copy of everything, or having it removed, is not built yet. Kynviora will not
+  pretend otherwise by showing a button that does nothing." Everything else in Phase 1.4 - the
+  eight purposes, the append-only receipts, the withdrawal path, and the enforcement in
+  `selectRecipients` - is built and tested.
+- **Reason**: a shell needs a retention matrix, and there is not one. **Four existing deviations
+  converge on the same missing document**: `DEV-009` (Visit Pack retention), `DEV-032` (no item
+  delete), `DEV-034` (emergency information - third-party personal data with no retention shape),
+  and the retention question `DEV-035` inherits. "Delete my data" cannot be answered without saying
+  what is kept regardless, and this build has records that must survive a deletion request and no
+  approved statement of which: `audit_event` refuses DELETE to every role including the database
+  owner (DEC-013), `consent_receipt` does the same, and `dose_event` is the evidential record a
+  Visit Pack is built from. A shell that collected the request and left those tables untouched
+  would tell somebody their data was removed when the parts that matter most were not.
+
+  The export half is narrower but not free: `16` asks for a portable copy, and what a household
+  holds spans profile facts, items, dose events, assessments and receipts, several of which quote
+  source material whose redistribution is `BLK-004`'s open question. A shell that exported "some of
+  it" is worse than none, because a person checks a copy once.
+
+  What made a row genuinely unshippable rather than merely unfinished is `04`'s own word: a _shell_
+  is a control that opens something. A settings row that opens nothing tells somebody a control
+  exists, and this is the screen where they would go looking for it in the situation that matters -
+  the same reason the You screen has never shown an account row (`04` Phase 1.1).
+
+- **Temporary or permanent**: temporary, and blocked on a written decision rather than on work.
+- **Risk**: low, stated, and in the safe direction. The failure it leaves is a person having to ask
+  by some other means for something Kynviora cannot yet do - which the sentence tells them
+  explicitly. The opposite failure, a request form that records an intention nothing acts on, is a
+  product telling somebody their data has been dealt with when nothing has happened; a copy test
+  asserts the sentence says "not built yet" and names the reason rather than promising a date.
+- **Required future work**: the retention matrix `16` requires - for each table, what is kept after
+  a deletion request and on what basis, with the append-only tables named explicitly. Then the
+  export shape, then the two controls. This is the same document `DEV-009`, `DEV-032`, `DEV-034` and
+  `DEV-035` are all waiting on, and writing it is the largest single unblocking left in Stage 1.
