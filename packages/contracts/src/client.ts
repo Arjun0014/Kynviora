@@ -113,6 +113,30 @@ export interface ItemDetailResponse {
     readonly settledNote: string | null;
   };
   readonly attentionReasonCodes: readonly string[];
+  /**
+   * The version this detail was read at.
+   *
+   * Sent back on a change. `13` sets `owned_item`'s conflict policy to `ASK_USER`, so an edit
+   * that did not say what it was editing could only be last-write-wins.
+   */
+  readonly version: number;
+  /**
+   * Whether this caller may change it.
+   *
+   * Evaluated on the server with the same expression the update policy uses, so the screen and
+   * the policy cannot disagree. A screen withholds the controls rather than offering ones the
+   * write would refuse - absent rather than disabled, as DEC-045 has it.
+   */
+  readonly mayEdit: boolean;
+  /**
+   * The stored values, keyed as the manual-entry form keys them.
+   *
+   * Separate from `categoryFields` and `sharedFields`, which are presentation. An editor cannot
+   * use a rendered label - matching on one would be the "branch on message text" `13` forbids -
+   * and a form needs the field's own name to send it back.
+   */
+  readonly editableValues: Readonly<Record<string, string | null>>;
+  readonly stoppedOn: string | null;
   readonly serverTime: string;
 }
 
@@ -174,6 +198,49 @@ export interface ItemCreated {
   readonly completeNote: string | null;
   readonly note: string;
   readonly replayed: boolean;
+  readonly serverTime: string;
+}
+
+/**
+ * A change to an item that already exists (`04` Stage 2 - update, archive, review).
+ *
+ * Absent means unchanged and `null` means cleared - collapsing them would mean either that
+ * nothing can ever be un-entered, or that every save wipes every field the screen did not happen
+ * to send.
+ *
+ * There is no field for a verification state, a catalog identifier, an item kind or a
+ * `lastReviewedAt`: editing a record is not evidence about a pack, and `markReviewed` is a
+ * request the server timestamps rather than a time a client supplies.
+ */
+export interface ItemUpdateBody {
+  readonly expectedVersion: number;
+  readonly displayName?: string;
+  readonly brand?: string | null;
+  readonly manufacturer?: string | null;
+  readonly market?: string | null;
+  readonly recordedGtin?: string | null;
+  readonly recordedLotCode?: string | null;
+  readonly expiresOn?: string | null;
+  readonly startedOn?: string | null;
+  readonly notes?: string | null;
+  readonly strengthText?: string | null;
+  readonly dosageForm?: string | null;
+  readonly directionsText?: string | null;
+  readonly personalCareCategory?: string | null;
+  readonly ingredientDeclarationRaw?: string | null;
+  readonly labelVersionNote?: string | null;
+  readonly lifecycleState?: string;
+  readonly stoppedOn?: string | null;
+  readonly markReviewed?: boolean;
+}
+
+export interface ItemUpdated {
+  readonly id: string;
+  readonly version: number;
+  readonly lifecycleState: string;
+  /** Field names, never values. `14` keeps a medicine record's content out of a log. */
+  readonly changedFields: readonly string[];
+  readonly lastReviewedAt: string | null;
   readonly serverTime: string;
 }
 
@@ -830,6 +897,15 @@ export interface KynvioraClient {
    * body's shape rather than of this comment: there is no field for either.
    */
   createItem(body: ManualEntryBody, idempotencyKey: string): Promise<ApiOutcome<ItemCreated>>;
+  /**
+   * Change an item that already exists (`04` Stage 2 - update, archive, review).
+   *
+   * No idempotency key, and that is not an omission. The write is conditional on
+   * `expectedVersion`, so a retry either lands once or comes back as a conflict - the same
+   * guarantee a key gives, from the mechanism `13`'s `ASK_USER` policy already required. A second
+   * key would be a second answer to the same question.
+   */
+  updateItem(itemId: string, body: ItemUpdateBody): Promise<ApiOutcome<ItemUpdated>>;
   listAlerts(): Promise<ApiOutcome<AlertsResponse>>;
   /**
    * How supported jurisdictions treat one substance.
@@ -1026,7 +1102,12 @@ export function createClient(options: ClientOptions): KynvioraClient {
       query === undefined ? { method: 'GET', path } : { method: 'GET', path, query },
     );
 
-  const send = <T>(method: 'POST' | 'PUT', path: string, body: unknown, idempotencyKey?: string) =>
+  const send = <T>(
+    method: 'POST' | 'PUT' | 'PATCH',
+    path: string,
+    body: unknown,
+    idempotencyKey?: string,
+  ) =>
     request<T>(transport, {
       method,
       path,
@@ -1060,6 +1141,11 @@ export function createClient(options: ClientOptions): KynvioraClient {
     // The domain refuses and names the field; this sends what it was given.
     createItem: (body, idempotencyKey) =>
       send<ItemCreated>('POST', '/v1/items', body, idempotencyKey),
+
+    // PATCH rather than PUT, because absent and `null` mean different things here and a whole-
+    // document PUT could not express "leave this alone".
+    updateItem: (itemId, body) =>
+      send<ItemUpdated>('PATCH', `/v1/items/${encodeURIComponent(itemId)}`, body),
 
     // No profile parameter: the route returns what row-level security admits, which is `13`'s
     // "never trust a profile ID in the request as proof of access" applied by construction.

@@ -40,6 +40,14 @@ export interface ItemDetailProps {
   readonly view: ItemDetailScreenView | null;
   readonly state: ScreenStateKind;
   readonly onClose: () => void;
+  /**
+   * Opens the editing screen.
+   *
+   * Offered only where the server said this caller may change the item - absent rather than
+   * disabled (DEC-045). A caregiver who may read a medicine and not change it sees a screen with
+   * no control, not a greyed-out one telling them what they are not trusted with.
+   */
+  readonly onEdit?: () => void;
 }
 
 function FieldRow({ field }: { readonly field: ItemFieldResponse }) {
@@ -57,7 +65,7 @@ function FieldRow({ field }: { readonly field: ItemFieldResponse }) {
   );
 }
 
-export function ItemDetail({ view, state, onClose }: ItemDetailProps) {
+export function ItemDetail({ view, state, onClose, onEdit }: ItemDetailProps) {
   return (
     <View style={styles.container}>
       <ScreenState state={state} />
@@ -137,6 +145,12 @@ export function ItemDetail({ view, state, onClose }: ItemDetailProps) {
           </View>
         </>
       )}
+
+      {/* Absent where the caller may not change the item, and absent where the detail did not
+          arrive - a control offered over nothing would open a form with no version to send. */}
+      {view !== null && view.mayEdit && onEdit !== undefined ? (
+        <PrimaryButton label="Change what is recorded" variant="secondary" onPress={onEdit} />
+      ) : null}
 
       <PrimaryButton label="Back to the shelf" variant="secondary" onPress={onClose} />
     </View>

@@ -2002,3 +2002,188 @@ describe('writing down a pack, end to end', () => {
     expect(outcome.kind).toBe('REFUSED');
   });
 });
+
+describe('changing an item, end to end', () => {
+  /**
+   * Stage 2's "update, archive, and review", through the code path the Expo screens use.
+   *
+   * The property worth proving over a real connection is the round trip: what the detail hands an
+   * editor, sent back unchanged, is not a change. A prefill that got one field wrong would clear
+   * a value the person never touched, the write would succeed, and nothing else would notice.
+   */
+
+  const freshMedicine = async (name: string): Promise<string> => {
+    const created = await owner.createItem(
+      manualEntryDraft({
+        profileId: SEED.profileId,
+        itemKind: 'MEDICINE',
+        values: {
+          displayName: name,
+          brand: 'Synthetic Brand',
+          strengthText: '500 mg',
+          dosageForm: 'Tablet',
+          market: 'GB',
+          recordedGtin: '1234567890128',
+          notes: 'The blue box.',
+        },
+      }),
+      randomUUID(),
+    );
+    if (created.kind !== 'OK') throw new Error('expected the item to be created');
+    return created.value.id;
+  };
+
+  it('hands an editor a prefill that saving back unchanged is not a change', async () => {
+    const id = await freshMedicine('Editable Tablet (synthetic)');
+
+    const detail = await owner.itemDetail(id);
+    if (detail.kind !== 'OK') throw new Error('expected the detail to load');
+    const view = itemDetailScreenView(detail.value);
+
+    expect(view.mayEdit).toBe(true);
+    expect(view.version).toBe(1);
+
+    const unchanged = await owner.updateItem(id, {
+      expectedVersion: view.version,
+      ...detail.value.editableValues,
+    });
+
+    expect(unchanged.kind).toBe('REFUSED');
+    if (unchanged.kind !== 'REFUSED') return;
+    expect(unchanged.detail?.['reason_code']).toBe('no_change');
+  });
+
+  it('changes a field and shows it back', async () => {
+    const id = await freshMedicine('Changed Tablet (synthetic)');
+
+    const updated = await owner.updateItem(id, { expectedVersion: 1, strengthText: '250 mg' });
+    expect(updated.kind).toBe('OK');
+    if (updated.kind !== 'OK') return;
+    expect(updated.value.version).toBe(2);
+    expect(updated.value.changedFields).toEqual(['strengthText']);
+
+    const detail = await owner.itemDetail(id);
+    if (detail.kind !== 'OK') return;
+    expect(itemDetailScreenView(detail.value).categoryFields.map((f) => f.value)).toContain(
+      '250 mg',
+    );
+  });
+
+  it('empties a field on request, and the detail says nobody entered it', async () => {
+    // On an edit a blank field is "empty this", which is the only way to remove a value somebody
+    // typed by mistake. Stored as an absence, so the detail reads "Not recorded".
+    const id = await freshMedicine('Emptied Tablet (synthetic)');
+
+    const updated = await owner.updateItem(id, { expectedVersion: 1, notes: null });
+    expect(updated.kind).toBe('OK');
+
+    const detail = await owner.itemDetail(id);
+    if (detail.kind !== 'OK') return;
+    const notes = itemDetailScreenView(detail.value).sharedFields.find(
+      (field) => field.label === 'Your notes',
+    );
+    expect(notes?.value).toBeNull();
+    expect(notes?.absentNote).not.toBeNull();
+  });
+
+  it('refuses a stale change and hands back the version to use', async () => {
+    // `13` sets this entity's conflict policy to `ASK_USER`. A second editor is told rather than
+    // overwritten, and the screen re-reads instead of retrying the same body.
+    const id = await freshMedicine('Contested Tablet (synthetic)');
+
+    const first = await owner.updateItem(id, { expectedVersion: 1, strengthText: '250 mg' });
+    expect(first.kind).toBe('OK');
+
+    const stale = await owner.updateItem(id, { expectedVersion: 1, strengthText: '100 mg' });
+    expect(stale.kind).toBe('REFUSED');
+    if (stale.kind !== 'REFUSED') return;
+
+    expect(stale.code).toBe('VERSION_CONFLICT');
+    expect(stale.detail?.['currentVersion']).toBe(2);
+    expect(screenStateForFailure(stale)).toBe('RECOVERABLE_ERROR');
+
+    // The first change stands.
+    const detail = await owner.itemDetail(id);
+    if (detail.kind !== 'OK') return;
+    expect(detail.value.categoryFields.map((f) => f.value)).toContain('250 mg');
+  });
+
+  it('stops an item, and the shelf stops asking about it', async () => {
+    // A shelf that kept nagging about packs somebody has finished with is the alarm optimisation
+    // `02` refuses, and worse, it teaches people to ignore the list that matters.
+    const id = await freshMedicine('Finished Tablet (synthetic)');
+
+    const before = await owner.listItems({
+      profileId: SEED.profileId,
+      attention: 'NEEDS_VERIFICATION',
+      limit: 100,
+    });
+    if (before.kind !== 'OK') throw new Error('expected the shelf to load');
+    expect(before.value.items.map((item) => item.id)).toContain(id);
+
+    const stopped = await owner.updateItem(id, {
+      expectedVersion: 1,
+      lifecycleState: 'STOPPED',
+    });
+    expect(stopped.kind).toBe('OK');
+
+    const after = await owner.listItems({
+      profileId: SEED.profileId,
+      attention: 'NEEDS_VERIFICATION',
+      limit: 100,
+    });
+    if (after.kind !== 'OK') throw new Error('expected the shelf to load');
+    expect(after.value.items.map((item) => item.id)).not.toContain(id);
+  });
+
+  it('marks an item looked at without confirming anything about the product', async () => {
+    // `08` reserves confirmation for something read off the pack. Looking at a record is not that,
+    // and the copy on the control says so.
+    const id = await freshMedicine('Checked Tablet (synthetic)');
+
+    const reviewed = await owner.updateItem(id, { expectedVersion: 1, markReviewed: true });
+    expect(reviewed.kind).toBe('OK');
+    if (reviewed.kind !== 'OK') return;
+    expect(reviewed.value.lastReviewedAt).not.toBeNull();
+
+    const detail = await owner.itemDetail(id);
+    if (detail.kind !== 'OK') return;
+    expect(detail.value.attentionReasonCodes).not.toContain('NEVER_REVIEWED');
+    // Three chips, all still unconfirmed.
+    const view = itemDetailScreenView(detail.value);
+    for (const chip of [view.identity, view.formulation, view.batch]) {
+      expect(chip?.label).not.toMatch(/confirmed/i);
+    }
+  });
+
+  it('tells a stranger nothing about an item they cannot reach', async () => {
+    const id = await freshMedicine('Private Tablet (synthetic)');
+
+    const refused = await stranger.updateItem(id, { expectedVersion: 1, strengthText: '250 mg' });
+    expect(refused.kind).toBe('UNAVAILABLE');
+  });
+
+  it('rejects an unauthenticated change', async () => {
+    const id = await freshMedicine('Anonymous Edit Tablet (synthetic)');
+
+    const refused = await anonymous.updateItem(id, { expectedVersion: 1, strengthText: '250 mg' });
+    expect(refused.kind).toBe('UNAUTHENTICATED');
+  });
+
+  it('cannot be used to claim a verification state', async () => {
+    // `08`, and the same boundary creation keeps. The body has no field for it and the schema is
+    // strict, so an attempt is a refusal rather than a key that is quietly ignored.
+    const id = await freshMedicine('Unverifiable Tablet (synthetic)');
+
+    const outcome = await owner.updateItem(id, {
+      expectedVersion: 1,
+      ...{ identityVerification: 'CONFIRMED' },
+    });
+
+    expect(outcome.kind).toBe('REFUSED');
+
+    const detail = await owner.itemDetail(id);
+    if (detail.kind !== 'OK') return;
+    expect(itemDetailScreenView(detail.value).identity?.label).not.toMatch(/confirmed/i);
+  });
+});

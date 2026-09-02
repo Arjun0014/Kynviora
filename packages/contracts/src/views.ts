@@ -28,11 +28,13 @@ import {
   isCaregiverCapability,
   isEvidenceLevel,
   isItemKind,
+  isItemLifecycleState,
   isItemVerification,
   isMatchConfidence,
   type ActionUrgency,
   type EvidenceLevel,
   type ItemKind,
+  type ItemLifecycleState,
   type ItemVerification,
   type CaregiverCapability,
   type MatchConfidence,
@@ -879,6 +881,21 @@ export interface ItemDetailScreenView {
   readonly categoryFields: ItemDetailResponse['categoryFields'];
   readonly sharedFields: ItemDetailResponse['sharedFields'];
   readonly attention: ItemDetailResponse['attention'];
+  /** Narrowed, so an unreadable state offers no lifecycle controls rather than the wrong ones. */
+  readonly lifecycleState: ItemLifecycleState | null;
+  /** What a change has to be sent against (`13`, `ASK_USER`). */
+  readonly version: number;
+  /**
+   * Whether to offer the editing controls at all.
+   *
+   * Defaults to `false` where the server did not say. Deny by default (`14`) applies to a control
+   * as much as to a read: withholding one a person could have used costs a tap, and offering one
+   * the write refuses costs them a form they filled in for nothing.
+   */
+  readonly mayEdit: boolean;
+  /** Prefill for the edit form. Only string entries survive; anything else reads as absent. */
+  readonly editableValues: Readonly<Record<string, string>>;
+  readonly stoppedOn: string | null;
 }
 
 /**
@@ -904,7 +921,30 @@ export function itemDetailScreenView(response: ItemDetailResponse): ItemDetailSc
     categoryFields: response.categoryFields,
     sharedFields: response.sharedFields,
     attention: response.attention,
+    lifecycleState: isItemLifecycleState(response.lifecycleState) ? response.lifecycleState : null,
+    version: Number.isInteger(response.version) ? response.version : 0,
+    mayEdit: response.mayEdit === true,
+    editableValues: editableValues(response.editableValues),
+    stoppedOn: typeof response.stoppedOn === 'string' ? response.stoppedOn : null,
   };
+}
+
+/**
+ * The prefill, narrowed entry by entry.
+ *
+ * `null` becomes an absent key rather than the string "null", and a non-string is dropped
+ * entirely. Trap 101: a shape this build did not expect would otherwise be typed into a form as
+ * `[object Object]` and saved back over what was actually recorded - which is worse here than on
+ * a read-only screen, because the person would then own the wrong value.
+ */
+function editableValues(raw: unknown): Readonly<Record<string, string>> {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return Object.freeze({});
+
+  const values: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'string') values[key] = value;
+  }
+  return Object.freeze(values);
 }
 
 // ---------------------------------------------------------------------------

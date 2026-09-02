@@ -25,3 +25,4 @@ export * from './safetyReceipt.js';
 export * from './notificationPolicy.js';
 export * from './shelfAttention.js';
 export * from './manualEntry.js';
+export * from './itemUpdate.js';

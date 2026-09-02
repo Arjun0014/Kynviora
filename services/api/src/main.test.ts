@@ -31,9 +31,22 @@ const dataDirs: string[] = [];
  * Each server gets its own directory and port: PGlite is a single writer (see `db/src/seed.ts`),
  * and `port: 0` lets the OS pick so several can run at once.
  *
- * Starting one costs a PGlite instance and thirteen migrations, so the read-only tests share
+ * Starting one costs a PGlite instance and every migration, so the read-only tests share
  * {@link shared} and only the tests that need a different configuration start their own.
  */
+
+/**
+ * How long a test that boots a whole process is allowed.
+ *
+ * The suite's default is 30s and booting one takes most of that on its own - a PGlite instance
+ * plus sixteen migrations plus, for the seeded configurations, the seed. Under the full suite,
+ * where files run in parallel and several of them hold their own engine, it crosses the line: this
+ * failed one run and passed the next with nothing changed, and the migration count only grows.
+ *
+ * Raised here rather than globally, because 30s is the right default for a test that is only slow
+ * by accident, and these are slow on purpose. `beforeAll` already gets 60s for the same reason.
+ */
+const PROCESS_BOOT_TIMEOUT_MS = 60_000;
 async function startServer(overrides: Partial<MainConfig> = {}): Promise<StartedServer> {
   const dataDir = mkdtempSync(join(tmpdir(), 'kynviora-main-'));
   dataDirs.push(dataDir);
@@ -87,12 +100,16 @@ describe('the process starts and serves', () => {
     );
   });
 
-  it('starts with no authenticator when that is stated explicitly', async () => {
-    const server = await startServer({ devAuth: false, allowAnonymousStart: true, seed: false });
-    // It comes up, and it rejects every authenticated request, which is what was asked for.
-    expect((await fetch(`${server.url}/health`)).status).toBe(200);
-    expect((await get(server, '/v1/profiles')).status).toBe(401);
-  });
+  it(
+    'starts with no authenticator when that is stated explicitly',
+    async () => {
+      const server = await startServer({ devAuth: false, allowAnonymousStart: true, seed: false });
+      // It comes up, and it rejects every authenticated request, which is what was asked for.
+      expect((await fetch(`${server.url}/health`)).status).toBe(200);
+      expect((await get(server, '/v1/profiles')).status).toBe(401);
+    },
+    PROCESS_BOOT_TIMEOUT_MS,
+  );
 });
 
 describe('the authorization boundary, against a real engine', () => {
@@ -185,32 +202,37 @@ describe('the staff origin, against a real process', () => {
 });
 
 describe('the development seed', () => {
-  it('is idempotent across restarts of the same database', async () => {
-    // PGlite is a single writer, so the seed runs inside the process. Restarting must not
-    // duplicate the household or fail on the primary key.
-    const dataDir = mkdtempSync(join(tmpdir(), 'kynviora-seed-'));
-    dataDirs.push(dataDir);
+  // Two boots of the same database in one test, so it needs the allowance twice over.
+  it(
+    'is idempotent across restarts of the same database',
+    async () => {
+      // PGlite is a single writer, so the seed runs inside the process. Restarting must not
+      // duplicate the household or fail on the primary key.
+      const dataDir = mkdtempSync(join(tmpdir(), 'kynviora-seed-'));
+      dataDirs.push(dataDir);
 
-    const config: MainConfig = {
-      port: 0,
-      staffPort: null,
-      host: '127.0.0.1',
-      dataDir,
-      devAuth: true,
-      seed: true,
-      allowAnonymousStart: false,
-    };
+      const config: MainConfig = {
+        port: 0,
+        staffPort: null,
+        host: '127.0.0.1',
+        dataDir,
+        devAuth: true,
+        seed: true,
+        allowAnonymousStart: false,
+      };
 
-    const first = await start(config, { logger: noopLogger() });
-    const before = await get(first, `/v1/items?profileId=${SEED.profileId}`, SEED.userId);
-    expect(before.body.items).toHaveLength(3);
-    await first.stop();
+      const first = await start(config, { logger: noopLogger() });
+      const before = await get(first, `/v1/items?profileId=${SEED.profileId}`, SEED.userId);
+      expect(before.body.items).toHaveLength(3);
+      await first.stop();
 
-    const second = await start(config, { logger: noopLogger() });
-    started.push(second);
-    const after = await get(second, `/v1/items?profileId=${SEED.profileId}`, SEED.userId);
-    expect(after.body.items).toHaveLength(3);
-  });
+      const second = await start(config, { logger: noopLogger() });
+      started.push(second);
+      const after = await get(second, `/v1/items?profileId=${SEED.profileId}`, SEED.userId);
+      expect(after.body.items).toHaveLength(3);
+    },
+    PROCESS_BOOT_TIMEOUT_MS,
+  );
 
   it('seeds no safety or regulatory content', async () => {
     // Publishing either needs a qualified reviewer (`BLK-006`) and retrieved official documents

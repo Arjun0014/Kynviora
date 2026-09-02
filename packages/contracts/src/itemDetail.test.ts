@@ -47,6 +47,10 @@ function detail(overrides: Partial<ItemDetailResponse> = {}): ItemDetailResponse
       settledNote: 'Everything Kynviora asks for has been entered.',
     },
     attentionReasonCodes: [],
+    version: 1,
+    mayEdit: true,
+    editableValues: { displayName: 'Synthetic Tablet', strengthText: '500 mg' },
+    stoppedOn: null,
     serverTime: '2026-09-02T12:00:00.000Z',
     ...overrides,
   };
@@ -136,5 +140,60 @@ describe('the shelf row', () => {
       expect(Object.keys(view)).not.toContain(forbidden);
     }
     expect(view.attention).toHaveLength(2);
+  });
+});
+
+describe('what an editor is handed', () => {
+  /**
+   * The three fields an edit needs, narrowed rather than trusted.
+   *
+   * A screen that guessed any of them would guess wrong in the direction that costs something: it
+   * would offer a control the write refuses, send a change against a version nobody has, or show
+   * lifecycle controls for a state it could not read.
+   */
+
+  it('carries the version and the permission through', () => {
+    const view = itemDetailScreenView(detail({ version: 7, mayEdit: true }));
+    expect(view.version).toBe(7);
+    expect(view.mayEdit).toBe(true);
+  });
+
+  it('withholds the controls where the server did not say', () => {
+    // Deny by default (`14`), applied to a control. Withholding one a person could have used
+    // costs a tap; offering one the write refuses costs them a form filled in for nothing.
+    const missing = { ...detail() } as Record<string, unknown>;
+    delete missing['mayEdit'];
+
+    const view = itemDetailScreenView(missing as unknown as ItemDetailResponse);
+    expect(view.mayEdit).toBe(false);
+  });
+
+  it('withholds them for a value that is not a boolean', () => {
+    const view = itemDetailScreenView({
+      ...detail(),
+      mayEdit: 'yes',
+    } as unknown as ItemDetailResponse);
+    expect(view.mayEdit).toBe(false);
+  });
+
+  it('falls back to a version no write can succeed against', () => {
+    // Zero is not a version any row has, and the schema starts at 1. A response this client could
+    // not read produces a conflict rather than a silent overwrite of somebody else's change.
+    const view = itemDetailScreenView({
+      ...detail(),
+      version: 'three',
+    } as unknown as ItemDetailResponse);
+    expect(view.version).toBe(0);
+  });
+
+  it('offers no lifecycle controls for a state it cannot read', () => {
+    const view = itemDetailScreenView(detail({ lifecycleState: 'PAUSED' }));
+    expect(view.lifecycleState).toBeNull();
+  });
+
+  it('reads the three states it knows', () => {
+    for (const state of ['ACTIVE', 'STOPPED', 'ARCHIVED'] as const) {
+      expect(itemDetailScreenView(detail({ lifecycleState: state })).lifecycleState).toBe(state);
+    }
   });
 });

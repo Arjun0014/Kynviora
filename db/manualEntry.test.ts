@@ -261,3 +261,103 @@ describe('migration 0016 - one save arriving twice writes one row', () => {
     expect(definition).toMatch(/WHERE .*client_operation_id IS NOT NULL/i);
   });
 });
+
+describe('the version column an edit is conditional on', () => {
+  /**
+   * `13` sets `owned_item`'s conflict policy to `ASK_USER`, and `PATCH /v1/items/:itemId` writes
+   * `version = version + 1` inside the same statement that tests it. That only works while
+   * nothing else moves the column.
+   */
+
+  const insert = (name: string) =>
+    t.asUser(OWNER, (db) =>
+      db.query<{ id: string; version: number }>(
+        `INSERT INTO owned_item (profile_id, item_kind, display_name)
+         VALUES ($1, 'MEDICINE', $2)
+         RETURNING id, version`,
+        [PROFILE, name],
+      ),
+    );
+
+  it('starts at 1', async () => {
+    const inserted = await insert('Synthetic Tablet');
+    expect(inserted.rows[0]?.version).toBe(1);
+  });
+
+  it('is not moved by the touch trigger', async () => {
+    // `owned_item_touch` sets `updated_at` and nothing else. A trigger that also bumped the
+    // version would double-count every conditional write, and the route would be reporting a
+    // version no client had ever seen.
+    const inserted = await insert('Synthetic Tablet');
+    const id = inserted.rows[0]?.id ?? '';
+
+    await t.asUser(OWNER, (db) =>
+      db.query(`UPDATE owned_item SET notes = 'A note.' WHERE id = $1`, [id]),
+    );
+
+    const after = await t.asService((db) =>
+      db.query<{ version: number; updated_at: Date }>(
+        'SELECT version, updated_at FROM owned_item WHERE id = $1',
+        [id],
+      ),
+    );
+    expect(after.rows[0]?.version).toBe(1);
+    expect(after.rows[0]?.updated_at).toBeDefined();
+  });
+
+  it('makes a conditional write on a stale version affect no rows', async () => {
+    // The mechanism itself, at the layer that provides it. Two writers, one condition: the second
+    // changes nothing rather than overwriting the first.
+    const inserted = await insert('Synthetic Tablet');
+    const id = inserted.rows[0]?.id ?? '';
+
+    const first = await t.asUser(OWNER, (db) =>
+      db.query(
+        `UPDATE owned_item SET notes = 'First.', version = version + 1
+          WHERE id = $1 AND version = $2 RETURNING version`,
+        [id, 1],
+      ),
+    );
+    expect(first.rows.length).toBe(1);
+
+    const second = await t.asUser(OWNER, (db) =>
+      db.query(
+        `UPDATE owned_item SET notes = 'Second.', version = version + 1
+          WHERE id = $1 AND version = $2 RETURNING version`,
+        [id, 1],
+      ),
+    );
+    expect(second.rows.length).toBe(0);
+
+    const stored = await t.asService((db) =>
+      db.query<{ notes: string; version: number }>(
+        'SELECT notes, version FROM owned_item WHERE id = $1',
+        [id],
+      ),
+    );
+    expect(stored.rows[0]?.notes).toBe('First.');
+    expect(stored.rows[0]?.version).toBe(2);
+  });
+
+  it('refuses a stopped date before the started date', async () => {
+    // `owned_item_dates_ordered`. The domain refuses it first and names the field; this is what
+    // makes that a second line of defence rather than the only one.
+    const inserted = await insert('Synthetic Tablet');
+    const id = inserted.rows[0]?.id ?? '';
+
+    await t.asUser(OWNER, (db) =>
+      db.query(`UPDATE owned_item SET started_on = '2026-08-01' WHERE id = $1`, [id]),
+    );
+
+    const message = await expectDenied(() =>
+      t.asUser(OWNER, (db) =>
+        db.query(
+          `UPDATE owned_item SET lifecycle_state = 'STOPPED', stopped_on = '2026-06-01'
+            WHERE id = $1`,
+          [id],
+        ),
+      ),
+    );
+    expect(message).toMatch(/owned_item_dates_ordered/);
+  });
+});

@@ -24,14 +24,18 @@ import {
   attentionReasons,
   domainError,
   isErr,
+  isItemLifecycleState,
   isItemVerification,
+  isPersonalCareCategory,
   manualEntryLimits,
+  normalizeItemUpdate,
   normalizeManualEntry,
   type DomainError,
   type Instant,
   type InviteTokenService,
   type ItemVerification,
   type Logger,
+  type StoredItem,
   type UserId,
 } from '@kynviora/domain';
 import { itemDetailView, manualEntryOutcomeView } from '@kynviora/presentation';
@@ -91,6 +95,67 @@ async function insertOrRefusal<T>(ctx: RequestContext, run: () => Promise<T>): P
 /** Unknown means unverified. Never `CONFIRMED` - the reassuring member is never the fallback. */
 function asItemVerification(raw: string): ItemVerification {
   return isItemVerification(raw) ? raw : 'UNVERIFIED';
+}
+
+/** The columns a change is applied to, as they come off the row. */
+interface StoredItemRow {
+  readonly id: string;
+  readonly profile_id: string;
+  readonly item_kind: string;
+  readonly version: number;
+  readonly lifecycle_state: string;
+  readonly display_name: string;
+  readonly brand: string | null;
+  readonly manufacturer: string | null;
+  readonly market: string | null;
+  readonly recorded_gtin: string | null;
+  readonly recorded_lot_code: string | null;
+  readonly expires_on: Date | string | null;
+  readonly started_on: Date | string | null;
+  readonly stopped_on: Date | string | null;
+  readonly notes: string | null;
+  readonly strength_text: string | null;
+  readonly dosage_form: string | null;
+  readonly directions_text: string | null;
+  readonly personal_care_category: string | null;
+  readonly ingredient_declaration_raw: string | null;
+  readonly label_version_note: string | null;
+}
+
+/**
+ * The stored row, as the domain sees it.
+ *
+ * The two enumerated columns are narrowed rather than cast. A `lifecycle_state` this build did
+ * not expect becomes `ARCHIVED` - the member that claims least about a live medicine, since
+ * `shelfAttention` and the safety inbox both treat anything that is not `ACTIVE` as finished
+ * with. Treating an unreadable state as `ACTIVE` would be the reassuring fallback, which is
+ * exactly what `asItemVerification` above refuses to be.
+ */
+function storedItemFromRow(row: StoredItemRow): StoredItem {
+  // Narrowed through a local rather than cast: the guard cannot see through a `??`, and a cast
+  // here would let a category the schema stopped allowing reach the domain as a valid one.
+  const category = row.personal_care_category;
+  return {
+    version: row.version,
+    lifecycleState: isItemLifecycleState(row.lifecycle_state) ? row.lifecycle_state : 'ARCHIVED',
+    stoppedOn: dateOrNull(row.stopped_on),
+    itemKind: row.item_kind === 'MEDICINE' ? 'MEDICINE' : 'PERSONAL_CARE',
+    displayName: row.display_name,
+    brand: row.brand,
+    manufacturer: row.manufacturer,
+    market: row.market,
+    recordedGtin: row.recorded_gtin,
+    recordedLotCode: row.recorded_lot_code,
+    expiresOn: dateOrNull(row.expires_on),
+    startedOn: dateOrNull(row.started_on),
+    notes: row.notes,
+    strengthText: row.strength_text,
+    dosageForm: row.dosage_form,
+    directionsText: row.directions_text,
+    personalCareCategory: category !== null && isPersonalCareCategory(category) ? category : null,
+    ingredientDeclarationRaw: row.ingredient_declaration_raw,
+    labelVersionNote: row.label_version_note,
+  };
 }
 
 /** A `date` column, rendered as the date it is rather than as an instant. */
@@ -227,6 +292,44 @@ const manualEntryBodySchema = z
     personalCareCategory: z.string().nullish(),
     ingredientDeclarationRaw: z.string().nullish(),
     labelVersionNote: z.string().nullish(),
+  })
+  .strict();
+
+/**
+ * A change to an item that already exists (`04` Stage 2 - update, archive, review).
+ *
+ * `.strict()`, so a key this build does not know about is a refusal rather than one silently
+ * ignored - a client that believed it had set a verification state would be the worst version of
+ * that. Every field is `.nullish()`, which is what keeps "leave it alone" and "empty it" apart on
+ * the wire: absent is unchanged and `null` clears.
+ *
+ * There is deliberately no field for a verification state, a catalog identifier, an item kind, or
+ * a `lastReviewedAt`. See `itemUpdate.ts` - the absence is the enforcement.
+ */
+const itemUpdateBodySchema = z
+  .object({
+    // Required. `13` sets this entity's conflict policy to ASK_USER, so an edit that did not say
+    // what it was editing could only be last-write-wins.
+    expectedVersion: z.number().int().min(1),
+    displayName: z.string().optional(),
+    brand: z.string().nullish(),
+    manufacturer: z.string().nullish(),
+    market: z.string().nullish(),
+    recordedGtin: z.string().nullish(),
+    recordedLotCode: z.string().nullish(),
+    expiresOn: z.string().nullish(),
+    startedOn: z.string().nullish(),
+    notes: z.string().nullish(),
+    strengthText: z.string().nullish(),
+    dosageForm: z.string().nullish(),
+    directionsText: z.string().nullish(),
+    personalCareCategory: z.string().nullish(),
+    ingredientDeclarationRaw: z.string().nullish(),
+    labelVersionNote: z.string().nullish(),
+    lifecycleState: z.string().optional(),
+    stoppedOn: z.string().nullish(),
+    /** A request, never a timestamp. The server stamps the time. */
+    markReviewed: z.boolean().optional(),
   })
   .strict();
 
@@ -786,6 +889,8 @@ export function createServer(options: ServerOptions): FastifyInstance {
           recorded_gtin: string | null;
           recorded_lot_code: string | null;
           lifecycle_state: string;
+          version: number;
+          may_edit: boolean;
           identity_verification: string;
           formulation_verification: string;
           batch_verification: string;
@@ -807,12 +912,20 @@ export function createServer(options: ServerOptions): FastifyInstance {
           // and for the ingredient declaration that is Phase 2.3's second exit criterion failing
           // on the read path.
           `SELECT id, item_kind, display_name, brand, manufacturer, market,
-                  recorded_gtin, recorded_lot_code, lifecycle_state,
+                  recorded_gtin, recorded_lot_code, lifecycle_state, version,
                   identity_verification, formulation_verification, batch_verification,
                   strength_text, dosage_form, directions_text, personal_care_category,
                   ingredient_declaration_raw, label_version_note,
                   started_on, stopped_on, expires_on, last_reviewed_at, last_safety_checked_at,
-                  notes
+                  notes,
+                  -- Whether this caller may change it, evaluated with the same expression the
+                  -- owned_item_update policy USING clause uses. Asked here so a screen can
+                  -- withhold the control rather than offer one the write would refuse, and asked
+                  -- as the policy own predicate so the screen and the policy cannot disagree.
+                  kynviora.has_capability(
+                    profile_id,
+                    CASE WHEN item_kind = 'MEDICINE' THEN 'MANAGE_MEDICINES' ELSE 'MANAGE_SHELF' END
+                  ) AS may_edit
              FROM owned_item
             WHERE id = $1 AND deleted_at IS NULL`,
           [params.data.itemId],
@@ -860,6 +973,210 @@ export function createServer(options: ServerOptions): FastifyInstance {
           attentionReasons: reasons,
         }),
         attentionReasonCodes: reasons,
+        // What an edit has to send back, and whether to offer one at all.
+        version: row.version,
+        mayEdit: row.may_edit,
+        // The same values again, keyed as the manual-entry form keys them.
+        //
+        // Not duplication: `categoryFields` and `sharedFields` are presentation - labels, absent
+        // notes, and which text is somebody else's words - and an editor needs none of that and
+        // cannot use any of it. A form built from rendered labels would have to match on the
+        // label text, which is the "branch on message text" `13` forbids one layer down.
+        editableValues: {
+          displayName: row.display_name,
+          brand: row.brand,
+          manufacturer: row.manufacturer,
+          market: row.market,
+          recordedGtin: row.recorded_gtin,
+          recordedLotCode: row.recorded_lot_code,
+          expiresOn: dateOrNull(row.expires_on),
+          startedOn: dateOrNull(row.started_on),
+          notes: row.notes,
+          strengthText: row.strength_text,
+          dosageForm: row.dosage_form,
+          directionsText: row.directions_text,
+          personalCareCategory: row.personal_care_category,
+          ingredientDeclarationRaw: row.ingredient_declaration_raw,
+          labelVersionNote: row.label_version_note,
+        },
+        stoppedOn: dateOrNull(row.stopped_on),
+        serverTime: ctx.now,
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // PATCH /v1/items/:itemId  (`04` Stage 2 - update, archive, review)
+    // -------------------------------------------------------------------------
+    // Stage 2's expected output is "create, view, update, archive, and review". Phases 2.2 and
+    // 2.3 are the first two words; this is the rest, and until it existed the manual-entry screen
+    // told people they could "add anything missing later from the item itself" when no surface
+    // could.
+    //
+    // WHY THE VERSION IS REQUIRED
+    // `13` sets `owned_item`'s conflict policy to `ASK_USER` (`sync.ts`), so a stale edit must not
+    // silently win. The write is conditional on the version the editor was looking at, and a
+    // person whose copy has moved is told rather than told their save worked.
+    //
+    // WHAT ROW-LEVEL SECURITY DECIDES AND WHAT IT DOES NOT
+    // `owned_item_update`'s USING clause requires `MANAGE_SHELF` or `MANAGE_MEDICINES`, so a
+    // caregiver who may read an item and not change it updates no rows - it filters rather than
+    // raising. That makes "refused" and "version moved" the same zero rows, which is why the
+    // route re-reads to tell them apart: reporting a refusal as a conflict would send somebody
+    // round a retry loop they can never win.
+
+    app.patch<{ Params: { itemId: string } }>('/v1/items/:itemId', async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      const noSuchItem = domainError('NOT_FOUND', 'No such item.');
+
+      const params = itemParamsSchema.safeParse(request.params);
+      if (!params.success) return fail(reply, noSuchItem, ctx.correlationId);
+      const itemId = params.data.itemId;
+
+      const body = itemUpdateBodySchema.safeParse(request.body ?? {});
+      if (!body.success) {
+        return fail(
+          reply,
+          domainError('VALIDATION_FAILED', 'Invalid request body.', { reason_code: 'body_schema' }),
+          ctx.correlationId,
+        );
+      }
+
+      const readStored = () =>
+        ctx.db((db) =>
+          db.query<StoredItemRow>(
+            `SELECT id, profile_id, item_kind, version, lifecycle_state, display_name, brand,
+                    manufacturer, market, recorded_gtin, recorded_lot_code,
+                    expires_on, started_on, stopped_on, notes,
+                    strength_text, dosage_form, directions_text,
+                    personal_care_category, ingredient_declaration_raw, label_version_note
+               FROM owned_item
+              WHERE id = $1 AND deleted_at IS NULL`,
+            [itemId],
+          ),
+        );
+
+      const before = (await readStored()).rows[0];
+      // An item belonging to somebody else and one that does not exist are the same answer, so
+      // this route is not an oracle for an owned-item ID.
+      if (before === undefined) return fail(reply, noSuchItem, ctx.correlationId);
+
+      const outcome = normalizeItemUpdate(storedItemFromRow(before), body.data);
+      if (isErr(outcome)) return fail(reply, outcome.error, ctx.correlationId);
+      const next = outcome.value;
+
+      // The write, conditional on the version. `version` is bumped here rather than by a trigger
+      // because the condition and the increment have to be one statement: two would be a race
+      // that the whole point of this route is to close.
+      const written = await ctx.db((db) =>
+        db.query<{ version: number; last_reviewed_at: Date | string | null }>(
+          `UPDATE owned_item
+              SET display_name = $3,
+                  brand = $4,
+                  manufacturer = $5,
+                  market = $6,
+                  recorded_gtin = $7,
+                  recorded_lot_code = $8,
+                  expires_on = $9,
+                  started_on = $10,
+                  notes = $11,
+                  strength_text = $12,
+                  dosage_form = $13,
+                  directions_text = $14,
+                  personal_care_category = $15,
+                  ingredient_declaration_raw = $16,
+                  label_version_note = $17,
+                  lifecycle_state = $18,
+                  stopped_on = $19,
+                  -- Stamped by the server, never supplied. A client-set timestamp would let a
+                  -- screen claim somebody looked at a medicine at a moment they did not.
+                  last_reviewed_at = CASE WHEN $20 THEN now() ELSE last_reviewed_at END,
+                  version = version + 1
+            WHERE id = $1 AND version = $2 AND deleted_at IS NULL
+        RETURNING version, last_reviewed_at`,
+          [
+            itemId,
+            body.data.expectedVersion,
+            next.fields.displayName,
+            next.fields.brand,
+            next.fields.manufacturer,
+            next.fields.market,
+            next.fields.recordedGtin,
+            next.fields.recordedLotCode,
+            next.fields.expiresOn,
+            next.fields.startedOn,
+            next.fields.notes,
+            next.fields.strengthText,
+            next.fields.dosageForm,
+            next.fields.directionsText,
+            next.fields.personalCareCategory,
+            next.fields.ingredientDeclarationRaw,
+            next.fields.labelVersionNote,
+            next.lifecycleState,
+            next.stoppedOn,
+            next.stampReviewed,
+          ],
+        ),
+      );
+
+      const committed = written.rows[0];
+      if (committed === undefined) {
+        // Zero rows is three different facts. Re-read to say which, because a refusal reported as
+        // a conflict sends somebody round a retry loop they can never win, and a conflict
+        // reported as absence tells them their own item is gone.
+        const after = (await readStored()).rows[0];
+        if (after === undefined) return fail(reply, noSuchItem, ctx.correlationId);
+
+        if (after.version !== body.data.expectedVersion) {
+          return fail(
+            reply,
+            domainError('VERSION_CONFLICT', 'This item changed while you had it open.', {
+              reason_code: 'item_version',
+              // The current version, so the client can re-read and try again against it. Never a
+              // value from the row and never who changed it (`14`, DEC-076).
+              currentVersion: after.version,
+            }),
+            ctx.correlationId,
+          );
+        }
+
+        // Readable, unchanged, and the update policy admitted nothing: this caller may look and
+        // not change. Answered as the same absence every other refusal gives - there is
+        // deliberately no outcome in this API meaning "you are not allowed" (trap 89), and the
+        // detail's `mayEdit` is what stops a screen offering the control in the first place.
+        return fail(reply, domainError('PERMISSION_DENIED', 'No such item.'), ctx.correlationId);
+      }
+
+      // Append-only, and the only place the sequence of changes lives: `owned_item` holds one row
+      // and this update overwrote the previous values. Field names only - `14` keeps the content
+      // of somebody's medicine record out of a log, and "the strength changed" is what an access
+      // history needs to be useful.
+      await ctx.privileged('AUDIT_WRITE', (db) =>
+        db.query(
+          `INSERT INTO audit_event
+             (actor_user_id, actor_role, action, target_kind, target_id, target_version,
+              correlation_id, detail)
+           VALUES ($1, 'kynviora_app', 'OWNED_ITEM_UPDATED', 'owned_item', $2, $3, $4, $5::jsonb)`,
+          [
+            ctx.principal.userId,
+            itemId,
+            String(committed.version),
+            ctx.correlationId,
+            JSON.stringify({
+              changed_fields: next.changedFields,
+              lifecycle_state: next.lifecycleState,
+            }),
+          ],
+        ),
+      );
+
+      return reply.status(200).send({
+        id: itemId,
+        version: committed.version,
+        lifecycleState: next.lifecycleState,
+        changedFields: next.changedFields,
+        lastReviewedAt: isoOrNull(committed.last_reviewed_at),
         serverTime: ctx.now,
       });
     });

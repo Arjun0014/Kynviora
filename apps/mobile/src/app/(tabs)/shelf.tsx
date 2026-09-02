@@ -58,6 +58,7 @@ import { ResourceState } from '@/components/ScreenState';
 import { StatusChip } from '@/components/StatusChip';
 import { RecordDose } from '@/features/doses/RecordDose';
 import { AddItem } from '@/features/shelf/AddItem';
+import { EditItem } from '@/features/shelf/EditItem';
 import { ItemDetail } from '@/features/shelf/ItemDetail';
 
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
@@ -88,6 +89,15 @@ export default function ShelfScreen() {
    * is the reduction to a generic note Phase 2.1's first exit criterion forbids.
    */
   const [adding, setAdding] = useState<ItemKind | null>(null);
+
+  /**
+   * Whether the open item is being edited.
+   *
+   * Reached from the detail rather than from the row, because a control on the list would let
+   * somebody change a record they were not looking at - and the detail is where the three
+   * verification chips say how much of it Kynviora actually knows.
+   */
+  const [editing, setEditing] = useState(false);
 
   /**
    * The filter, as the two questions it actually is.
@@ -132,7 +142,9 @@ export default function ShelfScreen() {
     [client, detailFor],
   );
 
-  const { resource: detailResource } = useResource(loadDetail, { enabled: detailFor !== null });
+  const { resource: detailResource, reload: reloadDetail } = useResource(loadDetail, {
+    enabled: detailFor !== null,
+  });
 
   const detailView: ItemDetailScreenView | null = useMemo(
     () => (detailResource.value === null ? null : itemDetailScreenView(detailResource.value)),
@@ -224,14 +236,37 @@ export default function ShelfScreen() {
     );
   }
 
+  if (detailFor !== null && editing && detailView !== null) {
+    return (
+      <Screen title="Shelf" intro={detailView.displayName}>
+        <EditItem
+          view={detailView}
+          onChanged={() => {
+            // Both lists. The detail carries the version the next change is sent against, and the
+            // shelf row carries the state and the attention reasons a lifecycle change moves.
+            reloadDetail();
+            reload();
+          }}
+          onClose={() => {
+            setEditing(false);
+          }}
+        />
+      </Screen>
+    );
+  }
+
   if (detailFor !== null) {
     return (
       <Screen title="Shelf" intro="What Kynviora has for this item, and what is still missing.">
         <ItemDetail
           view={detailView}
           state={detailResource.state}
+          onEdit={() => {
+            setEditing(true);
+          }}
           onClose={() => {
             setDetailFor(null);
+            setEditing(false);
           }}
         />
       </Screen>
