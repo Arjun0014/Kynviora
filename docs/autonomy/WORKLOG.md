@@ -2786,3 +2786,48 @@ any client field - and two end to end.
 `04` Phase 5.2's expected output now reads true except for the review queue, and both exit criteria
 hold. The first is enforced by what the lookup is allowed to read rather than by a check on what it
 returns.
+
+### `DEV-018` - the other half of a substance match
+
+Phase 5.2 gave the historical shadow dataset the _fact_ side of a substance match and the _item_
+side was still missing, so `INGREDIENT_SENSITIVITY` stayed refused. That refusal was right while it
+lasted: a run reporting fewer matches than the rule really produces reads as "this affects nobody"
+on the screen a reviewer approves from, and supplying one half without the other would have made
+the rule report zero with a straight face.
+
+**Both halves landed together.** The item side aggregates the confirmed declaration's canonical keys
+per item through `formulation_ingredient`, and the fact side joins `allergy_record.substance_id`,
+which Phase 5.2 made meaningful an hour earlier. The formulation's `version_label` came with it - it
+had been `null` on every historical assessment and the row records it.
+
+**Only `EXACT` ingredients contribute a key.** An ambiguous ingredient resolved to no substance, and
+counting it would be matching on a mapping nobody made - the same discipline the rule already keeps
+on the profile side and the same one DEC-098 keeps at the point a term is recorded. That is what
+makes a zero here a _measured_ zero rather than a structural one, which is the whole distinction the
+deviation was written about (DEC-099).
+
+**`DUPLICATE_ACTIVE_INGREDIENT` stays refused, for a different reason than it was put there for.**
+The dataset can feed it now; `evaluateRule` cannot evaluate it, because `09` requires validated
+reference data and clinical review before that rule may exist at all. A confident zero about a rule
+nobody has written is worse than a refusal, and the comment says which of the two reasons applies -
+a list whose entries are there for different reasons is one somebody eventually clears wrongly.
+
+**The aggregation is a correlated subquery.** One row per item is what the dataset builder expects,
+and a per-item round trip over a whole installation's shelf is the shape that stops being viable
+first. `array_agg` returns `NULL` rather than an empty array when nothing matched, which the mapper
+coalesces.
+
+The new test block runs last in its file on purpose: it adds a fourth item to the shelf, and the
+counts every earlier block asserts are the counts of a three-item shelf.
+
+### State
+
+3451 tests passing across 116 files, up from 3446. Typecheck, mobile typecheck, lint and format all
+clean via `npm run verify`, exit 0 read from the log.
+
+Five tests: one that runs the sensitivity rule against a real shelf carrying a mapped ingredient and
+a mapped recorded sensitivity and finds exactly the one household, one that reads the breakdown for
+the three that did not match, one that holds an unmapped term to a measured zero, one that asserts
+the run still writes no assessment and names nobody, and the split refusal case.
+
+`DEV-018` is closed. What it was waiting on turned out to be two things, and Phase 5.2 was the first.

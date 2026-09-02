@@ -358,7 +358,7 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   remains is presentational: the single-request view returns `shadowRunId` and a reviewer must
   fetch the run separately, which a staff console would join up (`DEV-016`).
 
-## DEV-018 - A historical shadow run cannot measure substance-matching rules
+## DEV-018 - A historical shadow run cannot measure substance-matching rules — RESOLVED 2026-09-02
 
 - **Affected specification**: `04` Phase 6.7 lists shadow-run mode "against synthetic/historical
   datasets" without qualifying which rules can be measured against which.
@@ -383,12 +383,28 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   `HISTORICAL_UNSUPPORTED_KINDS`. `BLK-003` gates the substance vocabulary those keys come from,
   so this is downstream of it.
 
-  **Half of it cleared on 2026-09-02.** The _fact_ side now exists: `04` Phase 5.2 maps a typed
-  term to a canonical substance at write time, so `allergy_record.substance_id` carries a mapping
-  (DEC-098). The _item_ side does not - the shelf join here still does not reach the confirmed
-  declaration, so `substanceKeys` is empty. Supplying one half would let a rule that matches on the
-  intersection report zero matches with a straight face, which is the under-count this deviation
-  exists to refuse. Both stay empty and both kinds stay refused.
+### Resolved, 2026-09-02
+
+Both halves, in the order the deviation required them: the _fact_ side came with `04` Phase 5.2
+(DEC-098), and the _item_ side is the join this deviation named.
+
+- `historicalDataset` now aggregates the confirmed declaration's canonical keys per item through
+  `formulation_ingredient`, taking only `EXACT` ingredients - an ambiguous one resolved to no
+  substance, and counting it would be matching on a mapping nobody made (DEC-099). It also carries
+  `marketed_formulation.version_label`, which the assessment records and which was `null`.
+- The profile fact's key is joined through `allergy_record.substance_id`, which Phase 5.2 made
+  meaningful.
+- `INGREDIENT_SENSITIVITY` is off `HISTORICAL_UNSUPPORTED_KINDS`. A run over it now reports what the
+  rule would really produce, and where that is zero it is a measured zero rather than a structural
+  one - which is the whole distinction this deviation was written about.
+- `DUPLICATE_ACTIVE_INGREDIENT` stays on the list **for a different reason**, stated in the comment:
+  the dataset can feed it and `evaluateRule` cannot evaluate it, because `09` requires validated
+  reference data and clinical review before that rule may exist at all (`BLK-006`). A confident zero
+  about a rule nobody has written is worse than a refusal.
+
+Five tests, including one that runs the rule against a real shelf with a mapped ingredient and a
+mapped recorded sensitivity and finds exactly the one household, one that asserts the run still
+writes no assessment and names nobody, and one that holds an unmapped term to a measured zero.
 
 ## DEV-019 - A development authenticator stands in for Phase 1.1
 

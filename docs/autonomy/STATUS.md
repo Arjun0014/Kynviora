@@ -9,18 +9,18 @@ Last updated: 2026-09-02
 
 ## Current position
 
-|                    |                                                        |
-| ------------------ | ------------------------------------------------------ |
-| **Current stage**  | Stage 5 (Personal-Care Formulation Intelligence)       |
-| **Current phase**  | Phase 5.2 complete; Stage 1 complete except 1.1        |
-| **Last completed** | Phase 5.2 - a typed term mapped to a substance         |
-| **Branch**         | `master`                                               |
-| **Latest commit**  | `feat(catalog): the word you wrote, and what it means` |
-| **Baseline tag**   | `baseline-spec-only`                                   |
+|                    |                                                       |
+| ------------------ | ----------------------------------------------------- |
+| **Current stage**  | Stage 5/6 (normalization, shadow measurement)         |
+| **Current phase**  | Phase 5.2 complete; `DEV-018` and `DEV-028` closed    |
+| **Last completed** | `DEV-018` - both halves of a substance match          |
+| **Branch**         | `master`                                              |
+| **Latest commit**  | `feat(safety): measuring a rule against a real shelf` |
+| **Baseline tag**   | `baseline-spec-only`                                  |
 
 ## Verification state
 
-- **3446 tests passing**, 0 failing, across 116 files.
+- **3451 tests passing**, 0 failing, across 116 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -91,7 +91,7 @@ the API will not distinguish them.
 | Consent state, withdrawal, and what withdrawing stops      | Complete, 87 tests; no export/deletion (`DEV-036`)         |
 | Typed term mapped to a canonical substance                 | Complete, 27 tests; no review queue (`DEV-037`)            |
 | Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)             |
-| Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                         |
+| Shadow runs, before/after comparison, assessment replay    | Complete, 74 tests; substance rules now measurable         |
 | Manual entry: the write path, the form and the screen      | Complete, 105 tests; the only surface that creates an item |
 | Item update, the three lifecycle states, mark-as-checked   | Complete, 105 tests; no deletion (`DEV-032`)               |
 | End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                         |
@@ -200,7 +200,16 @@ Next, in the order they build on each other:
 3. **Phase 2.5's item deletion**, the moment the retention matrix exists. `DEV-032` has been waiting
    on the same document as `DEV-036` and is the smallest thing that unblocks with it.
 
-**Not next, and why.** The export-and-deletion shell (`DEV-036`) is a document, not a feature: "get
+**Not next, and why.** The notification digest (`DEV-033`) is not the cheap win it looks like. A
+digest is sent on a cadence, and nothing sends anything (`BLK-009`) or runs on a cadence. Every
+question it has to answer - how often, what somebody sees if they open the app first, whether an
+item resolved since it was collected still appears - is about a delivery that does not happen. It
+also wants the local time `DEV-030` records as missing, and that is a product decision in disguise:
+quiet hours live on the _profile_, so applying them means deciding whether a caregiver abroad is
+held through the household's night or their own. `04` Phase 7.5 does not say, and inventing it
+decides when somebody is woken.
+
+The export-and-deletion shell (`DEV-036`) is a document, not a feature: "get
 me a copy" and "remove it" cannot be answered without a retention matrix saying what is kept
 regardless, and this build has records that must survive a deletion request with no approved
 statement of which. Five deviations converge on that one missing document (`DEV-009`, `DEV-032`,
@@ -227,6 +236,12 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 
 ## Recent decisions worth knowing
 
+- **DEC-099** - a blast radius counts only mappings somebody made. Only `EXACT` ingredients
+  contribute a canonical key to the historical shadow dataset, which is what makes a zero a measured
+  one rather than a structural one. Both halves of a substance match landed together, because
+  supplying one alone would have let the rule report zero with a straight face.
+  `DUPLICATE_ACTIVE_INGREDIENT` stays refused for a different reason than it was refused for, and
+  the comment says which.
 - **DEC-098** - a typed term is mapped by the **same** function as a printed one, at write time,
   and only through a reviewed alias. Never a display name: `substance_alias` carries provenance and
   an exact-versus-ambiguous state, and matching on `preferred_name` would let a rule fire on a

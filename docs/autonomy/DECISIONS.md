@@ -3084,3 +3084,83 @@ exactly as typed and rendered first on the row; mapping a term is not correcting
 
 **Sources.** `04` Phase 5.2; `04` Phase 1.3; `08`; `15` A11; `10`; `14`; DEC-091; DEC-093; DEC-097;
 `DEV-028`; `BLK-003`; migrations `0003`, `0004` and `0019`.
+
+---
+
+## DEC-099 - A blast radius counts only mappings somebody made, and a rule nobody wrote is still refused
+
+**Date:** 2026-09-02
+**Phase:** 6.7 (`DEV-018`)
+
+**Status:** Accepted
+
+The historical shadow dataset reached `owned_item`, `batch_or_lot` and `product_identity` and
+stopped there, so `INGREDIENT_SENSITIVITY` was refused rather than measured (`DEV-018`). Refusing
+was right while it lasted: reporting fewer matches than a rule really produces reads as "this
+affects nobody" on the screen a reviewer approves from, and a reviewer confirming an expected match
+volume against an under-count would be confirming something false.
+
+**Both halves, or neither.** Phase 5.2 supplied the fact side and the item side was still missing,
+and supplying one alone would have been worse than supplying neither - a rule matching on the
+intersection would have reported zero with a straight face. Both landed together: the declaration's
+canonical keys aggregated per item, and the profile fact's key joined through `substance_id`.
+
+**Only `EXACT` ingredients contribute a key.** An `AMBIGUOUS` or `UNRESOLVED` ingredient resolved to
+no substance, and counting it would be matching on a mapping nobody made - the same discipline
+`evaluateIngredientSensitivity` already keeps on the profile side, and the same one DEC-098 keeps at
+the point a term is recorded. A measured zero and a structural zero are different statements, and
+this is what makes the number the first kind.
+
+**`DUPLICATE_ACTIVE_INGREDIENT` stays refused, for a different reason than it was refused for.** The
+dataset can feed it now; the engine cannot evaluate it. `09` requires validated reference data and
+clinical review before that rule may exist at all (`BLK-006`), so `evaluateRule` returns a non-match
+for every item - and measuring it would produce a confident zero about a rule nobody has written.
+The refusal is the same code path and the comment says which of the two reasons applies, because a
+list whose entries are there for different reasons is a list somebody eventually clears wrongly.
+
+**The aggregation is a correlated subquery, not a second round trip.** One row per item is what the
+dataset builder expects, and a per-item query over a whole installation's shelf is the shape that
+stops being viable first. `array_agg` returns `NULL` rather than an empty array when nothing
+matched, which the mapper coalesces - an item with no formulation never reaches the subquery at all.
+
+**Sources.** `04` Phase 6.7; `09`; `DEV-018`; DEC-098; `BLK-003`; `BLK-006`.
+
+---
+
+## DEC-099 - A blast radius counts only mappings somebody made, and a rule nobody wrote is still refused
+
+**Date:** 2026-09-02
+**Phase:** 6.7 (`DEV-018`)
+
+**Status:** Accepted
+
+The historical shadow dataset reached `owned_item`, `batch_or_lot` and `product_identity` and
+stopped there, so `INGREDIENT_SENSITIVITY` was refused rather than measured (`DEV-018`). Refusing
+was right while it lasted: reporting fewer matches than a rule really produces reads as "this
+affects nobody" on the screen a reviewer approves from, and a reviewer confirming an expected match
+volume against an under-count would be confirming something false.
+
+**Both halves, or neither.** Phase 5.2 supplied the fact side and the item side was still missing,
+and supplying one alone would have been worse than supplying neither - a rule matching on the
+intersection would have reported zero with a straight face. Both landed together: the declaration's
+canonical keys aggregated per item, and the profile fact's key joined through `substance_id`.
+
+**Only `EXACT` ingredients contribute a key.** An `AMBIGUOUS` or `UNRESOLVED` ingredient resolved to
+no substance, and counting it would be matching on a mapping nobody made - the same discipline
+`evaluateIngredientSensitivity` already keeps on the profile side, and the same one DEC-098 keeps at
+the point a term is recorded. A measured zero and a structural zero are different statements, and
+this is what makes the number the first kind.
+
+**`DUPLICATE_ACTIVE_INGREDIENT` stays refused, for a different reason than it was refused for.** The
+dataset can feed it now; the engine cannot evaluate it. `09` requires validated reference data and
+clinical review before that rule may exist at all (`BLK-006`), so `evaluateRule` returns a non-match
+for every item - and measuring it would produce a confident zero about a rule nobody has written.
+The refusal is the same code path and the comment says which of the two reasons applies, because a
+list whose entries are there for different reasons is a list somebody eventually clears wrongly.
+
+**The aggregation is a correlated subquery, not a second round trip.** One row per item is what the
+dataset builder expects, and a per-item query over a whole installation's shelf is the shape that
+stops being viable first. `array_agg` returns `NULL` rather than an empty array when nothing
+matched, which the mapper coalesces - an item with no formulation never reaches the subquery at all.
+
+**Sources.** `04` Phase 6.7; `09`; `DEV-018`; DEC-098; `BLK-003`; `BLK-006`.

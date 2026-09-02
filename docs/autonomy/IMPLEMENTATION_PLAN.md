@@ -775,20 +775,35 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
-1. **`DEV-033`'s notification digest**, the last piece of Phase 7.5. Unlike the missed-dose
-   scheduler it needs no unmade product decision - `18` constrains the grouping rather than leaving
-   it open - and it is the difference between a household with several alerts getting several
-   interruptions and getting one.
-2. **`DEV-018`'s remaining half.** Phase 5.2 gave the historical shadow dataset the _fact_ side of
-   a substance match; the _item_ side is still missing, because the shelf join does not reach the
-   confirmed declaration. Joining `marketed_formulation` and `formulation_ingredient` would let
-   `INGREDIENT_SENSITIVITY` come off `HISTORICAL_UNSUPPORTED_KINDS` - and a rule nobody can measure
-   against real data is one nobody can approve.
-3. **Phase 2.5's item deletion, if the retention matrix lands.** `DEV-032` has been waiting on the
-   same document as `DEV-036`; it is the smallest thing that becomes buildable the moment somebody
-   writes what is kept after a deletion request and on what basis.
+**There is no unblocked engineering task left that does not first need a decision or a credential.**
+That is a finding rather than a shortage of ambition, and it is what the three items below are:
 
-**Not next, and why:** the export-and-deletion shell (`DEV-036`) is a document, not a feature. "Get
+1. **The retention matrix.** Six deviations now converge on one missing document - `DEV-009`,
+   `DEV-032`, `DEV-034`, `DEV-035`, `DEV-036` and the deletion half of `16`. It unblocks Phase 2.5's
+   item deletion, Phase 1.4's export-and-deletion shell, emergency information and Visit Pack
+   retention in one stroke, and it is the largest single unblocking left in the build. It is a
+   retention and disclosure decision rather than an engineering one.
+2. **A licensed substance vocabulary (`BLK-003`).** Every mechanism that would use it now exists and
+   is tested: a typed term resolves through it (DEC-098), a declaration resolves through it, the
+   shadow run measures the intersection (DEC-099), and the sensitivity rule matches on it. With an
+   empty vocabulary all of that is correct and finds nothing. Seeding it is the difference between a
+   safety feature that works and one that is merely right.
+3. **Phase 5.5's possible-formula-change task**, once `BLK-007` clears. `diffIngredients`, the Trust
+   Passport and the Review Inbox all exist; what does not is a _second_ observation to compare
+   against, because nothing can read a label. The exit criterion - "the app does not silently reuse
+   an old formula when the user's current label conflicts" - needs a current label.
+
+**Not next, and why:** the notification digest (`DEV-033`) is not the cheap win it looks like. A
+digest is a thing that is _sent_ on a cadence, and nothing sends anything (`BLK-009`) or runs on a
+cadence at all. Every question it has to answer - how often, what somebody sees if they open the app
+before it arrives, whether an item resolved since it was collected still appears - is about a
+delivery that does not happen, so the answers could not be checked against anything. It also wants
+the local time `DEV-030` records as missing, and that one is a product decision in disguise: quiet
+hours live on the _profile_, so applying them means deciding whether a caregiver abroad is held
+through the household's night or their own. `04` Phase 7.5 does not say, and inventing it decides
+when somebody is woken.
+
+The export-and-deletion shell (`DEV-036`) is a document, not a feature. "Get
 me a copy" and "remove it" cannot be answered without a retention matrix saying what is kept
 regardless, and this build has records that must survive a deletion request with no approved
 statement of which - `audit_event` and `consent_receipt` both refuse DELETE to every role, and
@@ -812,9 +827,11 @@ switcher that owns its exit criterion, and the two screens (DEC-087 to DEC-090, 
 `DEV-035`); Phase 1.4 - the consent state, its two routes, the screen, and the enforcement that
 turned an append-only log into something that stops a notification (DEC-094 to DEC-096, `DEV-036`);
 `DEV-028` - the two identities behind an ingredient match, frozen at evaluation so the approved
-wording can be filled without re-deriving anything (DEC-097, migration `0018`); and Phase 5.2 - a
-term somebody typed resolved by the same function as one printed on a label, at write time and only
-through a reviewed alias (DEC-098, `DEV-037`, migration `0019`).
+wording can be filled without re-deriving anything (DEC-097, migration `0018`); Phase 5.2 - a term
+somebody typed resolved by the same function as one printed on a label, at write time and only
+through a reviewed alias (DEC-098, `DEV-037`, migration `0019`); and `DEV-018` - both halves of a
+substance match in the historical shadow dataset, so a sensitivity rule reports a measured zero
+rather than a structural one (DEC-099).
 
 ## What "complete" means here, and what it does not
 
