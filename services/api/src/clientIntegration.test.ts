@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { start, type StartedServer } from './main.js';
 import { SEED } from '@kynviora/db';
-import { noopLogger, quietHoursFromClock } from '@kynviora/domain';
+import { bandMatchesBirthYear, noopLogger, quietHoursFromClock } from '@kynviora/domain';
 import {
   ALREADY_ACCEPTED_CODE,
   ANONYMOUS,
@@ -30,6 +30,10 @@ import {
   lensView,
   manualEntryDraft,
   notificationPolicyView,
+  emptyProfileForm,
+  profileBodyFrom,
+  profileFormRefusal,
+  profileSwitcherView,
   mayInvite,
   refreshedResource,
   revocationMessage,
@@ -2317,5 +2321,159 @@ describe('when Kynviora may interrupt somebody, end to end', () => {
       expect(result.ok, `${start}-${end}`).toBe(false);
       if (!result.ok) expect(result.error.detail?.['field'], `${start}-${end}`).toBe(field);
     }
+  });
+});
+
+describe('making a person, end to end', () => {
+  /**
+   * `04` Phase 1.2, through the code path the Expo screen uses.
+   *
+   * Until this phase nothing in the build could make a household or a profile - every one that
+   * existed was seeded. What is exercised here is the round trip a person actually makes on their
+   * first launch: name a household, name the first person in it, and find them in the list the
+   * switcher renders from.
+   */
+
+  /** A key nobody has used before. One per create, except where a replay is the point. */
+  const key = (): string => randomUUID();
+
+  it('creates a household and the first person in it', async () => {
+    const household = await owner.createHousehold({ displayName: 'The Nair household' }, key());
+    if (household.kind !== 'OK') throw new Error('expected the household to be created');
+    expect(household.value.displayName).toBe('The Nair household');
+
+    const profile = await owner.createProfile(
+      profileBodyFrom(household.value.id, {
+        ...emptyProfileForm(),
+        displayName: 'Amma',
+        ageBand: 'OLDER_ADULT_65_PLUS',
+        birthYear: '1958',
+      }),
+      key(),
+    );
+    if (profile.kind !== 'OK') throw new Error('expected the profile to be created');
+
+    expect(profile.value.displayName).toBe('Amma');
+    expect(profile.value.ageBand).toBe('OLDER_ADULT_65_PLUS');
+    expect(profile.value.birthYear).toBe(1958);
+    // Somebody they look after, because they did not say it was them.
+    expect(profile.value.isSelf).toBe(false);
+    expect(profile.value.isManaged).toBe(true);
+  });
+
+  it('offers the new person in the switcher, under their own name', async () => {
+    // Phase 1.2's second exit criterion, through the view that decides it. The list is the
+    // server's answer, and the switcher renders it rather than anything the client posted.
+    const listed = await owner.listProfiles();
+    if (listed.kind !== 'OK') throw new Error('expected the profiles to load');
+
+    const amma = listed.value.profiles.find((profile) => profile.displayName === 'Amma');
+    expect(amma).toBeDefined();
+    if (amma === undefined) return;
+
+    const view = profileSwitcherView(listed.value.profiles, amma.id);
+    expect(view.activeId).toBe(amma.id);
+    expect(view.activeName).toBe('Amma');
+    expect(view.selectionDropped).toBe(false);
+    // The band as a phrase. Never `OLDER_ADULT_65_PLUS` beside somebody's name (trap 129).
+    expect(view.lines.find((line) => line.id === amma.id)?.ageLabel).toBe('65 or older');
+  });
+
+  it('adds a second person to the same household', async () => {
+    // The switcher hands the screen a household rather than letting it make one. A family split
+    // across two households would collect separate items and caregivers, and nothing merges them.
+    const listed = await owner.listProfiles();
+    if (listed.kind !== 'OK') throw new Error('expected the profiles to load');
+
+    const view = profileSwitcherView(listed.value.profiles, null);
+    expect(view.addToHouseholdId).not.toBeNull();
+    if (view.addToHouseholdId === null) return;
+
+    const second = await owner.createProfile(
+      profileBodyFrom(view.addToHouseholdId, {
+        ...emptyProfileForm(),
+        displayName: 'Me',
+        isSelf: true,
+      }),
+      key(),
+    );
+    if (second.kind !== 'OK') throw new Error('expected the second profile to be created');
+
+    expect(second.value.householdId).toBe(view.addToHouseholdId);
+    expect(second.value.isSelf).toBe(true);
+    expect(second.value.isManaged).toBe(false);
+
+    const after = await owner.listProfiles();
+    if (after.kind !== 'OK') throw new Error('expected the profiles to load');
+    const households = new Set(after.value.profiles.map((profile) => profile.householdId));
+    expect(households.has(view.addToHouseholdId)).toBe(true);
+  });
+
+  it('makes one person when the same create arrives twice', async () => {
+    const listed = await owner.listProfiles();
+    if (listed.kind !== 'OK') throw new Error('expected the profiles to load');
+    const household = profileSwitcherView(listed.value.profiles, null).addToHouseholdId;
+    if (household === null) throw new Error('expected a household');
+
+    const same = key();
+    const body = profileBodyFrom(household, { ...emptyProfileForm(), displayName: 'Twice' });
+
+    const first = await owner.createProfile(body, same);
+    const second = await owner.createProfile(body, same);
+    if (first.kind !== 'OK' || second.kind !== 'OK') throw new Error('expected both to succeed');
+
+    expect(second.value.id).toBe(first.value.id);
+    expect(second.value.replayed).toBe(true);
+
+    const after = await owner.listProfiles();
+    if (after.kind !== 'OK') throw new Error('expected the profiles to load');
+    expect(after.value.profiles.filter((profile) => profile.displayName === 'Twice')).toHaveLength(
+      1,
+    );
+  });
+
+  it('refuses a household the caller does not own, and says nothing about it', async () => {
+    // `profile_insert` decides this. A household this caller may not write to and one that does
+    // not exist are the same answer, so the route is not an oracle for either.
+    const refused = await stranger.createProfile(
+      profileBodyFrom(SEED.householdId, { ...emptyProfileForm(), displayName: 'Sneaky' }),
+      key(),
+    );
+    expect(refused.kind).toBe('UNAVAILABLE');
+  });
+
+  it('refuses what the domain would refuse, before it reaches the server', () => {
+    // The refusal names the field, so the form can point at the control. Checked here because
+    // this is the only layer that sees what somebody typed.
+    for (const [values, field] of [
+      [{ displayName: '   ' }, 'displayName'],
+      [{ displayName: 'Amma', birthYear: '58' }, 'birthYear'],
+      [{ displayName: 'Amma', ageBand: 'SENIOR' }, 'ageBand'],
+      [{ displayName: 'Amma', languageTag: 'English' }, 'languageTag'],
+    ] as const) {
+      const refusal = profileFormRefusal({ ...emptyProfileForm(), ...values });
+      expect(refusal?.field, JSON.stringify(values)).toBe(field);
+    }
+  });
+
+  it('does not refuse an age range that disagrees with the year', () => {
+    // A correctable mistake, and refusing would throw away the rest of what somebody typed. The
+    // screen asks; the record accepts what they confirm.
+    expect(
+      profileFormRefusal({
+        ...emptyProfileForm(),
+        displayName: 'Amma',
+        ageBand: 'UNDER_3',
+        birthYear: '1958',
+      }),
+    ).toBeNull();
+    expect(bandMatchesBirthYear('UNDER_3', 1958, 2026)).toBe(false);
+  });
+
+  it('tells a stranger nothing about anybody else’s people', async () => {
+    const listed = await stranger.listProfiles();
+    if (listed.kind !== 'OK') throw new Error('expected the profiles to load');
+    expect(listed.value.profiles).toEqual([]);
+    expect(profileSwitcherView(listed.value.profiles, SEED.profileId).selectionDropped).toBe(true);
   });
 });

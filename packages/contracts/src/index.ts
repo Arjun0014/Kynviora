@@ -18,3 +18,4 @@ export * from './doseEvents.js';
 export * from './lens.js';
 export * from './visitPack.js';
 export * from './reconciliation.js';
+export * from './profileCreation.js';

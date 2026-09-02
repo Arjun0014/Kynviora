@@ -25,3 +25,4 @@ export * from './notificationPolicy.js';
 export * from './itemDetail.js';
 export * from './manualEntry.js';
 export * from './itemUpdate.js';
+export * from './profileCreation.js';

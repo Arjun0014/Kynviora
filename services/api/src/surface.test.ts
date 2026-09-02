@@ -138,6 +138,10 @@ describe('a route on the wrong surface is absent, not refused', () => {
 
   const householdRequests = [
     { method: 'GET' as const, url: '/v1/profiles' },
+    // `04` Phase 1.2. The two routes that make a person exist are household routes, and a staff
+    // origin that served them would let a reviewer account create the records it reviews.
+    { method: 'POST' as const, url: '/v1/households' },
+    { method: 'POST' as const, url: '/v1/profiles' },
     { method: 'GET' as const, url: '/v1/items?profileId=00000000-0000-4000-8000-0000000000bb' },
     { method: 'GET' as const, url: '/v1/alerts' },
     { method: 'GET' as const, url: '/v1/caregiver-grants' },

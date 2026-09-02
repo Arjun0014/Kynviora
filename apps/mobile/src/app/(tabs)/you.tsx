@@ -23,6 +23,7 @@ import {
   asNotificationDetailLevel,
   messageForFailure,
   notificationPolicyView,
+  profileSwitcherView,
   screenStateForFailure,
 } from '@kynviora/contracts';
 import { QUIET_HOURS_COPY, type ScreenState as ScreenStateKind } from '@kynviora/presentation';
@@ -33,11 +34,22 @@ import { Screen } from '@/components/Screen';
 import { ResourceState } from '@/components/ScreenState';
 import { DeliveryPolicy } from '@/features/notifications/DeliveryPolicy';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
+import { ProfileSwitcher } from '@/features/profiles/ProfileSwitcher';
+import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
 
 export default function YouScreen() {
   const { client, session, configurationError, elevate } = useApi();
-  const { activeProfile, activeProfileId } = useProfiles();
+  const {
+    activeProfile,
+    activeProfileId,
+    profiles,
+    resource: profilesResource,
+    select,
+    reload: reloadProfiles,
+  } = useProfiles();
   const [saving, setSaving] = useState(false);
+  /** `04` Phase 1.2. Open where somebody is adding a person, closed the rest of the time. */
+  const [addingPerson, setAddingPerson] = useState(false);
   const [policyState, setPolicyState] = useState<ScreenStateKind | null>(null);
   const [policyMessage, setPolicyMessage] = useState<string | null>(null);
   const [policySaved, setPolicySaved] = useState<string | null>(null);
@@ -139,6 +151,27 @@ export default function YouScreen() {
 
   const settings = resource.value;
   const policy = settings === null ? null : notificationPolicyView(settings);
+  // `04` Phase 1.2. The view decides which profile a screen is entitled to render under, and it
+  // never falls back to whoever is first - see `profileSwitcherView`.
+  const switcher = profileSwitcherView(profiles, activeProfileId);
+
+  /**
+   * Whether the server has actually answered about profiles.
+   *
+   * `EMPTY` carries no value by design (`resource.ts`), and it is the state that most needs the
+   * setup screen - so "has a value" is not the test. Anything else without one is loading or
+   * failed, and offering to create a household there would invite somebody who already has one to
+   * make a second, which nothing in this build merges.
+   */
+  const profilesLoaded = profilesResource.value !== null || profilesResource.state === 'EMPTY';
+
+  const onCreated = useCallback(() => {
+    setAddingPerson(false);
+    // Re-read rather than select what was just made. The selectable set is the server's answer
+    // (`13`), and a client that selected a profile it had only just posted would be trusting its
+    // own write rather than the authorisation behind it.
+    reloadProfiles();
+  }, [reloadProfiles]);
 
   return (
     <Screen
@@ -162,7 +195,37 @@ export default function YouScreen() {
         </Text>
       )}
 
-      {settings === null || policy === null ? (
+      {/* `04` Phase 1.2. Above everything else on this screen: whose records these are is the
+          question that has to be answered before any setting on the page means anything.
+
+          Nothing is offered while the list is still loading. An empty list and a list that has
+          not arrived look identical, and the setup screen for the second would invite somebody
+          with a household to create a second one - which nothing in this build merges. */}
+      {!profilesLoaded ? (
+        <ResourceState resource={profilesResource} onRetry={reloadProfiles} />
+      ) : addingPerson || switcher.isEmpty ? (
+        <SetUpHousehold
+          householdId={switcher.addToHouseholdId}
+          onCreated={onCreated}
+          onClose={
+            switcher.isEmpty
+              ? undefined
+              : () => {
+                  setAddingPerson(false);
+                }
+          }
+        />
+      ) : (
+        <ProfileSwitcher
+          view={switcher}
+          onSelect={select}
+          onAddPerson={() => {
+            setAddingPerson(true);
+          }}
+        />
+      )}
+
+      {activeProfileId === null || settings === null || policy === null ? (
         <ResourceState resource={resource} onRetry={onRetry} />
       ) : (
         <>

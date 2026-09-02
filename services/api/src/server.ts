@@ -30,6 +30,9 @@ import {
   manualEntryLimits,
   normalizeItemUpdate,
   normalizeManualEntry,
+  normalizeHouseholdDraft,
+  normalizeProfileDraft,
+  DEFAULT_LANGUAGE_TAG,
   type DomainError,
   type Instant,
   type InviteTokenService,
@@ -296,6 +299,39 @@ const manualEntryBodySchema = z
   .strict();
 
 /**
+ * A household somebody is creating (`04` Phase 1.2).
+ *
+ * One field, and `.strict()` so nothing else is accepted. There is deliberately no `ownerUserId`:
+ * `household_insert` requires the owner to be the caller and a body that named one would be an
+ * authorization statement arriving from the client, which is `13`'s first rule about profile IDs
+ * applied to the row that contains them.
+ */
+const householdBodySchema = z.object({ displayName: z.string() }).strict();
+
+/**
+ * A profile somebody is creating (`04` Phase 1.2).
+ *
+ * `.strict()`, so a key this build does not know about is a refusal rather than one silently
+ * ignored. There is no `selfUserId` and no `ownerUserId` for the same reason the household body
+ * has none: both are decided by who is asking. `isSelf` is a claim the caller makes about
+ * themselves, and it is the only identity statement this body can carry.
+ *
+ * `birthYear` arrives as a string rather than a number, because the domain refuses `58` rather
+ * than reading it as `1958` and a number has already lost the difference between what was typed
+ * and what was meant.
+ */
+const profileBodySchema = z
+  .object({
+    householdId: uuidSchema,
+    displayName: z.string(),
+    ageBand: z.string().nullish(),
+    birthYear: z.string().nullish(),
+    languageTag: z.string().nullish(),
+    isSelf: z.boolean().optional(),
+  })
+  .strict();
+
+/**
  * A change to an item that already exists (`04` Stage 2 - update, archive, review).
  *
  * `.strict()`, so a key this build does not know about is a refusal rather than one silently
@@ -505,12 +541,13 @@ export function createServer(options: ServerOptions): FastifyInstance {
       const result = await ctx.db((db) =>
         db.query<{
           id: string;
+          household_id: string;
           display_name: string;
           age_band: string | null;
           is_managed: boolean;
           owner_user_id: string;
         }>(
-          `SELECT id, display_name, age_band, is_managed, owner_user_id
+          `SELECT id, household_id, display_name, age_band, is_managed, owner_user_id
            FROM profile
            WHERE deleted_at IS NULL
            ORDER BY created_at`,
@@ -520,6 +557,12 @@ export function createServer(options: ServerOptions): FastifyInstance {
       return reply.send({
         profiles: result.rows.map((row) => ({
           id: row.id,
+          // Which household this profile is in, so a person adding somebody else adds them to the
+          // household they are already in rather than to a second one (`04` Phase 1.2). It
+          // discloses nothing: an opaque ID, on a row row-level security already admitted, and a
+          // caregiver who sent it to `POST /v1/profiles` would be refused by `profile_insert`
+          // because they do not own the household.
+          householdId: row.household_id,
           displayName: row.display_name,
           ageBand: row.age_band,
           isManaged: row.is_managed,
@@ -532,6 +575,245 @@ export function createServer(options: ServerOptions): FastifyInstance {
         })),
         serverTime: ctx.now,
       });
+    });
+
+    // -------------------------------------------------------------------------
+    // POST /v1/households
+    // -------------------------------------------------------------------------
+    // `04` Phase 1.2's first expected output. A household is the container every profile hangs
+    // off, and until now the only ones that existed were seeded.
+    //
+    // No ownership is read from the body. `household_insert` requires `owner_user_id` to be the
+    // caller, so the row's owner is decided by the request context and the database checks it -
+    // there is no code path here that could get it wrong, which is `13`'s "never trust an
+    // identifier in the request as proof of access" applied to the row rather than to a lookup.
+
+    app.post('/v1/households', async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      // `13`: idempotency on a mutation that can be retried. Required rather than optional, for
+      // the reason POST /v1/items requires it - a caller that may omit it is a caller that will,
+      // and two households are worse than two rows on a list: every later record hangs off one,
+      // so the copies collect separate items, caregivers and safety history and nothing merges
+      // them.
+      if (!ctx.operationId) {
+        return fail(
+          reply,
+          domainError('VALIDATION_FAILED', 'Idempotency-Key header is required.', {
+            reason_code: 'idempotency_key_required',
+          }),
+          ctx.correlationId,
+        );
+      }
+
+      const body = householdBodySchema.safeParse(request.body ?? {});
+      if (!body.success) {
+        return fail(
+          reply,
+          domainError('VALIDATION_FAILED', 'Invalid request body.', { reason_code: 'body_schema' }),
+          ctx.correlationId,
+        );
+      }
+
+      const normalized = normalizeHouseholdDraft(body.data);
+      if (isErr(normalized)) return fail(reply, normalized.error, ctx.correlationId);
+
+      const inserted = await insertOrRefusal(ctx, () =>
+        ctx.db((db) =>
+          db.query<{ id: string }>(
+            `INSERT INTO household (owner_user_id, display_name, client_operation_id)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (owner_user_id, client_operation_id)
+               WHERE client_operation_id IS NOT NULL
+               DO NOTHING
+             RETURNING id`,
+            [ctx.principal.userId, normalized.value.displayName, ctx.operationId],
+          ),
+        ),
+      );
+
+      if (inserted === null) {
+        return fail(
+          reply,
+          domainError('PERMISSION_DENIED', 'You cannot create a household.'),
+          ctx.correlationId,
+        );
+      }
+
+      const created = inserted.rows[0]?.id;
+      if (created !== undefined) {
+        return reply.status(201).send({
+          id: created,
+          displayName: normalized.value.displayName,
+          replayed: false,
+          serverTime: ctx.now,
+        });
+      }
+
+      // The key has been used by this user before, so this is the same create arriving twice.
+      // The stored row is read back rather than the submission echoed, for the reason the item
+      // route reads its row back: a retry carrying a changed name would otherwise be told what
+      // the body it sent implies, when what exists is the first one.
+      const existing = await ctx.db((db) =>
+        db.query<{ id: string; display_name: string }>(
+          `SELECT id, display_name FROM household
+            WHERE owner_user_id = $1 AND client_operation_id = $2 AND deleted_at IS NULL`,
+          [ctx.principal.userId, ctx.operationId],
+        ),
+      );
+
+      const stored = existing.rows[0];
+      if (stored === undefined) {
+        return fail(
+          reply,
+          domainError('PERMISSION_DENIED', 'You cannot create a household.'),
+          ctx.correlationId,
+        );
+      }
+
+      return reply.status(200).header('idempotent-replay', 'true').send({
+        id: stored.id,
+        displayName: stored.display_name,
+        replayed: true,
+        serverTime: ctx.now,
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // POST /v1/profiles
+    // -------------------------------------------------------------------------
+    // `04` Phase 1.2's second expected output, and the thing that makes its first exit criterion
+    // - "every item created later must require a profile" - true by construction rather than by
+    // there being no profiles at all.
+    //
+    // `profile_insert` requires that the caller owns the profile *and* owns the household it
+    // goes in, so a household ID that belongs to somebody else is refused by the database rather
+    // than by a check this handler could forget. The refusal is answered as absence: a household
+    // this caller may not write to and one that does not exist are the same answer, so the route
+    // is not an oracle for either.
+
+    app.post('/v1/profiles', async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      if (!ctx.operationId) {
+        return fail(
+          reply,
+          domainError('VALIDATION_FAILED', 'Idempotency-Key header is required.', {
+            reason_code: 'idempotency_key_required',
+          }),
+          ctx.correlationId,
+        );
+      }
+
+      const body = profileBodySchema.safeParse(request.body ?? {});
+      if (!body.success) {
+        return fail(
+          reply,
+          domainError('VALIDATION_FAILED', 'Invalid request body.', { reason_code: 'body_schema' }),
+          ctx.correlationId,
+        );
+      }
+
+      const normalized = normalizeProfileDraft(body.data);
+      if (isErr(normalized)) return fail(reply, normalized.error, ctx.correlationId);
+      const draft = normalized.value;
+
+      const inserted = await insertOrRefusal(ctx, () =>
+        ctx.db((db) =>
+          db.query<{ id: string }>(
+            // `self_user_id` is the caller or nothing. There is no parameter that could carry
+            // another user, so a profile cannot arrive asserting that somebody else is its
+            // subject - `04` Phase 1.2's "clear distinction between account holder and managed
+            // profile", made unrepresentable rather than validated.
+            //
+            // `language_tag` falls to the column default when absent, which is the household's
+            // language rather than "no language" - the one place in this route where an absence
+            // becomes a value, and it is a rendering choice with no safety meaning.
+            `INSERT INTO profile
+               (household_id, owner_user_id, self_user_id, display_name, birth_year, age_band,
+                language_tag, is_managed, client_operation_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (household_id, client_operation_id)
+               WHERE client_operation_id IS NOT NULL
+               DO NOTHING
+             RETURNING id`,
+            [
+              body.data.householdId,
+              ctx.principal.userId,
+              draft.isSelf ? ctx.principal.userId : null,
+              draft.displayName,
+              draft.birthYear,
+              draft.ageBand,
+              // The column is NOT NULL with a default, and the default lives in the domain as
+              // well so the app and the database cannot render different languages for one
+              // profile. A test reads the catalog default and asserts they agree.
+              draft.languageTag ?? DEFAULT_LANGUAGE_TAG,
+              // A profile somebody made for themselves is not managed; one they made for a
+              // relative is. The two columns say different things and are set from the same
+              // answer, which is the only place they may be derived from one another.
+              !draft.isSelf,
+              ctx.operationId,
+            ],
+          ),
+        ),
+      );
+
+      if (inserted === null) {
+        return fail(reply, domainError('NOT_FOUND', 'No such household.'), ctx.correlationId);
+      }
+
+      const created = inserted.rows[0]?.id;
+      if (created !== undefined) {
+        return reply.status(201).send({
+          id: created,
+          householdId: body.data.householdId,
+          displayName: draft.displayName,
+          ageBand: draft.ageBand,
+          birthYear: draft.birthYear,
+          isSelf: draft.isSelf,
+          isManaged: !draft.isSelf,
+          replayed: false,
+          serverTime: ctx.now,
+        });
+      }
+
+      const existing = await ctx.db((db) =>
+        db.query<{
+          id: string;
+          display_name: string;
+          age_band: string | null;
+          birth_year: number | null;
+          self_user_id: string | null;
+          is_managed: boolean;
+        }>(
+          `SELECT id, display_name, age_band, birth_year, self_user_id, is_managed
+             FROM profile
+            WHERE household_id = $1 AND client_operation_id = $2 AND deleted_at IS NULL`,
+          [body.data.householdId, ctx.operationId],
+        ),
+      );
+
+      const stored = existing.rows[0];
+      if (stored === undefined) {
+        return fail(reply, domainError('NOT_FOUND', 'No such household.'), ctx.correlationId);
+      }
+
+      return reply
+        .status(200)
+        .header('idempotent-replay', 'true')
+        .send({
+          id: stored.id,
+          householdId: body.data.householdId,
+          displayName: stored.display_name,
+          ageBand: stored.age_band,
+          birthYear: stored.birth_year,
+          isSelf: stored.self_user_id === (ctx.principal.userId as string),
+          isManaged: stored.is_managed,
+          replayed: true,
+          serverTime: ctx.now,
+        });
     });
 
     // -------------------------------------------------------------------------

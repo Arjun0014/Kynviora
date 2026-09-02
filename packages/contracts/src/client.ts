@@ -32,6 +32,14 @@ import type { ApiOutcome } from './outcome.js';
 
 export interface ProfileSummary {
   readonly id: string;
+  /**
+   * The household this profile is in (`04` Phase 1.2).
+   *
+   * Carried so that adding a second person adds them beside the first rather than to a new
+   * household. Two households are not a duplicate row: every later record hangs off one, and
+   * nothing in this build merges them.
+   */
+  readonly householdId: string;
   readonly displayName: string;
   readonly ageBand: string | null;
   /** Whether the profile is for someone the account holder looks after. Not about authority. */
@@ -197,6 +205,62 @@ export interface ItemCreated {
   readonly limitCodes: readonly string[];
   readonly completeNote: string | null;
   readonly note: string;
+  readonly replayed: boolean;
+  readonly serverTime: string;
+}
+
+// ---------------------------------------------------------------------------
+// Making a household, and the people in it (`04` Phase 1.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * A household somebody is creating.
+ *
+ * One field. There is deliberately no `ownerUserId`: the owner is the caller, decided by the
+ * request context and checked by `household_insert`, and a body that could name one would be an
+ * authorization statement travelling from a client.
+ */
+export interface HouseholdBody {
+  readonly displayName: string;
+}
+
+export interface HouseholdCreated {
+  readonly id: string;
+  readonly displayName: string;
+  readonly replayed: boolean;
+  readonly serverTime: string;
+}
+
+/**
+ * A profile somebody is creating.
+ *
+ * `birthYear` is a string because the domain refuses `58` rather than reading it as `1958`, and a
+ * number has already lost the difference between what was typed and what was meant.
+ *
+ * There is no `selfUserId` and no `ownerUserId`. `isSelf` is a claim the caller makes about
+ * themselves and is the only identity statement this body can carry - a profile asserting that
+ * somebody else is its subject would be written by the wrong person, and `self_user_id` is unique,
+ * so it would also take a name that person could never claim.
+ */
+export interface ProfileBody {
+  readonly householdId: string;
+  readonly displayName: string;
+  readonly ageBand?: string | null;
+  readonly birthYear?: string | null;
+  readonly languageTag?: string | null;
+  readonly isSelf?: boolean;
+}
+
+export interface ProfileCreated {
+  readonly id: string;
+  readonly householdId: string;
+  readonly displayName: string;
+  readonly ageBand: string | null;
+  readonly birthYear: number | null;
+  /** Whether the profile is the caller themselves. */
+  readonly isSelf: boolean;
+  /** Whether it is for somebody the caller looks after. The other side of the same answer. */
+  readonly isManaged: boolean;
   readonly replayed: boolean;
   readonly serverTime: string;
 }
@@ -944,6 +1008,19 @@ export interface KynvioraClient {
    * body's shape rather than of this comment: there is no field for either.
    */
   createItem(body: ManualEntryBody, idempotencyKey: string): Promise<ApiOutcome<ItemCreated>>;
+
+  /**
+   * Make a household, and make a person in it (`04` Phase 1.2).
+   *
+   * Both take an idempotency key, and both require one at the server. Two households are not a
+   * duplicate row on a list: every later record hangs off one, so two copies collect separate
+   * items, caregivers and safety history, and nothing in this build merges them.
+   */
+  createHousehold(
+    body: HouseholdBody,
+    idempotencyKey: string,
+  ): Promise<ApiOutcome<HouseholdCreated>>;
+  createProfile(body: ProfileBody, idempotencyKey: string): Promise<ApiOutcome<ProfileCreated>>;
   /**
    * Change an item that already exists (`04` Stage 2 - update, archive, review).
    *
@@ -1195,6 +1272,14 @@ export function createClient(options: ClientOptions): KynvioraClient {
     // The domain refuses and names the field; this sends what it was given.
     createItem: (body, idempotencyKey) =>
       send<ItemCreated>('POST', '/v1/items', body, idempotencyKey),
+
+    createHousehold: (body, idempotencyKey) =>
+      send<HouseholdCreated>('POST', '/v1/households', body, idempotencyKey),
+
+    // The key is the caller's, and re-sending the same one is how a person who tapped twice gets
+    // one profile. The server reads back the row that exists rather than echoing the second body.
+    createProfile: (body, idempotencyKey) =>
+      send<ProfileCreated>('POST', '/v1/profiles', body, idempotencyKey),
 
     // PATCH rather than PUT, because absent and `null` mean different things here and a whole-
     // document PUT could not express "leave this alone".

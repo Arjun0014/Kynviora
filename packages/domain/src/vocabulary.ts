@@ -509,6 +509,29 @@ export const PRODUCT_USE_TYPES = ['RINSE_OFF', 'LEAVE_ON', 'ORAL', 'UNKNOWN'] as
 export type ProductUseType = Member<typeof PRODUCT_USE_TYPES>;
 export const isProductUseType = makeGuard(PRODUCT_USE_TYPES);
 
+/**
+ * The age bands a profile may carry (`04` Phase 1.2, `16` data minimisation).
+ *
+ * A band rather than a date of birth, and the bands are the MVP rule set's, not a demographic
+ * segmentation: `03` scopes the safety rules to paediatric dosing, pregnancy and older adults, and
+ * these are the distinctions those rules actually draw. Storing an exact date where a band answers
+ * the question is collecting a stronger identifier than the product needs, which `16` forbids -
+ * `profile.birth_year` exists for the cases a rule needs the year and is separately optional.
+ *
+ * The same list, in the same order, is a CHECK constraint on `profile.age_band` in migration
+ * `0002`. A test asserts the two agree: a band the domain offers and the database refuses is a
+ * form somebody fills in and cannot submit.
+ */
+export const AGE_BANDS = [
+  'UNDER_3',
+  'CHILD_3_12',
+  'TEEN_13_17',
+  'ADULT_18_64',
+  'OLDER_ADULT_65_PLUS',
+] as const;
+export type AgeBand = Member<typeof AGE_BANDS>;
+export const isAgeBand = makeGuard(AGE_BANDS);
+
 /** Caregiver capability grants (`07` CaregiverGrant). */
 export const CAREGIVER_CAPABILITIES = [
   'VIEW_SAFETY',
