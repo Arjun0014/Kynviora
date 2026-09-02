@@ -317,18 +317,27 @@ describe('a shadow run touches nobody', () => {
 });
 
 describe('a historical run refuses what it cannot measure', () => {
-  it('will not run a substance-matching rule against the shelf', async () => {
-    // The shelf join here does not carry the confirmed ingredient declaration, so the run would
-    // report fewer matches than the rule really produces - and an under-count reads as "this
-    // affects nobody", which is the most dangerous wrong answer a blast radius can give.
-    for (const kind of ['INGREDIENT_SENSITIVITY', 'DUPLICATE_ACTIVE_INGREDIENT']) {
-      const ruleId = await candidateRule({ kind });
-      const response = await historicalRun(ruleId);
-      expect(response.statusCode).toBe(400);
-      expect(response.json()).toMatchObject({
-        error: { detail: { reason_code: 'historical_dataset_incomplete_for_rule' } },
-      });
-    }
+  it('will not run a rule the engine has not been written for', async () => {
+    // `DUPLICATE_ACTIVE_INGREDIENT` is the one left. The *dataset* can feed it since `DEV-018`
+    // closed; `evaluateRule` returns a non-match for every item, because `09` requires validated
+    // reference data and clinical review before that rule may exist at all. Measuring it would
+    // produce a confident zero about a rule nobody has written, and an under-count reads as "this
+    // affects nobody" - the most dangerous wrong answer a blast radius can give.
+    const ruleId = await candidateRule({ kind: 'DUPLICATE_ACTIVE_INGREDIENT' });
+    const response = await historicalRun(ruleId);
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { detail: { reason_code: 'historical_dataset_incomplete_for_rule' } },
+    });
+  });
+
+  it('will now run a substance-matching rule against the shelf', async () => {
+    // `DEV-018`. The dataset carries both halves of a substance match - the confirmed
+    // declaration's canonical keys and the profile fact's - so a run reports what the rule would
+    // really produce rather than being refused.
+    const ruleId = await candidateRule({ kind: 'INGREDIENT_SENSITIVITY' });
+    const response = await historicalRun(ruleId);
+    expect(response.statusCode).toBe(201);
   });
 
   it('runs the same rule kind against a synthetic dataset the caller supplied', async () => {
@@ -563,5 +572,139 @@ describe('replay after a correction', () => {
       payload: { ruleVersionId: ruleId, changeKind: 'SOURCE_CORRECTION', changeNote: '' },
     });
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe('measuring a substance-matching rule against the real shelf (DEV-018)', () => {
+  /**
+   * The half of `DEV-018` Phase 5.2 did not clear.
+   *
+   * Until now the historical dataset reached `owned_item`, `batch_or_lot` and `product_identity`
+   * and stopped there: no confirmed declaration on the item side and no canonical key on the fact
+   * side, so `INGREDIENT_SENSITIVITY` was refused rather than measured. Refusing was right -
+   * reporting fewer matches than a rule really produces reads as "this affects nobody" on the
+   * screen a reviewer approves from. What is asserted here is that it now measures, and that the
+   * number is arrived at the same way the rule would arrive at it.
+   *
+   * This block runs last on purpose: it adds a fourth item to the shelf, and the counts the
+   * earlier blocks assert are the counts of a three-item shelf.
+   */
+
+  const SUBSTANCE = testUuid(200);
+  const FORMULATION = testUuid(201);
+  const ITEM_D = testUuid(202);
+  const FACT = testUuid(203);
+  const IDENTITY_D = testUuid(204);
+
+  beforeAll(async () => {
+    await t.asService(async (db) => {
+      await db.query(
+        `INSERT INTO normalized_substance
+           (id, canonical_key, preferred_name, substance_kind, vocabulary_version, review_state)
+         VALUES ($1, 'synthetic.salicylic_acid', 'Salicylic acid', 'COSMETIC_INGREDIENT',
+                 'norm-1', 'PUBLISHED')`,
+        [SUBSTANCE],
+      );
+      await db.query(
+        `INSERT INTO product_identity (id, item_kind, display_name)
+         VALUES ($1, 'PERSONAL_CARE', 'Synthetic Lotion')`,
+        [IDENTITY_D],
+      );
+      await db.query(
+        `INSERT INTO marketed_formulation
+           (id, product_identity_id, market, version_label, ingredient_declaration_raw,
+            fingerprint, fingerprint_version)
+         VALUES ($1, $2, 'GB', 'v3', 'Aqua, Salicylic Acid', 'fp-synthetic', '1.0.0')`,
+        [FORMULATION, IDENTITY_D],
+      );
+      // One mapped ingredient and one that resolved to nothing. Only the mapped one may
+      // contribute a key: a rule counting the unmapped one would be matching on a mapping nobody
+      // made.
+      await db.query(
+        `INSERT INTO formulation_ingredient
+           (formulation_id, position, raw_term, substance_id, mapping_state)
+         VALUES ($1, 0, 'Aqua', NULL, 'UNRESOLVED'),
+                ($1, 1, 'Salicylic Acid', $2, 'EXACT')`,
+        [FORMULATION, SUBSTANCE],
+      );
+      await db.query(
+        `INSERT INTO owned_item
+           (id, profile_id, item_kind, product_identity_id, formulation_id, display_name,
+            identity_verification, formulation_verification, batch_verification, lifecycle_state)
+         VALUES ($1, $2, 'PERSONAL_CARE', $3, $4, 'Synthetic Lotion',
+                 'CONFIRMED', 'CONFIRMED', 'UNVERIFIED', 'ACTIVE')`,
+        [ITEM_D, PROFILE_A, IDENTITY_D, FORMULATION],
+      );
+      await db.query(
+        `INSERT INTO allergy_record
+           (id, profile_id, record_kind, display_term, substance_id, substance_mapping_state,
+            provenance, certainty)
+         VALUES ($1, $2, 'SENSITIVITY', 'salicylates', $3, 'EXACT', 'USER_REPORTED', 'REPORTED')`,
+        [FACT, PROFILE_A, SUBSTANCE],
+      );
+    });
+  });
+
+  it('finds the household whose recorded sensitivity is in the declaration', async () => {
+    const ruleId = await candidateRule({ kind: 'INGREDIENT_SENSITIVITY' });
+    const response = await historicalRun(ruleId);
+    expect(response.statusCode).toBe(201);
+
+    const body = response.json<RunBody>();
+    expect(body.datasetSize).toBe(4);
+    expect(body.matchedItems).toBe(1);
+    expect(body.potentialUserMatches).toBe(1);
+    expect(body.reasonCounts.SUBSTANCE_IN_DECLARATION).toBe(1);
+  });
+
+  it('reports why the rest did not match, rather than only that they did not', async () => {
+    // The breakdown is what a reviewer reads before approving. Three items carry no recorded
+    // sensitivity for their profile at all, which is a different fact from a declaration that
+    // does not contain one.
+    const ruleId = await candidateRule({ kind: 'INGREDIENT_SENSITIVITY' });
+    const body = (await historicalRun(ruleId)).json<RunBody>();
+    const unmatched =
+      (body.reasonCounts.NO_ELIGIBLE_PROFILE_FACT ?? 0) +
+      (body.reasonCounts.NO_SIGNAL_MATCHED ?? 0) +
+      (body.reasonCounts.INSUFFICIENT_ITEM_VERIFICATION ?? 0);
+    expect(unmatched).toBe(3);
+  });
+
+  it('still touches nothing and names nobody', async () => {
+    // The exit criterion this whole suite is for. Measuring a substance rule must not make it
+    // the first shadow run that writes an assessment or leaks a profile.
+    const ruleId = await candidateRule({ kind: 'INGREDIENT_SENSITIVITY' });
+    const before = await t.asService((db) =>
+      db.query<{ count: string }>(`SELECT count(*) AS count FROM profile_assessment`),
+    );
+
+    const response = await historicalRun(ruleId);
+    expect(JSON.stringify(response.json())).not.toContain(PROFILE_A);
+    expect(JSON.stringify(response.json())).not.toContain(FACT);
+    expect(JSON.stringify(response.json())).not.toContain('salicylates');
+
+    const after = await t.asService((db) =>
+      db.query<{ count: string }>(`SELECT count(*) AS count FROM profile_assessment`),
+    );
+    expect(after.rows[0]?.count).toBe(before.rows[0]?.count);
+  });
+
+  it('counts an unmapped recorded term as no eligible fact, not as a match', async () => {
+    // The state of almost every record in this build, because the vocabulary needs a licensed
+    // source (`BLK-003`). It must read as a measured zero rather than quietly becoming a match.
+    const unmapped = testUuid(210);
+    await t.asService((db) =>
+      db.query(
+        `INSERT INTO allergy_record
+           (id, profile_id, record_kind, display_term, provenance, certainty)
+         VALUES ($1, $2, 'ALLERGY', 'penicillin', 'USER_REPORTED', 'REPORTED')`,
+        [unmapped, PROFILE_B],
+      ),
+    );
+
+    const ruleId = await candidateRule({ kind: 'INGREDIENT_SENSITIVITY' });
+    const body = (await historicalRun(ruleId)).json<RunBody>();
+    // Unchanged: PROFILE_B holds no item with a declaration, and the new fact carries no key.
+    expect(body.matchedItems).toBe(1);
   });
 });

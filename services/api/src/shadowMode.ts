@@ -114,11 +114,19 @@ const idParamsSchema = z.object({ id: z.string().uuid() });
 /**
  * Rule kinds a historical dataset cannot feed faithfully.
  *
- * Both match on the confirmed ingredient declaration, which the shelf join here does not carry.
- * A run over them would report fewer matches than the rule would really produce.
+ * `INGREDIENT_SENSITIVITY` came off this list when `DEV-018` closed: the dataset now carries both
+ * halves of a substance match - the confirmed declaration's canonical keys and the profile fact's
+ * - so a run over it reports what the rule would really produce. Where that is zero it is a
+ * measured zero, which is a different statement from a structural one and is the whole reason the
+ * refusal existed.
+ *
+ * `DUPLICATE_ACTIVE_INGREDIENT` stays, and for a different reason than it was put here for. The
+ * dataset can now feed it; `evaluateRule` cannot evaluate it - `09` requires validated reference
+ * data and clinical review before that rule may exist at all (`BLK-006`), so the engine returns a
+ * non-match for every item. Measuring it would produce a confident zero about a rule that has not
+ * been written, which is worse than refusing.
  */
 const HISTORICAL_UNSUPPORTED_KINDS: readonly string[] = Object.freeze([
-  'INGREDIENT_SENSITIVITY',
   'DUPLICATE_ACTIVE_INGREDIENT',
 ]);
 
@@ -220,14 +228,31 @@ export function registerShadowModeRoutes(app: FastifyInstance, deps: ShadowModeR
         formulation_verification: string;
         batch_verification: string;
         lifecycle_state: string;
+        formulation_version: string | null;
+        substance_keys: string[] | null;
       }>(
+        // `DEV-028`'s sibling, `DEV-018`: the confirmed declaration, which this join did not reach
+        // until now. Only `EXACT` ingredients contribute a key - an ambiguous one resolved to no
+        // substance and a rule that counted it would be matching on a mapping nobody made, which
+        // is the same discipline `evaluateIngredientSensitivity` keeps on the profile side.
+        //
+        // Aggregated in SQL rather than in a second query and a join in memory: one row per item
+        // is what the dataset builder below expects, and a per-item round trip over a whole
+        // installation's shelf is the shape that stops being viable first.
         `SELECT oi.id, oi.profile_id, oi.product_identity_id, oi.formulation_id, oi.batch_id,
                 b.lot_code, pi.gtin, oi.expires_on,
                 oi.identity_verification, oi.formulation_verification, oi.batch_verification,
-                oi.lifecycle_state
+                oi.lifecycle_state,
+                mf.version_label AS formulation_version,
+                (SELECT array_agg(DISTINCT ns.canonical_key)
+                   FROM formulation_ingredient fi
+                   JOIN normalized_substance ns ON ns.id = fi.substance_id
+                  WHERE fi.formulation_id = oi.formulation_id
+                    AND fi.mapping_state = 'EXACT') AS substance_keys
            FROM owned_item oi
            LEFT JOIN batch_or_lot b ON b.id = oi.batch_id
            LEFT JOIN product_identity pi ON pi.id = oi.product_identity_id
+           LEFT JOIN marketed_formulation mf ON mf.id = oi.formulation_id
           WHERE oi.deleted_at IS NULL
           ORDER BY oi.id`,
       );
@@ -240,9 +265,16 @@ export function registerShadowModeRoutes(app: FastifyInstance, deps: ShadowModeR
         provenance: string;
         version: number;
         created_at: Date;
+        canonical_key: string | null;
       }>(
-        `SELECT id, profile_id, record_kind, display_term, provenance, version, created_at
-           FROM allergy_record WHERE deleted_at IS NULL`,
+        // `04` Phase 5.2 put a mapping on `substance_id`; this is what reads it. `allergy_select`
+        // is not in play - this runs privileged and cross-profile, because a blast-radius number
+        // that only covered the households one caller may read would be worse than no number.
+        `SELECT ar.id, ar.profile_id, ar.record_kind, ar.display_term, ar.provenance, ar.version,
+                ar.created_at, ns.canonical_key
+           FROM allergy_record ar
+           LEFT JOIN normalized_substance ns ON ns.id = ar.substance_id
+          WHERE ar.deleted_at IS NULL`,
       );
 
       const signals = await db.query<{
@@ -271,13 +303,11 @@ export function registerShadowModeRoutes(app: FastifyInstance, deps: ShadowModeR
         list.push({
           id: row.id,
           kind: row.record_kind as ProfileFact['kind'],
-          // Still null, and both halves of `DEV-018` are why. Since `04` Phase 5.2 the fact side
-          // is available - `allergy_record.substance_id` now carries a mapping - but the *item*
-          // side does not: `substanceKeys` below is empty because this join does not reach the
-          // confirmed declaration. Supplying one half would let a rule that matches on the
-          // intersection report zero matches with a straight face, so both stay empty and
-          // `HISTORICAL_UNSUPPORTED_KINDS` refuses the rules outright.
-          substanceCanonicalKey: null,
+          // `DEV-018`, the fact half. Null where the term is unmapped, which in this build is
+          // almost everywhere: the vocabulary needs a licensed source (`BLK-003`). That is a
+          // measured zero rather than a structural one, which is the whole difference this
+          // deviation was about.
+          substanceCanonicalKey: row.canonical_key,
           displayTerm: row.display_term,
           provenance: row.provenance as ProvenanceKind,
           recordedAt: instantFrom(row.created_at.toISOString()),
@@ -292,7 +322,7 @@ export function registerShadowModeRoutes(app: FastifyInstance, deps: ShadowModeR
           profileId: row.profile_id,
           productIdentityId: row.product_identity_id,
           formulationId: row.formulation_id,
-          formulationVersion: null,
+          formulationVersion: row.formulation_version,
           batchId: row.batch_id,
           lotCode: row.lot_code,
           gtin: row.gtin,
@@ -300,7 +330,9 @@ export function registerShadowModeRoutes(app: FastifyInstance, deps: ShadowModeR
           identityVerification: row.identity_verification as ItemVerification,
           formulationVerification: row.formulation_verification as ItemVerification,
           batchVerification: row.batch_verification as ItemVerification,
-          substanceKeys: [],
+          // `DEV-018`, the item half. `array_agg` returns NULL rather than an empty array when
+          // nothing matched, and an item with no formulation never reaches the subquery at all.
+          substanceKeys: row.substance_keys ?? [],
           isActive: row.lifecycle_state === 'ACTIVE',
         },
         profileFacts: factsByProfile.get(row.profile_id) ?? [],
