@@ -50,6 +50,7 @@ import {
   presentVerification,
   resolutionOptions,
   attentionListView,
+  manualEntryForm,
   type StatusPresentation,
 } from '@kynviora/presentation';
 import { isSafetyResolution } from '@kynviora/domain';
@@ -60,6 +61,7 @@ import type {
   CaregiverAuditEvent,
   CaregiverGrant,
   ItemDetailResponse,
+  ManualEntryBody,
   SafetyInboxLineResponse,
   SafetyReceiptResponse,
   PendingInvitation,
@@ -902,5 +904,96 @@ export function itemDetailScreenView(response: ItemDetailResponse): ItemDetailSc
     categoryFields: response.categoryFields,
     sharedFields: response.sharedFields,
     attention: response.attention,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Manual entry (`04` Phases 2.2 and 2.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * A field a submission may carry, as a value rather than only as a type.
+ *
+ * `profileId` and `itemKind` are excluded because they are not things somebody types into a
+ * field: one narrows the write and the other decides which form is on the screen.
+ */
+export type ManualEntryField = Exclude<keyof ManualEntryBody, 'profileId' | 'itemKind'>;
+
+/**
+ * Every field name a submission may carry, checked in both directions by the compiler.
+ *
+ * `satisfies Record<ManualEntryField, true>` fails if a field is missing and fails if one is
+ * invented, which is the point: the form lives in `@kynviora/presentation` and the body lives in
+ * `client.ts`, and a typo in a form field's key would otherwise mean that field is silently never
+ * sent. A barcode a person typed and Kynviora quietly dropped is worse than one they never
+ * entered, because the screen would say it had been recorded.
+ */
+const MANUAL_ENTRY_FIELD_PRESENCE = {
+  displayName: true,
+  brand: true,
+  manufacturer: true,
+  market: true,
+  recordedGtin: true,
+  recordedLotCode: true,
+  expiresOn: true,
+  startedOn: true,
+  notes: true,
+  strengthText: true,
+  dosageForm: true,
+  directionsText: true,
+  personalCareCategory: true,
+  ingredientDeclarationRaw: true,
+  labelVersionNote: true,
+} as const satisfies Record<ManualEntryField, true>;
+
+export const MANUAL_ENTRY_FIELDS: readonly ManualEntryField[] = Object.freeze(
+  Object.keys(MANUAL_ENTRY_FIELD_PRESENCE) as ManualEntryField[],
+);
+
+export function isManualEntryField(value: string): value is ManualEntryField {
+  return Object.prototype.hasOwnProperty.call(MANUAL_ENTRY_FIELD_PRESENCE, value);
+}
+
+/**
+ * What somebody typed, as a body.
+ *
+ * WHICH FIELDS CAN BE SENT IS THE FORM'S DECISION, NOT A SCREEN'S
+ * The fields come from {@link manualEntryForm}, so a value for a field the form for this category
+ * does not offer cannot be submitted. That matters because the domain refuses a medicine carrying
+ * a personal-care category outright: a draft left behind when somebody changed their mind about
+ * what they were adding would otherwise be refused with a message about a field they never saw.
+ *
+ * A BLANK FIELD IS OMITTED, AND NOTHING ELSE IS TOUCHED
+ * `04` Phase 2.2's second exit criterion is that a missing field stays explicitly unknown. A
+ * field somebody left blank is not sent, so it is stored as an absence rather than as an empty
+ * string that a screen would render as an answer. Every field that *is* sent is sent exactly as
+ * typed - not trimmed, not upper-cased, not stripped of spaces. The domain refuses a malformed
+ * value and names the field; a value this client had quietly repaired is one nobody can check
+ * against the pack in their hand.
+ *
+ * The name is always sent, even blank. A missing key fails the body schema and comes back as a
+ * generic "invalid request body"; an empty one reaches the domain, which refuses it naming
+ * `displayName` - and only the second lets a form point at the field somebody has to fill in.
+ */
+export function manualEntryDraft(input: {
+  readonly profileId: string;
+  readonly itemKind: ItemKind;
+  readonly values: Readonly<Record<string, string>>;
+}): ManualEntryBody {
+  const offered: Partial<Record<ManualEntryField, string>> = {};
+
+  for (const field of manualEntryForm(input.itemKind).fields) {
+    if (field.field === 'displayName') continue;
+    if (!isManualEntryField(field.field)) continue;
+    const typed = input.values[field.field];
+    if (typed === undefined || typed.trim() === '') continue;
+    offered[field.field] = typed;
+  }
+
+  return {
+    profileId: input.profileId,
+    itemKind: input.itemKind,
+    displayName: input.values['displayName'] ?? '',
+    ...offered,
   };
 }

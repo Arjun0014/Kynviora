@@ -224,7 +224,11 @@ describe('exit criterion 1 - neither category is a generic note, over the wire',
   it('gives a personal-care item its own, and none of the medicine ones', async () => {
     const body = (await detail(principalFor(OWNER), PERSONAL_CARE)).json<DetailBody>();
     expect(body.categoryHeading).toBe('About this product');
-    expect(body.categoryFields.map((f) => f.label)).toEqual(['Kind of product']);
+    expect(body.categoryFields.map((f) => f.label)).toEqual([
+      'Kind of product',
+      'Ingredients as printed',
+      'Note about the label version',
+    ]);
     expect(body.categoryFields[0]?.value).toBe('Hair care');
   });
 

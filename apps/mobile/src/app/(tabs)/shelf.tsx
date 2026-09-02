@@ -14,6 +14,12 @@
  * level security decides it. A profile this account cannot see comes back as an empty page rather
  * than a refusal, which is why an empty shelf and an unauthorised one look the same here.
  *
+ * ADDING AN ITEM LIVES HERE BECAUSE THE SHELF IS WHAT IT JOINS
+ * `04` Phases 2.2 and 2.3. Two controls rather than one, because which of the two a person is
+ * adding decides which fields they are asked for - a single "Add" that asked the category as its
+ * first question would be the same two paths with a step in front of them. The labels are the
+ * forms' own headings: this screen writes no copy.
+ *
  * RECORDING A DOSE LIVES HERE BECAUSE THE MEDICINE DOES
  * `04` Phase 4.3 is about recording what happened, and what happened, happened to one of these.
  * Phase 4.2's reminders need a device (`BLK-002`), so there is no schedule strip to hang it off -
@@ -30,9 +36,10 @@ import {
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   MIN_TOUCH_TARGET_DP,
+  manualEntryForm,
   type ScreenState as ScreenStateKind,
 } from '@kynviora/presentation';
-import type { DoseEventKind } from '@kynviora/domain';
+import { ITEM_KINDS, type DoseEventKind, type ItemKind } from '@kynviora/domain';
 import {
   doseHistory,
   itemDetailScreenView,
@@ -50,6 +57,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { ResourceState } from '@/components/ScreenState';
 import { StatusChip } from '@/components/StatusChip';
 import { RecordDose } from '@/features/doses/RecordDose';
+import { AddItem } from '@/features/shelf/AddItem';
 import { ItemDetail } from '@/features/shelf/ItemDetail';
 
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
@@ -71,6 +79,15 @@ export default function ShelfScreen() {
    * second list of the same things.
    */
   const [detailFor, setDetailFor] = useState<ShelfItemView | null>(null);
+
+  /**
+   * The category being added, or `null`.
+   *
+   * Holding the category rather than a boolean is what makes the form a form: `manualEntryForm`
+   * decides which fields exist for which category, and a medicine asked for a "kind of product"
+   * is the reduction to a generic note Phase 2.1's first exit criterion forbids.
+   */
+  const [adding, setAdding] = useState<ItemKind | null>(null);
 
   /**
    * The filter, as the two questions it actually is.
@@ -192,6 +209,21 @@ export default function ShelfScreen() {
     setRecorded(false);
   }, []);
 
+  if (adding !== null && activeProfileId !== null) {
+    return (
+      <Screen title="Shelf" intro="Only the name is needed.">
+        <AddItem
+          itemKind={adding}
+          profileId={activeProfileId}
+          onSaved={onRetry}
+          onClose={() => {
+            setAdding(null);
+          }}
+        />
+      </Screen>
+    );
+  }
+
   if (detailFor !== null) {
     return (
       <Screen title="Shelf" intro="What Kynviora has for this item, and what is still missing.">
@@ -233,6 +265,21 @@ export default function ShelfScreen() {
       refreshing={refreshing}
     >
       <ResourceState resource={resource} onRetry={onRetry} />
+
+      {/* Above the filters and above the list, so it is reachable from the empty shelf as well -
+          which is the state every new household starts in and the one where it matters most. */}
+      {activeProfileId === null
+        ? null
+        : ITEM_KINDS.map((kind) => (
+            <PrimaryButton
+              key={kind}
+              label={manualEntryForm(kind).heading}
+              variant="secondary"
+              onPress={() => {
+                setAdding(kind);
+              }}
+            />
+          ))}
 
       {/* Two filters, each named as the question it asks. They narrow and they do not rank -
           which of two people's medicines matters more is not a judgement this screen makes. */}

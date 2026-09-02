@@ -58,6 +58,17 @@ export type ApiOutcome<T> =
       readonly kind: 'REFUSED';
       readonly code: string;
       readonly message: string;
+      /**
+       * The structured half of the refusal, where the server sent one.
+       *
+       * `errors.ts` has already made this client-safe, and it is where a refusal names the field
+       * it is about. A form that could not read it would have to point at nothing, or guess from
+       * the message text - and `13` says clients branch on codes, never on message text.
+       *
+       * Absent rather than empty when the server sent none, so "the server said nothing" and "the
+       * server said this is about no particular field" stay different facts.
+       */
+      readonly detail?: Readonly<Record<string, string | number | boolean | null>>;
       readonly retryable: boolean;
       readonly correlationId: string | null;
     }
@@ -111,6 +122,7 @@ export function classifyError(status: number, error: WireError | null): ApiOutco
       kind: 'REFUSED',
       code: error.code,
       message: error.message,
+      ...(error.detail === undefined ? {} : { detail: error.detail }),
       retryable: error.retryable,
       correlationId,
     };
@@ -137,15 +149,43 @@ export function parseWireError(body: unknown): WireError | null {
   const message = fields['message'];
   const retryable = fields['retryable'];
   const correlationId = fields['correlationId'];
+  const detail = parseDetail(fields['detail']);
 
   if (typeof code !== 'string' || typeof message !== 'string') return null;
 
   return {
     code,
     message,
+    ...(detail === undefined ? {} : { detail }),
     retryable: typeof retryable === 'boolean' ? retryable : false,
     correlationId: typeof correlationId === 'string' ? correlationId : '',
   };
+}
+
+/**
+ * The scalar entries of an error's detail, or `undefined`.
+ *
+ * Narrowed value by value rather than cast. A nested object or an array reaching a screen would
+ * render as `[object Object]` beside somebody's medicine - trap 101, on the error path this time -
+ * and a detail this build cannot read is better treated as one the server did not send.
+ */
+function parseDetail(
+  value: unknown,
+): Readonly<Record<string, string | number | boolean | null>> | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+
+  const entries: Record<string, string | number | boolean | null> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      entry === null ||
+      typeof entry === 'string' ||
+      typeof entry === 'number' ||
+      typeof entry === 'boolean'
+    ) {
+      entries[key] = entry;
+    }
+  }
+  return Object.freeze(entries);
 }
 
 // ---------------------------------------------------------------------------

@@ -177,10 +177,23 @@ export interface ItemDetailInput {
   readonly formulationVerification: string;
   readonly batchVerification: string;
 
+  readonly manufacturer: string | null;
+  /**
+   * The barcode and the lot code as this household recorded them.
+   *
+   * Never a catalog identity. Migration `0015` keeps them on `owned_item` because a household
+   * typing a number is not the catalog learning one, and the labels below say so - a row reading
+   * plainly "Barcode" beside three unconfirmed chips invites exactly the reading `08` forbids.
+   */
+  readonly recordedGtin: string | null;
+  readonly recordedLotCode: string | null;
+
   readonly strengthText: string | null;
   readonly dosageForm: string | null;
   readonly directionsText: string | null;
   readonly personalCareCategory: string | null;
+  readonly ingredientDeclarationRaw: string | null;
+  readonly labelVersionNote: string | null;
 
   readonly startedOn: string | null;
   readonly stoppedOn: string | null;
@@ -270,7 +283,15 @@ export function itemDetailView(input: ItemDetailInput): ItemDetailView {
         // Quoted, never rewritten and never summarised (`04` Phase 4.1, `09`).
         field('Directions as written', input.directionsText, true),
       ]
-    : [field('Kind of product', personalCareCategoryLabel(input.personalCareCategory))];
+    : [
+        field('Kind of product', personalCareCategoryLabel(input.personalCareCategory)),
+        // Quoted for the reason a written direction is: it is the manufacturer's words off the
+        // back of a pack, kept exactly as printed and never normalized (`05.1`). Phase 2.3's
+        // second exit criterion is also this row existing at all - a product whose declaration a
+        // person transcribed and no screen shows back has been reduced to name plus barcode.
+        field('Ingredients as printed', input.ingredientDeclarationRaw, true),
+        field('Note about the label version', input.labelVersionNote),
+      ];
 
   return {
     id: input.id,
@@ -293,7 +314,13 @@ export function itemDetailView(input: ItemDetailInput): ItemDetailView {
     categoryHeading: isMedicine ? 'About this medicine' : 'About this product',
     categoryFields,
     sharedFields: [
+      field('Who makes it', input.manufacturer),
       field('Where it was bought', input.market),
+      // "as recorded here", not "Barcode". These are the household's own transcription and they
+      // corroborate nothing; a bare label beside three unconfirmed chips would read as evidence
+      // that Kynviora had matched something (`08`, `15` A11).
+      field('Barcode as recorded here', input.recordedGtin),
+      field('Batch or lot code as recorded here', input.recordedLotCode),
       field('Started', input.startedOn),
       field('Stopped', input.stoppedOn),
       field('Expires', input.expiresOn),

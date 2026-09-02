@@ -135,11 +135,29 @@ interface CreatedBody {
   readonly note: string;
 }
 
-async function create(as: Principal | null, body: Record<string, unknown>) {
+/**
+ * A key nobody has used before.
+ *
+ * Fresh per call by default, because these tests are about what one save does. The retry tests
+ * pass the same key twice deliberately, and that is the whole difference between them.
+ */
+let nextKey = 1000;
+function freshKey(): string {
+  nextKey += 1;
+  return testUuid(nextKey);
+}
+
+async function create(
+  as: Principal | null,
+  body: Record<string, unknown>,
+  options: { readonly key?: string | null; readonly profileId?: string } = {},
+) {
+  const key = options.key === undefined ? freshKey() : options.key;
   return request(as, {
     method: 'POST',
     url: '/v1/items',
-    payload: { profileId: PROFILE, ...body },
+    payload: { profileId: options.profileId ?? PROFILE, ...body },
+    ...(key === null ? {} : { headers: { 'idempotency-key': key } }),
   });
 }
 
@@ -443,15 +461,11 @@ describe('who may add an item', () => {
       itemKind: 'MEDICINE',
       displayName: 'Synthetic Tablet',
     });
-    const unknown = await request(principalFor(OWNER), {
-      method: 'POST',
-      url: '/v1/items',
-      payload: {
-        profileId: testUuid(999),
-        itemKind: 'MEDICINE',
-        displayName: 'Synthetic Tablet',
-      },
-    });
+    const unknown = await create(
+      principalFor(OWNER),
+      { itemKind: 'MEDICINE', displayName: 'Synthetic Tablet' },
+      { profileId: testUuid(999) },
+    );
     // A profile this caller cannot write to and one that does not exist are the same answer, so
     // the route is not an oracle for either.
     expect(stranger.statusCode).toBe(unknown.statusCode);
@@ -461,15 +475,11 @@ describe('who may add an item', () => {
   });
 
   it('will not let anybody write to a profile in the same household they do not hold', async () => {
-    const response = await request(principalFor(OWNER), {
-      method: 'POST',
-      url: '/v1/items',
-      payload: {
-        profileId: OTHER_PROFILE,
-        itemKind: 'MEDICINE',
-        displayName: 'Synthetic Tablet',
-      },
-    });
+    const response = await create(
+      principalFor(OWNER),
+      { itemKind: 'MEDICINE', displayName: 'Synthetic Tablet' },
+      { profileId: OTHER_PROFILE },
+    );
     // Sharing a household is not a capability. `13`: a profile ID narrows a result set and never
     // grants access.
     expect(response.statusCode).toBe(404);
@@ -479,5 +489,176 @@ describe('who may add an item', () => {
     expect(
       (await create(null, { itemKind: 'MEDICINE', displayName: 'Synthetic Tablet' })).statusCode,
     ).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('a save that arrives twice writes one item', () => {
+  /**
+   * `13`: "Idempotency key on mutations that can be retried"; "server commits exactly once".
+   *
+   * The screen is what makes this reachable. A person on a bad connection taps Save, sees
+   * nothing, and taps again - and without a key that is a second medicine record. `04` Phase 8.5
+   * reconciles this shelf against a list somebody was handed, where two identical rows read as
+   * two medicines they are taking: a false statement about somebody's treatment, produced by a
+   * dropped connection.
+   */
+
+  it('requires a key rather than accepting the write without one', async () => {
+    const response = await create(
+      principalFor(OWNER),
+      { itemKind: 'MEDICINE', displayName: 'Synthetic Tablet' },
+      { key: null },
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(
+      response.json<{ error: { detail?: { reason_code?: string } } }>().error.detail?.reason_code,
+    ).toBe('idempotency_key_required');
+
+    const count = await t.asService((db) =>
+      db.query<{ n: string }>('SELECT count(*)::text AS n FROM owned_item'),
+    );
+    expect(count.rows[0]?.n).toBe('0');
+  });
+
+  it('writes one row and answers the retry with the same item', async () => {
+    const key = freshKey();
+    const body = { itemKind: 'MEDICINE', displayName: 'Synthetic Tablet', strengthText: '500 mg' };
+
+    const first = await create(principalFor(OWNER), body, { key });
+    const second = await create(principalFor(OWNER), body, { key });
+
+    expect(first.statusCode).toBe(201);
+    expect(first.json<{ replayed: boolean }>().replayed).toBe(false);
+
+    expect(second.statusCode).toBe(200);
+    expect(second.headers['idempotent-replay']).toBe('true');
+    expect(second.json<{ replayed: boolean }>().replayed).toBe(true);
+    expect(second.json<CreatedBody>().id).toBe(first.json<CreatedBody>().id);
+
+    const count = await t.asService((db) =>
+      db.query<{ n: string }>('SELECT count(*)::text AS n FROM owned_item'),
+    );
+    expect(count.rows[0]?.n).toBe('1');
+  });
+
+  it('describes the record that exists, not the body that arrived second', async () => {
+    // A retry carrying a changed field is answered about the row that is actually there. On a
+    // screen whose subject is what Kynviora does and does not hold about a pack, describing a
+    // record nobody has is exactly the failure this route is meant to prevent.
+    const key = freshKey();
+
+    const first = await create(
+      principalFor(OWNER),
+      { itemKind: 'MEDICINE', displayName: 'Synthetic Tablet' },
+      { key },
+    );
+    const second = await create(
+      principalFor(OWNER),
+      {
+        itemKind: 'MEDICINE',
+        displayName: 'Synthetic Tablet',
+        recordedGtin: '1234567890123',
+        expiresOn: '2027-01-31',
+      },
+      { key },
+    );
+
+    expect(second.statusCode).toBe(200);
+    // The stored row has neither, so both limits still stand.
+    expect(second.json<CreatedBody>().limitCodes).toContain('NO_IDENTIFIER');
+    expect(second.json<CreatedBody>().limitCodes).toContain('NO_EXPIRY');
+    expect(second.json<CreatedBody>().limitCodes).toEqual(first.json<CreatedBody>().limitCodes);
+
+    const row = await storedRow(first.json<CreatedBody>().id);
+    expect(row?.recorded_gtin).toBeNull();
+    expect(row?.expires_on).toBeNull();
+  });
+
+  it('lets two different saves through', async () => {
+    // The guarantee is about one intent arriving twice, not about a person adding two packs.
+    await create(principalFor(OWNER), { itemKind: 'MEDICINE', displayName: 'One' });
+    await create(principalFor(OWNER), { itemKind: 'MEDICINE', displayName: 'Two' });
+
+    const count = await t.asService((db) =>
+      db.query<{ n: string }>('SELECT count(*)::text AS n FROM owned_item'),
+    );
+    expect(count.rows[0]?.n).toBe('2');
+  });
+
+  it('scopes the key to the profile, so one household cannot refuse another household write', async () => {
+    // dose_event's key is globally unique, and under that shape a key another household already
+    // used makes this INSERT conflict - and the replay read then finds nothing under row-level
+    // security, so the second household's item is dropped and answered with a success carrying no
+    // ID. Scoped to the profile, the collision is unreachable.
+    const key = freshKey();
+
+    const mine = await create(
+      principalFor(OWNER),
+      { itemKind: 'MEDICINE', displayName: 'Synthetic Tablet' },
+      { key },
+    );
+    expect(mine.statusCode).toBe(201);
+
+    // The stranger owns OTHER_PROFILE and writes to it with the very same key.
+    const theirs = await create(
+      principalFor(STRANGER),
+      { itemKind: 'MEDICINE', displayName: 'Their Tablet' },
+      { key, profileId: OTHER_PROFILE },
+    );
+
+    expect(theirs.statusCode).toBe(201);
+    expect(theirs.json<CreatedBody>().id).not.toBe(mine.json<CreatedBody>().id);
+
+    const count = await t.asService((db) =>
+      db.query<{ n: string }>('SELECT count(*)::text AS n FROM owned_item'),
+    );
+    expect(count.rows[0]?.n).toBe('2');
+  });
+
+  it('does not turn a retry into an oracle for somebody else profile', async () => {
+    // The stranger writes with a key, then the owner replays that key against the stranger's
+    // profile. The row exists and the owner may not read it, so the answer is the same not-found
+    // a profile that does not exist gives.
+    const key = freshKey();
+
+    const theirs = await create(
+      principalFor(STRANGER),
+      { itemKind: 'MEDICINE', displayName: 'Their Tablet' },
+      { key, profileId: OTHER_PROFILE },
+    );
+    expect(theirs.statusCode).toBe(201);
+
+    const probe = await create(
+      principalFor(OWNER),
+      { itemKind: 'MEDICINE', displayName: 'Synthetic Tablet' },
+      { key, profileId: OTHER_PROFILE },
+    );
+
+    expect(probe.statusCode).toBe(404);
+  });
+
+  it('refuses a malformed body before it can consume a key', async () => {
+    // A refusal must be retryable with the same key. A body the domain rejected wrote nothing, so
+    // the corrected submission has to be able to reuse the key the screen already generated -
+    // otherwise every validation error would silently need a new one.
+    const key = freshKey();
+
+    const refused = await create(
+      principalFor(OWNER),
+      { itemKind: 'MEDICINE', displayName: '   ' },
+      { key },
+    );
+    expect(refused.statusCode).toBe(400);
+
+    const corrected = await create(
+      principalFor(OWNER),
+      { itemKind: 'MEDICINE', displayName: 'Synthetic Tablet' },
+      { key },
+    );
+    expect(corrected.statusCode).toBe(201);
+    expect(corrected.json<{ replayed: boolean }>().replayed).toBe(false);
   });
 });

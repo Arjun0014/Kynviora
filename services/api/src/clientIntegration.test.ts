@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { start, type StartedServer } from './main.js';
@@ -26,10 +26,13 @@ import {
   doseHistory,
   heldCapabilities,
   inviterAuthority,
+  itemDetailScreenView,
   lensView,
+  manualEntryDraft,
   mayInvite,
   refreshedResource,
   revocationMessage,
+  screenStateForFailure,
   MAX_DOSE_NOTE_LENGTH,
   reviewInboxView,
   safetyInboxView,
@@ -1794,5 +1797,208 @@ describe('the Global Regulatory Lens, end to end', () => {
     // The transport guard applies to the repeated query shape as well as the single-valued one,
     // which is the whole reason the guard was extended rather than duplicated.
     expect(() => buildUrlForTest('/v1/regulatory-lens', { token: 'abc' })).toThrow();
+  });
+});
+
+describe('writing down a pack, end to end', () => {
+  /**
+   * `04` Phases 2.2 and 2.3, through the code path the Expo screens use.
+   *
+   * Every other suite tests one side. The API suite proves the route stores an absence as an
+   * absence; the contracts suite proves the draft builder sends what was typed. Neither proves
+   * the form's field names and the body's field names agree over a real connection, and that is
+   * the failure that would look like nothing at all: a barcode somebody entered, accepted by a
+   * screen, and never stored.
+   */
+
+  it('creates a medicine from a name and nothing else, and puts it on the shelf', async () => {
+    const before = await owner.listItems({ profileId: SEED.profileId });
+    if (before.kind !== 'OK') throw new Error('expected the shelf to load');
+
+    const body = manualEntryDraft({
+      profileId: SEED.profileId,
+      itemKind: 'MEDICINE',
+      values: { displayName: 'End-to-end Tablet (synthetic)' },
+    });
+    const created = await owner.createItem(body, randomUUID());
+
+    expect(created.kind).toBe('OK');
+    if (created.kind !== 'OK') return;
+    expect(created.value.replayed).toBe(false);
+
+    const after = await owner.listItems({ profileId: SEED.profileId, limit: 100 });
+    if (after.kind !== 'OK') throw new Error('expected the shelf to load');
+    expect(
+      shelfView(after.value.items, after.value.nextCursor).items.map((i) => i.displayName),
+    ).toContain('End-to-end Tablet (synthetic)');
+  });
+
+  it('stores every field the personal-care form offers', async () => {
+    // Phase 2.3's second exit criterion, over the wire and read back through Phase 2.1's detail.
+    // This is the test that would fail on a typo in a form field's key.
+    const values: Record<string, string> = {
+      displayName: 'End-to-end Shampoo (synthetic)',
+      brand: 'Synthetic Brand',
+      manufacturer: 'Synthetic Manufacturing Ltd',
+      market: 'GB',
+      recordedGtin: '1234567890128',
+      recordedLotCode: 'LOT-E2E',
+      personalCareCategory: 'HAIR_CARE',
+      ingredientDeclarationRaw: 'Aqua, Sodium Laureth Sulfate, Glycerin, Parfum',
+      labelVersionNote: 'Says new formula on the front',
+      expiresOn: '2027-01-31',
+      startedOn: '2026-09-01',
+      notes: 'The one in the blue bottle.',
+    };
+
+    const created = await owner.createItem(
+      manualEntryDraft({ profileId: SEED.profileId, itemKind: 'PERSONAL_CARE', values }),
+      randomUUID(),
+    );
+    expect(created.kind).toBe('OK');
+    if (created.kind !== 'OK') return;
+
+    const detail = await owner.itemDetail(created.value.id);
+    expect(detail.kind).toBe('OK');
+    if (detail.kind !== 'OK') return;
+
+    const view = itemDetailScreenView(detail.value);
+    const rendered = [...view.categoryFields, ...view.sharedFields]
+      .map((field) => field.value)
+      .filter((value): value is string => value !== null);
+
+    // Every typed value survives, except the category - which is a closed vocabulary rendered as
+    // a phrase rather than as `HAIR_CARE` (trap 129) - and the two the header already carries.
+    for (const [field, typed] of Object.entries(values)) {
+      if (field === 'personalCareCategory' || field === 'displayName' || field === 'brand') {
+        continue;
+      }
+      expect(rendered, field).toContain(typed);
+    }
+    expect(rendered).not.toContain('HAIR_CARE');
+    expect(view.displayName).toBe('End-to-end Shampoo (synthetic)');
+    expect(view.brand).toBe('Synthetic Brand');
+  });
+
+  it('stores a blank field as an absence, not as an answer', async () => {
+    // Phase 2.2's second exit criterion, end to end. The detail renders "not recorded" for a
+    // field nobody filled in, and never an empty value that reads as one somebody did.
+    const created = await owner.createItem(
+      manualEntryDraft({
+        profileId: SEED.profileId,
+        itemKind: 'MEDICINE',
+        values: { displayName: 'Sparse Tablet (synthetic)', brand: '   ', strengthText: '' },
+      }),
+      randomUUID(),
+    );
+    if (created.kind !== 'OK') throw new Error('expected the item to be created');
+
+    // What the record cannot do, said at the moment a person can still act on it (`10`).
+    expect(created.value.limitCodes).toContain('NO_IDENTIFIER');
+    expect(created.value.limits.length).toBe(created.value.limitCodes.length);
+    expect(created.value.completeNote).toBeNull();
+
+    const detail = await owner.itemDetail(created.value.id);
+    if (detail.kind !== 'OK') throw new Error('expected the detail to load');
+
+    const view = itemDetailScreenView(detail.value);
+    expect(view.brand).toBeNull();
+    for (const field of [...view.categoryFields, ...view.sharedFields]) {
+      if (field.value === null) expect(field.absentNote).not.toBeNull();
+      else expect(field.value.trim()).not.toBe('');
+    }
+  });
+
+  it('writes one item when the same save arrives twice', async () => {
+    // `13`, and the reason the key belongs to the draft rather than to the press: a person on a
+    // bad connection tapping Save twice must not end up with two of the same medicine, which
+    // `04` Phase 8.5 would later reconcile as two medicines they are taking.
+    const key = randomUUID();
+    const body = manualEntryDraft({
+      profileId: SEED.profileId,
+      itemKind: 'MEDICINE',
+      values: { displayName: 'Retried Tablet (synthetic)' },
+    });
+
+    const first = await owner.createItem(body, key);
+    const second = await owner.createItem(body, key);
+
+    expect(first.kind).toBe('OK');
+    expect(second.kind).toBe('OK');
+    if (first.kind !== 'OK' || second.kind !== 'OK') return;
+
+    expect(first.value.replayed).toBe(false);
+    expect(second.value.replayed).toBe(true);
+    expect(second.value.id).toBe(first.value.id);
+
+    const shelf = await owner.listItems({ profileId: SEED.profileId, limit: 100 });
+    if (shelf.kind !== 'OK') throw new Error('expected the shelf to load');
+    const named = shelf.value.items.filter(
+      (item) => item.displayName === 'Retried Tablet (synthetic)',
+    );
+    expect(named.length).toBe(1);
+  });
+
+  it('refuses a malformed value and names the field the form should point at', async () => {
+    // The refusal has to arrive as a field name rather than as prose. `13`: clients branch on
+    // codes, never on message text - and a form with eleven fields that cannot point is one where
+    // the person has to find it themselves.
+    const refused = await owner.createItem(
+      manualEntryDraft({
+        profileId: SEED.profileId,
+        itemKind: 'MEDICINE',
+        values: { displayName: 'Bad Market Tablet (synthetic)', market: 'gb' },
+      }),
+      randomUUID(),
+    );
+
+    expect(refused.kind).toBe('REFUSED');
+    if (refused.kind !== 'REFUSED') return;
+    expect(refused.detail?.['field']).toBe('market');
+    expect(screenStateForFailure(refused)).toBe('RECOVERABLE_ERROR');
+  });
+
+  it('tells a stranger nothing about the profile they cannot write to', async () => {
+    // The same absence the shelf gives. `13`: a profile ID narrows a write and never grants one.
+    const refused = await stranger.createItem(
+      manualEntryDraft({
+        profileId: SEED.profileId,
+        itemKind: 'MEDICINE',
+        values: { displayName: 'Intruder Tablet (synthetic)' },
+      }),
+      randomUUID(),
+    );
+
+    expect(refused.kind).toBe('UNAVAILABLE');
+  });
+
+  it('rejects an unauthenticated write', async () => {
+    const refused = await anonymous.createItem(
+      manualEntryDraft({
+        profileId: SEED.profileId,
+        itemKind: 'MEDICINE',
+        values: { displayName: 'Anonymous Tablet (synthetic)' },
+      }),
+      randomUUID(),
+    );
+    expect(refused.kind).toBe('UNAUTHENTICATED');
+  });
+
+  it('cannot be used to put anything into the shared catalog', async () => {
+    // `15` A11 with the attacker replaced by an honest person mis-reading a label. The body has
+    // no field for a catalog identifier, and the server's schema is strict - so an attempt is a
+    // refusal rather than a key that is quietly ignored.
+    const outcome = await owner.createItem(
+      {
+        profileId: SEED.profileId,
+        itemKind: 'MEDICINE',
+        displayName: 'Catalog Tablet (synthetic)',
+        // A field no form offers and the body does not declare, sent deliberately.
+        ...{ productIdentityId: '00000000-0000-4000-8000-000000000001' },
+      },
+      randomUUID(),
+    );
+
+    expect(outcome.kind).toBe('REFUSED');
   });
 });

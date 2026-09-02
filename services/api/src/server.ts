@@ -608,6 +608,21 @@ export function createServer(options: ServerOptions): FastifyInstance {
       const ctx = await contextFor(request, reply);
       if (!ctx) return;
 
+      // `13`: "Idempotency key on mutations that can be retried." A person who taps Save, sees
+      // nothing, and taps again would otherwise write a second medicine record - and `04` Phase
+      // 8.5 reconciles this shelf against a list somebody was handed, where two identical rows
+      // read as two medicines they are taking. Required rather than optional, for the reason the
+      // dose-event route requires it: a caller that may omit it is a caller that will.
+      if (!ctx.operationId) {
+        return fail(
+          reply,
+          domainError('VALIDATION_FAILED', 'Idempotency-Key header is required.', {
+            reason_code: 'idempotency_key_required',
+          }),
+          ctx.correlationId,
+        );
+      }
+
       const body = manualEntryBodySchema.safeParse(request.body ?? {});
       if (!body.success) {
         return fail(
@@ -635,8 +650,16 @@ export function createServer(options: ServerOptions): FastifyInstance {
                (profile_id, item_kind, display_name, brand, manufacturer, market,
                 recorded_gtin, recorded_lot_code, expires_on, started_on, notes,
                 strength_text, dosage_form, directions_text,
-                personal_care_category, ingredient_declaration_raw, label_version_note)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                personal_care_category, ingredient_declaration_raw, label_version_note,
+                client_operation_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                     $18)
+             -- The index is inferred by its own columns and predicate rather than left bare. A
+             -- bare ON CONFLICT DO NOTHING would also swallow a violation of some future
+             -- constraint, and report it as a successful retry of something that never happened.
+             ON CONFLICT (profile_id, client_operation_id)
+               WHERE client_operation_id IS NOT NULL
+               DO NOTHING
              RETURNING id`,
             [
               body.data.profileId,
@@ -656,28 +679,79 @@ export function createServer(options: ServerOptions): FastifyInstance {
               entry.personalCareCategory,
               entry.ingredientDeclarationRaw,
               entry.labelVersionNote,
+              ctx.operationId,
             ],
           ),
         ),
       );
 
-      const id = inserted === null ? undefined : inserted.rows[0]?.id;
-      if (id === undefined) {
-        // Row-level security admitted nothing. A profile this caller cannot write to and one that
-        // does not exist are the same answer, so the route is not an oracle for either.
+      if (inserted === null) {
+        // Row-level security refused the write. A profile this caller cannot write to and one
+        // that does not exist are the same answer, so the route is not an oracle for either.
         return fail(reply, domainError('NOT_FOUND', 'No such profile.'), ctx.correlationId);
       }
 
-      const limits = manualEntryLimits(entry);
+      const created = inserted.rows[0]?.id;
+      if (created !== undefined) {
+        const limits = manualEntryLimits(entry);
+        return reply.status(201).send({
+          id: created,
+          // What this record cannot support, said now rather than the first time an alert fails
+          // to arrive and nobody knows why (`10`).
+          ...manualEntryOutcomeView([...limits]),
+          limitCodes: limits,
+          replayed: false,
+          serverTime: ctx.now,
+        });
+      }
 
-      return reply.status(201).send({
-        id,
-        // What this record cannot support, said now rather than the first time an alert fails to
-        // arrive and nobody knows why (`10`).
-        ...manualEntryOutcomeView([...limits]),
-        limitCodes: limits,
-        serverTime: ctx.now,
+      // The key has been used on this profile before, so this is the same save arriving twice.
+      // `13`: the server commits exactly once.
+      //
+      // The stored row is read back rather than the submission echoed. A retry that carried a
+      // changed field would otherwise be told what the body it sent implies, when what exists is
+      // the first one - and on a screen whose whole subject is what Kynviora does and does not
+      // hold about a pack, describing a record nobody has is the failure this route is for.
+      const existing = await ctx.db((db) =>
+        db.query<{
+          id: string;
+          recorded_gtin: string | null;
+          recorded_lot_code: string | null;
+          ingredient_declaration_raw: string | null;
+          expires_on: Date | string | null;
+        }>(
+          `SELECT id, recorded_gtin, recorded_lot_code, ingredient_declaration_raw, expires_on
+             FROM owned_item
+            WHERE profile_id = $1 AND client_operation_id = $2`,
+          [body.data.profileId, ctx.operationId],
+        ),
+      );
+
+      const stored = existing.rows[0];
+      if (stored === undefined) {
+        // The conflicting row belongs to a profile this caller cannot read. Answered as the same
+        // absence, for the same reason: this route says nothing about what exists elsewhere.
+        return fail(reply, domainError('NOT_FOUND', 'No such profile.'), ctx.correlationId);
+      }
+
+      const storedLimits = manualEntryLimits({
+        ...entry,
+        recordedGtin: stored.recorded_gtin,
+        recordedLotCode: stored.recorded_lot_code,
+        ingredientDeclarationRaw: stored.ingredient_declaration_raw,
+        expiresOn: dateOrNull(stored.expires_on),
       });
+
+      return reply
+        .status(200)
+        .header('idempotent-replay', 'true')
+        .send({
+          id: stored.id,
+          ...manualEntryOutcomeView([...storedLimits]),
+          limitCodes: storedLimits,
+          replayed: true,
+          serverTime: ctx.now,
+        });
     });
 
     // -------------------------------------------------------------------------
@@ -707,7 +781,10 @@ export function createServer(options: ServerOptions): FastifyInstance {
           item_kind: string;
           display_name: string;
           brand: string | null;
+          manufacturer: string | null;
           market: string | null;
+          recorded_gtin: string | null;
+          recorded_lot_code: string | null;
           lifecycle_state: string;
           identity_verification: string;
           formulation_verification: string;
@@ -716,6 +793,8 @@ export function createServer(options: ServerOptions): FastifyInstance {
           dosage_form: string | null;
           directions_text: string | null;
           personal_care_category: string | null;
+          ingredient_declaration_raw: string | null;
+          label_version_note: string | null;
           started_on: Date | string | null;
           stopped_on: Date | string | null;
           expires_on: Date | string | null;
@@ -723,9 +802,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
           last_safety_checked_at: Date | string | null;
           notes: string | null;
         }>(
-          `SELECT id, item_kind, display_name, brand, market, lifecycle_state,
+          // The five columns migration `0015` added are read here as well. A field a person can
+          // type on the manual-entry form and never see again is one they entered into nothing,
+          // and for the ingredient declaration that is Phase 2.3's second exit criterion failing
+          // on the read path.
+          `SELECT id, item_kind, display_name, brand, manufacturer, market,
+                  recorded_gtin, recorded_lot_code, lifecycle_state,
                   identity_verification, formulation_verification, batch_verification,
                   strength_text, dosage_form, directions_text, personal_care_category,
+                  ingredient_declaration_raw, label_version_note,
                   started_on, stopped_on, expires_on, last_reviewed_at, last_safety_checked_at,
                   notes
              FROM owned_item
@@ -752,7 +837,10 @@ export function createServer(options: ServerOptions): FastifyInstance {
           itemKind: row.item_kind,
           displayName: row.display_name,
           brand: row.brand,
+          manufacturer: row.manufacturer,
           market: row.market,
+          recordedGtin: row.recorded_gtin,
+          recordedLotCode: row.recorded_lot_code,
           lifecycleState: row.lifecycle_state,
           identityVerification: row.identity_verification,
           formulationVerification: row.formulation_verification,
@@ -761,6 +849,8 @@ export function createServer(options: ServerOptions): FastifyInstance {
           dosageForm: row.dosage_form,
           directionsText: row.directions_text,
           personalCareCategory: row.personal_care_category,
+          ingredientDeclarationRaw: row.ingredient_declaration_raw,
+          labelVersionNote: row.label_version_note,
           startedOn: dateOrNull(row.started_on),
           stoppedOn: dateOrNull(row.stopped_on),
           expiresOn: dateOrNull(row.expires_on),

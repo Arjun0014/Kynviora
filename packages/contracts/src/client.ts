@@ -122,6 +122,61 @@ export interface ItemsResponse {
   readonly serverTime: string;
 }
 
+/**
+ * What somebody typed about a pack they are holding (`04` Phases 2.2 and 2.3).
+ *
+ * Only `profileId`, `itemKind` and `displayName` are required, which is Phase 2.2's first exit
+ * criterion on the wire: a record has to be creatable from a name and nothing else.
+ *
+ * There is deliberately no field for a verification state, a confidence, or a catalog identifier.
+ * Their absence is the enforcement, and the server's body schema is `.strict()`, so an attempt to
+ * send one is a refusal rather than a key that is quietly ignored - a client that believed it had
+ * confirmed something would be the worst version of this.
+ */
+export interface ManualEntryBody {
+  readonly profileId: string;
+  readonly itemKind: 'MEDICINE' | 'PERSONAL_CARE';
+  readonly displayName: string;
+  readonly brand?: string | null;
+  readonly manufacturer?: string | null;
+  readonly market?: string | null;
+  readonly recordedGtin?: string | null;
+  readonly recordedLotCode?: string | null;
+  readonly expiresOn?: string | null;
+  readonly startedOn?: string | null;
+  readonly notes?: string | null;
+  readonly strengthText?: string | null;
+  readonly dosageForm?: string | null;
+  readonly directionsText?: string | null;
+  readonly personalCareCategory?: string | null;
+  readonly ingredientDeclarationRaw?: string | null;
+  readonly labelVersionNote?: string | null;
+}
+
+/**
+ * What exists afterwards, and what it cannot do yet.
+ *
+ * The limits are composed on the server for `11`'s reason: they are the approved wording for what
+ * Kynviora will not be able to do about this pack, and a client that assembled them would carry
+ * that copy in every build it ever shipped. `limitCodes` is beside them so a client can act on
+ * the identity rather than by matching a sentence.
+ *
+ * `replayed` says the save arrived twice and one item exists. Reported rather than hidden,
+ * because a client that has lost its own record of the first attempt otherwise cannot tell a
+ * commit from a duplicate - but it is not a different outcome for the person, and no screen here
+ * says anything different about it.
+ */
+export interface ItemCreated {
+  readonly id: string;
+  readonly heading: string;
+  readonly limits: readonly string[];
+  readonly limitCodes: readonly string[];
+  readonly completeNote: string | null;
+  readonly note: string;
+  readonly replayed: boolean;
+  readonly serverTime: string;
+}
+
 export interface AlertSummary {
   readonly id: string;
   readonly profileId: string;
@@ -762,6 +817,19 @@ export interface KynvioraClient {
   listItems(query: ItemsQuery): Promise<ApiOutcome<ItemsResponse>>;
   /** One item and what is not settled about it (`04` Phase 2.1). */
   itemDetail(itemId: string): Promise<ApiOutcome<ItemDetailResponse>>;
+  /**
+   * Write down a pack somebody is holding (`04` Phases 2.2 and 2.3).
+   *
+   * The idempotency key is a parameter for the reason it is on a dose event and on an invitation:
+   * a key regenerated on retry is not an idempotency key. Here it is the difference between a
+   * person on a bad connection tapping Save twice and a shelf carrying two of the same medicine -
+   * which `04` Phase 8.5 later reconciles against a list somebody was handed, where it reads as
+   * two medicines they are taking.
+   *
+   * Nothing here reaches the catalog and nothing here is confirmed. Both are properties of the
+   * body's shape rather than of this comment: there is no field for either.
+   */
+  createItem(body: ManualEntryBody, idempotencyKey: string): Promise<ApiOutcome<ItemCreated>>;
   listAlerts(): Promise<ApiOutcome<AlertsResponse>>;
   /**
    * How supported jurisdictions treat one substance.
@@ -985,6 +1053,13 @@ export function createClient(options: ClientOptions): KynvioraClient {
       }),
 
     itemDetail: (itemId) => get<ItemDetailResponse>(`/v1/items/${encodeURIComponent(itemId)}`),
+
+    // The body is passed through untouched. Trimming, upper-casing a market or stripping a space
+    // out of a barcode here would be the client repairing what somebody typed, and a value
+    // Kynviora quietly altered is one they can no longer check against the pack in their hand.
+    // The domain refuses and names the field; this sends what it was given.
+    createItem: (body, idempotencyKey) =>
+      send<ItemCreated>('POST', '/v1/items', body, idempotencyKey),
 
     // No profile parameter: the route returns what row-level security admits, which is `13`'s
     // "never trust a profile ID in the request as proof of access" applied by construction.

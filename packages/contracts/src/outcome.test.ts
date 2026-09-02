@@ -189,3 +189,101 @@ describe('the state a screen shows', () => {
     }
   });
 });
+
+describe('a refusal keeps the field it names', () => {
+  /**
+   * The domain names the field a refusal is about so a form can point at it, and until now the
+   * client dropped it on the floor - `WireError.detail` was declared and never parsed. A form
+   * with eleven fields that can only say "that is not a kind of product Kynviora knows" is one
+   * where the person has to find it themselves.
+   */
+
+  it('carries the detail through to a REFUSED outcome', () => {
+    const outcome = classifyError(
+      400,
+      parseWireError({
+        error: {
+          code: 'VALIDATION_FAILED',
+          message: 'An item needs a name.',
+          detail: { reason_code: 'manual_entry', field: 'displayName' },
+          retryable: false,
+          correlationId: 'c1',
+        },
+      }),
+    );
+
+    expect(outcome.kind).toBe('REFUSED');
+    if (outcome.kind === 'REFUSED') expect(outcome.detail?.['field']).toBe('displayName');
+  });
+
+  it('leaves the detail absent when the server sent none', () => {
+    // Absent rather than empty: "the server said nothing" and "the server said this is about no
+    // particular field" are different facts.
+    const outcome = classifyError(
+      400,
+      parseWireError({
+        error: { code: 'VALIDATION_FAILED', message: 'No.', retryable: false, correlationId: 'c' },
+      }),
+    );
+
+    expect(outcome.kind).toBe('REFUSED');
+    if (outcome.kind === 'REFUSED') expect('detail' in outcome).toBe(false);
+  });
+
+  it('drops a detail entry that is not a scalar', () => {
+    // Trap 101 on the error path. A nested object rendered beside somebody's medicine would read
+    // as `[object Object]`, so a value this build cannot read is treated as one nobody sent.
+    const parsed = parseWireError({
+      error: {
+        code: 'VALIDATION_FAILED',
+        message: 'No.',
+        detail: {
+          field: 'market',
+          nested: { a: 1 },
+          list: [1, 2],
+          count: 2,
+          ok: false,
+          gone: null,
+        },
+        retryable: false,
+        correlationId: 'c',
+      },
+    });
+
+    expect(parsed?.detail).toEqual({ field: 'market', count: 2, ok: false, gone: null });
+  });
+
+  it('ignores a detail that is not an object at all', () => {
+    for (const detail of ['a string', 42, ['a', 'b'], null]) {
+      const parsed = parseWireError({
+        error: {
+          code: 'VALIDATION_FAILED',
+          message: 'No.',
+          detail,
+          retryable: false,
+          correlationId: 'c',
+        },
+      });
+      expect(parsed?.detail).toBeUndefined();
+    }
+  });
+
+  it('never carries a detail on an authorization outcome', () => {
+    // The server suppresses it for those classes, and there is nowhere on those outcomes to put
+    // one - which is the shape of the rule rather than a promise about the server.
+    const outcome = classifyError(
+      404,
+      parseWireError({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Not found.',
+          detail: { field: 'profileId' },
+          retryable: false,
+          correlationId: 'c',
+        },
+      }),
+    );
+
+    expect(outcome).toEqual({ kind: 'UNAVAILABLE' });
+  });
+});
