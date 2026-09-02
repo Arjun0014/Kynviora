@@ -5,6 +5,8 @@ import {
   resourceFor,
   resourceRetryLabel,
   refreshedResource,
+  projectionActionFor,
+  projectionKey,
   retainsPreviousContent,
   staleResource,
 } from './resource.js';
@@ -236,5 +238,99 @@ describe('a refresh over content already on screen', () => {
     const resource = refreshedResource<List>(ok([]), previous, { isEmpty });
     expect(resource.state).toBe('EMPTY');
     expect(resource.value).toBeNull();
+  });
+});
+
+describe('what a response does to content held on the device', () => {
+  it('writes what the server confirmed', () => {
+    expect(projectionActionFor(ok(['a']))).toBe('WRITE');
+  });
+
+  it('keeps the copy when the server said nothing about this caller', () => {
+    // `03` group J: the medicine list has to survive being offline. Neither of these is an
+    // answer about access, so the copy on disk is still the last thing the server did say.
+    expect(projectionActionFor({ kind: 'OFFLINE' })).toBe('KEEP');
+    expect(
+      projectionActionFor({ kind: 'SERVER_ERROR', retryable: true, correlationId: null }),
+    ).toBe('KEEP');
+  });
+
+  it('forgets the copy when access is the thing that failed', () => {
+    // `12`: "Authorization loss invalidates local access." Taking it off the screen and leaving
+    // it on the disk means a revoked caregiver reopens the app offline and reads it anyway -
+    // the same threat `15` A2 is about, one layer down.
+    for (const outcome of [
+      { kind: 'UNAVAILABLE' } as const,
+      { kind: 'AUTHORIZATION_LOST' } as const,
+      { kind: 'UNAUTHENTICATED' } as const,
+      { kind: 'STEP_UP_REQUIRED' } as const,
+      { kind: 'REFUSED', code: 'X', message: 'x', retryable: false, correlationId: null } as const,
+    ]) {
+      expect(projectionActionFor(outcome)).toBe('FORGET');
+    }
+  });
+
+  it('agrees with what the screen is allowed to keep', () => {
+    // Derived from one decision rather than written out twice. A future failure kind gets both
+    // behaviours from the exhaustiveness check in `retainsPreviousContent`, so the disk cannot
+    // drift into keeping what the screen has to drop.
+    const failures: Exclude<ApiOutcome<List>, { kind: 'OK' }>[] = [
+      { kind: 'OFFLINE' },
+      { kind: 'SERVER_ERROR', retryable: true, correlationId: null },
+      { kind: 'UNAVAILABLE' },
+      { kind: 'AUTHORIZATION_LOST' },
+      { kind: 'UNAUTHENTICATED' },
+      { kind: 'STEP_UP_REQUIRED' },
+      { kind: 'REFUSED', code: 'X', message: 'x', retryable: false, correlationId: null },
+    ];
+    for (const failure of failures) {
+      expect(projectionActionFor(failure)).toBe(
+        retainsPreviousContent(failure) ? 'KEEP' : 'FORGET',
+      );
+    }
+  });
+});
+
+describe('the key a stored read lives under', () => {
+  const SESSION = '00000000-0000-4000-8000-00000000d001';
+
+  it('carries the session, so one identity cannot read another’s row', () => {
+    expect(projectionKey(SESSION, 'profiles')).toContain(SESSION);
+    expect(projectionKey(SESSION, 'profiles')).not.toBe(projectionKey('anonymous', 'profiles'));
+  });
+
+  it('distinguishes two reads by the same identity', () => {
+    // The bug this replaced: both reads landed on one row, so the profile list read back the
+    // shelf and the app crashed on a shape it did not expect.
+    expect(projectionKey(SESSION, 'profiles')).not.toBe(projectionKey(SESSION, 'items:x:all'));
+  });
+
+  it('needs no separator to stay unambiguous', () => {
+    // A separator is only unambiguous if the store keeps it, and the store did not: `expo-sqlite`
+    // truncated a NUL-separated key at the NUL. A length prefix asks nothing of the store.
+    expect(projectionKey('ab', 'cd')).not.toBe(projectionKey('a', 'bcd'));
+    expect(projectionKey('a', 'b:c')).not.toBe(projectionKey('a:b', 'c'));
+  });
+
+  it('contains no character a text column could truncate on', () => {
+    // Specifically no NUL. The parts are a UUID and a screen-supplied name, and this asserts the
+    // joining itself introduces nothing exotic.
+    const key = projectionKey(SESSION, 'items:00000000-0000-4000-8000-00000000d020:all');
+    expect(key.includes(' ')).toBe(false);
+  });
+
+  it('is injective over a set of realistic pairs', () => {
+    const pairs: readonly (readonly [string, string])[] = [
+      [SESSION, 'profiles'],
+      [SESSION, 'items:p1:all'],
+      [SESSION, 'items:p1:NEEDS_REVIEW'],
+      [SESSION, 'items:p2:all'],
+      ['anonymous', 'profiles'],
+      ['anonymous', 'items:p1:all'],
+      ['', 'profiles'],
+      ['a', ''],
+    ];
+    const keys = new Set(pairs.map(([session, logical]) => projectionKey(session, logical)));
+    expect(keys.size).toBe(pairs.length);
   });
 });

@@ -122,6 +122,13 @@ export default function ShelfScreen() {
   const { resource, reload, refreshing } = useResource(load, {
     enabled: activeProfileId !== null,
     isEmpty: (value) => value.items.length === 0,
+    // `03` group J: the current medicine list and the basic personal-care shelf have to be usable
+    // with no network. The key carries the filter as well as the profile, because a filtered list
+    // and an unfiltered one are different answers and a key that dropped the filter would show
+    // one as the other.
+    ...(activeProfileId === null
+      ? {}
+      : { projectionKey: `items:${activeProfileId}:${attention ?? 'all'}` }),
   });
 
   const view = useMemo(

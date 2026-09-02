@@ -179,3 +179,50 @@ export function refreshedResource<T>(
   if (outcome.kind === 'OK' || previous === null) return next;
   return retainsPreviousContent(outcome) ? staleResource(previous) : next;
 }
+
+// ---------------------------------------------------------------------------
+// Content held on the device between sessions
+// ---------------------------------------------------------------------------
+
+/**
+ * What a response does to a copy of the content kept on the device.
+ *
+ * `12` requires an encrypted local projection so the medicine list survives being offline
+ * (`03` group J), and it requires two more things in the same breath: sign-out removes decrypted
+ * projections, and **authorization loss invalidates local access**. The second is the one a cache
+ * gets wrong. {@link retainsPreviousContent} already decides whether a failure may leave content
+ * on _screen_; the same answer has to reach the _disk_, or a revoked caregiver closes the app,
+ * reopens it offline, and reads a shelf the server would refuse them.
+ *
+ * So this is deliberately derived from `retainsPreviousContent` rather than written out again.
+ * A future failure kind added to `ApiOutcome` gets its screen behaviour and its disk behaviour
+ * from one decision, and the exhaustiveness check in that function is what makes somebody make it.
+ */
+export type ProjectionAction = 'WRITE' | 'KEEP' | 'FORGET';
+
+export function projectionActionFor(outcome: ApiOutcome<unknown>): ProjectionAction {
+  if (outcome.kind === 'OK') return 'WRITE';
+  return retainsPreviousContent(outcome) ? 'KEEP' : 'FORGET';
+}
+
+/**
+ * The key a screen's stored content lives under.
+ *
+ * Built rather than written by hand so the session can never be left out: a key without it is a
+ * row one identity writes and another reads.
+ *
+ * **The encoding is length-prefixed, not separated.** The first version joined the two parts with
+ * a NUL, which is the usual choice precisely because it cannot occur in either part. On a device
+ * it silently destroyed both: `expo-sqlite` binds a TEXT parameter through C string handling, so
+ * the key was truncated at the NUL and every read of every screen collided on one row - the
+ * profile list read back the shelf, and the app crashed on the shape it did not expect. Reading
+ * the stored keys off the emulator showed exactly one row, and its characters were the session
+ * ID alone.
+ *
+ * A separator is only unambiguous if the store keeps it. A length prefix needs nothing of the
+ * store: `36:<uuid>items:...` cannot be produced by any other pair, whatever characters the parts
+ * contain, and it survives any transport that preserves ordinary text.
+ */
+export function projectionKey(sessionId: string, logical: string): string {
+  return `${String(sessionId.length)}:${sessionId}${logical}`;
+}

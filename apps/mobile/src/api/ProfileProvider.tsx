@@ -14,6 +14,15 @@
  * Selecting a profile still grants nothing. Every request carries it as a filter and the server
  * applies RLS regardless, so a stale selection produces an empty screen rather than someone
  * else's data.
+ *
+ * THE LIST IS KEPT ON THE DEVICE; THE SELECTION IS STILL NOT
+ * `03` group J requires a basic profile summary to survive being offline, and without one the
+ * shelf cannot be read offline either - every shelf request is keyed on a profile ID. So the
+ * server's answer is written to the encrypted projection and read back on a cold launch, where
+ * it arrives as `STALE`. What has not changed is that the selection is still derived from a list
+ * rather than stored: the app cannot name a profile that was never in a list the server sent.
+ * And `15` A2's fourth mitigation is what makes the copy safe to hold - the next authenticated
+ * read that comes back as an access failure deletes the row rather than labelling it.
  */
 
 import {
@@ -49,6 +58,9 @@ export function ProfileProvider({ children }: { readonly children: ReactNode }) 
 
   const { resource, reload } = useResource(load, {
     isEmpty: (value) => value.profiles.length === 0,
+    // The request takes no parameters, so the key needs nothing but its name - the session is
+    // added by the store.
+    projectionKey: 'profiles',
   });
 
   const profiles = resource.value?.profiles ?? [];
