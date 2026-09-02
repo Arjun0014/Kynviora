@@ -5,11 +5,10 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "scheme": "kynviora",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "android": {
       "package": "com.kynviora.app",
-      "edgeToEdgeEnabled": true,
       "permissions": ["android.permission.CAMERA", "android.permission.POST_NOTIFICATIONS"],
       "blockedPermissions": [
         "android.permission.READ_CONTACTS",

@@ -17,3 +17,13 @@ Thumbs.db
 # KYNVIORA_LOCAL_DB_DIR once put 1,277 PGlite pages into a commit.
 .kynviora-data/
 .kynviora-*/
+
+# Generated native projects (Expo CNG). `npx expo prebuild` regenerates them from
+# `app.json`, so a committed copy is a second source of truth that drifts from the
+# config plugins - including the SQLCipher one, whose whole effect is a generated
+# `gradle.properties` line.
+apps/mobile/android/
+apps/mobile/ios/
+
+# The session transcript pasted in for a resume. Not project documentation.
+docs/autonomy/last_session_messeges.md

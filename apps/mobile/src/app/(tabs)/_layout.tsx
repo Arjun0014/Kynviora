@@ -8,7 +8,7 @@
  */
 
 import { Tabs } from 'expo-router';
-import { Text } from 'react-native';
+import { Text, type ColorValue } from 'react-native';
 import { LIGHT_THEME, FONT_SIZE } from '@kynviora/presentation';
 
 /** Glyphs distinguishable by shape, standing in for a real icon set. */
@@ -20,7 +20,10 @@ const TAB_GLYPHS = {
   you: '☰',
 } as const;
 
-function TabIcon({ glyph, color }: { glyph: string; color: string }) {
+// `color` is what the navigator hands the icon, and its type is React Native's `ColorValue`
+// rather than `string` - a platform colour is an opaque object. Narrowing it here would compile
+// only until the navigator passed one, so the prop takes what the caller actually gives it.
+function TabIcon({ glyph, color }: { glyph: string; color: ColorValue }) {
   return (
     <Text
       accessibilityElementsHidden
