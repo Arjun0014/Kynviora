@@ -184,6 +184,20 @@ export const MATCH_REASONS = [
 ] as const;
 export type MatchReason = (typeof MATCH_REASONS)[number];
 
+/**
+ * The identities behind a match, frozen at evaluation time.
+ *
+ * One shape rather than a union per rule kind, because the row that stores it is one row and the
+ * reader does not know which rule produced it. A rule with nothing of this shape to name reports
+ * `null` rather than a half-filled record.
+ */
+export interface MatchedInputs {
+  /** The canonical substance key in the declaration that the rule matched. */
+  readonly substanceKey: string;
+  /** The profile fact the rule matched it against. */
+  readonly profileFactId: string;
+}
+
 /** The result of evaluating one rule against one item. */
 export interface Assessment {
   readonly ruleId: string;
@@ -208,6 +222,24 @@ export interface Assessment {
     readonly profileFactVersions: readonly string[];
     readonly actionSignalVersions: readonly string[];
   };
+
+  /**
+   * Which inputs produced the match, by identity rather than by version (`DEV-028`).
+   *
+   * `null` on every non-match and on every rule that has nothing of this shape to name. Where it
+   * is present it is the substance key and the profile fact the rule actually matched on - not a
+   * list of candidates, and not something a read path could recompute.
+   *
+   * The distinction from `inputVersions` is the whole point. Versions say *what state* the
+   * evaluation ran against; this says *which row* out of that state was the reason. `09` asks for
+   * both and only the first was ever stored, so the approved ingredient-sensitivity template -
+   * which names the exact ingredient and the exact recorded sensitivity - could not be filled.
+   * Re-deriving it later by intersecting the declaration with the profile's facts is a *different
+   * computation*: both may have moved, so it could name a substance the rule did not match on, and
+   * a confident approved-looking sentence about the wrong ingredient is worse than no sentence
+   * (DEC-064).
+   */
+  readonly matchedInputs: MatchedInputs | null;
 
   /** True when the rule ran in shadow mode and must not produce a user-visible alert. */
   readonly shadowOnly: boolean;
@@ -242,6 +274,10 @@ export function evaluateRule(inputs: AssessmentInputs): Assessment {
     },
     shadowOnly: rule.shadowMode,
     evaluatedAt: evaluationInstant,
+    // Absent unless a rule names something. Declared on the base so that every branch below,
+    // including the ones added later, has to opt *in* to naming an identity rather than inherit
+    // one from a neighbouring rule's shape.
+    matchedInputs: null,
   };
 
   const noMatch = (reason: MatchReason): Assessment => ({
@@ -527,6 +563,10 @@ function evaluateIngredientSensitivity(
     reasons: ['SUBSTANCE_IN_DECLARATION'],
     urgency: rule.maxUrgency,
     inputVersions: { ...base.inputVersions, profileFactVersions: [hit.version] },
+    // `DEV-028`. The two identities the approved template needs, taken from the fact the filter
+    // above actually selected rather than from anything re-derived. The non-null assertion is the
+    // same one the `declared.has` test relies on: `eligible` excluded every fact whose key is null.
+    matchedInputs: { substanceKey: hit.substanceCanonicalKey!, profileFactId: hit.id },
   };
 }
 
@@ -574,6 +614,11 @@ export function evaluateRules(
  * `09`: "Replaying the same versions must reproduce the result." `04` Phase 6.7 requires replay
  * after a source, rule or normalization change. This is the mechanism behind both.
  */
+/** A comparable form of the matched identities. `null` and absent are the same answer. */
+function matchedInputsKey(matched: MatchedInputs | null): string {
+  return matched === null ? '' : `${matched.substanceKey} ${matched.profileFactId}`;
+}
+
 export function replayAssessment(
   original: Assessment,
   inputs: AssessmentInputs,
@@ -588,6 +633,12 @@ export function replayAssessment(
   if (recomputed.reasons.join(',') !== original.reasons.join(',')) differences.push('reasons');
   if (recomputed.explanationTemplateId !== original.explanationTemplateId) {
     differences.push('explanationTemplateId');
+  }
+  // `DEV-028`. A replay that reproduced the verdict while naming a different ingredient or a
+  // different recorded sensitivity has not reproduced the result - it has produced the same
+  // conclusion for another reason, and the sentence a person reads is built from these two.
+  if (matchedInputsKey(recomputed.matchedInputs) !== matchedInputsKey(original.matchedInputs)) {
+    differences.push('matchedInputs');
   }
 
   return { reproduced: differences.length === 0, recomputed, differences };

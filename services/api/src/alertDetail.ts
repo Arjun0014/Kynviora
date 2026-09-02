@@ -21,10 +21,21 @@
  * Re-evaluate anything. The assessment froze the confidence, the evidence level, the urgency and
  * the template identifier at evaluation time precisely so a later rule revision cannot change
  * what somebody was told, and a detail screen that recomputed any of them would be a second
- * source of truth (DEC-010). It also will not derive *which* ingredient or which recorded
- * sensitivity produced an ingredient match: the assessment does not record them, and joining the
- * two lists afresh would risk naming a substance the rule did not match on - which is the failure
- * DEC-064 refuses for the Lens. `DEV-028` records the gap and the fix.
+ * source of truth (DEC-010).
+ *
+ * WHICH INGREDIENT, AND WHICH RECORDED SENSITIVITY
+ * Since migration `0018` the assessment names both (`DEV-028`), so this route resolves them rather
+ * than deriving them. The distinction is the whole of DEC-097: it looks each one up **by the
+ * identity the rule froze**, and never re-intersects the declaration with the profile's facts -
+ * that is a different computation over state that may have moved, and it could name a substance
+ * the rule did not match on. A confident approved-looking sentence about the wrong ingredient is
+ * worse than no sentence, which is what DEC-064 decided for the Lens.
+ *
+ * Both lookups are LEFT joins under row-level security, which is load-bearing rather than
+ * incidental. `allergy_select` requires `VIEW_MEDICINES`, so a caregiver holding `VIEW_SAFETY`
+ * alone reads the alert and **not** what the person is allergic to - `03` group H keeps the two
+ * apart, and the narrative declines to render rather than the route refusing. An absent lookup is
+ * the same honest outcome the route already had before the columns existed.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -103,6 +114,15 @@ interface DetailRow {
   readonly publication_date: Date | string | null;
   readonly effective_date: Date | string | null;
 
+  /** `DEV-028`. NULL on every assessment written before migration `0018`, and on every non-match. */
+  readonly matched_substance_key: string | null;
+  readonly matched_profile_fact_id: string | null;
+  readonly profile_fact_versions: string[] | null;
+  /** NULL where the catalog does not know the key, or where the fact is hidden from this caller. */
+  readonly matched_substance_name: string | null;
+  readonly matched_fact_term: string | null;
+  readonly matched_fact_version: number | null;
+
   readonly reported_incorrect: boolean;
 }
 
@@ -166,6 +186,14 @@ export function registerAlertDetailRoutes(app: FastifyInstance, deps: AlertDetai
                 a.explanation_template_id  AS explanation_template_id,
                 a.evaluated_at             AS evaluated_at,
 
+                -- DEV-028. The identities the rule matched on, and the names they resolve to.
+                a.matched_substance_key    AS matched_substance_key,
+                a.matched_profile_fact_id  AS matched_profile_fact_id,
+                a.profile_fact_versions    AS profile_fact_versions,
+                ns.preferred_name          AS matched_substance_name,
+                ar.display_term            AS matched_fact_term,
+                ar.version                 AS matched_fact_version,
+
                 b.lot_code                 AS lot_code,
                 i.batch_verification       AS batch_verification,
                 i.formulation_verification AS formulation_verification,
@@ -198,6 +226,12 @@ export function registerAlertDetailRoutes(app: FastifyInstance, deps: AlertDetai
            LEFT JOIN batch_or_lot b  ON b.id = i.batch_id
            LEFT JOIN regulatory_rule_version rr ON rr.id = a.regulatory_rule_version_id
            LEFT JOIN source_registry_entry s    ON s.id = rr.source_registry_entry_id
+           -- DEV-028, both by the identity the assessment froze rather than by re-deriving it.
+           -- LEFT for the reason above: allergy_select needs VIEW_MEDICINES, so a caregiver who
+           -- may read the alert and not the medicine narrows this to NULL instead of losing the
+           -- alert, and the catalog may equally not know a key from an older vocabulary.
+           LEFT JOIN normalized_substance ns ON ns.canonical_key = a.matched_substance_key
+           LEFT JOIN allergy_record ar       ON ar.id = a.matched_profile_fact_id
           WHERE ap.id = $1`,
         [alertId],
       ),
@@ -291,6 +325,23 @@ export function registerAlertDetailRoutes(app: FastifyInstance, deps: AlertDetai
     const expiresOn = dateOrNull(row.item_expires_on);
     const nowDate = ctx.now.slice(0, 10);
 
+    /**
+     * The recorded sensitivity, but only if it still says what the rule matched (`DEV-028`).
+     *
+     * The identity is frozen; the *words* are not. `display_term` is the person's own account and
+     * they may edit it, so quoting today's wording as what the rule matched would be a statement
+     * about what happened that is not true. The assessment froze the fact's version alongside its
+     * ID, so the comparison is cheap and the failure is the honest one: the template refuses and
+     * the alert keeps its listed facts.
+     *
+     * The substance name is deliberately **not** gated the same way. A canonical key is a fixed
+     * identity and a `preferred_name` change is the catalog renaming the same thing, not a person
+     * changing what they said - which is why the key is what the assessment stores.
+     */
+    const factVersions = row.profile_fact_versions ?? [];
+    const factUnchanged =
+      row.matched_fact_version !== null && factVersions.includes(String(row.matched_fact_version));
+
     const input: AlertDetailInput = {
       alertPublicationId: row.alert_id,
       state: row.alert_state,
@@ -316,11 +367,11 @@ export function registerAlertDetailRoutes(app: FastifyInstance, deps: AlertDetai
       expiresOn,
       hasExpired: expiresOn !== null && expiresOn <= nowDate,
 
-      // Not derivable from the assessment; see the module note and `DEV-028`. Passing `null`
-      // makes the sensitivity template refuse to render rather than name a substance that may
-      // not be the one the rule matched.
-      ingredientName: null,
-      recordedTerm: null,
+      // Resolved from what the rule froze, never re-derived; see the module note and DEC-097.
+      // `null` either way makes the sensitivity template refuse to render rather than name a
+      // substance that may not be the one the rule matched.
+      ingredientName: row.matched_substance_name,
+      recordedTerm: factUnchanged ? row.matched_fact_term : null,
       formulationConfirmedFromLabel: row.formulation_verification === 'CONFIRMED',
 
       source: {

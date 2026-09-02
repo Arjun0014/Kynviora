@@ -687,9 +687,15 @@ export function registerShadowModeRoutes(app: FastifyInstance, deps: ShadowModeR
         explanation_template_id: string;
         normalization_version: string;
         evaluated_at: Date;
+        matched_substance_key: string | null;
+        matched_profile_fact_id: string | null;
       }>(
+        // `DEV-028`. The matched identities are read back with everything else, because
+        // `replayAssessment` compares them: without them every recomputed ingredient match would
+        // report a difference against an original that simply had not been asked for its reasons.
         `SELECT owned_item_id, profile_id, matched, match_confidence, reasons, evidence_level,
-                urgency, explanation_template_id, normalization_version, evaluated_at
+                urgency, explanation_template_id, normalization_version, evaluated_at,
+                matched_substance_key, matched_profile_fact_id
            FROM profile_assessment WHERE rule_version_id = $1 ORDER BY owned_item_id`,
         [rule.id],
       );
@@ -718,6 +724,16 @@ export function registerShadowModeRoutes(app: FastifyInstance, deps: ShadowModeR
           profileFactVersions: [],
           actionSignalVersions: [],
         },
+        // Both or neither, which the schema constraint also enforces. A half-filled record here
+        // would compare unequal to a whole one and report a difference that is this mapper's,
+        // not the rule's.
+        matchedInputs:
+          row.matched_substance_key === null || row.matched_profile_fact_id === null
+            ? null
+            : {
+                substanceKey: row.matched_substance_key,
+                profileFactId: row.matched_profile_fact_id,
+              },
         shadowOnly: false,
         evaluatedAt: instantFrom(row.evaluated_at.toISOString()),
       }));

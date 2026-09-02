@@ -618,3 +618,123 @@ describe('consent is strictly the caller’s own (`04` Phase 1.4)', () => {
     expect(message).toMatch(/row-level security/i);
   });
 });
+
+describe('an assessment names which inputs produced the match (DEV-028, migration 0018)', () => {
+  // The two columns are what let the approved ingredient-sensitivity template be filled from
+  // stored data rather than re-derived on the read path. The constraints below are what stop a
+  // half-filled or contradictory record reaching the screen as a sentence with a hole in it.
+
+  const RULE_V = testUuid(910_001);
+  const ITEM_V = testUuid(910_002);
+
+  beforeAll(async () => {
+    await t.asService(async (db) => {
+      await db.query(
+        `INSERT INTO assessment_rule_version
+           (id, rule_key, version, rule_kind, evidence_level, max_urgency,
+            required_item_verification, required_profile_provenance, explanation_template_id)
+         VALUES ($1, 'synthetic.sensitivity', '1.0.0', 'INGREDIENT_SENSITIVITY', 'B', 'MEDIUM',
+                 ARRAY['CONFIRMED']::text[], ARRAY['USER_REPORTED']::text[],
+                 'tpl.ingredient_sensitivity')`,
+        [RULE_V],
+      );
+      await db.query(
+        `INSERT INTO owned_item (id, profile_id, item_kind, display_name)
+         VALUES ($1, $2, 'MEDICINE', 'Synthetic Tablet')`,
+        [ITEM_V, PROFILE_A1],
+      );
+    });
+  });
+
+  async function insertAssessment(
+    values: {
+      readonly matched?: boolean;
+      readonly substanceKey?: string | null;
+      readonly factId?: string | null;
+    } = {},
+  ): Promise<void> {
+    await t.asService((db) =>
+      db.query(
+        `INSERT INTO profile_assessment
+           (profile_id, owned_item_id, rule_version_id, matched, match_confidence, reasons,
+            evidence_level, urgency, explanation_template_id, normalization_version, evaluated_at,
+            matched_substance_key, matched_profile_fact_id)
+         VALUES ($1, $2, $3, $4, $5, ARRAY['SUBSTANCE_IN_DECLARATION']::text[], 'B', $6,
+                 'tpl.ingredient_sensitivity', 'norm-1', now(), $7, $8)`,
+        [
+          PROFILE_A1,
+          ITEM_V,
+          RULE_V,
+          values.matched ?? true,
+          values.matched === false ? 'NOT_MATCHED' : 'EXACT',
+          values.matched === false ? 'INFORMATIONAL' : 'MEDIUM',
+          values.substanceKey === undefined ? 'synthetic.substance' : values.substanceKey,
+          values.factId === undefined ? testUuid(910_003) : values.factId,
+        ],
+      ),
+    );
+  }
+
+  it('stores both identities on a match', async () => {
+    await insertAssessment();
+    const res = await t.asUser(OWNER_A, (db) =>
+      db.query<{ matched_substance_key: string; matched_profile_fact_id: string }>(
+        `SELECT matched_substance_key, matched_profile_fact_id
+           FROM profile_assessment WHERE owned_item_id = $1 AND matched_substance_key IS NOT NULL`,
+        [ITEM_V],
+      ),
+    );
+    expect(res.rows[0]?.matched_substance_key).toBe('synthetic.substance');
+    expect(res.rows[0]?.matched_profile_fact_id).toBe(testUuid(910_003));
+  });
+
+  it('refuses a substance with no fact behind it, and a fact with no substance', async () => {
+    // Either alone renders as a sentence with a hole in it: a key that names an ingredient and
+    // cannot say whose sensitivity it matched, or a fact whose ingredient nobody can name.
+    for (const half of [
+      { substanceKey: 'synthetic.substance', factId: null },
+      { substanceKey: null, factId: testUuid(910_004) },
+    ]) {
+      const message = await expectDenied(() => insertAssessment(half));
+      expect(message, JSON.stringify(half)).toMatch(/assessment_matched_inputs_paired/i);
+    }
+  });
+
+  it('refuses a non-match that names an ingredient anyway', async () => {
+    // A sentence about a match that did not happen.
+    const message = await expectDenied(() => insertAssessment({ matched: false }));
+    expect(message).toMatch(/assessment_matched_inputs_only_when_matched/i);
+  });
+
+  it('refuses a blank substance key', async () => {
+    const message = await expectDenied(() => insertAssessment({ substanceKey: '   ' }));
+    expect(message).toMatch(/assessment_matched_substance_not_blank/i);
+  });
+
+  it('accepts a non-match that names nothing, which is every non-match', async () => {
+    await insertAssessment({ matched: false, substanceKey: null, factId: null });
+    const res = await t.asUser(OWNER_A, (db) =>
+      db.query<{ count: string }>(
+        `SELECT count(*) AS count FROM profile_assessment
+          WHERE owned_item_id = $1 AND NOT matched`,
+        [ITEM_V],
+      ),
+    );
+    expect(Number(res.rows[0]?.count ?? 0)).toBeGreaterThan(0);
+  });
+
+  it('still refuses to let either column be edited afterwards', async () => {
+    // The columns exist so a later event cannot rewrite what the rule saw. An UPDATE that could
+    // change which ingredient an alert names would be exactly that.
+    const message = await expectDenied(() =>
+      t.asOwner((db) =>
+        db.query(
+          `UPDATE profile_assessment SET matched_substance_key = 'something.else'
+            WHERE owned_item_id = $1`,
+          [ITEM_V],
+        ),
+      ),
+    );
+    expect(message).toMatch(/append-only/i);
+  });
+});

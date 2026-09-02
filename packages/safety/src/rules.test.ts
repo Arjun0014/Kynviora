@@ -513,3 +513,154 @@ describe('evaluateRules', () => {
     expect(results[1]?.matched).toBe(false);
   });
 });
+
+describe('which inputs produced the match (DEV-028)', () => {
+  /**
+   * `09` asks an assessment to store exact references to the profile facts it used, and until
+   * migration `0018` only their *versions* were kept. A version says what state the evaluation ran
+   * against; it does not say which row out of that state was the reason - so the approved
+   * ingredient-sensitivity template, which names the exact ingredient and the exact recorded
+   * sensitivity, could not be filled from stored data.
+   *
+   * The identity is frozen here, at evaluation time, because re-deriving it later by intersecting
+   * the declaration with the profile's facts is a different computation over state that may have
+   * moved. It could name a substance the rule did not match on, and a confident approved-looking
+   * sentence about the wrong ingredient is worse than no sentence (DEC-064).
+   */
+
+  const sensitivity = rule({
+    kind: 'INGREDIENT_SENSITIVITY',
+    maxUrgency: 'MEDIUM',
+    evidenceLevel: 'B',
+    explanationTemplateId: 'tpl.ingredient_sensitivity',
+    requiredItemVerification: ['CONFIRMED'],
+    requiredProfileProvenance: ['USER_REPORTED'],
+  });
+
+  function fact(overrides: Partial<ProfileFact> = {}): ProfileFact {
+    return {
+      id: 'fact-1',
+      kind: 'ALLERGY',
+      substanceCanonicalKey: 'SALICYLIC_ACID',
+      displayTerm: 'salicylates',
+      provenance: 'USER_REPORTED',
+      recordedAt: NOW,
+      version: 'pf-1',
+      ...overrides,
+    };
+  }
+
+  it('names the substance and the fact it actually matched', () => {
+    const result = evaluateRule(
+      inputs({
+        rule: sensitivity,
+        item: item({ substanceKeys: ['WATER', 'SALICYLIC_ACID'] }),
+        profileFacts: [fact()],
+      }),
+    );
+    expect(result.matchedInputs).toEqual({
+      substanceKey: 'SALICYLIC_ACID',
+      profileFactId: 'fact-1',
+    });
+  });
+
+  it('names the one that matched, not the first one considered', () => {
+    // The interesting case, and the one a read-path derivation gets wrong: several eligible facts,
+    // only one of them in the declaration. Taking the intersection afresh would be right today and
+    // wrong the moment either list moved.
+    const result = evaluateRule(
+      inputs({
+        rule: sensitivity,
+        item: item({ substanceKeys: ['SALICYLIC_ACID'] }),
+        profileFacts: [
+          fact({ id: 'fact-peanut', substanceCanonicalKey: 'PEANUT', version: 'pf-9' }),
+          fact({ id: 'fact-salicylate', substanceCanonicalKey: 'SALICYLIC_ACID' }),
+        ],
+      }),
+    );
+    expect(result.matchedInputs?.profileFactId).toBe('fact-salicylate');
+    expect(result.matchedInputs?.substanceKey).toBe('SALICYLIC_ACID');
+    // And the frozen version is that fact's, matching the identity rather than listing both.
+    expect(result.inputVersions.profileFactVersions).toEqual(['pf-1']);
+  });
+
+  it('names nothing when the rule did not match', () => {
+    // A row that said which ingredient was involved while reporting no match would be a sentence
+    // about something that did not happen. The schema constraint refuses the pair as well.
+    for (const notMatched of [
+      inputs({
+        rule: sensitivity,
+        item: item({ substanceKeys: ['WATER'] }),
+        profileFacts: [fact()],
+      }),
+      inputs({
+        rule: sensitivity,
+        item: item({ formulationVerification: 'UNVERIFIED', substanceKeys: ['SALICYLIC_ACID'] }),
+        profileFacts: [fact()],
+      }),
+      inputs({
+        rule: sensitivity,
+        item: item({ substanceKeys: ['SALICYLIC_ACID'] }),
+        profileFacts: [fact({ provenance: 'PACKAGE_OCR' })],
+      }),
+      inputs({
+        rule: sensitivity,
+        item: item({ substanceKeys: ['SALICYLIC_ACID'] }),
+        profileFacts: [],
+      }),
+    ]) {
+      const result = evaluateRule(notMatched);
+      expect(result.matched).toBe(false);
+      expect(result.matchedInputs).toBeNull();
+    }
+  });
+
+  it('names nothing on a rule with nothing of this shape to name', () => {
+    // Expiry and batch matches have no ingredient and no profile fact behind them. Inheriting a
+    // neighbouring rule's shape would put an identity on a row that never had one.
+    const expired = evaluateRule(
+      inputs({
+        rule: rule({ kind: 'EXPIRY', maxUrgency: 'LOW' }),
+        item: item({ expiresOn: '2020-01-01' }),
+      }),
+    );
+    expect(expired.matched).toBe(true);
+    expect(expired.matchedInputs).toBeNull();
+  });
+
+  it('is part of what a replay has to reproduce', () => {
+    // A replay that reproduced the verdict while naming a different recorded sensitivity has not
+    // reproduced the result - it reached the same conclusion for another reason, and the sentence
+    // a person reads is built from exactly these two values.
+    const original = evaluateRule(
+      inputs({
+        rule: sensitivity,
+        item: item({ substanceKeys: ['SALICYLIC_ACID'] }),
+        profileFacts: [fact()],
+      }),
+    );
+
+    const same = replayAssessment(
+      original,
+      inputs({
+        rule: sensitivity,
+        item: item({ substanceKeys: ['SALICYLIC_ACID'] }),
+        profileFacts: [fact()],
+      }),
+    );
+    expect(same.reproduced).toBe(true);
+
+    // The person corrected the record and it is now a different row with the same effect.
+    const rerecorded = replayAssessment(
+      original,
+      inputs({
+        rule: sensitivity,
+        item: item({ substanceKeys: ['SALICYLIC_ACID'] }),
+        profileFacts: [fact({ id: 'fact-2', version: 'pf-2' })],
+      }),
+    );
+    expect(rerecorded.recomputed.matched).toBe(true);
+    expect(rerecorded.reproduced).toBe(false);
+    expect(rerecorded.differences).toContain('matchedInputs');
+  });
+});

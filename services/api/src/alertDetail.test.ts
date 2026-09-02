@@ -32,6 +32,10 @@ const SOURCE = testUuid(50);
 const RULE = testUuid(60);
 const REG_RULE = testUuid(61);
 const DOCUMENT = testUuid(62);
+/** `DEV-028`. The substance the rule matched, and the record it matched against. */
+const SUBSTANCE = testUuid(70);
+const SUBSTANCE_KEY = 'synthetic.salicylic_acid';
+const ALLERGY_FACT = testUuid(71);
 
 const NOW = instantFrom('2026-09-01T12:00:00.000Z');
 
@@ -125,6 +129,21 @@ beforeAll(async () => {
       [REG_RULE, SOURCE, DOCUMENT],
     );
 
+    // `DEV-028`. A catalog substance and one recorded sensitivity on this profile, so an
+    // ingredient-sensitivity alert has something real to name on both sides.
+    await db.query(
+      `INSERT INTO normalized_substance
+         (id, canonical_key, preferred_name, substance_kind, vocabulary_version, review_state)
+       VALUES ($1, $2, 'Salicylic acid', 'ACTIVE_PHARMACEUTICAL', 'norm-1', 'PUBLISHED')`,
+      [SUBSTANCE, SUBSTANCE_KEY],
+    );
+    await db.query(
+      `INSERT INTO allergy_record
+         (id, profile_id, record_kind, display_term, substance_id, provenance, certainty)
+       VALUES ($1, $2, 'SENSITIVITY', 'salicylates', $3, 'USER_REPORTED', 'REPORTED')`,
+      [ALLERGY_FACT, PROFILE, SUBSTANCE],
+    );
+
     await db.query(
       `INSERT INTO assessment_rule_version
          (id, rule_key, version, rule_kind, evidence_level, max_urgency,
@@ -190,6 +209,10 @@ async function publishAlert(
     readonly evidenceLevel?: string;
     readonly urgency?: string;
     readonly matchConfidence?: string;
+    /** `DEV-028`. Both or neither - the schema refuses the pair half-filled. */
+    readonly matchedSubstanceKey?: string;
+    readonly matchedProfileFactId?: string;
+    readonly profileFactVersions?: readonly string[];
   } = {},
 ): Promise<{ alertId: string; assessmentId: string }> {
   alertCounter += 1;
@@ -198,8 +221,10 @@ async function publishAlert(
       `INSERT INTO profile_assessment
          (profile_id, owned_item_id, rule_version_id, matched, match_confidence, reasons,
           evidence_level, urgency, explanation_template_id, normalization_version,
-          regulatory_rule_version_id, evaluated_at)
-       VALUES ($1, $2, $3, true, $4, $5::text[], $6, $7, $8, 'norm-1', $9, $10)
+          regulatory_rule_version_id, evaluated_at,
+          matched_substance_key, matched_profile_fact_id, profile_fact_versions)
+       VALUES ($1, $2, $3, true, $4, $5::text[], $6, $7, $8, 'norm-1', $9, $10,
+               $11, $12, $13::text[])
        RETURNING id`,
       [
         PROFILE,
@@ -212,6 +237,9 @@ async function publishAlert(
         overrides.templateId ?? 'tpl.batch',
         overrides.regulatory === false ? null : REG_RULE,
         NOW,
+        overrides.matchedSubstanceKey ?? null,
+        overrides.matchedProfileFactId ?? null,
+        overrides.profileFactVersions ?? [],
       ],
     );
     const assessmentId = assessment.rows[0]?.id ?? '';
@@ -665,5 +693,154 @@ describe('reporting a match as incorrect', () => {
     // exactly that. The audit records that a note exists, not what it says.
     expect(JSON.stringify(events.rows[0]?.detail)).not.toContain('a sentence about a medicine');
     expect(JSON.stringify(events.rows[0]?.detail)).toContain('note_recorded');
+  });
+});
+
+describe('which ingredient matched which recorded sensitivity (DEV-028)', () => {
+  /**
+   * Until migration `0018` the assessment stored versions and reason codes but not identities, so
+   * the alert detail could say *that* a substance in the declaration matched a recorded fact and
+   * not *which* - and `explanationFor` refused to render `tpl.ingredient_sensitivity` rather than
+   * name a substance it was guessing at.
+   *
+   * The route now resolves both by the identity the rule froze. It still never re-derives them:
+   * intersecting the declaration with the profile's facts afresh is a different computation over
+   * state that may have moved, and naming the wrong ingredient confidently is worse than naming
+   * none (DEC-064, DEC-097).
+   */
+
+  it('names both in the approved wording', async () => {
+    const { alertId } = await publishAlert({
+      templateId: 'tpl.ingredient_sensitivity',
+      reasons: ['SUBSTANCE_IN_DECLARATION'],
+      matchedSubstanceKey: SUBSTANCE_KEY,
+      matchedProfileFactId: ALLERGY_FACT,
+      profileFactVersions: ['1'],
+    });
+
+    const response = await request(principalFor(OWNER), {
+      method: 'GET',
+      url: `/v1/alerts/${alertId}`,
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<DetailBody>();
+
+    expect(body.message).not.toBeNull();
+    const message = (body.message ?? []).join(' ');
+    // The catalog's preferred name, not the canonical key: a key beside somebody's medicine is a
+    // field value, not a phrase (trap 129).
+    expect(message).toContain('Salicylic acid');
+    expect(message).not.toContain(SUBSTANCE_KEY);
+    // And the person's own words, quoted as theirs.
+    expect(message).toContain('salicylates');
+    expect(body.unexplainable).toBeNull();
+  });
+
+  it('says nothing about the sensitivity to a caregiver who may not read it', async () => {
+    // `03` group H keeps safety access separate from medicine access, and `allergy_select`
+    // requires VIEW_MEDICINES. A caregiver holding VIEW_SAFETY alone is entitled to the alert and
+    // not to what the person is allergic to, so the narrative declines rather than the route
+    // refusing - the same shape the withheld person and item names already have.
+    await grant(CAREGIVER_SAFETY, ['VIEW_SAFETY']);
+    const { alertId } = await publishAlert({
+      templateId: 'tpl.ingredient_sensitivity',
+      reasons: ['SUBSTANCE_IN_DECLARATION'],
+      matchedSubstanceKey: SUBSTANCE_KEY,
+      matchedProfileFactId: ALLERGY_FACT,
+      profileFactVersions: ['1'],
+    });
+
+    const response = await request(principalFor(CAREGIVER_SAFETY), {
+      method: 'GET',
+      url: `/v1/alerts/${alertId}`,
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<DetailBody>();
+
+    // The alert is readable and the narrative is not rendered. `unexplainable` is deliberately
+    // not asserted here: this caller cannot read the item either, so the view reports a withheld
+    // half rather than an unrenderable template - two different absences with different notices,
+    // and conflating them is how a caregiver would be told the rule was unknown.
+    expect(body.alertPublicationId).toBe(alertId);
+    expect(body.message).toBeNull();
+    expect(body.withheldNotice).not.toBeNull();
+    expect(JSON.stringify(body)).not.toContain('salicylates');
+  });
+
+  it('stops quoting a recorded term the person has since changed', async () => {
+    // The identity is frozen; the words are not. `display_term` is the person's own account and
+    // they may edit it, so quoting today's wording as what the rule matched would be a statement
+    // about what happened that is not true.
+    const { alertId } = await publishAlert({
+      templateId: 'tpl.ingredient_sensitivity',
+      reasons: ['SUBSTANCE_IN_DECLARATION'],
+      matchedSubstanceKey: SUBSTANCE_KEY,
+      matchedProfileFactId: ALLERGY_FACT,
+      // The version the rule saw. The record below moves past it.
+      profileFactVersions: ['1'],
+    });
+
+    await t.asService((db) =>
+      db.query(
+        `UPDATE allergy_record SET display_term = 'aspirin', version = version + 1 WHERE id = $1`,
+        [ALLERGY_FACT],
+      ),
+    );
+
+    const response = await request(principalFor(OWNER), {
+      method: 'GET',
+      url: `/v1/alerts/${alertId}`,
+    });
+    const body = response.json<DetailBody>();
+    expect(body.message).toBeNull();
+    // Neither the old wording nor the new one: the point is that Kynviora cannot say which the
+    // rule matched, not that it should show the newer guess.
+    expect(JSON.stringify(body)).not.toContain('salicylates');
+    expect(JSON.stringify(body)).not.toContain('aspirin');
+
+    await t.asService((db) =>
+      db.query(
+        `UPDATE allergy_record SET display_term = 'salicylates', version = 1 WHERE id = $1`,
+        [ALLERGY_FACT],
+      ),
+    );
+  });
+
+  it('renders nothing for an assessment written before the columns existed', async () => {
+    // Every row from before migration `0018` carries NULL in both, and a route that filled the gap
+    // by deriving it would be exactly the read-path computation `DEV-028` refused.
+    const { alertId } = await publishAlert({
+      templateId: 'tpl.ingredient_sensitivity',
+      reasons: ['SUBSTANCE_IN_DECLARATION'],
+    });
+
+    const response = await request(principalFor(OWNER), {
+      method: 'GET',
+      url: `/v1/alerts/${alertId}`,
+    });
+    const body = response.json<DetailBody>();
+    expect(body.message).toBeNull();
+    expect(body.unexplainable).not.toBeNull();
+  });
+
+  it('renders nothing when the catalog does not know the key', async () => {
+    // A key from a vocabulary this build no longer carries resolves to no name, and a sentence
+    // reading "This product's ingredient list includes null" is the failure the template's own
+    // refusal exists to prevent.
+    const { alertId } = await publishAlert({
+      templateId: 'tpl.ingredient_sensitivity',
+      reasons: ['SUBSTANCE_IN_DECLARATION'],
+      matchedSubstanceKey: 'nothing.knows.this',
+      matchedProfileFactId: ALLERGY_FACT,
+      profileFactVersions: ['1'],
+    });
+
+    const response = await request(principalFor(OWNER), {
+      method: 'GET',
+      url: `/v1/alerts/${alertId}`,
+    });
+    const body = response.json<DetailBody>();
+    expect(body.message).toBeNull();
+    expect(JSON.stringify(body)).not.toContain('nothing.knows.this');
   });
 });
