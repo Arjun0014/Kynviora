@@ -72,12 +72,12 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 
 ## Stage 2 - Unified Health Shelf and Item Lifecycle
 
-| Phase | Title                      | Status        |
-| ----- | -------------------------- | ------------- |
-| 2.1   | Shared Shelf framework     | `COMPLETE`    |
-| 2.2   | Manual medicine entry      | `NOT_STARTED` |
-| 2.3   | Manual personal-care entry | `NOT_STARTED` |
-| 2.4   | Product Trust Passport v1  | `COMPLETE`    |
+| Phase | Title                      | Status     |
+| ----- | -------------------------- | ---------- |
+| 2.1   | Shared Shelf framework     | `COMPLETE` |
+| 2.2   | Manual medicine entry      | `COMPLETE` |
+| 2.3   | Manual personal-care entry | `COMPLETE` |
+| 2.4   | Product Trust Passport v1  | `COMPLETE` |
 
 - **2.1**: complete as of 2026-09-02. Migration `0004` already carried the lifecycle state, the
   three verification axes and the timestamps; `GET /v1/items` returned them and the Shelf rendered
@@ -110,7 +110,49 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
   against real PostgreSQL including the `03` group H boundary - a caregiver holding `VIEW_SAFETY`
   and not `VIEW_MEDICINES` reads an alert about a medicine and gets a not-found for the medicine.
 
-- **2.2 / 2.3**: unchanged and accurate. There is no manual-entry surface for either category.
+- **2.2 / 2.3**: complete as of 2026-09-02, in two commits - the write path, then the surface that
+  reaches it. Until the first, nothing in this build created an `owned_item` from a user surface,
+  so every shelf in every test and every dogfood run was seeded.
+
+  **Exit criterion 2.2a** - a clinically useful current medicine record creatable entirely
+  manually - is one required field. A person holding a box in a kitchen has a name and may have
+  nothing else to hand. Everything else is optional, the form says so at the top rather than
+  leaving somebody to discover it, and nothing is marked recommended: a form that scolded somebody
+  for leaving the batch code blank would collect guessed batch codes.
+
+  **Exit criterion 2.2b** - missing fields stay explicitly unknown rather than receiving defaults
+  - is a shape rather than a behaviour. No field in the domain has a fallback, migration `0015`
+    gives none of the new columns a DEFAULT, a value of spaces becomes NULL rather than something a
+    screen renders as an answer, and a db-level test reads `information_schema` to assert both.
+    There is no "Unknown" string and no empty-string sentinel.
+
+  **Exit criterion 2.3b** - personal-care data is not reduced to name plus barcode - needed work
+  on the read path as well as the write path, and that is what this phase actually turned on.
+  Phase 2.1's item detail was written before migration `0015`, so five columns a person can now
+  fill in were writable and invisible: somebody could transcribe a whole back-of-bottle
+  declaration into nothing. All five are on the detail now (DEC-081).
+
+  **Nothing typed reaches the catalog and nothing typed is confirmed.** The submission has no
+  `productIdentityId`, `formulationId` or `batchId` and no way to acquire one; the body schema is
+  `.strict()` so an attempt is a 400 rather than a silently ignored key. The three axes keep
+  `0004`'s UNVERIFIED - `08` reserves CONFIRMED for something read off the pack - and the form
+  says why, because a person reading "not confirmed" with no explanation would reasonably think
+  Kynviora doubted them.
+
+  **It refuses rather than repairs**, at every layer. A market of `gb` is not upper-cased and a
+  barcode with a space is not stripped, on the client or on the server: a value Kynviora quietly
+  altered is one the person can no longer check against the pack in their hand. Each refusal names
+  the field, and the refusal's field name now survives the client boundary so the form can point
+  at it (DEC-080).
+
+  **A retried save writes one item.** Migration `0016`, keyed per profile rather than globally
+  (DEC-079). The screen holds one key per draft rather than per press, so a person on a bad
+  connection tapping Save twice gets one medicine record rather than two - which `04` Phase 8.5
+  would later reconcile as two medicines they are taking.
+
+  105 tests across the domain (18), presentation (28 including the item detail's new rows), the
+  database (9), contracts (16) and the API (36 against real PostgreSQL, 8 of them end to end
+  through the shipped client).
 
 The Trust Passport's underlying data - identity/formulation/batch verification kept separate,
 corroboration state, coverage statement - already exists in the domain and catalog layers.
@@ -591,24 +633,23 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
-1. Phases 2.2 and 2.3: manual medicine and personal-care entry. Nothing creates an `owned_item`
-   from a user surface, so every shelf in this build was seeded. The schema, the verification
-   axes and now the detail and the filters are all in place; what is missing is the write path
-   and the screens.
-2. The notification settings screen. The route reports quiet hours, the urgency-to-channel table
+1. The notification settings screen. The route reports quiet hours, the urgency-to-channel table
    and the copy that explains both; no client renders any of it, so a person cannot set a window
    they can already be governed by.
+2. Editing an item, and stopping one. `owned_item` has an UPDATE policy, a `lifecycle_state` and a
+   `version` column, and the shelf now says out loud that a person can "add anything missing
+   later from the item itself" - which is currently not true of any surface. Phase 2.1's detail is
+   where it belongs.
 3. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch, its authorization and now its delivery policy all exist; nothing calls them with a
    real occurrence.
 
-Done since this list was last written: the staff reviewer console and the API surface split
-(`DEV-016`, `DEV-017`), Phase 7.3, Phase 7.4's regulatory half, Phase 7.6 end to end, Phase 7.5
-including the dispatcher that acts on it, and Phase 2.1's item detail and filters.
+Done since this list was last written: Phases 2.2 and 2.3 end to end - the write path, the client,
+the screen, and the five fields Phase 2.1's detail had never shown back.
 
 ## What "complete" means here, and what it does not
 
-Twenty-eight phases are marked `COMPLETE` above. In every case that means the logic is
+Thirty phases are marked `COMPLETE` above. In every case that means the logic is
 implemented, tested, documented and committed - and in most cases the tests execute against a real
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
@@ -617,8 +658,8 @@ device, a credential, a labelled dataset, human participants, or a qualified hum
 those are marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even
 where all buildable work is finished. `BLOCKERS.md` records what each one needs.
 
-The counts above are the tables' own, recounted whenever a status changes: 28 `COMPLETE`, 8
-`IN_PROGRESS`, 6 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
+The counts above are the tables' own, recounted whenever a status changes: 30 `COMPLETE`, 8
+`IN_PROGRESS`, 4 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
 `04` defines. A prose count that drifts from the table it describes is the quiet way a status
 document stops being one - and the first version of this paragraph drifted immediately, because it
 was measured before the same commit moved 2.1. Count the rows:

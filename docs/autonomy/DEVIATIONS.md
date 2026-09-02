@@ -682,3 +682,35 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   hands of the device that actually knows it. Either way `deliveryDecision` does not change - it
   already takes the value rather than computing it, which is why this is a wiring gap rather than
   a design one.
+
+---
+
+## DEV-031 - `dose_event`'s idempotency key is still globally unique
+
+- **Affected specification**: `13` ("idempotency key on mutations that can be retried"; "server
+  commits exactly once").
+- **Expected behaviour**: a retried write commits once, and a key chosen by one household has no
+  effect on another household's write.
+- **Implemented behaviour**: true for `owned_item` as of migration `0016`, where
+  `owned_item_idempotency` is UNIQUE on `(profile_id, client_operation_id)`. Not true for
+  `dose_event`, where migration `0004` made `dose_event_idempotency` UNIQUE on
+  `client_operation_id` alone. Under that shape, a key another household has already used makes
+  the INSERT conflict; the route's replay read then runs under row-level security, finds nothing,
+  and answers `200` with `{ id: null, replayed: true }` - a success for a dose event that was never
+  recorded.
+- **Reason**: the collision needs a client to reuse a UUID another household generated, which does
+  not happen by accident and gains an attacker nothing they could not do by not sending the request
+  at all - the row they suppress is their own. Changing the shape of a shipped idempotency
+  guarantee is not something to do in passing while finishing a different phase, and doing it
+  properly means a migration that drops and rebuilds a unique index on a table that already has
+  rows, plus a re-read of the route's error branch.
+- **Temporary or permanent**: temporary.
+- **Risk**: low. The failure is self-inflicted and silent rather than cross-household: nobody reads
+  or writes another household's row, and the `id: null` in the response is already the signal that
+  nothing was returned. It is on this list because "the two idempotency guarantees in this codebase
+  have different shapes" is exactly the kind of inconsistency a later reader resolves by copying the
+  wrong one.
+- **Required future work**: a migration replacing `dose_event_idempotency` with a unique index on
+  `(owned_item_id, client_operation_id)` or on the profile, whichever the dose route can scope to
+  without a second query, and the same replay-read behaviour `POST /v1/items` now has. The route
+  change is small; the migration is the part that needs care.

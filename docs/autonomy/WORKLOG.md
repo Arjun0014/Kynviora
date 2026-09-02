@@ -2087,3 +2087,85 @@ format all clean via `npm run verify`, exit 0. 71 new tests across four suites.
 Phase 2.1 is `COMPLETE`. The honest remainder is one layer down: nothing in this build creates an
 `owned_item` from a user surface, so every shelf so far has been seeded. That is Phases 2.2 and
 2.3, and it is the next thing worth doing.
+
+### Phases 2.2 and 2.3 - the surface, and the five fields nothing showed back
+
+The previous session ended on a usage limit immediately after committing the write path, with the
+note "then the client and screen". That is what this one finished. The baseline was re-established
+first rather than trusted: `npm run verify` at `8726c44` gave 2955 tests across 98 files, exit 0,
+which matched the commit message, so nothing was half-applied this time.
+
+**The route had no idempotency key, and until there was a screen nothing needed one.** Every
+caller was a test that submits once. A person on a train tapping Save, seeing nothing and tapping
+again is the retry, and without a key that is a second medicine record - which `04` Phase 8.5
+later reconciles against a list somebody was handed, where two identical rows read as two
+medicines they are taking. That is a false statement about somebody's treatment produced by a
+dropped connection, and it is the reason migration `0016` is part of this phase rather than a
+later tidy-up.
+
+**It is scoped to the profile, and `dose_event`'s is not.** Copying the precedent would have been
+the obvious move and is wrong. Under a globally unique key, a value another household already used
+makes the INSERT conflict; the replay read then runs under row-level security, finds nothing, and
+the route answers `200` with no ID - their item dropped silently, reported as success. Scoped to
+`(profile_id, client_operation_id)`, the collision can only happen inside a scope the caller can
+read back, which is the only scope where a replay is a real replay (DEC-079). The existing
+dose-event shape was left alone rather than changed in passing, and is `DEV-031`.
+
+**A replay describes the row that exists.** The first draft echoed the submission, which is wrong
+for the same reason the whole feature is careful: a retry carrying a changed field would be told
+what its own body implies, when what exists is the first version. On a screen whose entire subject
+is what Kynviora does and does not hold about a pack, describing a record nobody has is the
+failure the key was added to prevent.
+
+**The refusal's field name was being thrown away at the client boundary.** `normalizeManualEntry`
+returns `detail.field` precisely so a form can point at the field it refused, and `errors.ts`
+passes `detail` through for client-correctable classes - and `parseWireError` never read it.
+`WireError.detail` had been declared and unparsed since the module was written. A form with eleven
+fields that can only say "that is not a kind of product Kynviora knows" makes the person hunt for
+it. It is threaded onto `REFUSED` only, narrowed scalar by scalar (trap 101 on the error path),
+absent rather than empty where the server sent none, and with nowhere to put one on an
+authorization outcome - so a server that started sending `detail` on a 404 could not leak it
+through this client (DEC-080).
+
+**The end-to-end test found what four layers of unit tests had not.** Phase 2.1's item detail was
+written before migration `0015` existed, so `manufacturer`, `recorded_gtin`, `recorded_lot_code`,
+`ingredient_declaration_raw` and `label_version_note` were writable and invisible. A person could
+transcribe a whole back-of-bottle declaration and never see it again. That is Phase 2.3's "not
+reduced to name + barcode" failing on the read path rather than on the write path, and it is
+invisible from either side alone: the write tests assert the columns are stored, the read tests
+assert the fields they know about are rendered, and neither notices a column nobody joined them
+over. The suite that caught it drives the shipped client against a real server and compares what a
+person typed with what comes back.
+
+The rule that came out of it is in DEC-081: a field on `manualEntryForm` has a row on the item
+detail, asserted over the whole form rather than field by field so a field added later is covered
+without anybody remembering to.
+
+**A barcode is labelled as the household's own record.** "Barcode as recorded here", not
+"Barcode". These columns corroborate nothing (`15` A11, `08`), and a bare label sitting above three
+unconfirmed verification chips would read as evidence Kynviora had matched something. The label is
+the only thing that prevents it, because the value looks identical either way.
+
+**Two smaller choices.** A form-field error wears `attention`, not `action` - `action` is what a
+recall wears, and spending it on a mistyped barcode is the alarm optimisation `02` refuses. And
+the client sends what was typed, untouched: deciding a blank field is absent is not the same as
+altering a value, and the second is what makes a record uncheckable against the pack in somebody's
+hand.
+
+**The near-miss.** The first full verify came back from the background runner reporting exit 0, and
+it had not passed: `npm run verify > log 2>&1; echo "EXIT=$?"` makes the wrapper succeed whatever
+verify did, and the notification reports the wrapper. The format check had failed on twelve files.
+Trap 142 records it, because the failure mode is a commit on red that every other gate would have
+been reported as green.
+
+### State
+
+3000 tests passing across 100 files, up from 2955 across 98. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 45 new tests across five suites - the database
+schema itself, presentation, contracts, the API against real PostgreSQL, and eight end to end
+through the client the app ships.
+
+Phases 2.2 and 2.3 are `COMPLETE`. Neither has an exit criterion needing a device, a credential or
+a human reviewer, and the screen is reachable in a way the safety surfaces are not: a person
+running the dev seed can add a medicine and see it on their own shelf. Stage 2 has no unblocked
+phase left.

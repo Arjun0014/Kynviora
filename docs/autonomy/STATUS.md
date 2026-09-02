@@ -9,18 +9,18 @@ Last updated: 2026-09-02
 
 ## Current position
 
-|                    |                                                  |
-| ------------------ | ------------------------------------------------ |
-| **Current stage**  | Stage 7 (Safety Watch), after the Safety Receipt |
-| **Current phase**  | Phase 7.5 next; DEV-007, DEV-016, DEV-017 closed |
-| **Last completed** | Phase 7.6 - resolution and the Safety Receipt    |
-| **Branch**         | `master`                                         |
-| **Latest commit**  | `feat(safety): the receipt, on a screen`         |
-| **Baseline tag**   | `baseline-spec-only`                             |
+|                    |                                                              |
+| ------------------ | ------------------------------------------------------------ |
+| **Current stage**  | Stage 2 (Unified Health Shelf), after manual entry           |
+| **Current phase**  | No unblocked phase left in Stage 2 or Stage 7                |
+| **Last completed** | Phases 2.2 and 2.3 - manual medicine and personal-care entry |
+| **Branch**         | `master`                                                     |
+| **Latest commit**  | `feat(shelf): the form for a pack you are holding`           |
+| **Baseline tag**   | `baseline-spec-only`                                         |
 
 ## Verification state
 
-- **2891 tests passing**, 0 failing, across 95 files.
+- **3000 tests passing**, 0 failing, across 100 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -66,31 +66,32 @@ the API will not distinguish them.
 
 ## What is genuinely built and tested
 
-| Area                                                       | State                                                   |
-| ---------------------------------------------------------- | ------------------------------------------------------- |
-| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                      |
-| Database schema, 13 migrations, full RLS                   | Complete, 293 tests incl. threats A1/A2/A3              |
-| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                     |
-| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                      |
-| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                      |
-| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                                      |
-| Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                                     |
-| API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                                      |
-| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                                      |
-| Caregiver invitation, acceptance, revocation, audit        | Complete, 214 tests                                     |
-| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                                     |
-| Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009)             |
-| Household Review Inbox, record-writing completion          | Complete, 95 tests                                      |
-| Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                                     |
-| Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006)    |
-| Staff surface split, console package, console process      | Complete, 172 tests; **authenticates nobody** (BLK-010) |
-| Alert detail, explainability, report-incorrect             | Complete, 89 tests; **no alert to open** (BLK-006)      |
-| Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)          |
-| Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                      |
-| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                      |
-| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                     |
-| Caregiver, export, notification, inbox, reconciliation UI  | Wired; **not device-verified** (`DEV-007`)              |
-| CI pipeline                                                | Written; not yet run on a real runner                   |
+| Area                                                       | State                                                      |
+| ---------------------------------------------------------- | ---------------------------------------------------------- |
+| Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                         |
+| Database schema, 16 migrations, full RLS                   | Complete, 302 tests incl. threats A1/A2/A3                 |
+| Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                        |
+| Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                         |
+| Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                         |
+| Ingestion pipeline with hostile-source defences            | Complete, 37 tests                                         |
+| Presentation layer, accessibility tokens, safety copy      | Complete, 436 tests                                        |
+| API boundary (Fastify), RLS-scoped context                 | Complete, 37 tests                                         |
+| Offline sync protocol, per-entity conflict policy          | Complete, 43 tests                                         |
+| Caregiver invitation, acceptance, revocation, audit        | Complete, 214 tests                                        |
+| Visit Pack export, reviewed-content gate, expiry           | Complete, 100 tests                                        |
+| Caregiver alert delivery, notification privacy             | Complete, 126 tests; **not sent** (BLK-009)                |
+| Household Review Inbox, record-writing completion          | Complete, 95 tests                                         |
+| Medicine Reconciliation, two lists and no chosen answer    | Complete, 109 tests                                        |
+| Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006)       |
+| Staff surface split, console package, console process      | Complete, 172 tests; **authenticates nobody** (BLK-010)    |
+| Alert detail, explainability, report-incorrect             | Complete, 89 tests; **no alert to open** (BLK-006)         |
+| Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)             |
+| Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                         |
+| Manual entry: the write path, the form and the screen      | Complete, 105 tests; the only surface that creates an item |
+| End-to-end vertical slice, 7 required scenarios            | Complete, 36 tests                                         |
+| Mobile app shell, encrypted store, accessible primitives   | Typechecks; **not device-verified**                        |
+| Caregiver, export, inbox, reconciliation, add-an-item UI   | Wired; **not device-verified** (`DEV-007`)                 |
+| CI pipeline                                                | Written; not yet run on a real runner                      |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
 alert-delivery, Review Inbox, reconciliation and reviewer-console rows each count tests that
@@ -794,3 +795,43 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
 132. Do not let an unrecognised filter value through as "no filter". A silently widened result set
      and a silently narrowed one are both the failure a list about somebody's medicines cannot
      have - the same rule the safety inbox already keeps (trap 79).
+133. Do not copy `dose_event`'s globally unique idempotency key onto a new table. A key another
+     household already used makes the INSERT conflict, the replay read then finds nothing under
+     row-level security, and the route answers success carrying no ID - their row dropped
+     silently. Scope it to the profile (DEC-079); the existing one is `DEV-031`.
+134. Do not write `ON CONFLICT DO NOTHING` without inferring the index. A bare form also swallows
+     a violation of some future constraint and reports it as a successful retry of something that
+     never happened. Name the columns and the predicate.
+135. Do not echo the submitted body on an idempotent replay. A retry carrying a changed field
+     would be told what its own body implies, when what exists is the first version. Re-read the
+     stored row and describe that.
+136. Do not regenerate the idempotency key on each press. One key per draft: a refused body wrote
+     nothing and leaves the key free, so correcting a field and trying again has to be the same
+     save rather than a second medicine record.
+137. Do not add a field to `manualEntryForm` without a row for it on the item detail. Phase 2.1's
+     detail predates migration `0015`, so five columns were writable and invisible - somebody
+     could transcribe a whole back-of-bottle declaration into nothing. Four layers of unit tests
+     passed; an end-to-end test through the shipped client is what found it (DEC-081).
+138. Do not label a transcribed barcode "Barcode". These columns are the household's own record
+     and corroborate nothing (`15` A11, `08`); a bare label above three unconfirmed chips reads as
+     evidence Kynviora matched something. "as recorded here" is what prevents that, because the
+     value cannot.
+139. Do not let a client drop the `detail` a refusal carries. The domain names the field so a form
+     can point at it, and `WireError.detail` was declared and never parsed for months - a form
+     with eleven fields could only say "that is not a kind of product Kynviora knows". Scalars
+     only, absent rather than empty, and never on an authorization outcome (DEC-080).
+140. Do not give a form-field error the `action` tone. `action` is what a recall wears, and
+     spending it on a mistyped barcode is the alarm optimisation `02` refuses - it makes the red
+     mean less where it matters. `attention` is the tone for something a person can fix.
+141. Do not trim, upper-case or strip a value on the client before sending it. Deciding a blank
+     field is absent is not the same as altering a value: the first is what `04` Phase 2.2's
+     second exit criterion asks for, the second is a value the person can no longer check against
+     the pack in their hand. The domain refuses and names the field.
+142. Do not read a background `npm run verify` as green because the task notification says exit 0. `npm run verify > log 2>&1; echo "EXIT=$?"` makes the wrapper succeed whatever verify did;
+     the notification reports the wrapper. Grep the log for the vitest summary, or append the real
+     code to the log. This nearly produced a commit on a failing format check.
+143. Do not couple a form's field list to a screen by hand. `manualEntryDraft` reads
+     `manualEntryForm`, so a value left behind when somebody changed their mind about what they
+     were adding cannot be submitted; and a `satisfies Record<ManualEntryField, true>` map checks
+     both directions at compile time - a form key the body cannot carry, and a body field no form
+     asks for.

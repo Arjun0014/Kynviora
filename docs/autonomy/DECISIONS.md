@@ -2158,3 +2158,111 @@ waiting for a window that never ends because nobody could tell it the window had
 strictly worse than a notification arriving at an inconvenient hour.
 
 **Sources.** `04` Phase 7.5; `02`; `23` D-005; `DEV-030`.
+
+---
+
+## DEC-079 - A manual entry's idempotency key is scoped to the profile, not global
+
+**Date:** 2026-09-02
+**Phase:** 2.2 / 2.3
+**Status:** Accepted
+
+`13` requires an idempotency key on a mutation that can be retried, and until the screen existed
+`POST /v1/items` had none - every caller was a test that submits once. A person on a train tapping
+Save, seeing nothing and tapping again is the retry, and without a key that is a second medicine
+record on the shelf `04` Phase 8.5 later reconciles against a list somebody was handed, where two
+identical rows read as two medicines they are taking.
+
+The precedent was `dose_event.client_operation_id`, which migration `0004` made **globally**
+unique. Migration `0016` deliberately does not copy it. Under a global key, a value another
+household already used makes this INSERT conflict; the replay read then runs under row-level
+security, finds nothing, and the route answers a success carrying no ID - so the second household's
+item is silently dropped. Scoping the uniqueness to `(profile_id, client_operation_id)` makes that
+unreachable: a collision can only happen inside a scope the caller can actually read back, which is
+the only scope where a replay is a real replay. A test writes the same key on two profiles and
+asserts both rows exist.
+
+**The index is inferred explicitly.** `ON CONFLICT (profile_id, client_operation_id) WHERE
+client_operation_id IS NOT NULL DO NOTHING`, not a bare `ON CONFLICT DO NOTHING` - which would also
+swallow a violation of some future constraint and report it as a successful retry of something that
+never happened.
+
+**A replay describes the stored row, not the body that arrived.** The route re-reads the four
+columns the limits are derived from rather than echoing the submission. A retry carrying a changed
+field would otherwise be told what its own body implies, when what exists is the first version -
+and on a screen whose entire subject is what Kynviora does and does not hold about a pack,
+describing a record nobody has is the failure the route exists to prevent.
+
+**A refusal does not consume the key.** A body the domain rejected wrote nothing, so the corrected
+submission reuses the key the screen already generated. The alternative - a new key after every
+validation error - would mean the one path where a person retries most often is the one path with
+no protection.
+
+**Sources.** `13`; `04` Phases 2.2, 2.3 and 8.5; migrations `0004` and `0016`; `DEV-031`.
+
+---
+
+## DEC-080 - A refusal's field name reaches the client; an authorization refusal still says nothing
+
+**Date:** 2026-09-02
+**Phase:** 2.2 / 2.3
+**Status:** Accepted
+
+`normalizeManualEntry` names the field it refused - that is why it returns `detail.field` rather
+than only a sentence - and `errors.ts` passes `detail` through for client-correctable classes. The
+client dropped it: `WireError.detail` was declared and never parsed, so `ApiOutcome`'s `REFUSED`
+carried a message and nothing structured. A form with eleven fields that can only say "that is not
+a kind of product Kynviora knows" is one where the person has to find the field themselves.
+
+`parseWireError` now reads it and `classifyError` carries it onto `REFUSED` only. Three properties
+hold and are tested:
+
+- **Scalars only.** Each entry is narrowed value by value; a nested object or an array is dropped.
+  Trap 101 on the error path - a shape this build did not expect would render as `[object Object]`
+  beside somebody's medicine.
+- **Absent rather than empty** where the server sent none, so "the server said nothing" and "the
+  server said this is about no particular field" stay different facts.
+- **Nowhere to put one on an authorization outcome.** `UNAVAILABLE` has no `detail` field, so a
+  server that started sending one on a 404 could not leak it through this client. `errors.ts`
+  suppresses it on that side; the union's shape is the same rule stated again where a future change
+  would have to notice it.
+
+The screen branches on `detail.field`, never on the message text (`13`).
+
+**Sources.** `13`; `12`; `14`; `errors.ts`; trap 101.
+
+---
+
+## DEC-081 - The manual-entry form owns the field list, and the item detail must show all of it
+
+**Date:** 2026-09-02
+**Phase:** 2.2 / 2.3
+**Status:** Accepted
+
+Which fields a category has is decided in exactly one place - `manualEntryForm` in
+`@kynviora/presentation` - and two consumers are held to it by tests rather than by care.
+
+**The request builder reads the form.** `manualEntryDraft` in `@kynviora/contracts` copies only the
+fields the form for that category offers, so a value left behind when somebody changed their mind
+about what they were adding cannot be submitted and refused with a message about a field no longer
+on their screen. A `satisfies Record<ManualEntryField, true>` map checks both directions at compile
+time: a field name the body cannot carry fails, and a field the body carries that no form asks for
+fails too - the second being `DEV-026`'s failure in miniature, a value only a test could ever set.
+
+**The item detail shows everything the form collects.** This is the rule the phase actually turned
+on. Phase 2.1's detail was written before migration `0015` added `manufacturer`, `recorded_gtin`,
+`recorded_lot_code`, `ingredient_declaration_raw` and `label_version_note`, so the form collected
+five fields that no screen ever showed back. A person could transcribe a whole back-of-bottle
+declaration into nothing - which is Phase 2.3's "not reduced to name + barcode" failing on the read
+path instead of on the write path, and it is invisible from either side alone. An end-to-end test
+through the shipped client found it; four layers of unit tests had not.
+
+**A recorded barcode is labelled as one.** "Barcode as recorded here", not "Barcode". These columns
+are the household's own transcription and they corroborate nothing (`15` A11, `08`); a bare label
+sitting above three unconfirmed verification chips would read as evidence that Kynviora had matched
+something. The label is what prevents that, because the value cannot.
+
+**The ingredient declaration is quoted.** Same treatment as a written direction: it is the
+manufacturer's words off the pack, kept exactly as printed and never normalized (`05.1`).
+
+**Sources.** `04` Phases 2.1, 2.2 and 2.3; `05.1`; `08`; `15` A11; `DEV-026`; migration `0015`.
