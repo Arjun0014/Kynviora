@@ -26,7 +26,9 @@
     "typecheck:mobile": "npm --prefix apps/mobile run typecheck",
     "dev": "npm --prefix services/api run dev",
     "dev:console": "npm --prefix services/staff-web run dev",
-    "migrate": "npm --prefix db run migrate"
+    "migrate": "npm --prefix db run migrate",
+    "verify:device": "tsx scripts/device/verifyLocalStorage.ts",
+    "verify:device:a11y": "tsx scripts/device/verifyAccessibility.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

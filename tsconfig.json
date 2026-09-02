@@ -1,6 +1,12 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": { "noEmit": true },
-  "include": ["packages/*/src/**/*", "services/*/src/**/*", "db/**/*.ts", "*.ts"],
+  "include": [
+    "packages/*/src/**/*",
+    "services/*/src/**/*",
+    "db/**/*.ts",
+    "scripts/**/*.ts",
+    "*.ts"
+  ],
   "exclude": ["node_modules", "**/dist", "apps/**"]
 }

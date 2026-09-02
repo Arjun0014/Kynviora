@@ -6,7 +6,15 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'node',
-    include: ['packages/**/*.test.ts', 'services/**/*.test.ts', 'db/**/*.test.ts'],
+    // `scripts/**` carries the device-verification harness. Only its analysis has tests here;
+    // the runner needs an attached device and is invoked by hand (`npm run verify:device`), so
+    // the judgements it makes are covered by CI and the evidence is not.
+    include: [
+      'packages/**/*.test.ts',
+      'services/**/*.test.ts',
+      'db/**/*.test.ts',
+      'scripts/**/*.test.ts',
+    ],
     exclude: ['**/node_modules/**', '**/dist/**', 'apps/**'],
     testTimeout: 30_000,
     hookTimeout: 60_000,
