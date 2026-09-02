@@ -675,7 +675,11 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Risk**: low, and deliberately biased. Not holding is the safe direction: the failure it avoids
   is a `CRITICAL` recall waiting for a window that never ends. The settings screen says so - the
   copy for an unknown local time reads "Nothing is being held back" rather than leaving an empty
-  state that would read as "quiet hours are working" (DEC-078).
+  state that would read as "quiet hours are working" (DEC-078). That screen now exists: a person
+  can set a window from the You tab, and the sentence is shown **before** they set one rather than
+  after, because the person about to rely on quiet hours is the one who needs it. The API reports
+  the fact as `QUIET_HOURS_APPLIED` and `notificationPolicyView` turns it into the sentence, so the
+  day this deviation closes there is one constant to flip and no screen to remember (DEC-086).
 - **Required future work**: the client reports its own local minute on the request that triggers a
   dispatch, or the profile records an IANA zone and the server converts. The second is better and
   costs a column, a migration and a zone database; the first is cheaper and puts the value in the
@@ -743,3 +747,34 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
 - **Required future work**: the retention matrix, then a delete route that sets `deleted_at`, an
   audit row, and copy that says plainly what survives - the audit log does, and a person told
   "deleted" while a row about them remains has been misled. `04` Phase 1.4 is the natural home.
+
+---
+
+## DEV-033 - A digest is classified and never assembled
+
+- **Affected specification**: `04` Phase 7.5 lists "digest policy for lower urgency" among the
+  expected outputs.
+- **Expected behaviour**: `MEDIUM` and `LOW` events do not interrupt anybody; they are collected
+  and shown together, so a household sees them without a phone lighting up for each one.
+- **Implemented behaviour**: the first half only. `MAX_CHANNEL_FOR_URGENCY` maps `MEDIUM` and `LOW`
+  to `DIGEST`, `deliveryDecision` returns the channel with its reason, `dispatchAlert` records the
+  plan and the channel on `alert_delivery` and sends nothing for any channel that is not
+  `INTERRUPT`, and the settings screen says in words what each urgency does. Nothing gathers the
+  digest-channel rows into a summary, and there is no route, no schedule and no screen for one.
+- **Reason**: a digest is a thing that is _sent_ on a cadence, and nothing sends anything
+  (`BLK-009`) or runs on a cadence at all - there is no scheduler in this build, which is the same
+  gap `DEV-011` records for missed doses. Assembling a summary nothing can deliver would be
+  building the half that cannot be checked against reality: the questions it has to answer -
+  how often, what a person sees if they open the app before it arrives, whether an item resolved
+  since it was collected still appears - are all about a delivery that does not happen.
+- **Temporary or permanent**: temporary.
+- **Risk**: low, and the safe direction. Nothing is lost: the events are recorded, and every one of
+  them is already reachable in the app through the Safety Inbox and the Shelf, which is what
+  `IN_APP_ONLY` and `DIGEST` both mean today. The failure it leaves is that a household must open
+  Kynviora to see a `MEDIUM` finding rather than being told, and `02` treats not interrupting as
+  the default rather than a degradation.
+- **Required future work**: a scheduler, which `DEV-011` also needs, then a digest assembler that
+  reads `alert_delivery` rows planned onto the digest channel and revalidates each one at assembly
+  time - `revalidate` already exists, and a summary that reported a withdrawn alert as current
+  would breach `04` Phase 7.5's own second exit criterion. Quiet hours and the digest want the same
+  missing input, a local time (`DEV-030`), so the two are best done together.

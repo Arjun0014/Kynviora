@@ -9,18 +9,18 @@ Last updated: 2026-09-02
 
 ## Current position
 
-|                    |                                                              |
-| ------------------ | ------------------------------------------------------------ |
-| **Current stage**  | Stage 2 (Unified Health Shelf), lifecycle included           |
-| **Current phase**  | No unblocked phase left in Stage 2 or Stage 7                |
-| **Last completed** | Stage 2's update, archive and review half                    |
-| **Branch**         | `master`                                                     |
-| **Latest commit**  | `feat(shelf): correcting a record, and putting an item away` |
-| **Baseline tag**   | `baseline-spec-only`                                         |
+|                    |                                                      |
+| ------------------ | ---------------------------------------------------- |
+| **Current stage**  | Stage 7 (Safety Watch), notification policy included |
+| **Current phase**  | No unblocked phase left in Stage 2 or Stage 7        |
+| **Last completed** | Phase 7.5's client half - setting quiet hours        |
+| **Branch**         | `master`                                             |
+| **Latest commit**  | `feat(safety): choosing when Kynviora may interrupt` |
+| **Baseline tag**   | `baseline-spec-only`                                 |
 
 ## Verification state
 
-- **3088 tests passing**, 0 failing, across 103 files.
+- **3140 tests passing**, 0 failing, across 104 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -85,6 +85,7 @@ the API will not distinguish them.
 | Reviewer console: roles, two-person approval, withdrawal   | Complete, 116 tests; **publishes nothing** (BLK-006)       |
 | Staff surface split, console package, console process      | Complete, 172 tests; **authenticates nobody** (BLK-010)    |
 | Alert detail, explainability, report-incorrect             | Complete, 89 tests; **no alert to open** (BLK-006)         |
+| Notification delivery policy, quiet hours, revalidation    | Complete, 139 tests; **holds nothing** (`DEV-030`)         |
 | Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)             |
 | Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                         |
 | Manual entry: the write path, the form and the screen      | Complete, 105 tests; the only surface that creates an item |
@@ -125,53 +126,51 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Phase 7.3 is finished, and blocked on its first exit criterion.** `GET /v1/alerts/:alertId`
-assembles everything `04` lists and `POST /v1/alerts/:alertId/report-incorrect` is the correction
-action. The second exit criterion is met structurally - every fact carries a `FactBasis` and there
-is no constructor that omits one (DEC-070). The first needs usability participants to explain why
-they received a test alert, and nobody here can convene them, so the phase is `BLOCKED_EXTERNAL`
-rather than complete.
+**Phase 7.5 is finished, both halves.** The route has reported quiet hours, the urgency-to-channel
+table and the copy since the phase's first half; a person can now set a window from the You tab,
+behind step-up, with the whole policy written on every request so a partial body cannot silently
+clear one (DEC-085).
 
-Three decisions on that phase are worth not undoing: an explanation template this build does not
-have produces **no narrative at all** (DEC-071); a caregiver who may see an alert and not the item
-is shown the alert with the item withheld and the withholding stated (DEC-072); and a source's
-legal reference is withheld until its licence review is done, and the screen says so (DEC-073).
+Three things about it are worth not undoing. **A typed time is refused, not repaired** - `9:5` is
+not read as `09:05` and `24:00` is not read as midnight, because a window Kynviora reinterpreted is
+one a person cannot check against what they meant. **A window this build cannot read is a third
+state**, not "none": the label still shows and the editor is absent, because an editor prefilled
+with nothing would clear a real window the moment somebody pressed save. And **the screen says
+quiet hours do not hold anything yet, before somebody sets their first one** - `QUIET_HOURS_APPLIED`
+is a server constant checked against the dispatcher's actual behaviour by a test, and
+`notificationPolicyView` turns it into the sentence, so no surface can forget it and there is one
+constant to flip on the day it becomes true (DEC-086).
 
-`DEV-028` records what 7.3 exposed and did not fix: an assessment stores versions and reason codes
-but not _which_ ingredient matched _which_ recorded sensitivity, so the approved sensitivity
-template cannot be filled from stored data. The fix is a write-path change and must not become a
-read-path one.
+`DEV-033` records what 7.5 does **not** include: the digest. `MEDIUM` and `LOW` are classified onto
+the digest channel and recorded on `alert_delivery`, and nothing assembles them into a summary.
+There is no scheduler in this build - the same gap `DEV-011` records for missed doses - and a
+summary nothing can deliver cannot be checked against reality.
 
 ### What landed before it
 
-**`DEV-016` is finished, and so is `DEV-007`.** There are three origins now: the household API, a
-staff API that serves `/v1/reviewer/*` and nothing else, and the reviewer console on its own port.
-`createServer` takes a **required** `surface`, so a staff route is absent from a household process
-rather than refused by it (DEC-066). The console lives in `packages/staff-console` (session,
-client, view models, pages) and `services/staff-web` (the process, which holds no database
-connection at all).
+**Stage 2 now reads true except for deletion.** Phases 2.2 and 2.3 gave manual entry a write path,
+a client and a screen; Stage 2's remaining three words gave an item a version-conditional edit, the
+three lifecycle states and "I have checked this" (DEC-082, DEC-083, DEC-084). Every lifecycle state
+says what Kynviora **stops** doing - archiving turns the safety watch off, and that sentence sits
+above the control. Deletion is deliberately absent: it is a retention decision, not a fourth state,
+and the matrix `16` requires does not exist (`DEV-032`).
 
-Building it closed `DEV-017`'s presentational remainder too: a request names a shadow run and the
-console fetches it, so a reviewer confirming `EXPECTED_MATCH_VOLUME` reads a computed figure on the
-page rather than going to find it.
-
-What it did **not** do: authenticate anybody. `13` and `14` require MFA or a passkey for a reviewer
-account, and `BLK-010` records that none exists. The sign-in page says so and every page carries it
-in a banner.
+**Phase 7.6 and 7.4's attribution half** landed before that - the versioned Safety Receipt, and a
+change attributed from what was _recorded_ rather than from what two versions look like (DEC-074,
+DEC-075, DEC-076).
 
 Next, in the order they build on each other:
 
-1. **Phase 7.4's route.** The diff and the attribution are built and tested (DEC-074). A version
-   diff has nothing to compare until two regulatory versions are published, which `BLK-004`
-   prevents - but the **attribution** half is reachable today through `assessment_correction`
-   without any published regulatory record, and that is the piece to wire next.
-2. **Phase 7.6** - resolution and the Safety Receipt. `safety_receipt` already exists with its
-   full vocabulary and 7.3 writes one member of it (`REPORTED_INCORRECT_MATCH`). What remains is
-   the rest of the vocabulary, the versioned receipt, and making corrections visible without
-   erasing historical assessment.
-3. **Phase 7.5** - notification policy. Most of it landed with 8.2; what `04` still asks for is
-   deduplication, a digest policy, quiet hours and current-state revalidation on open.
-4. **A missed-dose scheduler** (`DEV-011`), once the grace window is a decided product question.
+1. **Phase 1.2's profile creation surface.** Every route takes a `profileId` and every test seeds
+   one; nothing creates a household or a profile from a screen. It is the oldest instance of the
+   gap Phases 2.2, 2.3 and 7.5 have each now closed for their own feature, and it is the first
+   screen a real person would meet - today no other screen is reachable without a seeded row.
+2. **A missed-dose scheduler** (`DEV-011`), once the grace window is a decided product question.
+   It is the same missing piece the digest needs (`DEV-033`), and supplying a recipient's local
+   minute at the same time would close `DEV-030` and make quiet hours actually hold.
+3. **Phase 1.4's consent enforcement and the export-and-deletion shell.** `consent_receipt` is
+   written and never read as a precondition, and the deletion half is where `DEV-032`'s missing
+   control belongs once a retention matrix exists.
 
 Note what none of this clears: `BLK-006`. The reviewer console is the workflow a qualified reviewer
 would use, the shadow run is what they would look at, and no qualified reviewer exists. Nothing in
@@ -179,12 +178,33 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 
 ## Next three planned tasks
 
-1. Phase 7.4's route, carrying the attribution from `assessment_correction`.
-2. Phase 7.6 - resolution outcomes and the versioned Safety Receipt.
-3. Phase 7.5's remainder - deduplication, digests, quiet hours, revalidation on open.
+1. Phase 1.2's household and profile creation surface.
+2. A missed-dose scheduler, which also unblocks the digest and quiet hours enforcement.
+3. Phase 1.4's consent enforcement and the export-and-deletion shell.
 
 ## Recent decisions worth knowing
 
+- **DEC-086** - the settings screen says quiet hours do not hold anything yet, **before** somebody
+  sets their first window rather than after. The server reports it (`QUIET_HOURS_APPLIED`, checked
+  against the dispatcher by a test, not trusted), `notificationPolicyView` turns it into the
+  sentence, and a missing copy key falls back to the packaged wording rather than to silence -
+  silence reads as "it works", which is the one reading that is false. The save confirmation says
+  what was recorded, never what will follow from it.
+- **DEC-085** - a typed clock time is **refused rather than repaired**: `9:5` is not read as
+  `09:05`, `24:00` is not midnight, and the refusal names the field. Both bounds or neither, at
+  three layers. And `setNotificationPolicy` sends the whole policy every time, because the route
+  writes one row and a body carrying only the changed half would clear the other.
+- **DEC-084** - every lifecycle state says what Kynviora **stops** doing. Archiving turns the
+  safety watch off, and that sentence sits above the control rather than under it. The wording is
+  checked against the code by a test that loops the vocabulary, so a state added later fails rather
+  than shipping with a blank line where its consequence should be.
+- **DEC-082/083** - an edit is conditional on `owned_item.version` and needs no idempotency key,
+  because a conditional write is already exactly-once for its intent. `ASK_USER` on a screen means
+  offering the saved version as a control and saying what pressing it costs - never replacing what
+  somebody typed on their behalf.
+- **DEC-079** - a manual entry's idempotency key is scoped to the **profile**, not globally. Under
+  a global key another household's key makes the insert conflict, the replay read finds nothing
+  under RLS, and the route answers success with no ID.
 - **DEC-074** - a change is attributed from what was **recorded**, never from what the two versions
   look like. A regulator tightening a limit and Kynviora discovering it mis-extracted the old one
   are byte-identical, so `attributeChange` reads the correction row and the supersession link and

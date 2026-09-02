@@ -2287,3 +2287,75 @@ through the client the app ships.
 
 Stage 2's expected output now reads true except for deletion. `04` Phase 2.1's "common item
 lifecycle" is a thing a person can actually move an item through rather than a column.
+
+---
+
+### Phase 7.5's client half - setting the window, and saying it does nothing yet
+
+**Where this picked up.** Mid-phase, with ten files modified and three untracked. `npm run verify`
+against that working tree came back exit **1** - typecheck, mobile typecheck and lint all clean,
+`format:check` failing on three test files. Nothing was half-written: the domain parser, the
+contracts view, the route's response, the screen, the wiring into the You tab and five suites of
+tests were all there and all passing. What had not happened was the formatting gate, the docs and
+the commit.
+
+**What Phase 7.5 already had.** The window has been stored on `profile_notification_policy` since
+migration `0014`, `withinQuietHours` and `deliveryDecision` have applied it since the phase's first
+half, and `GET /notification-settings` has reported it. Nothing let anybody set one, and
+`setNotificationPolicy` had sat on the client since 7.5 with no caller anywhere - a method nothing
+had ever run against a real server.
+
+**What this half adds.** `parseClockMinute` and `quietHoursFromClock` in the domain: a 24-hour time
+somebody typed, refused rather than repaired, naming the field to correct. A `NotificationPolicyView`
+in contracts that decides what a screen may offer. A `DeliveryPolicy` screen in the You tab, behind
+step-up. The route's body grew the two bounds, paired at three layers. Ten end-to-end tests through
+the client the app ships (DEC-085).
+
+**The gap that mattered, and it was in the words.** Quiet hours are configurable and hold nothing -
+`DEV-030`, because no caller supplies a local minute, and `BLK-009`, because nothing dispatches at
+all. The build already reported that honestly in one place and contradicted it in two others:
+
+- The save confirmation read "Saved. Kynviora will hold notifications during that window." That is
+  a promise this build does not keep, made at the exact moment somebody has just decided to rely on
+  it. It now says what was recorded - "Saved. Kynviora has recorded these hours." - and a test
+  asserts no confirmation ever claims holding.
+- The sentence saying quiet hours are not being applied showed **only where a window was already
+  set**, which is backwards. The person who most needs it is the one about to set their first.
+
+The fix moved the decision out of the screen: `notificationPolicyView` now returns the sentence
+itself, present whenever the server says the window does not hold, absent when it does. The rule is
+tested once in contracts instead of once per surface, and a missing copy key falls back to the
+packaged wording rather than to silence - silence reads as "it works", which is the one reading
+that is false (DEC-086).
+
+**One more sentence the screen was composing.** The note explaining why a window this build cannot
+read has no editor was written inline in the `.tsx`, under a module comment claiming the screen
+composes nothing. It moved to `QUIET_HOURS_COPY`, which puts it inside the copy scan that asserts
+no sentence in the module claims quiet hours silence everything.
+
+**A cross-reference that was wrong.** A test comment cited `DEV-026` for "a client method with no
+caller"; `DEV-026` is about a caregiver being offered no capabilities to delegate. Corrected to say
+the thing plainly rather than to point at the wrong record.
+
+**What is deliberately not built.** The digest. `04` Phase 7.5 asks for a digest policy for lower
+urgency, and `MEDIUM` and `LOW` are classified onto the digest channel, recorded on
+`alert_delivery`, and never assembled into anything. There is no scheduler in this build - the same
+gap `DEV-011` records for missed doses - and a summary nothing can deliver cannot be checked against
+reality. Recorded as `DEV-033`, alongside the note that quiet hours and the digest want the same
+missing input.
+
+**On the tooling trap that nearly repeated.** Trap 142 is that `npm run verify > log 2>&1; echo
+"EXIT=$?"` makes the wrapper succeed whatever verify did. Every verify this session wrote `$?` to
+its own file and that file was read rather than the task notification - which is how the opening
+baseline was correctly read as exit 1 while the notification said 0.
+
+### State
+
+3140 tests passing across 104 files, up from 3088 across 103. Typecheck, mobile typecheck, lint and
+format all clean via `npm run verify`, exit 0. 52 new tests across four suites - the domain's clock
+parser, the presentation copy, the contracts view, the API against real PostgreSQL, and ten end to
+end through the client the app ships.
+
+`04` Phase 7.5's deduplication, quiet hours and revalidation-on-open are complete and settable. Its
+digest is not, and `DEV-033` says why. Quiet hours are configured and enforce nothing, which the
+screen states in the place a person reads before deciding to depend on them.

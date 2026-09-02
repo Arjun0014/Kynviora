@@ -374,6 +374,24 @@ shows its counts beside the checklist item that asks about them.
   nothing (`DEV-030`); and real delivery remains blocked (`BLK-009`), so the transport this policy
   gates is still a recording stub.
 
+  **The client half followed** and is what makes the phase settable rather than only enforceable.
+  `parseClockMinute` and `quietHoursFromClock` read a 24-hour time somebody typed and refuse rather
+  than repair it; `notificationPolicyView` decides what a screen may offer; the `DeliveryPolicy`
+  screen sits in the You tab behind step-up; and the route's body carries both bounds, paired at
+  the domain, the schema and the database (DEC-085). 52 further tests, ten of them end to end
+  through the client the app ships - `setNotificationPolicy` had been declared since this phase
+  with no caller anywhere.
+
+  What the screen is careful about is that quiet hours are configurable and hold nothing. The
+  server reports that as `QUIET_HOURS_APPLIED`, an API test checks the constant against the
+  dispatcher's actual behaviour rather than trusting it, and the view turns it into a sentence
+  shown **before** somebody sets their first window rather than after. The save confirmation says
+  what was recorded rather than what will follow from it (DEC-086).
+
+  Still outstanding after both halves: the **digest**. `MEDIUM` and `LOW` are classified onto the
+  digest channel and recorded, and nothing assembles them into a summary - there is no scheduler in
+  this build, the same gap `DEV-011` records for missed doses. `DEV-033`.
+
 - **7.6**: complete. Every item of expected output exists - the seven-member resolution
   vocabulary, `POST /v1/alerts/:alertId/resolutions`, `GET /v1/alerts/:alertId/receipt`, the
   contracts client, and the screen the receipt opens on from the alert detail - and both exit
@@ -641,20 +659,22 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
-1. The notification settings screen. The route reports quiet hours, the urgency-to-channel table
-   and the copy that explains both; no client renders any of it, so a person cannot set a window
-   they can already be governed by. `DEV-030` is the other half of the same gap.
-2. Phase 1.2's profile creation surface. Every route takes a `profileId` and every test seeds one;
-   nothing creates a profile from a screen, which is now the oldest instance of the gap Phases
-   2.2 and 2.3 just closed for items.
-3. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
+1. Phase 1.2's profile creation surface. Every route takes a `profileId` and every test seeds one;
+   nothing creates a household or a profile from a screen, which is the oldest instance of the gap
+   Phases 2.2, 2.3 and 7.5 have each now closed for their own feature. It is also the first screen
+   a real person would meet, and today there is no way to reach any of the others without a seeded
+   row.
+2. A missed-dose scheduler, once the grace window is a decided product question (`DEV-011`). The
    dispatch, its authorization and now its delivery policy all exist; nothing calls them with a
-   real occurrence.
+   real occurrence. It is the same missing piece the digest needs (`DEV-033`), and supplying a
+   local minute at the same time would close `DEV-030`.
+3. Phase 1.4's consent enforcement and the export-and-deletion shell. `consent_receipt` is written
+   and never read as a precondition, and the deletion half is where `DEV-032`'s missing control
+   belongs once a retention matrix exists.
 
-Done since this list was last written: Phases 2.2 and 2.3 end to end - the write path, the client,
-the screen, and the five fields Phase 2.1's detail had never shown back - then Stage 2's "update,
-archive, and review": a version-conditional edit, the three lifecycle states, and "I have checked
-this" (DEC-082, DEC-083, DEC-084).
+Done since this list was last written: Phase 7.5's client half - the clock parser, the policy view,
+the delivery screen and the whole-policy write - with the truthfulness rule moved out of the screen
+so it is tested once (DEC-085, DEC-086, `DEV-033`).
 
 ## What "complete" means here, and what it does not
 

@@ -2398,3 +2398,104 @@ sentence in the vocabulary reads as advice.
 
 **Sources.** `04` Phase 2.1; `02`; `09`; `10`; `shelfAttention.ts`; `safetyInbox.ts`; migrations
 `0004` and `0001`; trap 109.
+
+---
+
+## DEC-085 - A typed time is refused rather than repaired, and the whole policy is written every time
+
+**Date:** 2026-09-02
+**Phase:** 7.5 (the client half)
+
+**Status:** Accepted
+
+Phase 7.5 shipped quiet hours as minutes from local midnight, stored, applied by
+`deliveryDecision` and readable through the settings route. Nothing let anybody set one. This is
+the half that does, and both halves of the decision are about not guessing.
+
+**A 24-hour clock, typed, and no am/pm control.** `07:00` is never seven in the evening. A
+locale-aware picker plus a meridiem toggle is a second thing to get wrong, on a screen whose whole
+subject is whether a phone lights up at three in the morning. `18` asks for familiar words first,
+and a 24-hour time is the one format that means the same thing to everybody who reads it.
+
+**`9:5` is not read as `09:05`, and `24:00` is not read as midnight.** `parseClockMinute` refuses
+both, and names the field it refused so the form can point at it. A window Kynviora quietly
+reinterpreted is one a person cannot check against what they meant - the same rule the manual-entry
+form keeps for a barcode, applied where the consequence is being woken up rather than a wrong
+match.
+
+**Both bounds or neither.** One alone is a window whose other end somebody has to invent. The
+domain refuses it, the route's schema refuses it, and `notification_quiet_hours_paired` refuses it
+in the database, so no layer is the only thing standing between a half-window and storage. Two
+identical bounds are refused for the reason `isValidQuietHours` already refused them: a zero-length
+window and a whole-day one are the same two numbers, and a rule whose meaning depends on the reader
+has no place deciding whether somebody is woken up.
+
+**Clearing is emptying both fields, not a separate switch.** There is one representation of "no
+quiet hours" - two nulls - and one path that produces it. A separate off state is a second thing
+that can disagree with the first.
+
+**The whole policy goes on every write.** `setNotificationPolicy` takes the owner's ceiling **and**
+the window together, because the route writes one row: a body carrying only the changed half would
+leave the other at whatever the caller last sent, which for quiet hours means a request that never
+mentioned the window silently clearing one somebody set. The screen re-sends the ceiling unchanged
+for exactly that reason. The client method changed shape from a bare `maxCaregiverDetail` string to
+a body, which cost nothing because it had no callers at all.
+
+**Step-up, and the prompt is on the screen.** `14` puts a change to what leaves the profile behind
+re-authentication, and changing when Kynviora may interrupt somebody is the same class of change.
+The screen says so before the control rather than leaving a 403 to explain itself.
+
+**Sources.** `04` Phase 7.5; `13`; `14`; `18`; migration `0014`'s
+`notification_quiet_hours_paired`; DEC-078; `DEV-030`.
+
+---
+
+## DEC-086 - The screen says quiet hours do not hold yet, before somebody sets one
+
+**Date:** 2026-09-02
+**Phase:** 7.5 (the client half)
+
+**Status:** Accepted
+
+`DEV-030` records that no caller supplies `localMinuteOfDay`, so a stored window holds nothing, and
+`BLK-009` records that nothing dispatches a notification at all. Building the screen that sets a
+window without saying either would be the `10` failure this codebase spends the most care avoiding:
+a person deciding to rely on Kynviora for something it does not do.
+
+**The server reports it; the screen does not assume it.** `QUIET_HOURS_APPLIED` is a constant on
+the API beside the dispatcher, `false`, with both reasons written next to it, and the settings
+response carries it. A screen that hard-coded the same `false` would be a second place to remember
+on the day it becomes true. An API test checks the constant against the behaviour rather than
+trusting it - with no local minute, a `HIGH` alert inside the window is not held.
+
+**Said whether or not a window is set.** The first version showed the sentence only where a window
+already existed, which is exactly backwards: the person who most needs it is the one about to set
+their first, and telling them afterwards is telling them too late. `notificationPolicyView` returns
+the sentence itself, so the rule is tested once in `@kynviora/contracts` rather than once per
+surface that renders it, and a missing copy key falls back to the packaged wording rather than to
+silence - silence here is indistinguishable from "it works", which is the one reading that is
+false.
+
+**The confirmation says what was recorded, not what will follow.** "Saved. Kynviora will hold
+notifications during that window" is a promise this build does not keep, made at the moment
+somebody has just decided to rely on it. It now reads "Saved. Kynviora has recorded these hours."
+A test asserts the confirmation never claims holding, so the sentence cannot drift back.
+
+**A window this build cannot read is a third state, not "none".** If the stored numbers do not
+narrow - equal bounds, out of range, not numbers - the view reports `quietHoursUnreadable` rather
+than `null`, the label the server composed still shows, and the editor is absent. An editor
+prefilled with nothing would clear a real window the moment somebody pressed save. Deny by default
+(`14`) applied to a control, with the reason on the screen.
+
+**A caregiver reads the window and changes nothing.** `16`: somebody receiving nothing at 3am
+deserves to know a window is doing that rather than a bug. The control is absent, not disabled, and
+a sentence says whose decision it is.
+
+**The urgency table is a statement, not a control.** Nothing about which urgency reaches a device
+is settable, and the copy says so rather than leaving somebody hunting for the switch. `02` is why
+there is no switch: a person who could raise every urgency to an interrupt would have rebuilt the
+alarm optimisation the product refuses, one row at a time. The rows are read from the domain's own
+ceiling on the server, so a client cannot describe a policy the server does not have, and an
+urgency the client cannot read is dropped rather than rendered as its code (trap 129).
+
+**Sources.** `04` Phase 7.5; `02`; `10`; `14`; `16`; DEC-078; `DEV-030`; `BLK-009`; trap 129.
