@@ -383,6 +383,13 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   `HISTORICAL_UNSUPPORTED_KINDS`. `BLK-003` gates the substance vocabulary those keys come from,
   so this is downstream of it.
 
+  **Half of it cleared on 2026-09-02.** The _fact_ side now exists: `04` Phase 5.2 maps a typed
+  term to a canonical substance at write time, so `allergy_record.substance_id` carries a mapping
+  (DEC-098). The _item_ side does not - the shelf join here still does not reach the confirmed
+  declaration, so `substanceKeys` is empty. Supplying one half would let a rule that matches on the
+  intersection report zero matches with a straight face, which is the under-count this deviation
+  exists to refuse. Both stay empty and both kinds stay refused.
+
 ## DEV-019 - A development authenticator stands in for Phase 1.1
 
 - **Affected specification**: `04` Phase 1.1 (authentication and session lifecycle), `13` and `14`
@@ -908,3 +915,48 @@ route.
   a deletion request and on what basis, with the append-only tables named explicitly. Then the
   export shape, then the two controls. This is the same document `DEV-009`, `DEV-032`, `DEV-034` and
   `DEV-035` are all waiting on, and writing it is the largest single unblocking left in Stage 1.
+
+---
+
+## DEV-037 - There is no review queue for unresolved substance mappings
+
+- **Affected specification**: `04` Phase 5.2 lists "human review queue for material unresolved
+  mappings" among its expected output.
+- **Expected behaviour**: a reviewer surface listing terms that did not resolve, or resolved
+  ambiguously, so somebody qualified can decide what they should map to.
+- **Implemented behaviour**: the mapping states exist, are stored, and are reported (DEC-098), and
+  nothing collects them into a queue. Both of Phase 5.2's exit criteria hold and are tested; this
+  is the one item of its expected output that does not.
+- **Reason**: two things are missing, and only one of them is engineering.
+
+  **There is nothing to map to.** The substance vocabulary needs a licensed source (`BLK-003`), so
+  in this build a reviewer opening such a queue would find that every item's only available action
+  is "cannot map this". A queue whose entries have no possible resolution is a worklist that
+  teaches its user to ignore it.
+
+  **And the entries would be somebody's health data on a staff screen.** An unresolved mapping is a
+  term a person typed about their own body. Putting it in front of a reviewer is a disclosure
+  decision - who may see it, whether it can be shown detached from the profile, and whether a
+  household is told - and `16` has no answer for it. `08.2` and `20` both keep subjects out of
+  operational and staff surfaces, and the reviewer console has deliberately never carried a single
+  household's data: `DEC-066` splits the staff API from the household one precisely so a reviewer
+  account cannot read the records it reviews. A queue of typed allergy terms would be the first
+  thing to cross that line, and it would cross it for a queue that cannot act.
+
+  The queue is also the item of expected output least load-bearing for the exit criteria. Neither
+  criterion mentions it: the first is about a suggestion not becoming a trusted mapping without
+  validation, which is enforced by only ever resolving through a reviewed alias, and the second is
+  about the original wording surviving, which it does.
+
+- **Temporary or permanent**: temporary, and gated on a licensed vocabulary plus a privacy decision
+  rather than on work.
+- **Risk**: low, and the safe direction. The failure it leaves is that an ambiguous or unknown term
+  stays unmapped until somebody seeds the vocabulary - which the person is told on the record
+  itself, in a sentence that says which of the two it is and, where they can act, what to do. The
+  opposite failure - a staff queue of household health terms, or a resolution mechanism that maps a
+  term without a reviewed alias - is irreversible in the way this whole codebase is built to avoid.
+- **Required future work**: a licensed substance vocabulary (`BLK-003`), then a decision on whether
+  an unresolved term may be shown to a reviewer and in what form - de-identified, aggregated by
+  term, or with household consent - then the queue on the staff surface. The mapping states this
+  build now stores are exactly what such a queue would select on, so it is a read over data that
+  already exists rather than new collection.

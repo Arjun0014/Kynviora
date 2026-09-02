@@ -289,15 +289,49 @@ restart, which needs a device (`BLK-002`).
 | Phase | Title                                            | Status             |
 | ----- | ------------------------------------------------ | ------------------ |
 | 5.1   | Ingredient declaration model                     | `COMPLETE`         |
-| 5.2   | Canonical ingredient/substance normalization     | `IN_PROGRESS`      |
+| 5.2   | Canonical ingredient/substance normalization     | `COMPLETE`         |
 | 5.3   | Formulation fingerprints and version history     | `COMPLETE`         |
 | 5.4   | Narrow sensitivity/allergy vocabulary            | `BLOCKED_EXTERNAL` |
 | 5.5   | Personal-care verification and formula-change UX | `NOT_STARTED`      |
 
 - **5.1**: raw declaration preserved, ordered token parsing, unknown ingredients retained as
   `UNRESOLVED`. Tested including comma-decimal concentrations and multi-script separators.
-- **5.2**: normalization engine and alias resolution complete; the seeded vocabulary itself needs
-  a licensed source (`BLK-003`).
+- **5.2**: complete. The engine and alias resolution have been there since Stage 5 and were only
+  ever pointed at ingredient declarations. What landed now is the other half: a term somebody typed
+  about their own body is resolved at write time, by the **same** function and the same key
+  function as a term printed on a label (DEC-098). That symmetry is the point rather than tidiness -
+  `evaluateIngredientSensitivity` intersects a declaration's canonical keys with a profile fact's,
+  so two resolvers that agreed today would eventually produce a rule that fires on one spelling of
+  a substance and not on another.
+
+  **Exit criterion 1** - "a synonym/model suggestion cannot become a trusted canonical mapping
+  without deterministic/source validation" - is enforced by what the lookup reads. Only
+  `substance_alias` resolves, never `preferred_name` or `inci_name`: `08` makes an alias a reviewed
+  artifact with its own provenance and its own exact-versus-ambiguous state, and a string
+  comparison against a display column is none of those. `REJECTED` aliases are excluded in SQL, and
+  nothing a person types ever creates a substance or an alias - a test counts both tables across a
+  write.
+
+  **Exit criterion 2** - "original label wording remains available beside normalized identity" -
+  holds on both sides: `rawTerm` on a parsed token and `display_term` on a recorded fact, stored
+  exactly as typed and rendered first. Mapping a term is not correcting it.
+
+  Migration `0019` stores the outcome rather than leaving it to be re-derived, with a biconditional
+  CHECK so a row cannot claim a rule can see it while carrying no substance. A corrected term is
+  re-resolved and an unrelated edit is not. And a NULL is split into the two things it means:
+  "Kynviora does not know that word" is a gap in a licensed vocabulary, and "that word means more
+  than one thing here" is something the person can fix - the second sentence does not list the
+  candidates, because offering them would be Kynviora suggesting what somebody is allergic to.
+
+  27 tests across the catalog engine (6), the presentation copy (4), the contracts view (5), the
+  API against real PostgreSQL (10) and two end to end. Outstanding: the human review queue for
+  unresolved mappings, which needs a vocabulary to map to (`BLK-003`) and a decision about whether
+  a term somebody typed about their own body may appear on a staff screen at all (`DEV-037`).
+
+  In practice almost nothing resolves in this build, because the vocabulary is empty: `BLK-003`.
+  That is a seeding problem with a name, and every record says which of the two reasons applies to
+  it.
+
 - **5.4**: exit criterion is "The matching vocabulary has clinical/product-safety review" -
   `BLK-006`.
 
@@ -741,15 +775,15 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
-1. **`DEV-028`'s write-path fix.** An assessment stores versions and reason codes but not _which_
-   recorded sensitivity matched _which_ ingredient, so the approved sensitivity template cannot be
-   filled from stored data. Phase 1.3 makes this reachable for the first time: there are now real
-   recorded sensitivities to name. It is a write-path change and must not become a read-path one.
-2. **Phase 5.2's substance normalization for a typed term.** Every hand-entered allergy is unmatched
-   (DEC-093) and therefore invisible to the one rule that would use it. Mapping a term to a
-   canonical substance is the difference between Phase 1.3's records existing and working - and it
-   is now the difference between Phase 1.4's `NOTIFICATIONS` consent governing a real alert stream
-   and governing an empty one.
+1. **`DEV-033`'s notification digest**, the last piece of Phase 7.5. Unlike the missed-dose
+   scheduler it needs no unmade product decision - `18` constrains the grouping rather than leaving
+   it open - and it is the difference between a household with several alerts getting several
+   interruptions and getting one.
+2. **`DEV-018`'s remaining half.** Phase 5.2 gave the historical shadow dataset the _fact_ side of
+   a substance match; the _item_ side is still missing, because the shelf join does not reach the
+   confirmed declaration. Joining `marketed_formulation` and `formulation_ingredient` would let
+   `INGREDIENT_SENSITIVITY` come off `HISTORICAL_UNSUPPORTED_KINDS` - and a rule nobody can measure
+   against real data is one nobody can approve.
 3. **Phase 2.5's item deletion, if the retention matrix lands.** `DEV-032` has been waiting on the
    same document as `DEV-036`; it is the smallest thing that becomes buildable the moment somebody
    writes what is kept after a deletion request and on what basis.
@@ -777,12 +811,14 @@ switcher that owns its exit criterion, and the two screens (DEC-087 to DEC-090, 
 1.3 - allergy and sensitivity records whose provenance no client can name (DEC-091 to DEC-093,
 `DEV-035`); Phase 1.4 - the consent state, its two routes, the screen, and the enforcement that
 turned an append-only log into something that stops a notification (DEC-094 to DEC-096, `DEV-036`);
-and `DEV-028` - the two identities behind an ingredient match, frozen at evaluation so the approved
-wording can be filled without re-deriving anything (DEC-097, migration `0018`).
+`DEV-028` - the two identities behind an ingredient match, frozen at evaluation so the approved
+wording can be filled without re-deriving anything (DEC-097, migration `0018`); and Phase 5.2 - a
+term somebody typed resolved by the same function as one printed on a label, at write time and only
+through a reviewed alias (DEC-098, `DEV-037`, migration `0019`).
 
 ## What "complete" means here, and what it does not
 
-Thirty-three phases are marked `COMPLETE` above. In every case that means the logic is
+Thirty-four phases are marked `COMPLETE` above. In every case that means the logic is
 implemented, tested, documented and committed - and in most cases the tests execute against a real
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
@@ -791,7 +827,7 @@ device, a credential, a labelled dataset, human participants, or a qualified hum
 those are marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even
 where all buildable work is finished. `BLOCKERS.md` records what each one needs.
 
-The counts above are the tables' own, recounted whenever a status changes: 33 `COMPLETE`, 6
+The counts above are the tables' own, recounted whenever a status changes: 34 `COMPLETE`, 5
 `IN_PROGRESS`, 3 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
 `04` defines. A prose count that drifts from the table it describes is the quiet way a status
 document stops being one - and the first version of this paragraph drifted immediately, because it

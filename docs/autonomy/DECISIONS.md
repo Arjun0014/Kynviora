@@ -3008,3 +3008,79 @@ schema refuses the half-filled pair.
 
 **Sources.** `04` Phase 7.3; `09`; `10`; `03` group H; DEC-013; DEC-026; DEC-064; `DEV-028`;
 `DEV-036`; migrations `0006` and `0018`.
+
+---
+
+## DEC-098 - A typed term is mapped by the same function as a printed one, at write time, and only through a reviewed alias
+
+**Date:** 2026-09-02
+**Phase:** 5.2
+
+**Status:** Accepted
+
+`allergy_record.substance_id` has been nullable since migration `0004` and **nothing had ever set
+it**, so every recorded allergy in this build was invisible to the one rule that would use it -
+`evaluateIngredientSensitivity` filters profile facts to those carrying a canonical key. The
+normalization engine that would map it has existed since Stage 5 and was only ever pointed at
+ingredient declarations. DEC-093 described the consequence honestly on every row; this is the cause.
+
+**The same function, deliberately.** `resolveRecordedTerm` and `normalizeIngredients` both go
+through `resolveLookupKey` and both key through `ingredientLookupKey`. That is not tidiness: the
+rule intersects a declaration's canonical keys with a profile fact's, so two resolvers that agreed
+today would eventually produce a rule that fires on one spelling of a substance and not on another -
+a spelling test wearing a safety rule's clothes. A test asserts a typed term and a label token with
+the same key resolve identically, field for field.
+
+**Only a reviewed alias resolves - not a display name.** The lookup reads `substance_alias` and
+nothing else, not `preferred_name` and not `inci_name`. `08` makes an alias a reviewed artifact
+carrying its own provenance and its own exact-versus-ambiguous state; a string comparison against a
+display column is none of those things, and it would let a rule fire on a match nobody reviewed -
+which is Phase 5.2's first exit criterion ("a synonym/model suggestion cannot become a trusted
+canonical mapping without deterministic/source validation") failing by the back door. `REJECTED`
+aliases are excluded in SQL: a mapping a reviewer refused must not count towards a match, nor
+towards the ambiguity that blocks one.
+
+The practical consequence today is that almost nothing resolves, because the vocabulary needs a
+licensed source (`BLK-003`). That is a seeding problem with a name, not a reason to lower the bar
+for what counts as a match.
+
+**Nothing a person types ever reaches the vocabulary.** The lookup is a SELECT. There is no branch
+that inserts a substance or an alias, and a test counts both tables across a write to prove it -
+`08` and threat A11, the same rule manual entry already keeps for products. An unrecognised term
+stays unrecognised and the row says so.
+
+**Ambiguity is represented, never resolved.** A term resolving to more than one substance maps to
+none of them. Picking the first would decide, on somebody's behalf, which of two substances they
+react to. Two aliases pointing at the _same_ substance is one answer rather than an ambiguity, so
+the candidates are deduplicated by substance before the count is taken.
+
+**The state is stored, not derived.** Migration `0019` adds `substance_mapping_state` with a
+biconditional CHECK against `substance_id`, so a row cannot claim a rule can see it while carrying
+no substance. Re-resolving on the read path would be the mistake `DEV-028` was closed for one level
+up: the vocabulary may have moved, so a re-resolution can disagree with the mapping that is actually
+on the row and driving the rule.
+
+**And a NULL is two different things to be told.** "Kynviora does not know that word" is a gap in a
+licensed vocabulary and nothing the person can act on. "That word means more than one thing here" is
+something they can fix in ten seconds by being more specific. A single sentence for both hides the
+half that has a next step (`10`). The ambiguous sentence does **not** list the candidates: offering
+them would be Kynviora suggesting what somebody is allergic to, and a record picked from a list
+Kynviora offered is a different record from one they wrote. A copy test asserts it never says "did
+you mean".
+
+**A corrected term is re-resolved; anything else is not.** A record whose wording changed while
+keeping the mapping the old wording earned would drive a rule on a substance nobody typed - Phase
+1.3's "silently becomes" one level down. Equally, marking a record as checked is not a
+re-resolution: a vocabulary that moved between the two moments must not silently change what a rule
+can see on an edit that never touched the word. Both are tested.
+
+**No client can set any of it.** There is no `substanceId`, no `substanceMappingState` and no
+`canonicalKey` on either body, the schemas are `.strict()`, and a screen that could claim a match
+would be claiming a rule watches something it does not - the same absence that keeps provenance out
+of a client's hands (DEC-091).
+
+**The original wording is untouched.** Phase 5.2's second exit criterion. `display_term` is stored
+exactly as typed and rendered first on the row; mapping a term is not correcting it.
+
+**Sources.** `04` Phase 5.2; `04` Phase 1.3; `08`; `15` A11; `10`; `14`; DEC-091; DEC-093; DEC-097;
+`DEV-028`; `BLK-003`; migrations `0003`, `0004` and `0019`.

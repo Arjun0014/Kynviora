@@ -2701,3 +2701,88 @@ including that neither new column can be edited afterwards.
 
 `DEV-028` is closed. The remaining gap it named - that nothing publishes an ingredient rule - is
 `BLK-006` and is not an engineering one.
+
+### Phase 5.2 - the half of normalization that was never pointed at a person
+
+`allergy_record.substance_id` has been nullable since migration `0004` and **nothing had ever set
+it**. So every recorded allergy in this build was invisible to the one rule that would use it -
+`evaluateIngredientSensitivity` filters profile facts to those carrying a canonical key - and the
+normalization engine that would have mapped one has existed since Stage 5, pointed exclusively at
+ingredient declarations. DEC-093 described the consequence honestly on every row a day ago. This is
+the cause.
+
+**The same function, and that is the point.** `resolveRecordedTerm` and `normalizeIngredients` both
+go through `resolveLookupKey` and both key through `ingredientLookupKey`. The rule intersects a
+declaration's canonical keys with a profile fact's, so two resolvers that agreed today would
+eventually produce a rule that fires on one spelling of a substance and not on another - a spelling
+test wearing a safety rule's clothes. A test asserts a typed term and a label token with the same
+key resolve identically, field for field, and four spellings of the same substance land on one key.
+
+**Only a reviewed alias resolves.** The lookup reads `substance_alias` and nothing else - not
+`preferred_name`, not `inci_name`. `08` makes an alias a reviewed artifact carrying its own
+provenance and its own exact-versus-ambiguous state; a string comparison against a display column is
+none of those, and it would let a rule fire on a match nobody reviewed. That is Phase 5.2's first
+exit criterion, and it would have failed by the back door. `REJECTED` aliases are excluded in SQL -
+a mapping somebody looked at and refused must not become a match, nor block one by counting towards
+ambiguity.
+
+The practical consequence is that almost nothing resolves in this build, because the vocabulary
+needs a licensed source (`BLK-003`). That is a seeding problem with a name, not a reason to lower the
+bar for what counts as a match.
+
+**Nothing a person types reaches the vocabulary.** The lookup is a SELECT with no insert branch, and
+a test counts `normalized_substance` and `substance_alias` across a write to prove it - `08` and
+threat A11, the same rule manual entry already keeps for products. An unrecognised term stays
+unrecognised, and the row says so.
+
+**A NULL was two different things, so it is now two.** "Kynviora does not know that word" is a gap in
+a licensed vocabulary and nothing the person can act on; "that word means more than one thing here"
+is something they can fix in ten seconds by being more specific. One sentence for both hides the half
+with a next step. The ambiguous sentence deliberately does not list the candidates - offering them
+would be Kynviora suggesting what somebody is allergic to, and a record picked from a list Kynviora
+offered is a different record from one they wrote. A copy test asserts it never says "did you mean"
+(DEC-098).
+
+**The state is stored, not derived.** Migration `0019` adds `substance_mapping_state` with a
+biconditional CHECK against `substance_id`, so a row cannot claim a rule can see it while carrying no
+substance. Re-resolving on the read path would be `DEV-028`'s mistake one level up: the vocabulary
+may have moved, and a re-resolution can disagree with the mapping that is actually on the row and
+driving the rule. The constraint earned itself immediately - the `alertDetail` fixture written an
+hour earlier set a `substance_id` and no state, and failed at the table rather than shipping a record
+claiming a rule could see it.
+
+**A corrected term is re-resolved; an unrelated edit is not.** A record whose wording changed while
+keeping the mapping the old wording earned would drive a rule on a substance nobody typed - Phase
+1.3's "silently becomes" one level down. And marking a record as checked is not a re-resolution: a
+vocabulary that moved between the two moments must not silently change what a rule can see on an edit
+that never touched the word. Both directions are tested, and both assignments happen in one UPDATE so
+no ordering can leave the pair disagreeing.
+
+**What is deliberately not built.** The human review queue for unresolved mappings. Two things are
+missing and only one is engineering: there is nothing to map _to_ until `BLK-003` clears, so every
+item's only available action would be "cannot map this"; and the entries would be terms people typed
+about their own bodies, on a staff screen. `DEC-066` split the staff API from the household one
+precisely so a reviewer account cannot read the records it reviews, and a queue of typed allergy
+terms would be the first thing to cross that line - for a queue that cannot act. `DEV-037`, with the
+note that the states this build now stores are exactly what such a queue would select on, so it is a
+read over existing data rather than new collection.
+
+**Half of `DEV-018` cleared, and it stays open.** The historical shadow dataset now has the _fact_
+side of a substance match available; the _item_ side does not, because the shelf join does not reach
+the confirmed declaration. Supplying one half would let a rule matching on the intersection report
+zero matches with a straight face, which is the under-count that deviation exists to refuse. Both
+stay empty and `INGREDIENT_SENSITIVITY` stays on `HISTORICAL_UNSUPPORTED_KINDS`.
+
+### State
+
+3446 tests passing across 116 files, up from 3419. Typecheck, mobile typecheck, lint and format all
+clean via `npm run verify`, exit 0 read from the log.
+
+27 new tests: six on the catalog engine including the symmetry between a typed term and a label
+token, four on the copy, five on the contracts view, ten on the API against real PostgreSQL -
+covering the re-resolution on edit, the untouched vocabulary, the refused alias and the absence of
+any client field - and two end to end.
+
+`04` Phase 5.2's expected output now reads true except for the review queue, and both exit criteria
+hold. The first is enforced by what the lookup is allowed to read rather than by a check on what it
+returns.

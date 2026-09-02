@@ -9,18 +9,18 @@ Last updated: 2026-09-02
 
 ## Current position
 
-|                    |                                                    |
-| ------------------ | -------------------------------------------------- |
-| **Current stage**  | Stage 1 (Identity, Profiles, Consent)              |
-| **Current phase**  | Stage 1 complete except 1.1; `DEV-028` closed      |
-| **Last completed** | `DEV-028` - which inputs produced a match          |
-| **Branch**         | `master`                                           |
-| **Latest commit**  | `feat(safety): which ingredient, and whose record` |
-| **Baseline tag**   | `baseline-spec-only`                               |
+|                    |                                                        |
+| ------------------ | ------------------------------------------------------ |
+| **Current stage**  | Stage 5 (Personal-Care Formulation Intelligence)       |
+| **Current phase**  | Phase 5.2 complete; Stage 1 complete except 1.1        |
+| **Last completed** | Phase 5.2 - a typed term mapped to a substance         |
+| **Branch**         | `master`                                               |
+| **Latest commit**  | `feat(catalog): the word you wrote, and what it means` |
+| **Baseline tag**   | `baseline-spec-only`                                   |
 
 ## Verification state
 
-- **3419 tests passing**, 0 failing, across 116 files.
+- **3446 tests passing**, 0 failing, across 116 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -69,7 +69,7 @@ the API will not distinguish them.
 | Area                                                       | State                                                      |
 | ---------------------------------------------------------- | ---------------------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine | Complete, 94 tests                                         |
-| Database schema, 18 migrations, full RLS                   | Complete, 311 tests incl. threats A1/A2/A3                 |
+| Database schema, 19 migrations, full RLS                   | Complete, 311 tests incl. threats A1/A2/A3                 |
 | Catalog engine, capture pipeline, Trust Passport           | Complete, 178 tests                                        |
 | Regulatory registry, Citation Gate, Lens                   | Complete, 72 tests                                         |
 | Safety rule engine with replay; schedule and refill        | Complete, 88 tests                                         |
@@ -89,6 +89,7 @@ the API will not distinguish them.
 | Household and profile creation, the profile switcher       | Complete, 90 tests; no emergency contact (`DEV-034`)       |
 | Allergy and sensitivity records, provenance, review date   | Complete, 86 tests; no conditions (`DEV-035`)              |
 | Consent state, withdrawal, and what withdrawing stops      | Complete, 87 tests; no export/deletion (`DEV-036`)         |
+| Typed term mapped to a canonical substance                 | Complete, 27 tests; no review queue (`DEV-037`)            |
 | Regulatory version diff and change attribution             | Complete, 27 tests; **no route yet** (BLK-004)             |
 | Shadow runs, before/after comparison, assessment replay    | Complete, 69 tests                                         |
 | Manual entry: the write path, the form and the screen      | Complete, 105 tests; the only surface that creates an item |
@@ -129,100 +130,89 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Phase 1.4 is finished and `DEV-028` is closed**, and with it Stage 1 has everything that is not
-blocked on an auth provider or on a document nobody has written. `GET` and `PUT /v1/consents` are the whole of it,
-neither taking a user, plus the consent list on the You tab and the check that sits first in
-`selectRecipients`.
-
-`consent_receipt` has been in migration `0002` since Stage 1 - append-only by trigger, superseding
-through `supersedes_id`, refusing UPDATE and DELETE to every role including the database owner, with
-its own authorization tests - and nothing had ever read it. That is a consent **log**. Phase 1.4's
-exit criterion is about a consent **state**.
+**Phase 5.2 is finished**, and with it the recorded allergies Phase 1.3 introduced are things a rule
+could see - where the vocabulary carries the word. `allergy_record.substance_id` had been nullable
+since migration `0004` with nothing ever setting it, so every recorded allergy in this build was
+invisible to `evaluateIngredientSensitivity` by construction. DEC-093 said so honestly on every row
+a day ago; this is the cause, closed.
 
 Five things about it are worth not undoing:
 
-- **The enforcement is a total record over the vocabulary, not a habit.** `CONSENT_ENFORCEMENT`
-  answers for all eight purposes - `ENFORCED`, `NOTHING_TO_STOP` or `REQUIRED` - under a `satisfies
-Readonly<Record<ConsentPurpose, ConsentEnforcement>>`, so a purpose added later without an answer
-  fails to compile rather than shipping as a switch nobody classified (DEC-094).
-- **The five switches that stop nothing say so on their own row.** No analytics, no OCR, no
-  connected health, no research programme, and manual entry never reaches the shared catalog either
-  way. Both halves of the sentence - Kynviora does not do this at all at the moment, **and** your
-  answer is recorded and will apply if it ever does - because the first alone reads as the answer
-  being thrown away.
-- **Withdrawing notifications stops every notification, a critical safety alert included.** Quiet
-  hours are a timing preference and a `CRITICAL` alert pierces them (DEC-078); consent is the basis
-  on which Kynviora may contact somebody at all, and continuing to send to a person who said stop is
-  sending without consent. The check is first, the owner is not exempt from their own answer, and
-  the sentence saying so is **above** the control and is also its accessibility hint (DEC-095).
-- **`CAREGIVER_SHARING` excludes caregivers and never the owner, and it does not revoke read
-  access.** The copy says which half it does not do and names the Care screen, rather than leaving
-  somebody believing they had cut a caregiver off.
-- **Nobody answers or reads consent for anybody else.** `consent_select` and `consent_insert` name
-  no household, no grant and no capability. A caregiver holding every capability there is still
-  cannot record that the person they look after agreed to something - asserted in SQL, three cases,
-  so a future route that named a user fails at the table (DEC-096).
+- **A typed term and a printed one go through the same function.** `resolveRecordedTerm` and
+  `normalizeIngredients` both call `resolveLookupKey` and both key through `ingredientLookupKey`.
+  The rule intersects a declaration's canonical keys with a profile fact's, so two resolvers become
+  a rule that fires on one spelling of a substance and not another. A test asserts the two paths
+  agree field for field (DEC-098).
+- **Only a reviewed alias resolves - never a display name.** `substance_alias` carries provenance
+  and an exact-versus-ambiguous state; `preferred_name` is a label. Matching on the label would let
+  a rule fire on a mapping nobody reviewed, which is Phase 5.2's first exit criterion failing by the
+  back door. `REJECTED` aliases count towards neither a match nor the ambiguity that blocks one.
+- **Nothing a person types reaches the vocabulary.** The lookup is a SELECT with no insert branch,
+  and a test counts both catalog tables across a write. `08` and threat A11, the same rule manual
+  entry keeps for products.
+- **The outcome is stored, not re-derived.** Migration `0019` adds `substance_mapping_state` with a
+  biconditional CHECK against `substance_id`. Re-resolving on the read path would be `DEV-028`'s
+  mistake one level up - the vocabulary can move, and a re-resolution can disagree with the mapping
+  actually driving the rule.
+- **A corrected term is re-resolved and an unrelated edit is not.** A record whose wording changed
+  while keeping the old mapping would drive a rule on a substance nobody typed; a review stamp
+  re-running the lookup would let a moved vocabulary change what a rule sees on an edit that never
+  touched the word.
 
-**`DEV-028` closed with it.** `profile_assessment` stored versions and reason codes but not
-identities, so the alert detail could say _that_ a substance in the declaration matched a recorded
-fact and not _which_ - and the approved ingredient-sensitivity wording refused to render rather than
-guess. Migration `0018` freezes the substance key and the profile fact ID at evaluation, and the
-detail resolves them by that identity under row-level security. It never re-intersects the
-declaration with the profile's facts: that is a different computation over state that may have
-moved (DEC-097). Phase 1.3 is what made it reachable - there are now real recorded sensitivities to
-name.
+And a NULL is now two sentences rather than one. "Kynviora does not know that word" is a gap in a
+licensed vocabulary (`BLK-003`) and nothing the person can act on; "that word means more than one
+thing here" is something they can fix by being more specific. The second does not list the
+candidates - offering them would be Kynviora suggesting what somebody is allergic to.
 
-`DEV-036` records what Phase 1.4 does **not** include: the export and deletion shell. There is no
-row, because a shell is a control that opens something and a settings row that opens nothing tells
-somebody a control exists - on the screen where they would look for it in the situation that matters.
-One sentence stands in its place and says why.
+`DEV-037` records what Phase 5.2 does **not** include: the review queue for unresolved mappings.
+There is nothing to map to until `BLK-003` clears, and the entries would be terms people typed about
+their own bodies on a staff screen - which `DEC-066`'s split exists to prevent.
 
 ### What landed before it
 
-**Phase 1.3 - allergy and sensitivity records.** Provenance is derived from who is writing and there
-is no field to send it: the draft has none, the body schema is `.strict()`, and
-`provenanceForRelationship` can never produce `IMPORTED` or `REVIEWER_CONFIRMED` (DEC-091). Certainty
-and provenance are separate axes - "I am sure" is the person's, `USER_REPORTED` is the record's
-(DEC-092). Every row says whether Kynviora can check anything against it, and in this build none can
-(DEC-093). No conditions (`DEV-035`).
+**`DEV-028` - which ingredient matched which recorded sensitivity.** Migration `0018` freezes the
+substance key and the profile fact ID at evaluation; the alert detail resolves both by that identity
+under row-level security and never re-intersects the declaration with the profile's facts (DEC-097).
 
-**Phase 1.2 - household and profile creation.** The oldest unbuilt surface in the plan. Both exit
-criteria hold, and the second - "screens cannot accidentally display one profile's data under another
-profile identity" - holds as a tested function: `profileSwitcherView` drops a selection the server no
-longer offers rather than falling back to whoever is first (DEC-087). No emergency information
-(`DEV-034`).
+**Phase 1.4 - consent as a state rather than a log.** `CONSENT_ENFORCEMENT` answers for all eight
+purposes; two enforce something and five say on their own row that they do not. Withdrawing
+notifications stops every notification, a critical safety alert included, and nothing pierces it
+(DEC-094 to DEC-096). No export or deletion shell (`DEV-036`).
 
-**Phase 7.5, both halves.** Quiet hours from the You tab, behind step-up, whole policy on every
-request (DEC-085), with the screen saying they hold nothing yet **before** the first one is set
-(DEC-086). No digest (`DEV-033`).
+**Phase 1.3 - allergy and sensitivity records.** Provenance derived from who is writing, with no
+field to send it (DEC-091); certainty and provenance kept apart (DEC-092). No conditions
+(`DEV-035`).
 
-**Stage 2 reads true except for deletion**, and **Phase 7.6 and 7.4's attribution half** landed
-before that.
+**Phase 1.2 - household and profile creation**, and **Phase 7.5, both halves**. **Stage 2 reads true
+except for deletion.**
 
 Next, in the order they build on each other:
 
-1. **Phase 5.2's substance normalization for a typed term.** Every hand-entered allergy is unmatched
-   and therefore invisible to the one rule that would use it. This is the difference between Phase
-   1.3's records existing and working; the difference between Phase 1.4's `NOTIFICATIONS` consent
-   governing a real alert stream and governing an empty one; and now the difference between
-   `DEV-028`'s columns holding an identity and holding NULL, because a rule that matches nothing
-   names nothing.
-2. **Phase 2.5's item deletion**, the moment the retention matrix exists. `DEV-032` has been waiting
+1. **`DEV-033`'s notification digest**, the last piece of Phase 7.5. Unlike the missed-dose
+   scheduler it needs no unmade product decision - `18` constrains the grouping rather than leaving
+   it open - and it is the difference between a household with several alerts getting several
+   interruptions and getting one.
+2. **`DEV-018`'s remaining half.** Phase 5.2 gave the historical shadow dataset the _fact_ side of a
+   substance match; the _item_ side is still missing, because the shelf join does not reach the
+   confirmed declaration. Joining `marketed_formulation` and `formulation_ingredient` would let
+   `INGREDIENT_SENSITIVITY` come off `HISTORICAL_UNSUPPORTED_KINDS` - and a rule nobody can measure
+   against real data is one nobody can approve.
+3. **Phase 2.5's item deletion**, the moment the retention matrix exists. `DEV-032` has been waiting
    on the same document as `DEV-036` and is the smallest thing that unblocks with it.
-3. **`DEV-033`'s notification digest**, the last piece of Phase 7.5, which needs no decision nobody
-   has made - only a grouping rule, which `18` constrains rather than leaves open.
 
-**Not next, and why.** The export-and-deletion shell (`DEV-036`) is a document, not a feature. "Get
+**Not next, and why.** The export-and-deletion shell (`DEV-036`) is a document, not a feature: "get
 me a copy" and "remove it" cannot be answered without a retention matrix saying what is kept
 regardless, and this build has records that must survive a deletion request with no approved
-statement of which: `audit_event` and `consent_receipt` both refuse DELETE to every role, and
-`dose_event` is what a Visit Pack is built from. Five deviations now converge on that one missing
-document - `DEV-009`, `DEV-032`, `DEV-034`, `DEV-035`, `DEV-036` - and it is a retention and
-disclosure decision rather than an engineering one. Inventing it would embed an unapproved answer to
-"what does Kynviora keep about you after you ask it to stop".
+statement of which. Five deviations converge on that one missing document (`DEV-009`, `DEV-032`,
+`DEV-034`, `DEV-035`, `DEV-036`), and it is a retention and disclosure decision rather than an
+engineering one.
 
-A missed-dose scheduler (`DEV-011`) is blocked the same way: the grace window has no answer, and `18`
-forbids shaming copy, so "how long before we tell a relative" is a question with a wrong answer
+The substance review queue (`DEV-037`) is the same shape twice over: nothing to map to until
+`BLK-003` clears, and a disclosure question - may a term somebody typed about their own body appear
+on a staff screen - that `16` has no answer for.
+
+A missed-dose scheduler (`DEV-011`) is blocked the same way: the grace window has no answer, and
+`18` forbids shaming copy, so "how long before we tell a relative" is a question with a wrong answer
 rather than a missing one.
 
 Note what none of this clears: `BLK-006`. The reviewer console is the workflow a qualified reviewer
@@ -231,12 +221,19 @@ the shipped fixtures is publishable and a test asserts that every one is refused
 
 ## Next three planned tasks
 
-1. Phase 5.2's substance normalization, so a typed allergy becomes one a rule can see.
-2. Phase 2.5's item deletion, once the retention matrix exists.
-3. `DEV-033`'s notification digest, the last piece of Phase 7.5.
+1. `DEV-033`'s notification digest, the last piece of Phase 7.5.
+2. `DEV-018`'s remaining half - the confirmed declaration in the historical shadow dataset.
+3. Phase 2.5's item deletion, once the retention matrix exists.
 
 ## Recent decisions worth knowing
 
+- **DEC-098** - a typed term is mapped by the **same** function as a printed one, at write time,
+  and only through a reviewed alias. Never a display name: `substance_alias` carries provenance and
+  an exact-versus-ambiguous state, and matching on `preferred_name` would let a rule fire on a
+  mapping nobody reviewed. Nothing a person types reaches the vocabulary. Ambiguity is represented
+  rather than resolved, and the sentence about it does not list the candidates. The outcome is
+  stored (migration `0019`, biconditional CHECK) rather than re-derived, and a corrected term is
+  re-resolved while a review stamp is not.
 - **DEC-097** - a match names its own inputs, and the read path **resolves** them rather than
   deriving them. `Assessment.matchedInputs` freezes the substance key and the profile fact ID at
   evaluation; migration `0018` stores them with three CHECKs. Re-intersecting the declaration with
@@ -1070,3 +1067,22 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
      froze, and show neither wording when they disagree. A catalog `preferred_name` is different:
      a rename is the catalog's and the canonical key did not move, which is why the key is what
      gets stored.
+170. Do not resolve a person's typed term by a different function from the one that resolves a
+     printed one. The sensitivity rule intersects a declaration's canonical keys with a profile
+     fact's, so two resolvers become a rule that fires on one spelling of a substance and not
+     another - a spelling test wearing a safety rule's clothes. One `resolveLookupKey`, one
+     `ingredientLookupKey`, and a test that asserts the two paths agree field for field.
+171. Do not resolve a term against a display name. `preferred_name` and `inci_name` are labels;
+     `substance_alias` is a reviewed artifact with its own provenance and its own exact-versus-
+     ambiguous state. Matching on a label would let a rule fire on a mapping nobody reviewed, which
+     is Phase 5.2's first exit criterion failing by the back door - and a `REJECTED` alias must
+     count towards neither a match nor the ambiguity that blocks one.
+172. Do not leave a derived mapping behind when the thing it was derived from changes. An edited
+     `display_term` that keeps the substance the old wording earned drives a rule on a substance
+     nobody typed. Re-resolve on the term and only on the term: a review stamp is not a
+     re-resolution, and re-running it there would let a moved vocabulary change what a rule sees on
+     an edit that never touched the word.
+173. Do not add a nullable derived column without a constraint tying it to the state that explains
+     it. `substance_id` and `substance_mapping_state` are a biconditional CHECK, and it caught a
+     fixture written an hour earlier that set one and not the other - a record that would have
+     claimed a rule could see it while carrying no substance.
