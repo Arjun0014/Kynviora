@@ -185,7 +185,13 @@ describe('draining the queue', () => {
 
   it('does nothing and reports nothing on an empty queue', async () => {
     const result = await drainPendingOperations([], () => Promise.resolve(ok));
-    expect(result).toEqual({ committed: [], updated: [], untouched: [], stoppedEarly: null });
+    expect(result).toEqual({
+      committed: [],
+      updated: [],
+      untouched: [],
+      skipped: [],
+      stoppedEarly: null,
+    });
   });
 
   it('drains what it can before the network goes', async () => {
@@ -293,6 +299,7 @@ describe('what a pass hands back to the journal', () => {
       ...result.committed,
       ...result.updated.map((op) => op.operationId),
       ...result.untouched.map((op) => op.operationId),
+      ...result.skipped.map((op) => op.operationId),
     ];
     expect(accounted).toHaveLength(queue.length);
     expect(new Set(accounted).size).toBe(queue.length);
@@ -306,8 +313,115 @@ describe('what a pass hands back to the journal', () => {
     const result = await drainPendingOperations(queue, () => Promise.resolve(answers[index++]!));
 
     const committed = new Set<string>(result.committed);
-    for (const op of [...result.updated, ...result.untouched]) {
+    for (const op of [...result.updated, ...result.untouched, ...result.skipped]) {
       expect(committed.has(op.operationId)).toBe(false);
     }
+  });
+});
+
+/**
+ * The third answer: nothing here can send this.
+ *
+ * A sender belongs to the screen that knows the shape of the write, so on the launch after the
+ * app's process was killed the queue is read before that screen has mounted - which is exactly the
+ * launch the journal exists for. Measured on a device: the queued edit was not sent on that launch
+ * and waited for the person to background and foreground the app again (`DEV-044`).
+ */
+describe('an operation nothing can send', () => {
+  const scheduleOnly = { canSend: (entityType: string) => entityType === 'medicine_schedule' };
+
+  function itemOperation(id: string, minute: number): PendingOperation {
+    return { ...operation(id, minute), entityType: 'owned_item' };
+  }
+
+  it('is not attempted at all', async () => {
+    let attempts = 0;
+    const result = await drainPendingOperations(
+      [itemOperation('s1', 1)],
+      () => {
+        attempts += 1;
+        return Promise.resolve(ok);
+      },
+      scheduleOnly,
+    );
+
+    expect(attempts).toBe(0);
+    expect(result.skipped.map((op) => op.operationId)).toHaveLength(1);
+    expect(result.committed).toEqual([]);
+    expect(result.updated).toEqual([]);
+  });
+
+  it('keeps its attempt budget and its state, because nothing was asked of a server', async () => {
+    // The defect this replaces: reporting it as `OFFLINE` marked it FAILED_RETRYABLE and spent an
+    // attempt, so a person's edit could reach MAX_UPLOAD_ATTEMPTS over enough launches without
+    // ever having been sent once.
+    const waiting = itemOperation('s2', 1);
+    const result = await drainPendingOperations([waiting], () => Promise.resolve(ok), scheduleOnly);
+
+    const [skipped] = result.skipped;
+    expect(skipped?.attemptCount).toBe(0);
+    expect(skipped?.state).toBe('PENDING');
+    expect(skipped?.lastError).toBeNull();
+    expect(isUploadable(skipped!)).toBe(true);
+  });
+
+  it('does not stop the operations behind it', async () => {
+    // A schedule whose screen is not mounted must not hold up an item edit whose screen is.
+    const sent: string[] = [];
+    const result = await drainPendingOperations(
+      [itemOperation('s3', 1), operation('s4', 2), itemOperation('s5', 3), operation('s6', 4)],
+      (op) => {
+        sent.push(op.operationId);
+        return Promise.resolve(ok);
+      },
+      scheduleOnly,
+    );
+
+    expect(sent).toHaveLength(2);
+    expect(result.committed).toHaveLength(2);
+    expect(result.skipped).toHaveLength(2);
+    expect(result.stoppedEarly).toBeNull();
+  });
+
+  it('is reported apart from what a stopped drain left behind', async () => {
+    // `untouched` is "the drain stopped before reaching these"; `skipped` is "the drain reached
+    // these and there was no way to send them". Collapsing the two would hide which of the app and
+    // the network the queue is actually waiting on.
+    const result = await drainPendingOperations(
+      [itemOperation('s7', 1), operation('s8', 2), operation('s9', 3)],
+      () => Promise.resolve(offline),
+      scheduleOnly,
+    );
+
+    expect(result.skipped.map((op) => op.entityType)).toEqual(['owned_item']);
+    expect(result.untouched).toHaveLength(1);
+    expect(result.stoppedEarly).toBe('OFFLINE');
+  });
+
+  it('sends everything when no predicate is given', async () => {
+    // The default has to be permissive: a caller with one fixed set of senders should not have to
+    // say so, and a predicate that defaulted to `false` would silently stop every existing drain.
+    const result = await drainPendingOperations([itemOperation('sa', 1), operation('sb', 2)], () =>
+      Promise.resolve(ok),
+    );
+
+    expect(result.committed).toHaveLength(2);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('never reaches MAX_UPLOAD_ATTEMPTS by being skipped', async () => {
+    // Ten launches with the screen unmounted is still an edit that has been tried zero times.
+    let waiting = itemOperation('sc', 1);
+    for (let launch = 0; launch < MAX_UPLOAD_ATTEMPTS + 5; launch += 1) {
+      const result = await drainPendingOperations(
+        [waiting],
+        () => Promise.resolve(ok),
+        scheduleOnly,
+      );
+      waiting = result.skipped[0] ?? waiting;
+    }
+
+    expect(waiting.attemptCount).toBe(0);
+    expect(needsUserAttention(waiting)).toBe(false);
   });
 });

@@ -52,6 +52,7 @@ import { useResource } from '@/api/useResource';
 import { CaregiverAccessList } from '@/features/caregivers/CaregiverAccessList';
 import { InviteCaregiver } from '@/features/caregivers/InviteCaregiver';
 import { RemoveCaregiverAccess } from '@/features/caregivers/RemoveCaregiverAccess';
+import { newIdempotencyKey } from '@/platform/ids';
 
 /** Matches `DEFAULT_INVITATION_TTL_DAYS` on the server. Shown, not sent. */
 const INVITATION_TTL_DAYS = 7;
@@ -118,7 +119,13 @@ export default function CareScreen() {
 
   const { resource, reload } = useResource(load, {
     enabled: activeProfileId !== null,
-    isEmpty: (value) => value.grants.length === 0 && value.invitations.length === 0,
+    // The history counts, and leaving it out was the same mistake the schedule editor made
+    // (`DEV-045`): `EMPTY` sets `value` to `null`, so a household with no current access showed no
+    // record of past access either - at the one moment somebody is most likely to be looking for
+    // it, having just revoked the last caregiver. "Nobody has access" and "nobody has ever had
+    // access" are different sentences and `08.2`'s audit trail is the difference.
+    isEmpty: (value) =>
+      value.grants.length === 0 && value.invitations.length === 0 && value.history.length === 0,
     isPartial: (value) => !value.invitationsLoaded,
   });
 
@@ -177,7 +184,7 @@ export default function CareScreen() {
       // A key per attempt, kept across retries of the same intent by being generated once here:
       // a key regenerated on retry would mint a second live token for one intent, which is two
       // credentials where the owner believes there is one.
-      const idempotencyKey = crypto.randomUUID();
+      const idempotencyKey = newIdempotencyKey();
 
       void elevated.createInvitation({ ...body }, idempotencyKey).then(
         (outcome) => {

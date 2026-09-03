@@ -33,7 +33,7 @@
  * on a shampoo is refused by the database as well as by this screen.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import {
   LIGHT_THEME,
@@ -76,6 +76,7 @@ import { ItemDetail } from '@/features/shelf/ItemDetail';
 import { MedicineSchedules } from '@/features/schedules/MedicineSchedules';
 import { useReminders } from '@/reminders/ReminderProvider';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
+import { newIdempotencyKey } from '@/platform/ids';
 
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
 
@@ -86,7 +87,7 @@ export default function ShelfScreen() {
   // and a screen that offered a schedule without saying notifications are off would promise
   // something the phone has already refused.
   const { status: reminderStatus, resync: resyncReminders } = useReminders();
-  const { queue: queueEdit, registerSender } = usePendingSync();
+  const { queue: queueEdit } = usePendingSync();
 
   const [recording, setRecording] = useState<ShelfItemView | null>(null);
   const [recordState, setRecordState] = useState<ScreenStateKind | null>(null);
@@ -254,9 +255,23 @@ export default function ShelfScreen() {
     [client, scheduling, activeProfileId],
   );
 
+  /**
+   * Deliberately **not** declared empty when there are no schedules.
+   *
+   * `EMPTY` sets `value` to `null` (`resourceFor`), and this payload is not one list: it carries
+   * the notification detail level, the prescriber's directions and `mayEdit` alongside the
+   * schedules. Calling it empty discarded all four, so `mayEdit` fell back to `false` and the
+   * "Add a schedule" button was not drawn - on exactly the medicines that had no schedule yet.
+   * A medicine could therefore never be given its first one, which is the only state a newly added
+   * medicine is ever in (`DEV-045`).
+   *
+   * There is nothing to gain by declaring it either: the editor renders "Nothing is scheduled for
+   * this medicine." from `schedules.length === 0` itself, and `ScreenState` is not shown for
+   * `EMPTY` anyway. `isEmpty` answers a question about a whole payload, and this one is empty in
+   * one field only.
+   */
   const { resource: scheduleResource, reload: reloadSchedules } = useResource(loadSchedules, {
     enabled: scheduling !== null,
-    isEmpty: (value) => value.schedules.length === 0,
   });
 
   const onRetry = useCallback(() => {
@@ -279,7 +294,7 @@ export default function ShelfScreen() {
       // recording a second event. `04` Phase 4.3 makes that an exit criterion, because an event
       // created offline may be uploaded more than once - and a duplicated history is a false
       // record of what somebody did.
-      const idempotencyKey = crypto.randomUUID();
+      const idempotencyKey = newIdempotencyKey();
 
       void client.recordDoseEvent(body, idempotencyKey).then(
         (outcome) => {
@@ -313,7 +328,7 @@ export default function ShelfScreen() {
       // happens tomorrow out of the offline journal. Two schedules on one medicine is not a
       // duplicate row on a list: it is being told twice, at the same minute, to take the same
       // tablet.
-      const idempotencyKey = crypto.randomUUID();
+      const idempotencyKey = newIdempotencyKey();
       const itemId = scheduling.id;
 
       void client.createSchedule(itemId, body, idempotencyKey).then(
@@ -357,31 +372,6 @@ export default function ShelfScreen() {
     },
     [client, scheduling, reloadSchedules, resyncReminders, queueEdit],
   );
-
-  /**
-   * How a queued schedule edit is sent when the drain reaches it.
-   *
-   * Registered rather than built into the drain, because the wire call belongs to the screen that
-   * knows the shape. `medicine_schedule` is the only type registered: `13`'s policy allows others
-   * to be queued in principle, and each needs its own sender and its own conflict surface before
-   * it should be (`DEV-038`).
-   */
-  useEffect(() => {
-    if (client === null) return;
-    registerSender('medicine_schedule', async (operation) => {
-      if (operation.mutation === 'CREATE') {
-        // The operation ID *is* the idempotency key (`13`), so a create that lands and then loses
-        // its answer to a dropped connection is committed once, not twice - which on this table is
-        // the difference between one reminder and two at the same minute.
-        return client.createSchedule(
-          operation.entityId,
-          operation.payload as ScheduleBody,
-          operation.operationId,
-        );
-      }
-      return client.updateSchedule(operation.entityId, operation.payload as ScheduleChangeBody);
-    });
-  }, [client, registerSender]);
 
   const onUpdateSchedule = useCallback(
     (scheduleId: string, body: ScheduleChangeBody) => {

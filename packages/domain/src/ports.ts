@@ -119,9 +119,22 @@ export interface IdGenerator {
   next(): string;
 }
 
-/** Production generator - cryptographically random UUID v4. */
-export function cryptoIdGenerator(): IdGenerator {
-  return { next: () => globalThis.crypto.randomUUID() };
+/**
+ * Production generator over a platform's own UUID source.
+ *
+ * The source is a parameter rather than an ambient `globalThis.crypto`, because there is no one
+ * global that has it. Node and a browser do; Hermes - the engine this project's only client runs
+ * on - does not. A generator that reads `globalThis.crypto` typechecks on every platform and
+ * fails on the single one that ships, which is exactly how `crypto.randomUUID()` reached a device
+ * in eight places (`DEV-043`). Requiring the caller to name its source makes the platform binding
+ * something a reader can see rather than something the compiler guessed.
+ *
+ * What is required of `randomUuid` is `07`'s property and not its shape: it must come from a
+ * cryptographically secure source. `randomUUID` from `node:crypto`, from the Web Crypto API and
+ * from `expo-crypto` all qualify; a `Math.random()` UUID has the right shape and none of it.
+ */
+export function cryptoIdGenerator(randomUuid: () => string): IdGenerator {
+  return { next: randomUuid };
 }
 
 /**

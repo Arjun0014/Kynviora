@@ -47,6 +47,7 @@ import { useResource } from '@/api/useResource';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import { VisitPackReview, type ReviewEntry } from './VisitPackReview';
+import { newIdempotencyKey } from '@/platform/ids';
 
 /**
  * SHA-256, from the platform.
@@ -132,7 +133,7 @@ export function VisitPackFlow({ onClose }: { readonly onClose: () => void }) {
           return;
         }
 
-        void elevated.createVisitPack(draft.body, crypto.randomUUID()).then(
+        void elevated.createVisitPack(draft.body, newIdempotencyKey()).then(
           (outcome) => {
             if (outcome.kind === 'OK') {
               setSendState(null);

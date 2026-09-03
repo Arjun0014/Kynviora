@@ -53,6 +53,7 @@ import {
 import { useApi } from '@/api/ApiProvider';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { newIdempotencyKey } from '@/platform/ids';
 
 export interface AddItemProps {
   readonly itemKind: ItemKind;
@@ -76,7 +77,7 @@ export function AddItem({ itemKind, profileId, onSaved, onClose }: AddItemProps)
 
   // Generated once for this draft. See the module note - regenerating it per press is not an
   // idempotency key, it is a second medicine record.
-  const [idempotencyKey] = useState(() => crypto.randomUUID());
+  const [idempotencyKey] = useState(() => newIdempotencyKey());
 
   const onSave = useCallback(() => {
     if (client === null) return;

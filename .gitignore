@@ -27,3 +27,8 @@ apps/mobile/ios/
 
 # The session transcript pasted in for a resume. Not project documentation.
 docs/autonomy/last_session_messeges.md
+
+# Working output from the device harnesses and from verification runs: logs, screenshots and
+# hierarchy dumps written when a check could not proceed (`scripts/device/ui.ts`). Evidence about
+# one run on one emulator, which is not project content.
+scratchpad/

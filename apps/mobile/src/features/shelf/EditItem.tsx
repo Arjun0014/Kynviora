@@ -27,7 +27,7 @@
  * drew itself would survive a conflict it did not notice.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import {
   LIGHT_THEME,
@@ -62,7 +62,7 @@ export interface EditItemProps {
 
 export function EditItem({ view, onChanged, onClose }: EditItemProps) {
   const { client } = useApi();
-  const { queue: queueEdit, registerSender } = usePendingSync();
+  const { queue: queueEdit } = usePendingSync();
 
   const form = useMemo(() => manualEntryForm(view.itemKind), [view.itemKind]);
 
@@ -94,29 +94,6 @@ export function EditItem({ view, onChanged, onClose }: EditItemProps) {
   const [unchanged, setUnchanged] = useState(false);
   /** Set where the person chose to take the saved version over what they had typed. */
   const [reloaded, setReloaded] = useState(false);
-
-  /**
-   * How a queued item edit is sent when the drain reaches it.
-   *
-   * Only `UPDATE`. A queued `CREATE` would reach Phase 8.5's reconciliation as a second copy of
-   * one medicine (`DEV-038`), and nothing here should quietly acquire that behaviour by handling
-   * a mutation it was never wired to queue.
-   */
-  useEffect(() => {
-    if (client === null) return;
-    registerSender('owned_item', async (operation) => {
-      if (operation.mutation !== 'UPDATE') {
-        return {
-          kind: 'REFUSED',
-          code: 'VALIDATION_FAILED',
-          message: 'Unsupported offline change.',
-          retryable: false,
-          correlationId: null,
-        };
-      }
-      return client.updateItem(operation.entityId, operation.payload as ItemUpdateBody);
-    });
-  }, [client, registerSender]);
 
   const send = useCallback(
     (body: ItemUpdateBody, note: string) => {

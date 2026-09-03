@@ -1,6 +1,16 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    // A phone is not a browser and is not Node, and the compiler must not be told otherwise.
+    // `expo/tsconfig.base` sets `lib: ["DOM", "ESNext"]`, and the monorepo's hoisted `@types/node`
+    // is picked up ambiently - between them, `crypto.randomUUID()` typechecked in eight places and
+    // threw `Property 'crypto' doesn't exist` on Hermes at the moment somebody pressed Save. This
+    // is the only gate over `apps/**`: it is outside the test run and outside the lint run
+    // (trap 164), so a global the runtime does not have has to fail here or nowhere (`DEV-043`).
+    // Everything the app genuinely uses - fetch, console, timers, URL - is declared by React
+    // Native's own types, which arrive through imports rather than through `@types`.
+    "lib": ["ESNext"],
+    "types": [],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,

@@ -55,6 +55,7 @@ import {
 } from '@kynviora/domain';
 import { drainPendingOperations, type ApiOutcome } from '@kynviora/contracts';
 import { useProjection } from '@/storage/ProjectionProvider';
+import { newIdempotencyKey } from '@/platform/ids';
 
 /** One change a screen could not send. */
 export interface QueueRequest {
@@ -123,13 +124,33 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
    */
   const senders = useRef(new Map<SyncEntityType, Sender>());
 
-  const registerSender = useCallback((entityType: SyncEntityType, send: Sender) => {
-    senders.current.set(entityType, send);
-  }, []);
-
   const drain = useCallback(() => {
     setGeneration((n) => n + 1);
   }, []);
+
+  /**
+   * Register how an entity type is sent, and try the queue again if this is the first way to send
+   * one.
+   *
+   * The re-drain is the point, and leaving it out was a real defect measured on a device. The
+   * store opens before any tab beyond the first has mounted, so the single pass a cold launch runs
+   * happens while this map is still empty - and the launch after a person's phone killed the app
+   * is exactly the launch their queued edit was waiting for. Without this, that edit sat until the
+   * person happened to background and foreground the app again, with nothing on any screen to say
+   * so (`DEV-044`).
+   *
+   * Only a genuinely new type re-drains. Re-registering the same type on a re-render would
+   * otherwise ask for a pass on every render of the screen that owns it, and `requestSyncPass`
+   * would dutifully defer and re-run them.
+   */
+  const registerSender = useCallback(
+    (entityType: SyncEntityType, send: Sender) => {
+      const isNew = !senders.current.has(entityType);
+      senders.current.set(entityType, send);
+      if (isNew) drain();
+    },
+    [drain],
+  );
 
   const queue = useCallback(
     async (request: QueueRequest): Promise<boolean> => {
@@ -143,7 +164,7 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
         // The idempotency key, stable across every retry (`13`). Reused from the attempt that
         // failed where the screen had one, because a fresh key on a create is how one edit becomes
         // two rows when the original landed and its answer did not come back.
-        operationId: unsafeId<OperationId>(request.operationId ?? crypto.randomUUID()),
+        operationId: unsafeId<OperationId>(request.operationId ?? newIdempotencyKey()),
         entityType: request.entityType,
         entityId: request.entityId,
         mutation: request.mutation,
@@ -189,14 +210,21 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
       const queued = await pending.list(sessionId);
       if (!live) return;
 
-      const result = await drainPendingOperations(queued, async (operation) => {
-        const send = senders.current.get(operation.entityType);
-        // No registered sender means the screen that queues this type is not mounted. Reported as
-        // offline rather than as a rejection: the edit is fine and nothing has been asked of the
-        // server, so it must keep its place and its full attempt budget.
-        if (send === undefined) return { kind: 'OFFLINE' };
-        return send(operation);
-      });
+      const result = await drainPendingOperations(
+        queued,
+        async (operation) => {
+          const send = senders.current.get(operation.entityType);
+          // Unreachable given `canSend` below, and kept as the honest answer rather than a throw:
+          // a sender removed between the check and the call is a race nobody has to reason about
+          // if the reply is "nothing was asked of the server".
+          if (send === undefined) return { kind: 'OFFLINE' };
+          return send(operation);
+        },
+        // No registered sender means the screen that knows how to send this type has not mounted.
+        // That is not a failed attempt, and reporting it as one used to spend an attempt on the
+        // operation and end the pass - so the queue was charged for the app having been opened.
+        { canSend: (entityType) => senders.current.has(entityType) },
+      );
       if (!live) return;
 
       for (const operationId of result.committed) await pending.remove(sessionId, operationId);

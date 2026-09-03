@@ -60,6 +60,7 @@ import {
 import { useApi } from '@/api/ApiProvider';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { newIdempotencyKey } from '@/platform/ids';
 
 export interface SetUpHouseholdProps {
   /**
@@ -97,8 +98,8 @@ export function SetUpHousehold({
   const [refusalMessage, setRefusalMessage] = useState<string | null>(null);
 
   // One per step, generated when the screen opens. See the module note.
-  const [householdKey] = useState(() => crypto.randomUUID());
-  const [profileKey] = useState(() => crypto.randomUUID());
+  const [householdKey] = useState(() => newIdempotencyKey());
+  const [profileKey] = useState(() => newIdempotencyKey());
 
   const clearFeedback = useCallback(() => {
     setState(null);

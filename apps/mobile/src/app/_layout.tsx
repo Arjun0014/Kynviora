@@ -26,6 +26,7 @@ import { ProfileProvider } from '@/api/ProfileProvider';
 import { ProjectionProvider } from '@/storage/ProjectionProvider';
 import { ReminderProvider } from '@/reminders/ReminderProvider';
 import { PendingSyncProvider } from '@/sync/PendingSyncProvider';
+import { PendingSenders } from '@/sync/PendingSenders';
 
 export default function RootLayout() {
   return (
@@ -44,6 +45,10 @@ export default function RootLayout() {
                 encrypted store, and outside the reminder provider because a queued schedule edit
                 has to be sendable whether or not reminders could be planned (`12`, `DEV-038`). */}
             <PendingSyncProvider>
+              {/* Inside the sync provider and outside every screen, for the reason the reminder
+                  engine is not on a screen either: what can be sent must not depend on which tab
+                  somebody last opened (`DEV-044`). */}
+              <PendingSenders />
               <ReminderProvider>
                 <Stack screenOptions={{ headerShown: false }}>
                   <Stack.Screen name="(tabs)" />
