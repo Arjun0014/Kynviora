@@ -3325,3 +3325,57 @@ about and which the first attempt here made.
 Pixel 7 / Android 16 emulator: `verify:device` 7/7, `verify:device:a11y` 34/34,
 `verify:device:reminders` 9/9, `verify:device:update` 6/6. Their judgements are covered by 131 tests
 that need no device. `19`'s device scenarios go from six covered to seven.
+
+### Then the backend track: edits that survive having no signal
+
+`DEV-038` had been the largest genuinely unblocked gap in the MVP: `12` requires a
+pending-operation journal, `13` defines the conflict policy, `sync.ts` had implemented all of it
+since Stage 1 - and **nothing had ever queued a row**. The read half shipped alone on purpose,
+because the deviation's own reasoning was that the journal was not the missing piece; a decision
+about each entity was.
+
+Three modules, and the two that matter are both in tested packages rather than in `apps/**`:
+
+**`classifyUpload`** reads one answer. The `REFUSED` split is the substance - a conflict is
+resolved by a person under `13`'s per-entity policy, a rejection is an edit that cannot be saved as
+written, and retrying either is useless. Two answers turned out to belong to the server rather than
+to me, and the first version got both wrong: `13` puts `retryable` on the wire, so a 500 the server
+marks final must not be retried four more times, and a refusal marked retryable **must** be -
+`RATE_LIMITED` is a 429 asking for a pause, and reading it as final permanently fails somebody's
+schedule change because they happened to save it during a burst.
+
+**`drainPendingOperations`** decides when to stop, which is the only decision the loop owns.
+`OFFLINE` and authorization loss end the pass; everything else continues. Without that, one dropped
+tunnel spends an attempt on every queued edit and a person who reconnects finds their changes marked
+as needing attention rather than sent. `SERVER_ERROR` is the near-miss and deliberately does not
+stop it: a 500 is about the request that caused it. `endsTheDrain` lists every `ApiOutcome` member
+rather than using a `default`, so a member added later cannot silently acquire "keep going" - the
+linter asked for that and was right (DEC-109).
+
+**The policy gate is a refusal, not a warning.** `queue` asks `isOptimisticallyApplicable` before
+writing anything and returns `false` for the types `13` resolves `SERVER_WINS`. A queued caregiver
+grant would show as active while offline, and the person who acted on it would believe somebody has
+access they do not. A warning would hand that decision to whoever wires the next call site, in
+`apps/**`, where nothing tests it (DEC-110).
+
+`medicine_schedule` is the one type wired, and it was chosen rather than defaulted to: Phase 4.1's
+route already carries both halves a replay needs - an idempotency key scoped to the item, and
+`expectedVersion` as a precondition - so a retry either lands once or comes back as a conflict, with
+no third outcome to design. `owned_item` and `dose_event` stay unwired for the non-engineering
+reasons `DEV-038` gave and which have not changed.
+
+**On the device.** The storage refactor is the risky part - the journal is a second table, so
+`openLocalStore` opens the SQLCipher file once and builds both on that handle rather than calling
+`openSecureDatabase` twice, which is the race `ProjectionProvider` already warned about (trap 180).
+One SIGSEGV was seen on the first launch after the change and did not reproduce in five subsequent
+cold launches; it came while Metro was still rebuilding and no crash has been seen since, so it is
+recorded as observed rather than diagnosed. What is verified is what the refactor put at risk: with
+the reverse tunnel removed, the app still renders "Development profile" out of the encrypted store.
+
+**What is still open and is said rather than implied.** No screen shows the queue or resolves a
+conflicted operation. `needsUserAttention` counts them and the count is exposed; the screen is not
+written. That is the half of `12`'s "resolvable failure state" that is still a state.
+
+### State
+
+3802 tests across 129 files, `npm run verify` exit 0.

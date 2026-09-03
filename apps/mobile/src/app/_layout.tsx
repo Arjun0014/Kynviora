@@ -25,6 +25,7 @@ import { ApiProvider } from '@/api/ApiProvider';
 import { ProfileProvider } from '@/api/ProfileProvider';
 import { ProjectionProvider } from '@/storage/ProjectionProvider';
 import { ReminderProvider } from '@/reminders/ReminderProvider';
+import { PendingSyncProvider } from '@/sync/PendingSyncProvider';
 
 export default function RootLayout() {
   return (
@@ -39,11 +40,16 @@ export default function RootLayout() {
                 looked at, and inside the projection provider because a device with no signal
                 still has to be reminded - it re-plans from the last response the store kept
                 (`03` group J, `04` Phase 4.2). */}
-            <ReminderProvider>
-              <Stack screenOptions={{ headerShown: false }}>
-                <Stack.Screen name="(tabs)" />
-              </Stack>
-            </ReminderProvider>
+            {/* Inside the projection provider because the journal is a table in the same
+                encrypted store, and outside the reminder provider because a queued schedule edit
+                has to be sendable whether or not reminders could be planned (`12`, `DEV-038`). */}
+            <PendingSyncProvider>
+              <ReminderProvider>
+                <Stack screenOptions={{ headerShown: false }}>
+                  <Stack.Screen name="(tabs)" />
+                </Stack>
+              </ReminderProvider>
+            </PendingSyncProvider>
           </ProfileProvider>
         </ProjectionProvider>
       </ApiProvider>

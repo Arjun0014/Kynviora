@@ -33,7 +33,7 @@
  * on a shampoo is refused by the database as well as by this screen.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import {
   LIGHT_THEME,
@@ -75,6 +75,7 @@ import { EditItem } from '@/features/shelf/EditItem';
 import { ItemDetail } from '@/features/shelf/ItemDetail';
 import { MedicineSchedules } from '@/features/schedules/MedicineSchedules';
 import { useReminders } from '@/reminders/ReminderProvider';
+import { usePendingSync } from '@/sync/PendingSyncProvider';
 
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
 
@@ -85,6 +86,7 @@ export default function ShelfScreen() {
   // and a screen that offered a schedule without saying notifications are off would promise
   // something the phone has already refused.
   const { status: reminderStatus, resync: resyncReminders } = useReminders();
+  const { queue: queueEdit, registerSender } = usePendingSync();
 
   const [recording, setRecording] = useState<ShelfItemView | null>(null);
   const [recordState, setRecordState] = useState<ScreenStateKind | null>(null);
@@ -335,6 +337,31 @@ export default function ShelfScreen() {
     [client, scheduling, reloadSchedules, resyncReminders],
   );
 
+  /**
+   * How a queued schedule edit is sent when the drain reaches it.
+   *
+   * Registered rather than built into the drain, because the wire call belongs to the screen that
+   * knows the shape. `medicine_schedule` is the only type registered: `13`'s policy allows others
+   * to be queued in principle, and each needs its own sender and its own conflict surface before
+   * it should be (`DEV-038`).
+   */
+  useEffect(() => {
+    if (client === null) return;
+    registerSender('medicine_schedule', async (operation) => {
+      if (operation.mutation === 'CREATE') {
+        // The operation ID *is* the idempotency key (`13`), so a create that lands and then loses
+        // its answer to a dropped connection is committed once, not twice - which on this table is
+        // the difference between one reminder and two at the same minute.
+        return client.createSchedule(
+          operation.entityId,
+          operation.payload as ScheduleBody,
+          operation.operationId,
+        );
+      }
+      return client.updateSchedule(operation.entityId, operation.payload as ScheduleChangeBody);
+    });
+  }, [client, registerSender]);
+
   const onUpdateSchedule = useCallback(
     (scheduleId: string, body: ScheduleChangeBody) => {
       if (client === null) return;
@@ -351,6 +378,24 @@ export default function ShelfScreen() {
             resyncReminders();
             return;
           }
+          // Offline is the one failure worth keeping the edit for. Everything else is an answer:
+          // a refusal names something to change, and an authorization failure must not be retried
+          // at all (`12`). `queue` can still refuse - the store may not be open - and then the
+          // original failure is what the person is told, which is the honest outcome.
+          if (outcome.kind === 'OFFLINE') {
+            void queueEdit({
+              entityType: 'medicine_schedule',
+              entityId: scheduleId,
+              mutation: 'UPDATE',
+              payload: body,
+              baseVersion: body.expectedVersion,
+            }).then((queued) => {
+              setScheduleState(queued ? null : screenStateForFailure(outcome));
+              setScheduleMessage(null);
+              if (queued) reloadSchedules();
+            });
+            return;
+          }
           setScheduleState(screenStateForFailure(outcome));
           setScheduleMessage(outcome.kind === 'REFUSED' ? outcome.message : null);
         },
@@ -360,7 +405,7 @@ export default function ShelfScreen() {
         },
       );
     },
-    [client, reloadSchedules, resyncReminders],
+    [client, reloadSchedules, resyncReminders, queueEdit],
   );
 
   const onCloseSchedule = useCallback(() => {

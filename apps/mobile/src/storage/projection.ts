@@ -73,7 +73,18 @@ async function ensureSchema(database: SQLiteDatabase): Promise<void> {
  * next write, which will fail again and say so.
  */
 export async function openProjection(): Promise<Projection> {
-  const database = await openSecureDatabase();
+  return openProjectionOn(await openSecureDatabase());
+}
+
+/**
+ * Build the projection on a database somebody else opened.
+ *
+ * `openLocalStore` uses this so the projection and the pending-operation journal share one
+ * connection. Two `openSecureDatabase()` calls would be two connections to one SQLCipher file
+ * racing each other's schema creation, which is the failure `ProjectionProvider` already warns
+ * about and which shows up as an intermittent error on a cold start rather than consistently.
+ */
+export async function openProjectionOn(database: SQLiteDatabase): Promise<Projection> {
   await ensureSchema(database);
 
   return {

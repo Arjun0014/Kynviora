@@ -20,7 +20,7 @@ Last updated: 2026-09-03
 
 ## Verification state
 
-- **3773 tests passing**, 0 failing, across 127 files.
+- **3802 tests passing**, 0 failing, across 129 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -1158,3 +1158,18 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
      zone on that launch. And compare the `origWhen` epoch from the dump's header, never the
      rendered time: `dumpsys` prints in the device's current zone, so the printed string changes on
      every row while nothing has moved.
+178. Do not let one dropped connection spend everybody's retry budget. A drain that keeps going
+     after `OFFLINE` gives every remaining queued edit an attempt it could never have succeeded at,
+     and five queued edits plus one tunnel drop is five operations pushed towards
+     `MAX_UPLOAD_ATTEMPTS` - so the person who reconnects finds their changes marked as needing
+     attention rather than simply sent. Stop on `OFFLINE` and on authorization loss, continue past
+     everything else, and leave the untried operations untouched (DEC-109).
+179. Do not read every refusal as final. `13` puts `retryable` on the wire and `RATE_LIMITED` is a
+     429 asking for a pause, not a verdict on the edit - so a client that classifies all refusals
+     as rejections permanently fails somebody's change because they saved it during a burst. The
+     mirror error is treating every 500 as retryable when the server said it was not. Both answers
+     are the server's, and both were wrong in the first version of `classifyUpload`.
+180. Do not open the encrypted database twice to add a second table. `ProjectionProvider` already
+     warned that several connections to one SQLCipher file race each other's schema creation, and
+     the journal is a second table, not a second store - one `openSecureDatabase`, two
+     `ensureSchema` calls on the handle it returns (`openLocalStore`).

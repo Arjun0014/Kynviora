@@ -2,15 +2,15 @@ import { describe, it, expect } from 'vitest';
 import {
   CATEGORY_REMINDER_BODY,
   GENERIC_REMINDER_BODY,
-  IDLE_REMINDER_SYNC,
+  IDLE_SYNC_PASS,
   MAX_PLANNED_REMINDERS,
   REMINDER_HORIZON_DAYS,
-  finishReminderSync,
+  finishSyncPass,
   planReminders,
   reconcileReminders,
   reminderContent,
   reminderKey,
-  requestReminderSync,
+  requestSyncPass,
   type ReminderSubject,
 } from './reminderPlan.js';
 import { GENERIC_NOTIFICATION_TITLE } from './alertDelivery.js';
@@ -421,9 +421,9 @@ describe('reconciling a plan against what a device already holds', () => {
  * about: a cold launch held 0 alarms with an active schedule, three times running, because the
  * only request that carried the complete set of inputs was refused by a guard and never retried.
  */
-describe('the reminder sync gate', () => {
+describe('the sync pass gate', () => {
   it('lets the first request start', () => {
-    const asked = requestReminderSync(IDLE_REMINDER_SYNC);
+    const asked = requestSyncPass(IDLE_SYNC_PASS);
     expect(asked.start).toBe(true);
     expect(asked.gate.running).toBe(true);
     expect(asked.gate.deferred).toBe(false);
@@ -432,56 +432,56 @@ describe('the reminder sync gate', () => {
   it('does not start a second request while one is running', () => {
     // The thing the original guard was right about. Two overlapping reconciliations read the same
     // held set, and each schedules what the other has not yet placed.
-    const first = requestReminderSync(IDLE_REMINDER_SYNC);
-    const second = requestReminderSync(first.gate);
+    const first = requestSyncPass(IDLE_SYNC_PASS);
+    const second = requestSyncPass(first.gate);
     expect(second.start).toBe(false);
   });
 
   it('defers that second request rather than dropping it', () => {
     // The defect. A request refused while another is in flight was computed from inputs that have
     // since moved, so it is the one that matters - and it was thrown away.
-    const first = requestReminderSync(IDLE_REMINDER_SYNC);
-    const second = requestReminderSync(first.gate);
+    const first = requestSyncPass(IDLE_SYNC_PASS);
+    const second = requestSyncPass(first.gate);
     expect(second.gate.deferred).toBe(true);
-    expect(finishReminderSync(second.gate).rerun).toBe(true);
+    expect(finishSyncPass(second.gate).rerun).toBe(true);
   });
 
   it('asks for no re-run when nothing arrived while it was working', () => {
-    const first = requestReminderSync(IDLE_REMINDER_SYNC);
-    const done = finishReminderSync(first.gate);
+    const first = requestSyncPass(IDLE_SYNC_PASS);
+    const done = finishSyncPass(first.gate);
     expect(done.rerun).toBe(false);
-    expect(done.gate).toEqual(IDLE_REMINDER_SYNC);
+    expect(done.gate).toEqual(IDLE_SYNC_PASS);
   });
 
   it('collapses any number of deferred requests into one re-run', () => {
     // Three inputs arriving in three renders must not cost three reconciliations: by the time the
     // re-run happens they would all read the same state, and each extra pass is a full read of
     // what the device holds plus a write of the difference.
-    let gate = requestReminderSync(IDLE_REMINDER_SYNC).gate;
-    for (let i = 0; i < 5; i += 1) gate = requestReminderSync(gate).gate;
-    const done = finishReminderSync(gate);
+    let gate = requestSyncPass(IDLE_SYNC_PASS).gate;
+    for (let i = 0; i < 5; i += 1) gate = requestSyncPass(gate).gate;
+    const done = finishSyncPass(gate);
     expect(done.rerun).toBe(true);
-    expect(done.gate).toEqual(IDLE_REMINDER_SYNC);
+    expect(done.gate).toEqual(IDLE_SYNC_PASS);
   });
 
   it('releases the gate even when the run it was holding failed', () => {
     // Called from a `finally`. A reconciliation that threw and left `running` true would refuse
     // every later one for the life of the process - the original defect, made permanent.
-    const first = requestReminderSync(IDLE_REMINDER_SYNC);
-    expect(finishReminderSync(first.gate).gate.running).toBe(false);
-    expect(requestReminderSync(finishReminderSync(first.gate).gate).start).toBe(true);
+    const first = requestSyncPass(IDLE_SYNC_PASS);
+    expect(finishSyncPass(first.gate).gate.running).toBe(false);
+    expect(requestSyncPass(finishSyncPass(first.gate).gate).start).toBe(true);
   });
 
   it('runs the deferred request and then settles, rather than re-running forever', () => {
     // The re-run is a single pass. A gate that re-armed itself would reconcile in a loop, which on
     // a device is a wake-up every few hundred milliseconds.
-    const first = requestReminderSync(IDLE_REMINDER_SYNC);
-    const deferred = requestReminderSync(first.gate);
-    const done = finishReminderSync(deferred.gate);
+    const first = requestSyncPass(IDLE_SYNC_PASS);
+    const deferred = requestSyncPass(first.gate);
+    const done = finishSyncPass(deferred.gate);
     expect(done.rerun).toBe(true);
 
-    const rerun = requestReminderSync(done.gate);
+    const rerun = requestSyncPass(done.gate);
     expect(rerun.start).toBe(true);
-    expect(finishReminderSync(rerun.gate).rerun).toBe(false);
+    expect(finishSyncPass(rerun.gate).rerun).toBe(false);
   });
 });

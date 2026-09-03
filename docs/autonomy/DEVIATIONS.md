@@ -979,7 +979,7 @@ route.
 
 ---
 
-## DEV-038 - The projection reads offline and writes nothing offline
+## DEV-038 - Offline writes exist for one entity type, and the other two are not waiting on engineering
 
 - **Affected specification**: `12` "Repository behavior" lists a pending-operation journal,
   idempotency keys, conflict status and sync metadata alongside local query/write; `03` group J
@@ -987,10 +987,15 @@ route.
   and `packages/domain/src/sync.ts` implements all of it.
 - **Expected behaviour**: a person with no network can add an item, record a dose or correct a
   record, and the change uploads later exactly once.
-- **Implemented behaviour**: the **read** half only. The encrypted projection holds the last
-  successful profile list and shelf, and both render with no network, labelled `STALE`
-  (DEC-100). Every write still goes straight to the API and fails as `OFFLINE` when there is no
-  network, exactly as it did before.
+- **Implemented behaviour**: the read half, and the write half for **medicine schedules**.
+
+  The journal is built and wired: `pending_operation_v1` is a table in the same SQLCipher database
+  as the projection, scoped to the session like every projection row; `drainPendingOperations`
+  sends what is queued on every foreground; and `classifyUpload` reads each answer against `13`'s
+  codes. A schedule edit that fails as `OFFLINE` is queued and lands on the next connection. Every
+  other write still goes straight to the API and fails as `OFFLINE`, exactly as before - and
+  deliberately, per the reason below.
+
 - **Reason**: the journal is not the missing piece; a decision about each entity is. `13`'s
   conflict policy is **per entity type**, `sync.ts` encodes it, and `isOptimisticallyApplicable`
   already says which mutations may be shown before the server has seen them - "Do not
@@ -1009,15 +1014,31 @@ route.
   is either confirmed by the server or labelled as older than it looks, and nothing is queued
   that could later be applied under a policy nobody chose.
 
-- **Temporary or permanent**: temporary. The domain half exists and is tested; what is missing is
-  the journal table, the retry, and the per-entity application at each call site.
-- **Risk**: low and visible. Somebody offline sees their medicine list and is told a change could
-  not be saved, rather than being told it was saved and finding later that it was not. The
-  opposite failure - a queued edit applied under the wrong conflict rule - is the one `13` writes
-  a per-entity table to prevent.
-- **Required future work**: a `pending_operation` table in the projection keyed by the client
-  operation ID that is already the idempotency key, a retry that drains it, and per-call-site
-  application through `sync.ts`'s existing policy rather than a generic replay.
+- **What closed, and what the policy gate does**: `queue` asks `isOptimisticallyApplicable` before
+  writing anything and **refuses** the types `13` resolves `SERVER_WINS` - caregiver grants,
+  assessments, publications (DEC-110). A refusal rather than a warning, because a warning is a
+  decision handed to whoever wires the next call site, in `apps/**`, where nothing tests it.
+
+  `medicine_schedule` was wired first because Phase 4.1's route already carries both halves a
+  replay needs: an idempotency key scoped to the item, and `expectedVersion` as a precondition. A
+  retry either lands once or comes back as a conflict, with no third outcome to design.
+
+- **What is still open, and why it is not engineering**:
+  - **`owned_item`** reaches Phase 8.5's reconciliation, where two copies of one medicine read as
+    two medicines somebody is taking.
+  - **`dose_event`** needs Phase 4.3's duplicate suppression to have a client that retries.
+  - **Nothing shows a person the queue.** `needsUserAttention` counts the operations that have
+    stopped retrying and the count is exposed, but no screen acts on it - so a conflicted schedule
+    edit is held safely and is not yet resolvable by the person it belongs to. That is the half of
+    `12`'s "resolvable failure state" that is still a state and not yet resolvable.
+- **Temporary or permanent**: temporary, and now partial rather than absent.
+- **Risk**: low and visible, and lower than it was. Somebody offline can set a medicine time and it
+  arrives when the connection does. What they cannot yet do is see that it is waiting, or act on one
+  that came back as a conflict - so the failure mode is a change that stays queued longer than they
+  expect, not one that is lost: nothing is ever discarded, and `drainPendingOperations` leaves
+  untried operations with a full attempt budget rather than spending it on a dead tunnel (DEC-109).
+- **Required future work**: a screen for the queue and for resolving a conflicted operation; then
+  `dose_event` and `owned_item` once the phases they depend on can carry them.
 
 ---
 

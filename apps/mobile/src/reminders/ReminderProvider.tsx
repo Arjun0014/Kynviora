@@ -54,15 +54,15 @@ import type { ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import {
   DEFAULT_NOTIFICATION_DETAIL,
-  IDLE_REMINDER_SYNC,
-  finishReminderSync,
+  IDLE_SYNC_PASS,
+  finishSyncPass,
   instantFrom,
   isNotificationDetailLevel,
   planReminders,
   reconcileReminders,
-  requestReminderSync,
+  requestSyncPass,
   type NotificationDetailLevel,
-  type ReminderSyncGate,
+  type SyncPassGate,
 } from '@kynviora/domain';
 import {
   deviceSchedules,
@@ -152,16 +152,16 @@ export function ReminderProvider({ children }: { readonly children: ReactNode })
     };
   }, [resync]);
 
-  const gate = useRef<ReminderSyncGate>(IDLE_REMINDER_SYNC);
+  const gate = useRef<SyncPassGate>(IDLE_SYNC_PASS);
 
   useEffect(() => {
     if (client === null || activeProfileId === null) return;
 
     // One sync at a time, and a request refused while one is running is deferred rather than
-    // dropped. `requestReminderSync` is where that rule lives and is tested; dropping it is what
+    // dropped. `requestSyncPass` is where that rule lives and is tested; dropping it is what
     // made a cold launch reconcile nothing at all, because the inputs arrive in stages and the
     // only request carrying all of them was the one refused.
-    const asked = requestReminderSync(gate.current);
+    const asked = requestSyncPass(gate.current);
     gate.current = asked.gate;
     if (!asked.start) return;
 
@@ -254,7 +254,7 @@ export function ReminderProvider({ children }: { readonly children: ReactNode })
         if (live) setStatus('UNAVAILABLE');
       })
       .finally(() => {
-        const done = finishReminderSync(gate.current);
+        const done = finishSyncPass(gate.current);
         gate.current = done.gate;
         // A request arrived while this one was working, so it read inputs this run did not have.
         // Bumping the generation re-enters the effect with whatever the current ones are.

@@ -21,11 +21,21 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import type { ReactNode } from 'react';
 import type { ClientSession } from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
-import { openProjection, type Projection } from './projection';
+import type { Projection } from './projection';
+import type { PendingOperationStore } from './pendingOperations';
+import { openLocalStore } from './localStore';
 
 export interface ProjectionContextValue {
   /** `null` until it opens, and permanently where it could not. */
   readonly projection: Projection | null;
+  /**
+   * The journal of edits made with no network (`12`, `DEV-038`).
+   *
+   * Opened on the same connection as the projection, and `null` in exactly the same circumstances
+   * - a device that cannot open its store cannot queue a write either, and a screen that offered
+   * to save offline against a store that is not there would promise something nothing can keep.
+   */
+  readonly pending: PendingOperationStore | null;
   /**
    * The identity every key written through this context is scoped to.
    *
@@ -40,6 +50,7 @@ export interface ProjectionContextValue {
 
 const ProjectionContext = createContext<ProjectionContextValue>({
   projection: null,
+  pending: null,
   sessionId: 'anonymous',
   error: null,
 });
@@ -55,22 +66,24 @@ export function ProjectionProvider({ children }: { readonly children: ReactNode 
   const { session } = useApi();
   const [opened, setOpened] = useState<{
     readonly projection: Projection | null;
+    readonly pending: PendingOperationStore | null;
     readonly error: string | null;
-  }>({ projection: null, error: null });
+  }>({ projection: null, pending: null, error: null });
   const previousSessionId = useRef<string | null>(null);
 
   useEffect(() => {
     let live = true;
 
-    void openProjection().then(
-      (projection) => {
+    void openLocalStore().then(
+      (store) => {
         if (!live) return;
-        setOpened({ projection, error: null });
+        setOpened({ projection: store.projection, pending: store.pending, error: null });
       },
       (reason: unknown) => {
         if (!live) return;
         setOpened({
           projection: null,
+          pending: null,
           error: reason instanceof Error ? reason.message : 'The local store could not be opened.',
         });
       },
@@ -89,11 +102,21 @@ export function ProjectionProvider({ children }: { readonly children: ReactNode 
     // Only on an actual change of identity. The first render is not a sign-out.
     if (previous === null || previous === sessionId || opened.projection === null) return;
     void opened.projection.clear();
-  }, [sessionId, opened.projection]);
+    // The queue goes with it. `12` requires an identity change to invalidate local access, and an
+    // unsent write is local access with a delayed effect - draining the previous person's edit
+    // under the new person's session is the same leak as showing them the previous shelf. The
+    // previous identity's rows are the ones removed, not the new one's.
+    if (opened.pending !== null) void opened.pending.clear(previous);
+  }, [sessionId, opened.projection, opened.pending]);
 
   const contextValue = useMemo<ProjectionContextValue>(
-    () => ({ projection: opened.projection, sessionId, error: opened.error }),
-    [opened.projection, opened.error, sessionId],
+    () => ({
+      projection: opened.projection,
+      pending: opened.pending,
+      sessionId,
+      error: opened.error,
+    }),
+    [opened.projection, opened.pending, opened.error, sessionId],
   );
 
   return <ProjectionContext.Provider value={contextValue}>{children}</ProjectionContext.Provider>;

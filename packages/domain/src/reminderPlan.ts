@@ -279,8 +279,13 @@ export function reconcileReminders(
 }
 
 /**
- * Whether a reconciliation may start now, and what happens to one that arrives while another is
- * already running.
+ * Whether a pass over queued work may start now, and what happens to one that arrives while
+ * another is already running.
+ *
+ * Named for the shape rather than for reminders, because there are now two callers: the reminder
+ * reconciliation this was written for, and the pending-operation drain (`DEV-038`), which has the
+ * identical problem - React effect inputs that arrive in stages, and a request that must not be
+ * lost because it was made while an earlier one was still in flight.
  *
  * WHY THIS IS HERE AND NOT IN THE COMPONENT THAT USES IT
  * Because it is a rule with a wrong answer, and the wrong answer was shipped and measured on a
@@ -302,7 +307,7 @@ export function reconcileReminders(
  * that superseded it is the one that matters. Deferring collapses any number of them into one
  * re-run, because they would all read the same state by the time it happened.
  */
-export interface ReminderSyncGate {
+export interface SyncPassGate {
   /** Whether a reconciliation is in flight. */
   readonly running: boolean;
   /** Whether one was asked for while that was true, and so is owed a run when it finishes. */
@@ -310,16 +315,16 @@ export interface ReminderSyncGate {
 }
 
 /** Nothing running, nothing owed. */
-export const IDLE_REMINDER_SYNC: ReminderSyncGate = { running: false, deferred: false };
+export const IDLE_SYNC_PASS: SyncPassGate = { running: false, deferred: false };
 
 /**
  * Ask for a reconciliation.
  *
  * `start` is whether the caller should begin one now. When it is false the request is not refused,
- * it is remembered: `finishReminderSync` will hand it back.
+ * it is remembered: `finishSyncPass` will hand it back.
  */
-export function requestReminderSync(gate: ReminderSyncGate): {
-  readonly gate: ReminderSyncGate;
+export function requestSyncPass(gate: SyncPassGate): {
+  readonly gate: SyncPassGate;
   readonly start: boolean;
 } {
   if (gate.running) return { gate: { running: true, deferred: true }, start: false };
@@ -333,9 +338,9 @@ export function requestReminderSync(gate: ReminderSyncGate): {
  * that threw still releases the gate - a failed reconciliation that left `running` true would stop
  * every later one, which is the original defect made permanent.
  */
-export function finishReminderSync(gate: ReminderSyncGate): {
-  readonly gate: ReminderSyncGate;
+export function finishSyncPass(gate: SyncPassGate): {
+  readonly gate: SyncPassGate;
   readonly rerun: boolean;
 } {
-  return { gate: IDLE_REMINDER_SYNC, rerun: gate.deferred };
+  return { gate: IDLE_SYNC_PASS, rerun: gate.deferred };
 }

@@ -3583,3 +3583,102 @@ The second and third rows are Phase 4.2's edit and cancellation paths, and befor
 were silently a launch behind.
 
 **Sources.** `04` Phase 4.2; trap 164; `12`; the `logcat` capture above; `reminderPlan.test.ts`.
+
+---
+
+## DEC-109 - A drain stops for the network and for authorization, and for nothing else
+
+**Date:** 2026-09-03
+**Phase:** 12 / 13 (offline write journal), `DEV-038`
+
+**Status:** Accepted
+
+**Context.** `12` requires a pending-operation journal and `13` a bounded retry. The domain half has
+existed since Stage 1 - `PendingOperation`, `uploadOrder`, `isUploadable`, `recordUploadOutcome`,
+`MAX_UPLOAD_ATTEMPTS` - and nothing had ever queued a row. Writing the drain is what forced the
+question the loop actually turns on: not what to send, but when to stop.
+
+**Decision.** `drainPendingOperations` ends the pass on `OFFLINE`, `UNAUTHENTICATED` and
+`AUTHORIZATION_LOST`, and continues past everything else. Operations after the stop are returned
+`untouched` - still `PENDING`, attempt count zero - and nothing is discarded.
+
+**Rationale, one failure at a time.**
+
+_Continuing after the network died_ spends an attempt on every remaining operation for a request
+none of them could have succeeded at. Five queued edits and one dropped tunnel is five operations
+pushed towards `MAX_UPLOAD_ATTEMPTS`, and a person who reconnects finds their edits marked as
+needing attention rather than simply sent. The attempt budget exists to bound retries of things that
+_failed_; spending it on one unreachable server empties it for the wrong reason.
+
+_Continuing after authorization ended_ is a revoked caregiver's remaining edits arriving one after
+another. Each is refused, which is not the point - the point is that they were sent, and `12`
+requires authorization loss to invalidate local access rather than to be pushed through.
+
+_Stopping on anything else_ would be worse than either. A validation refusal is about one edit and
+says nothing about the next, so one malformed change would block every other queued edit
+indefinitely. `SERVER_ERROR` is the interesting near-miss and it does **not** stop the drain: a 500
+is about the request that caused it, and one endpoint failing is not evidence the next will.
+
+**The operation that ended the drain is still recorded.** It was genuinely attempted and its attempt
+count should say so. What is left alone is everything after it.
+
+**Two answers are deferred to the server rather than decided here.** `13` puts `retryable` on the
+wire, and reading it is the difference between two edits surviving and two edits lost: a 500 the
+server marks final is a rejection rather than four more attempts, and a refusal marked retryable is
+a retry. `RATE_LIMITED` is the case that makes the second one matter - a 429 asks for a pause, and
+treating every refusal as final would permanently fail somebody's schedule change because they
+happened to save it during a burst. The first version of this mapping did exactly that.
+
+**Where the switch is exhaustive on purpose.** `endsTheDrain` lists every `ApiOutcome` member rather
+than using a `default`, so a member added later does not silently acquire "keep going" as its
+answer.
+
+**Sources.** `12` ("Repository behavior"; authorization loss invalidates local access); `13` (sync
+protocol, bounded retry, stable machine-readable codes); `03` group J; `DEV-038`; `drain.test.ts`.
+
+---
+
+## DEC-110 - The journal refuses an entity type rather than warning about it
+
+**Date:** 2026-09-03
+**Phase:** 12 / 13 (offline write journal), `DEV-038`
+
+**Status:** Accepted
+
+**Context.** `DEV-038` had said, since it was written, that the journal was not the missing piece -
+a decision about each entity was. `13`'s conflict policy is per entity type and `sync.ts` already
+encodes it; `isOptimisticallyApplicable` already says which mutations may be shown before the server
+has agreed.
+
+**Decision.** `PendingSyncProvider.queue` asks `isOptimisticallyApplicable` before writing anything
+and returns `false` where the answer is no. The caller then reports the failure it already had. One
+entity type is wired to a sender: `medicine_schedule`.
+
+**Rationale.** A queue that accepts everything and sorts it out at upload time is the global
+last-write-wins `13` refuses, arrived at by a different route. `caregiver_grant`, `profile_assessment`
+and `alert_publication` all resolve `SERVER_WINS`, and a queued change to any of them would be an
+authorization or safety outcome shown to somebody as done on the strength of nothing - a caregiver
+grant appearing active while offline is the worst version, because the person who acted on it
+believes somebody has access they do not.
+
+**Why a refusal and not a warning.** A warning is a decision handed to whoever wired the call site
+next, in `apps/**`, where nothing tests it. A `false` return is a decision made once, in a package
+that has tests, and the screen keeps the honest behaviour it already had - "this could not be saved"
+
+- rather than acquiring a wrong one.
+
+**Why one entity type and not all the eligible ones.** `owned_item` and `dose_event` are
+optimistically applicable under the policy and are still not wired, for the reasons `DEV-038` gave
+and which have not changed: an item created offline reaches Phase 8.5's reconciliation, where two
+copies of one medicine read as two medicines somebody is taking; a dose event created offline needs
+Phase 4.3's duplicate suppression to have a client that retries. `medicine_schedule` was wired first
+because Phase 4.1's route already carries both halves a replay needs - an idempotency key scoped to
+the item, and `expectedVersion` as a precondition - so a retry either lands once or comes back as a
+conflict, with no third outcome to design.
+
+**What is not built.** Nothing yet shows a person the queue, or lets them resolve a conflicted
+operation. `needsUserAttention` counts them and the count is exposed; the screen that acts on it is
+not written, and `DEV-038` says so rather than the count implying otherwise.
+
+**Sources.** `12`; `13` (conflict policy per entity type); `04` Phase 4.1, 4.3, 8.5; `DEV-038`;
+`sync.ts`; trap 164.
