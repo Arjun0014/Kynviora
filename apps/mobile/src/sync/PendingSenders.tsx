@@ -27,13 +27,18 @@
  * to be standing.
  *
  * WHY IT RENDERS NOTHING
- * There is nothing to show. `12`'s "resolvable failure state" - the screen that lists what is
- * waiting and lets somebody act on a conflicted operation - is still missing, and it is tracked as
- * missing (`DEV-038`) rather than half-answered by a component whose real job is registration.
+ * Because showing the queue is a different job, and it now has its own screen: `PendingQueue` lists
+ * what is waiting and lets somebody act on a change the server refused (`12`'s resolvable failure
+ * state). This file only registers how each type goes on the wire.
  */
 
 import { useEffect } from 'react';
-import type { ItemUpdateBody, ScheduleBody, ScheduleChangeBody } from '@kynviora/contracts';
+import type {
+  HealthFactChangeBody,
+  ItemUpdateBody,
+  ScheduleBody,
+  ScheduleChangeBody,
+} from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
 
@@ -63,6 +68,36 @@ export function PendingSenders() {
         );
       }
       return client.updateSchedule(operation.entityId, operation.payload as ScheduleChangeBody);
+    });
+
+    /**
+     * A queued review of an allergy or sensitivity.
+     *
+     * `13` resolves `allergy_record` `ASK_USER`, and `DEV-038` refused to wire it until there was a
+     * screen where a person could resolve one - offering to keep a change somebody then cannot act
+     * on is worse than saying "not saved" at the time. That screen exists now (`PendingQueue`).
+     *
+     * **Only the review, not the create.** `addHealthFact` deliberately takes no idempotency key:
+     * the contract's reasoning is that a retried create makes a second allergy row, which is
+     * visible on the list and correctable. That reasoning is about a person tapping twice. A
+     * journal replays on its own, after an answer was lost, with nobody watching - and a second
+     * row appearing unbidden is not the same proposition. The review is conditional on
+     * `expectedVersion`, so a replay of one either lands once or comes back as a conflict.
+     *
+     * `condition_record` is not registered because there is no such feature to queue from
+     * (`DEV-035`), which is a better reason than the one `DEV-038` used to give.
+     */
+    registerSender('allergy_record', async (operation) => {
+      if (operation.mutation !== 'UPDATE') {
+        return {
+          kind: 'REFUSED',
+          code: 'VALIDATION_FAILED',
+          message: 'Unsupported offline change.',
+          retryable: false,
+          correlationId: null,
+        };
+      }
+      return client.updateHealthFact(operation.entityId, operation.payload as HealthFactChangeBody);
     });
 
     /**

@@ -20,7 +20,7 @@ Last updated: 2026-09-04
 
 ## Verification state
 
-- **3863 tests passing**, 0 failing, across 133 files.
+- **3932 tests passing**, 0 failing, across 137 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 

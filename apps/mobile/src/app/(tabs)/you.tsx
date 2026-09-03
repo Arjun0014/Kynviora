@@ -47,9 +47,14 @@ import { ConsentSettings } from '@/features/consent/ConsentSettings';
 import { HealthContext } from '@/features/profiles/HealthContext';
 import { ProfileSwitcher } from '@/features/profiles/ProfileSwitcher';
 import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
+import { PendingQueue } from '@/features/sync/PendingQueue';
+import { usePendingSync } from '@/sync/PendingSyncProvider';
 
 export default function YouScreen() {
   const { client, session, configurationError, elevate } = useApi();
+  // Read here rather than inside `PendingQueue`, so the section is absent when the journal is empty
+  // rather than rendering a heading over nothing.
+  const { waiting: pendingWaiting, needsAttention: pendingNeedsAttention } = usePendingSync();
   const {
     activeProfile,
     activeProfileId,
@@ -229,6 +234,12 @@ export default function YouScreen() {
           Kynviora is not set up to talk to a server on this device.
         </Text>
       )}
+
+      {/* Near the top, and only when there is something in it. `12` requires a **resolvable**
+          failure state, and a change the server refused is the one thing on this screen that is
+          waiting on the person rather than describing a setting. It renders nothing when the
+          journal is empty, so it is not a permanent reminder that syncing exists (`DEV-038`). */}
+      {pendingWaiting + pendingNeedsAttention > 0 ? <PendingQueue /> : null}
 
       {/* `04` Phase 1.2. Above everything else on this screen: whose records these are is the
           question that has to be answered before any setting on the page means anything.

@@ -101,6 +101,24 @@ export interface PendingSyncContextValue {
   readonly registerSender: (entityType: SyncEntityType, send: Sender) => void;
   /** Try to send what is queued now. */
   readonly drain: () => void;
+  /** Everything in the journal, for the screen that shows it (`12`, `DEV-038`). */
+  readonly list: () => Promise<readonly PendingOperation[]>;
+  /**
+   * Put one operation back in the queue.
+   *
+   * The attempt count is reset, which is the whole point: an operation that stopped retrying has
+   * spent its budget, and a person choosing "try again" is saying the reason it failed may have
+   * gone. Without the reset the button would be a no-op that looks like one.
+   */
+  readonly retry: (operationId: OperationId) => Promise<void>;
+  /**
+   * Remove one operation, unsent.
+   *
+   * The only action in this app that destroys a change somebody made, so it is never taken on
+   * anybody's behalf: `12` forbids discarding an edit silently, and this is only ever called from a
+   * control the person pressed.
+   */
+  readonly discard: (operationId: OperationId) => Promise<void>;
 }
 
 const PendingSyncContext = createContext<PendingSyncContextValue>({
@@ -109,6 +127,9 @@ const PendingSyncContext = createContext<PendingSyncContextValue>({
   needsAttention: 0,
   registerSender: () => undefined,
   drain: () => undefined,
+  list: () => Promise.resolve([]),
+  retry: () => Promise.resolve(),
+  discard: () => Promise.resolve(),
 });
 
 export function PendingSyncProvider({ children }: { readonly children: ReactNode }) {
@@ -255,6 +276,43 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
     };
   }, [pending, sessionId, generation]);
 
+  const list = useCallback(async (): Promise<readonly PendingOperation[]> => {
+    if (pending === null) return [];
+    return pending.list(sessionId);
+  }, [pending, sessionId]);
+
+  const retry = useCallback(
+    async (operationId: OperationId): Promise<void> => {
+      if (pending === null) return;
+      const found = (await pending.list(sessionId)).find(
+        (operation) => operation.operationId === operationId,
+      );
+      if (found === undefined) return;
+      // Back to `PENDING` with a fresh budget. `isUploadable` refuses a `CONFLICTED` or `REJECTED`
+      // row and refuses a `FAILED_RETRYABLE` one at the cap, so anything the screen offers to retry
+      // is in a state the drain would otherwise pass over for ever.
+      await pending.put(sessionId, {
+        ...found,
+        state: 'PENDING',
+        attemptCount: 0,
+        lastError: null,
+      });
+      drain();
+    },
+    [pending, sessionId, drain],
+  );
+
+  const discard = useCallback(
+    async (operationId: OperationId): Promise<void> => {
+      if (pending === null) return;
+      await pending.remove(sessionId, operationId);
+      // Not to send anything - there is nothing new to send - but to recount, so the screen and the
+      // badge agree with the journal immediately rather than at the next foreground.
+      drain();
+    },
+    [pending, sessionId, drain],
+  );
+
   const value = useMemo<PendingSyncContextValue>(
     () => ({
       queue,
@@ -262,8 +320,11 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
       needsAttention: counts.needsAttention,
       registerSender,
       drain,
+      list,
+      retry,
+      discard,
     }),
-    [queue, counts.waiting, counts.needsAttention, registerSender, drain],
+    [queue, counts.waiting, counts.needsAttention, registerSender, drain, list, retry, discard],
   );
 
   return <PendingSyncContext.Provider value={value}>{children}</PendingSyncContext.Provider>;

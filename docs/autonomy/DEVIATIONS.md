@@ -979,7 +979,7 @@ route.
 
 ---
 
-## DEV-038 - Offline writes exist for schedules and item edits, and the ones still open are not waiting on engineering
+## DEV-038 - Offline writes are visible and resolvable, and what is still open is not waiting on engineering
 
 - **Affected specification**: `12` "Repository behavior" lists a pending-operation journal,
   idempotency keys, conflict status and sync metadata alongside local query/write; `03` group J
@@ -1026,6 +1026,22 @@ route.
   assessments, publications (DEC-110). A refusal rather than a warning, because a warning is a
   decision handed to whoever wires the next call site, in `apps/**`, where nothing tests it.
 
+  **The queue is now visible and resolvable**, which is the other half of `12`'s sentence and the
+  half this deviation had been open on. `PendingQueue` lists what is waiting, in the words a person
+  uses - "A change to when a medicine is taken", not `medicine_schedule` - and offers what each row
+  can honestly support: both "try again" and "remove" on a conflict, because `13` says the person
+  decides; **only** "remove" on a rejection, because the server has read the change and retrying is
+  the same refusal later; and nothing at all on one that is simply waiting, because a change about
+  to be sent is not a question. Those decisions live in `pendingQueueView` where they are tested;
+  the screen renders them (trap 164).
+
+  Driven on the device: an edit saved with the API switched off appears as "1 change is waiting to
+  be sent", and the section is gone after the next foreground, with the server holding the change.
+
+  It is also why `DEV-044` could only be found by watching the wire. With nothing showing what was
+  waiting, "queued and not sent" and "sent" looked identical from inside the app, and the store is
+  SQLCipher-encrypted so `sqlite3` could not answer it either.
+
   `medicine_schedule` was wired first because Phase 4.1's route already carries both halves a
   replay needs: an idempotency key scoped to the item, and `expectedVersion` as a precondition. A
   retry either lands once or comes back as a conflict, with no third outcome to design.
@@ -1038,24 +1054,26 @@ route.
     Their call sites (`HealthContext.tsx`) are not yet wired, because the conflict-resolution
     screen `12` calls "a resolvable failure state" is not built - and offering to queue a change
     the person cannot then resolve is worse than saying "not saved" upfront on this class of fact.
-  - **Nothing shows a person the queue.** `needsUserAttention` counts the operations that have
-    stopped retrying and the count is exposed, but no screen acts on it - so a conflicted schedule
-    edit is held safely and is not yet resolvable by the person it belongs to. That is the half of
-    `12`'s "resolvable failure state" that is still a state and not yet resolvable.
-
-    It is also why `DEV-044` could only be found on a device and only by watching the wire: with no
-    screen showing what is waiting, "the edit was queued and not sent" and "the edit was sent" look
-    identical from inside the app, and the store is SQLCipher-encrypted so `sqlite3` cannot answer
-    it either. The queue screen is the first thing that would make the journal observable to the
-    person whose edit is in it, and to anyone verifying that it moved.
+  - **`allergy_record` CREATE** stays unwired for a reason that is now specific rather than
+    structural: `addHealthFact` deliberately carries no idempotency key, on the contract's
+    reasoning that a retried create makes a second allergy row which is "visible on the list,
+    correctable, and harmless". That reasoning is about a person tapping twice. A journal replays
+    on its own, after an answer was lost, with nobody watching - and a second row appearing
+    unbidden is a different proposition from one somebody caused. The **review** of a fact is
+    wired, because it is conditional on `expectedVersion`.
+  - **`condition_record`** is not wired because there is no such feature to queue from
+    (`DEV-035`) - a better reason than the one this deviation used to give.
 - **Temporary or permanent**: temporary, and now partial rather than absent.
 - **Risk**: low and visible, and lower than it was. Somebody offline can set a medicine time and it
   arrives when the connection does. What they cannot yet do is see that it is waiting, or act on one
   that came back as a conflict - so the failure mode is a change that stays queued longer than they
   expect, not one that is lost: nothing is ever discarded, and `drainPendingOperations` leaves
   untried operations with a full attempt budget rather than spending it on a dead tunnel (DEC-109).
-- **Required future work**: a screen for the queue and for resolving a conflicted operation; then
-  `dose_event` and `owned_item` once the phases they depend on can carry them.
+- **Required future work**: `dose_event` and `owned_item` CREATE once the phases they depend on
+  can carry them, and `allergy_record` CREATE if that route ever takes an idempotency key. What the
+  queue screen does not yet show is the two versions of a conflicted record side by side - it says
+  a person decides and lets them keep or discard their own change, which is `13`'s outcome, but
+  choosing between two texts they can both read would be better.
 
 ---
 

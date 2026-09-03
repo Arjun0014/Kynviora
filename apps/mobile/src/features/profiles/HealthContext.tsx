@@ -51,6 +51,7 @@ import {
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import { useApi } from '@/api/ApiProvider';
+import { usePendingSync } from '@/sync/PendingSyncProvider';
 
 export interface HealthContextProps {
   readonly view: HealthContextView;
@@ -61,6 +62,7 @@ export interface HealthContextProps {
 
 export function HealthContext({ view, profileId, onChanged }: HealthContextProps) {
   const { client } = useApi();
+  const { queue: queueEdit } = usePendingSync();
 
   const [kind, setKind] = useState('');
   const [term, setTerm] = useState('');
@@ -117,32 +119,55 @@ export function HealthContext({ view, profileId, onChanged }: HealthContextProps
       setState('LOADING');
       setMessage(null);
 
-      void client
-        .updateHealthFact(row.id, { expectedVersion: row.version, markReviewed: true })
-        .then(
-          (outcome) => {
-            if (outcome.kind === 'OK') {
-              setState(null);
-              onChanged();
-              return;
-            }
-            // A conflict here means somebody else changed the record while this list was open.
-            // The copy says nothing was saved, which is true: the write was conditional.
-            setState(screenStateForFailure(outcome));
-            setMessage(
-              outcome.kind === 'REFUSED' &&
-                outcome.detail?.['reason_code'] === 'health_fact_version'
-                ? HEALTH_CONTEXT_COPY.conflictNote
-                : messageForFailure(outcome),
-            );
-          },
-          () => {
-            setState('RECOVERABLE_ERROR');
-            setMessage(null);
-          },
-        );
+      const body = { expectedVersion: row.version, markReviewed: true };
+
+      void client.updateHealthFact(row.id, body).then(
+        (outcome) => {
+          if (outcome.kind === 'OK') {
+            setState(null);
+            onChanged();
+            return;
+          }
+          /**
+           * With no signal, the review is kept rather than refused.
+           *
+           * `13` resolves `allergy_record` `ASK_USER` and the write is conditional on
+           * `expectedVersion`, so a replay either lands once or comes back as a conflict - and a
+           * conflict is now something a person can see and decide about (`PendingQueue`), which is
+           * the condition `DEV-038` set before this could be wired at all. Only the review: adding
+           * a fact still fails as offline, because that route carries no idempotency key and an
+           * automatic replay is not the hand-retry its contract reasoned about.
+           */
+          if (outcome.kind === 'OFFLINE') {
+            void queueEdit({
+              entityType: 'allergy_record',
+              entityId: row.id,
+              mutation: 'UPDATE',
+              payload: body,
+              baseVersion: row.version,
+            }).then((queued) => {
+              setState(queued ? null : screenStateForFailure(outcome));
+              setMessage(queued ? null : messageForFailure(outcome));
+              if (queued) onChanged();
+            });
+            return;
+          }
+          // A conflict here means somebody else changed the record while this list was open.
+          // The copy says nothing was saved, which is true: the write was conditional.
+          setState(screenStateForFailure(outcome));
+          setMessage(
+            outcome.kind === 'REFUSED' && outcome.detail?.['reason_code'] === 'health_fact_version'
+              ? HEALTH_CONTEXT_COPY.conflictNote
+              : messageForFailure(outcome),
+          );
+        },
+        () => {
+          setState('RECOVERABLE_ERROR');
+          setMessage(null);
+        },
+      );
     },
-    [client, onChanged],
+    [client, onChanged, queueEdit],
   );
 
   return (
