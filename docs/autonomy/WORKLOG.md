@@ -3241,3 +3241,87 @@ Every file touched this session was then scanned for stray control characters; t
 `npm run verify:device:reminders` 9/9. `19`'s device scenarios go from five covered to six, and the
 remaining eight divide into four waiting on features that do not exist and four that are built and
 simply have not been driven on a device yet (`DEV-040`).
+
+---
+
+## 2026-09-03 - Session: what an update is allowed to take with it
+
+Resumed with the tree clean at 3750 tests across 126 files and `npm run verify` exit 0, which the
+run reproduced before anything was changed.
+
+**Two API servers were holding the same PGlite directory again.** `ListAgents` showed every
+Kynviora peer session offline, so this session is the only writer - but two `tsx watch src/main.ts`
+supervisors were alive, one of them the loser of an earlier `EADDRINUSE` that had exited its
+listener and kept watching. That is trap 175 exactly, and it is worth noting that the port check
+does not catch it: only one of them was listening. The stale process tree was killed and the live
+one left alone, which is the distinction the resume brief asks for.
+
+### Update over an existing install
+
+`19`'s "Android install/update" row had said "install covered; update over an existing install
+untested" since the device work began. It is the one routine event that runs new code against an
+old file, and the failure it produces is total and silent: a key that no longer derives, or a schema
+the new build will not open, and everything a household kept offline is gone with no error anybody
+would connect to the update. `12` makes that store the thing somebody depends on precisely when
+they have no signal to re-fetch with.
+
+`npm run verify:device:update` fills the store by _using_ the app, reads the encrypted file out
+through `run-as`, installs the APK over the existing app, and reads it again. **6/6 PASS:**
+
+| Check   | What the device showed                                                                |
+| ------- | ------------------------------------------------------------------------------------- |
+| `UPD-0` | the app rendered seeded content first, so there was something for the update to lose  |
+| `UPD-1` | `firstInstallTime` unchanged, `lastUpdateTime` moved - a replace, not a reinstall     |
+| `UPD-2` | the database is byte-identical across the update, all 12,288 of them                  |
+| `UPD-3` | with the API out of reach, the updated app still showed what only the local store had |
+| `UPD-4` | it launched and stayed running                                                        |
+| `UPD-5` | 15 of 15 pending alarms held after the package was replaced                           |
+
+**`UPD-1` is the check the scenario is built around, and it is the one that is easy to leave out.**
+A clean install also produces a working app - it just has none of the person's data in it, and it
+would pass `UPD-2` through `UPD-5` by re-fetching everything. `adb install -r` silently falling back
+to a clean install would then produce a green run proving the opposite of its claim. Both times are
+read and both are required: `lastUpdateTime` moving says something happened, `firstInstallTime`
+holding says the data directory was not taken away underneath it. `parseInstallIdentity` returns
+`null` rather than defaulting a missing time, because two absent values compare equal and equal
+times are how a reinstall reports itself as an update.
+
+`UPD-2` is byte equality rather than existence for the same reason. A new build that could not open
+the old file and quietly created a fresh one leaves a database at the same path, of a plausible
+size, that a person's data is simply not in - and "the file is there" calls that a pass.
+
+`UPD-5` came out of the reminder work: Android drops an app's alarms when its package is replaced,
+and `expo-notifications` re-registers from its own store on `MY_PACKAGE_REPLACED`. That is the same
+mechanism the reboot check measures, on the other event that triggers it, and it is polled rather
+than read once - for the reason `REM-5` had to become a poll.
+
+**What this does not cover, and it is narrower than the row's name.** Nothing here installs a build
+whose _local schema_ differs from the one on disk, because no second shape exists. The projection
+writes to `projected_read_v1` and the table name is the version, so a shape change means a new table
+created empty and old rows that nothing reads and nothing removes. Two consequences follow and they
+arrive together: somebody offline loses their copy at exactly the moment they cannot re-fetch it,
+and a table full of medicine names is retained with no reader, which is what `14` and `21` call more
+data than is needed.
+
+The obvious fix - drop every `projected_read_v%` that is not current, on open - is deliberately not
+written, because it forecloses the better one. A build that wanted to _migrate_ v1 rows into v2
+needs them still there, and a cleanup that runs on open destroys its input first. Choosing between
+migrating and discarding somebody's data belongs to the change that introduces v2, where both shapes
+are known. That is `DEV-042`.
+
+### The dependency gate, actually run
+
+`04` Phase 9.2 lists dependency and secret scanning in CI among its outstanding items, and
+`STATUS` has said "CI pipeline: written; not yet run on a real runner" throughout. The audit gate
+was run here directly: `npm audit --audit-level=high` **exits 0**, over 13 moderate findings and no
+high ones, all of them in the Expo prebuild toolchain rather than in anything that ships. Recorded
+because a gate nobody has executed is a gate nobody knows the state of - and the exit code was
+captured directly rather than through a pipe, which is the mistake `ci.yml`'s own header warns
+about and which the first attempt here made.
+
+### State
+
+3773 tests across 126 files, `npm run verify` exit 0. Four device harnesses, all green against a
+Pixel 7 / Android 16 emulator: `verify:device` 7/7, `verify:device:a11y` 34/34,
+`verify:device:reminders` 9/9, `verify:device:update` 6/6. Their judgements are covered by 131 tests
+that need no device. `19`'s device scenarios go from six covered to seven.

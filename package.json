@@ -29,7 +29,8 @@
     "migrate": "npm --prefix db run migrate",
     "verify:device": "tsx scripts/device/verifyLocalStorage.ts",
     "verify:device:a11y": "tsx scripts/device/verifyAccessibility.ts",
-    "verify:device:reminders": "tsx scripts/device/verifyReminders.ts"
+    "verify:device:reminders": "tsx scripts/device/verifyReminders.ts",
+    "verify:device:update": "tsx scripts/device/verifyUpdate.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

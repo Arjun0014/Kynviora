@@ -743,8 +743,13 @@ and the review screen typechecks but is not wired (`DEV-007`).
 
 - **9.1**: `BLK-008` - needs a labelled dataset, and `22` requires leadership to set the numeric
   thresholds.
-- **9.2**: RLS negative tests are automated and passing. Penetration testing, dependency/secret
-  scanning in CI, and MASVS device testing are outstanding.
+- **9.2**: RLS negative tests are automated and passing. The dependency gate has now been _run_
+  rather than only written: `npm audit --audit-level=high` exits 0 over 13 moderate findings, all
+  in the Expo prebuild toolchain and none in anything that ships. MASVS local-data-storage and
+  key-management testing is covered by `verify:device`, and the install/update path by
+  `verify:device:update` (`DEV-040`). Penetration testing, the secret scan on a real runner, and
+  the other MASVS categories - network communication, platform interaction, deep links, tampering -
+  are outstanding.
 - **9.3 / 9.4**: require qualified reviewers (`BLK-006`) and human usability participants.
 - **9.5**: requires legal and regulatory-classification review.
 

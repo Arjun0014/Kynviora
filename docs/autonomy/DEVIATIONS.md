@@ -1069,17 +1069,18 @@ route.
 
 ---
 
-## DEV-040 - Six of `19`'s fourteen device scenarios are covered, and the other eight are not waiting on a device
+## DEV-040 - Seven of `19`'s fourteen device scenarios are covered, and the other seven are not waiting on a device
 
 - **Affected specification**: `19` "Device E2E tests" lists fourteen scenarios that must be
   covered.
 - **Expected behaviour**: all fourteen exercised on a device.
-- **Implemented behaviour**: six, plus three automated harnesses that re-run them
-  (`npm run verify:device`, `npm run verify:device:a11y`, `npm run verify:device:reminders`).
+- **Implemented behaviour**: seven, plus four automated harnesses that re-run them
+  (`npm run verify:device`, `npm run verify:device:a11y`, `npm run verify:device:reminders`,
+  `npm run verify:device:update`).
 
   | `19` scenario                         | State                                                      |
   | ------------------------------------- | ---------------------------------------------------------- |
-  | Android install/update                | Install covered; update over an existing install untested  |
+  | Android install/update                | **Covered** - data, key and reminders survive a replace    |
   | Sign-up/sign-in/recovery              | No authentication exists (`BLK-010`, Phase 1.1)            |
   | Profile creation                      | Built and untested on device                               |
   | Medicine add/scan/manual path         | Manual path built; no scanner (`04` Phase 2.2)             |
@@ -1096,10 +1097,10 @@ route.
 
 - **Reason**: the environment blocker is gone, and what is left divides into two kinds. Four
   scenarios are about a feature that does not exist, and each names the blocker or deviation that
-  explains why. Four are about features that do exist and simply have not been driven on a device
+  explains why. Three are about features that do exist and simply have not been driven on a device
   yet - which is work, not a decision. Nothing here is waiting on hardware.
 
-  The four worth being explicit about, because their state is easy to misread:
+  The five worth being explicit about, because their state is easy to misread:
 
   **"Medicine reminder after process death" is now genuinely covered, and getting there found a
   measurement error worth remembering.** The harness first used `am force-stop`, which cancels an
@@ -1121,6 +1122,15 @@ route.
   announcements are any good is a question for somebody listening, which `04` Phase 9.4 already
   says needs people this build does not have.
 
+  **"Android install/update" is covered, and what it measures is narrower than its name.**
+  `npm run verify:device:update` fills the store by using the app, reads the encrypted file out
+  through `run-as`, installs over the existing app, and reads it again - byte-identical, the
+  keystore key still opens it, no crash, and 15 of 15 reminders back after the package replace. The
+  control that makes those mean anything is `UPD-1`: `firstInstallTime` unchanged and
+  `lastUpdateTime` moved, because a clean install would also produce a working app with none of the
+  person's data in it, and would pass every other check. What it does not cover is a build whose
+  _local schema_ differs from the one on disk, because no second shape exists yet - `DEV-042`.
+
   **"Clock/time-zone change" is covered, and getting it to mean anything took more than changing
   the clock.** `REM-7` moves the device from `Asia/Calcutta` to `Europe/London` and asserts every
   pending dose is still at the same absolute instant - the rule being that a schedule carries its
@@ -1138,10 +1148,10 @@ route.
 
 - **Temporary or permanent**: temporary.
 - **Risk**: low, and the shape of it is known rather than hidden. The claim being avoided is "the
-  device suite passes", which would read as fourteen scenarios when it is six.
-- **Required future work**: drive the four built-but-untested flows on the emulator and add them to
-  a harness - profile creation, caregiver invite/revoke, Visit Pack export, and an update over an
-  existing install; the other four unblock with the blockers they name.
+  device suite passes", which would read as fourteen scenarios when it is seven.
+- **Required future work**: drive the three built-but-untested flows on the emulator and add them
+  to a harness - profile creation, caregiver invite/revoke, and Visit Pack export; the other four
+  unblock with the blockers they name.
 
 ---
 
@@ -1209,3 +1219,45 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Risk**: 1 is the material one - a person who believes they are being reminded and is not.
   2 is bounded by a fortnight of not opening the app at all. 3 is a small annoyance in the direction
   that fails safe. 4 is an unmade claim rather than a broken promise.
+
+---
+
+## DEV-042 - The local store has no schema migration, and an update that changes its shape abandons the offline copy
+
+- **Affected specification**: `12` "Repository behavior" (the encrypted structured local store);
+  `03` group J (a person with no signal still sees their medicines); `19` ("Android
+  install/update"); `14` and `21` (data minimisation - keeping no more health data than is needed).
+- **Expected behaviour**: an app update carries a person's offline copy forward, whatever changed
+  in how it is stored.
+- **Implemented behaviour**: it carries it forward only while the shape does not change. The
+  projection writes to `projected_read_v1` and the table name **is** the version
+  (`apps/mobile/src/storage/projection.ts`), so a shape change means a new table created empty by
+  `CREATE TABLE IF NOT EXISTS`. Nothing migrates the rows, and nothing removes them.
+- **What is verified, and what this is not**: `npm run verify:device:update` passes 6/6 - the
+  encrypted database is byte-identical across an `install -r`, the keystore key still opens it, the
+  app does not crash, and 15 of 15 pending reminders come back. All of that is the platform's
+  replace path and the app's key handling, and all of it holds. What it does not exercise is a
+  build whose local schema differs from the one on disk, because no second shape exists yet.
+- **The two consequences, in order of who they hurt**:
+  1. **Somebody offline loses their copy at exactly the wrong moment.** A shape change lands with
+     an app update; the new table is empty until a successful fetch; and a person with no signal is
+     the one who cannot make that fetch. The failure is silent and reads as "the app forgot my
+     medicines" - `03` group J is the requirement it breaks.
+  2. **The abandoned table is never dropped.** Its rows hold medicine and profile names, and after
+     a shape change nothing reads them and nothing removes them. `14` and `21` ask for no more
+     health data retained than is needed, and an orphaned table is the definition of more.
+- **Why it is not fixed here, which is a decision rather than an omission**: the obvious fix -
+  dropping every `projected_read_v%` table that is not the current one, on open - would foreclose
+  the better fix. A build that wanted to _migrate_ v1 rows into v2 needs them to still be there,
+  and a cleanup that runs on open destroys its input before the migration can be written. Choosing
+  between "migrate" and "discard" is a decision about somebody's data that belongs to the change
+  that introduces v2, where the shapes are both known. Guessing it now, against a v2 nobody has
+  designed, is how the wrong one gets locked in.
+- **Temporary or permanent**: temporary, and dormant. Nothing is wrong today: there is one shape,
+  and it survives an update byte for byte.
+- **Risk**: none while one shape exists. On the day a second one lands, both consequences arrive
+  together and unannounced unless this is read first.
+- **Required future work**: with the v2 shape in hand, decide migrate-or-discard for the v1 rows,
+  implement it on open, drop the old table once its rows have been dealt with either way, and
+  extend `verify:device:update` to install a build whose local schema differs - which is the only
+  version of this scenario that measures the thing rather than the platform underneath it.
