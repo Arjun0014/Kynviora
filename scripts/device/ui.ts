@@ -46,6 +46,26 @@ export function centreOf(node: UiNode): Point {
 }
 
 /**
+ * How a control is asked for.
+ *
+ * A plain string is the whole accessible name. `{ startsWith }` is for the many controls whose name
+ * is a label followed by its own help sentence - a form field announces "Name. Whatever you call
+ * them. It is only ever shown to you and to people you invite." - where pinning the exact string
+ * would make this harness fail on a wording change that broke nothing (`18` requires the help to be
+ * announced, and it is expected to be edited).
+ */
+export type NameMatch = string | { readonly startsWith: string };
+
+export function nameMatches(actual: string, wanted: NameMatch): boolean {
+  return typeof wanted === 'string' ? actual === wanted : actual.startsWith(wanted.startsWith);
+}
+
+/** How a match reads in a report. */
+export function describeMatch(wanted: NameMatch): string {
+  return typeof wanted === 'string' ? wanted : `${wanted.startsWith}...`;
+}
+
+/**
  * The node carrying this accessible name, preferring one that can be tapped.
  *
  * A label and the control it labels often carry the same name - the label is drawn text, the
@@ -53,9 +73,9 @@ export function centreOf(node: UiNode): Point {
  * session's failure, so the clickable candidate wins and the first match is only a fallback for
  * fields like a `TextInput`, which reports itself as focusable rather than clickable.
  */
-export function nodeNamed(nodes: readonly UiNode[], name: string): UiNode | null {
+export function nodeNamed(nodes: readonly UiNode[], name: NameMatch): UiNode | null {
   const matches = nodes.filter(
-    (node) => node.packageName === PACKAGE && accessibleNameOf(node) === name,
+    (node) => node.packageName === PACKAGE && nameMatches(accessibleNameOf(node), name),
   );
   return matches.find((node) => node.clickable) ?? matches[0] ?? null;
 }
@@ -75,7 +95,7 @@ export function tapAt(point: Point): void {
 }
 
 /** Tap the control with this name. `false` where it was not on screen. */
-export function tapNamed(name: string): boolean {
+export function tapNamed(name: NameMatch): boolean {
   const nodes = currentNodes();
   if (nodes === null) return false;
   const node = nodeNamed(nodes, name);
@@ -134,7 +154,7 @@ export function scrollUp(): void {
  * invisible as one below it, and a run that only ever scrolls one way finds the second one and
  * misses the first.
  */
-export function scrollTo(name: string, maxSwipes = 30): UiNode | null {
+export function scrollTo(name: NameMatch, maxSwipes = 30): UiNode | null {
   // Back to the top first: a control above the current position is as invisible as one below it,
   // and a run that only scrolls one way finds the second and misses the first. Stops as soon as
   // the screen stops changing, so a short list does not cost twenty swipes.
@@ -199,7 +219,7 @@ function signatureOfScreen(): string | null {
  * Absence is therefore a deadline rather than a single reading. `null` still means absent - it just
  * means absent for long enough that waiting is not the answer.
  */
-export function waitForNamed(name: string, timeoutMs = 45_000): UiNode | null {
+export function waitForNamed(name: NameMatch, timeoutMs = 45_000): UiNode | null {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const node = scrollTo(name);
@@ -210,7 +230,7 @@ export function waitForNamed(name: string, timeoutMs = 45_000): UiNode | null {
 }
 
 /** Scroll a control into view - waiting for it to appear - and tap it. */
-export function scrollToAndTap(name: string, timeoutMs = 45_000): boolean {
+export function scrollToAndTap(name: NameMatch, timeoutMs = 45_000): boolean {
   const node = waitForNamed(name, timeoutMs);
   if (node === null) return false;
   tapAt(centreOf(node));
@@ -219,7 +239,7 @@ export function scrollToAndTap(name: string, timeoutMs = 45_000): boolean {
 }
 
 /** What a text field currently holds, or `null` where no field carries that name. */
-export function textFieldValue(name: string): string | null {
+export function textFieldValue(name: NameMatch): string | null {
   const nodes = currentNodes();
   if (nodes === null) return null;
   const node = nodeNamed(nodes, name);
@@ -238,7 +258,7 @@ export function textFieldValue(name: string): string | null {
  * checked for being non-empty.
  */
 export function typeInto(
-  name: string,
+  name: NameMatch,
   value: string,
 ): { readonly typed: boolean; readonly held: string | null } {
   // Waited for as well as scrolled to. A form opens wherever its scroll position happens to leave
@@ -249,7 +269,7 @@ export function typeInto(
 
   tapAt(centreOf(field));
   sleep(2_500);
-  adb(['shell', 'input', 'text', value]);
+  adb(['shell', 'input', 'text', forInputText(value)]);
   sleep(2_000);
 
   // Read back from where the keyboard has left it. The focused field is on screen by definition,
@@ -260,7 +280,25 @@ export function typeInto(
     dismissKeyboard();
     held = scrollTo(name)?.text ?? null;
   }
+
+  // Always closed before returning. A caller's next step is the button that saves the form, and
+  // the keyboard covers the bottom third of the screen - so leaving it open turned "Add this
+  // person" into a control the harness could not find (and, with a `waitForNamed` deadline, into
+  // forty-five seconds of looking for it).
+  dismissKeyboard();
   return { typed: held === value, held };
+}
+
+/**
+ * Encode a value for `adb shell input text`.
+ *
+ * A space ends the argument as far as the device's shell is concerned, so `input text` receives
+ * only the first word - which is how "Synthetic Relative D" reached a form as "Synthetic" and the
+ * run reported a field the app had refused. `input` reads `%s` as a space, which is the documented
+ * way through, and single quotes keep the rest of the string away from the shell.
+ */
+export function forInputText(value: string): string {
+  return `'${value.replace(/'/g, String.fromCharCode(39, 92, 39, 39)).replace(/ /g, '%s')}'`;
 }
 
 /** Close the soft keyboard, so the control underneath it can be found again. */

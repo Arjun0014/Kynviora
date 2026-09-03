@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { centreOf, nodeNamed } from './ui.js';
+import { centreOf, describeMatch, nameMatches, nodeNamed } from './ui.js';
 import { parseUiHierarchy, type UiNode } from './accessibility.js';
 
 const PACKAGE = 'com.kynviora.app';
@@ -90,5 +90,41 @@ describe('nodeNamed', () => {
     const found = nodeNamed(parseUiHierarchy(xml), 'Add a schedule');
     expect(found).not.toBeNull();
     expect(centreOf(found!)).toEqual({ x: 540, y: 1844 });
+  });
+});
+
+describe('nameMatches', () => {
+  it('demands the whole name when given a string', () => {
+    expect(nameMatches('Save schedule', 'Save schedule')).toBe(true);
+    expect(nameMatches('Save schedule and close', 'Save schedule')).toBe(false);
+  });
+
+  it('matches a prefix when asked to', () => {
+    // Most controls announce a label followed by their own help sentence, which `18` requires and
+    // which is expected to be reworded. Pinning the whole string makes a harness fail on an edit
+    // that broke nothing.
+    const announced =
+      'Name. Whatever you call them. It is only ever shown to you and to people you invite.';
+    expect(nameMatches(announced, { startsWith: 'Name.' })).toBe(true);
+    expect(nameMatches(announced, { startsWith: 'Language.' })).toBe(false);
+  });
+
+  it('does not let a prefix match a different field that starts the same way', () => {
+    expect(nameMatches('Names of your medicines', { startsWith: 'Name.' })).toBe(false);
+  });
+
+  it('reads as something a report can print', () => {
+    expect(describeMatch('Done')).toBe('Done');
+    expect(describeMatch({ startsWith: 'Name.' })).toBe('Name....');
+  });
+});
+
+describe('nodeNamed with a prefix', () => {
+  it('finds the field whose announced name begins with the label', () => {
+    const field = node({
+      className: 'android.widget.EditText',
+      contentDescription: 'Name. Whatever you call them.',
+    });
+    expect(nodeNamed([field], { startsWith: 'Name.' })).toBe(field);
   });
 });
