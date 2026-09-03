@@ -20,7 +20,7 @@ Last updated: 2026-09-03
 
 ## Verification state
 
-- **3743 tests passing**, 0 failing, across 126 files.
+- **3750 tests passing**, 0 failing, across 126 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -36,7 +36,7 @@ npm run verify
 ### On a device
 
 Three harnesses need an attached Android device or emulator and are **not** part of `npm run
-verify`. Their judgements are, though: 101 of the tests above exercise the rules they apply, so a
+verify`. Their judgements are, though: 108 of the tests above exercise the rules they apply, so a
 rule cannot change without CI noticing even where no hardware exists.
 
 ```bash
@@ -60,13 +60,15 @@ smoke test. Last run **34/34 PASS**.
 npm run verify:device:reminders
 ```
 
-Eight checks on the local reminder engine, and the two that matter most cannot be inferred from the
+Nine checks on the local reminder engine, and the two that matter most cannot be inferred from the
 code: after the app's process is killed, a notification still arrives, and its text names neither
 the medicine nor the person. The rest measure that the alarms are exact rather than deferrable
 (DEC-106), that re-planning converges instead of doubling, that the kill left the alarms intact -
-`am kill`, never `force-stop`, which cancels them (`DEV-041`) - and that they come back after a
-device restart with the app never opened. Last run **8/8 PASS** against a Pixel 7 / Android 16
-emulator. It needs the seeded API running, because it creates its schedule through the real route.
+`am kill`, never `force-stop`, which cancels them (`DEV-041`) - that they come back after a device
+restart with the app never opened, and that a dose does not move when the device changes time zone.
+Last run **9/9 PASS** against a Pixel 7 / Android 16 emulator. It needs the seeded API running,
+because it creates its schedule through the real route, and it reboots the device and moves its
+clock, so it is not something to run against a phone somebody is using.
 
 A check that could not be performed reports `INCONCLUSIVE` and fails the run. Two of the storage
 checks are absence tests, and an absence test over an empty input passes trivially (DEC-102).
@@ -137,7 +139,7 @@ the API will not distinguish them.
 | The encrypted read projection, offline shelf and profiles          | Complete, 11 tests; no offline writes (`DEV-038`)           |
 | Medicine schedules: the write path, the editor, the reads          | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
 | Local reminders: plan, reconcile, exact alarms, lock screen        | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
-| Device harnesses: local storage, key handling, 48dp, 2x, reminders | Complete, 101 tests; 5 of `19`'s 14 scenarios (`DEV-040`)   |
+| Device harnesses: local storage, key handling, 48dp, 2x, reminders | Complete, 108 tests; 6 of `19`'s 14 scenarios (`DEV-040`)   |
 | Caregiver, export, inbox, reconciliation, add-an-item UI           | Wired; **not device-verified** (`DEV-007`)                  |
 | CI pipeline                                                        | Written; not yet run on a real runner                       |
 
@@ -1137,3 +1139,11 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
      followed by a cold launch shows alarms coming back whether or not a single line of Kynviora's
      reconciliation ran. Wipe the app (`pm clear`) or change the schedule and check the alarm
      _times_, which is the only signal the two mechanisms disagree on.
+177. Do not test a time-zone change by comparing what a device holds before and after. Android
+     stores an alarm as an absolute instant, so alarms that merely _survive_ a zone change are
+     unchanged by definition, and `expo-notifications` re-registers from its own store on launch
+     even after a force-stop - so the check passes on a build that gets the rule completely wrong.
+     `pm clear` first, so every alarm read afterwards was expanded from the schedule row in the new
+     zone on that launch. And compare the `origWhen` epoch from the dump's header, never the
+     rendered time: `dumpsys` prints in the device's current zone, so the printed string changes on
+     every row while nothing has moved.

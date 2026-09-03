@@ -3198,3 +3198,46 @@ are covered by 101 tests that need no device.
 `04` Stage 4 is complete. What the engine does not do is `DEV-041`, unchanged by this session:
 force-stop ends reminders silently, an app unopened for more than a fortnight runs out of them,
 nothing is reconciled against recorded doses (by decision), and iOS is unverified.
+
+### Then the next unblocked thing: what happens when somebody travels
+
+`DEV-040` named this as the scenario that had just become worth doing, and for a specific reason: a
+schedule carries its own IANA zone and the device expands it, so moving the clock across a zone
+boundary is a test with a right answer rather than an observation. The rule is `schedule.ts`'s and
+predates the reminder engine - a schedule is authored in local wall-clock time and keeps firing at
+those local times "through a DST transition or a journey across zones". What was untested was the
+device honouring it.
+
+`REM-7` moves the emulator from `Asia/Calcutta` to `Europe/London` and asserts every pending dose is
+still at the same absolute instant. **All 14 were**, and the run is 9/9.
+
+Two things had to be right before that reading was worth having, and both are the same mistake in
+different clothes - a check that passes for a reason unrelated to what it claims.
+
+**The comparison is on the epoch, not on what the dump prints.** `dumpsys` renders `origWhen` in the
+device's _current_ zone, so every row's printed time changes when the zone does while nothing has
+moved. `PendingAlarm` now carries `epochMs`, read from the header's `origWhen 1788419520000` rather
+than the detail line's rendering. A check on the strings would have failed every row and looked like
+a real finding.
+
+**The app is wiped between the two readings.** This is the one that would have been easy to ship.
+Android stores an alarm as an absolute instant, so alarms that merely _survive_ a zone change are
+unchanged by definition - and `expo-notifications` re-registers from its own store on launch, so
+even a force-stop and relaunch restores the old instants without the schedule being expanded again.
+Either way the check passes on a build that gets the rule completely wrong. After `pm clear` there
+is nothing to survive and nothing to restore: every alarm read afterwards was computed from the
+schedule row, in the new zone, on that launch. Trap 177.
+
+Seven tests cover the judgement without a device, taking the reminder harness's own suite to
+47 and the three device harnesses to 108, including the case that matters most - a dose
+re-expanded in the device's zone, where 08:00 Kolkata becomes 08:00 London and somebody's morning
+tablet is silently due at lunchtime.
+
+Getting the parser there cost one detour worth recording: the regex landed in the file with literal
+`0x08` bytes where `\b` was intended, which is the same escaping trap the previous session hit.
+Every file touched this session was then scanned for stray control characters; there are none.
+
+**State after this piece.** 3750 tests across 126 files, `npm run verify` exit 0.
+`npm run verify:device:reminders` 9/9. `19`'s device scenarios go from five covered to six, and the
+remaining eight divide into four waiting on features that do not exist and four that are built and
+simply have not been driven on a device yet (`DEV-040`).

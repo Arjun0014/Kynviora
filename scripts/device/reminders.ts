@@ -37,6 +37,16 @@ export interface PendingAlarm {
   readonly tag: string;
   /** The `origWhen` line as printed, so a failure can name the time it was looking at. */
   readonly when: string;
+  /**
+   * The same moment as an absolute epoch millisecond, from the header's `origWhen <digits>`.
+   *
+   * `when` is rendered in the **device's current** zone, so it changes when somebody travels even
+   * though the alarm has not moved. Anything comparing two dumps across a time-zone change has to
+   * compare this instead, or it measures the rendering rather than the alarm. `null` where the
+   * header did not carry one, so a build that prints a different shape is not silently read as
+   * epoch zero.
+   */
+  readonly epochMs: number | null;
 }
 
 /**
@@ -75,6 +85,10 @@ export function pendingAlarmsFor(dump: string, packageName: string): readonly Pe
     let tag = '';
     let exact = false;
     let when = '';
+    // On the header line, not the detail line: `Alarm{... origWhen 1788419520000 ...}`. Unlike the
+    // detail line's rendering, this is zone-independent.
+    const epochMatch = /origWhen (\d{10,})/.exec(header);
+    const epochMs = epochMatch === null ? null : Number(epochMatch[1]);
 
     for (let detail = index + 1; detail < lines.length; detail += 1) {
       const line = lines[detail] ?? '';
@@ -96,7 +110,7 @@ export function pendingAlarmsFor(dump: string, packageName: string): readonly Pe
     // only understood one device is a harness that reports a false failure on the next one.
     if (!exact && /standalone/.test(header)) exact = true;
 
-    alarms.push({ exact, tag, when });
+    alarms.push({ exact, tag, when, epochMs });
   }
   return alarms;
 }
@@ -429,6 +443,106 @@ export function rebootRecoveryCheck(
       heldAfterReboot > 0
         ? `${String(heldAfterReboot)} of ${String(heldBeforeReboot)} pending alarm(s) were restored by the boot receiver.${took}`
         : `None of the ${String(heldBeforeReboot)} pending alarm(s) came back within the time allowed. Reminders stop at the first restart.`,
+  };
+}
+
+/**
+ * Whether moving the device to another time zone moved the doses.
+ *
+ * `19` lists a clock/time-zone-change scenario, and it only became a test with a right answer once
+ * a schedule carried its own zone. The rule is `schedule.ts`'s: a schedule is authored in local
+ * wall-clock time and keeps firing at those local times "through a DST transition or a journey
+ * across zones". The zone that decides the instant is the **schedule's**, not the phone's - so
+ * flying from Kolkata to London must not move a dose by five and a half hours, and the alarms the
+ * device holds must be the same absolute instants before and after.
+ *
+ * WHY THE COMPARISON IS ON `epochMs` AND NOT ON WHAT THE DUMP PRINTS
+ * `dumpsys` renders `origWhen` in the device's current zone, so every row's printed time changes
+ * when the zone does, while the alarm has not moved at all. A check comparing those strings would
+ * fail every time and would look like a real finding.
+ *
+ * WHY THE ZONE CHANGE ITSELF IS AN INPUT
+ * Because "the instants did not move" is exactly what a zone change that never happened also
+ * produces. Without the positive control this passes trivially on a device that refused
+ * `setprop` - which is DEC-102's rule, arriving where it is easiest to miss: an equality test
+ * over two identical readings taken under identical conditions.
+ */
+export function timeZoneShiftCheck(input: {
+  readonly before: readonly PendingAlarm[];
+  readonly after: readonly PendingAlarm[];
+  readonly zoneBefore: string;
+  readonly zoneAfter: string;
+  readonly available: boolean;
+}): Check {
+  const id = 'REM-7';
+  const title = 'A dose does not move when the device changes time zone';
+
+  if (!input.available) {
+    return { id, title, status: 'INCONCLUSIVE', detail: 'The alarm dump could not be read.' };
+  }
+  if (input.zoneBefore === input.zoneAfter) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail:
+        `The device zone did not change (${input.zoneBefore} both times), so nothing was tested. ` +
+        'Two identical readings under identical conditions are equal for the wrong reason.',
+    };
+  }
+  if (input.before.length === 0) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail: 'No reminders were pending before the zone change, so none could have moved.',
+    };
+  }
+
+  const instants = (alarms: readonly PendingAlarm[]): readonly number[] =>
+    alarms
+      .map((alarm) => alarm.epochMs)
+      .filter((value): value is number => value !== null)
+      .sort((a, b) => a - b);
+
+  const was = instants(input.before);
+  const now = instants(input.after);
+
+  if (was.length !== input.before.length || now.length !== input.after.length) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail:
+        'Some alarm records carried no absolute time, so the two dumps cannot be compared as ' +
+        'instants. Comparing what the dump prints would compare the rendering, not the alarm.',
+    };
+  }
+
+  const missing = was.filter((instant) => !now.includes(instant));
+  if (missing.length > 0) {
+    const shown = missing
+      .slice(0, 3)
+      .map((instant) => new Date(instant).toISOString())
+      .join(', ');
+    return {
+      id,
+      title,
+      status: 'FAIL',
+      detail:
+        `${String(missing.length)} of ${String(was.length)} dose(s) are no longer scheduled for ` +
+        `the instant they were before the device moved from ${input.zoneBefore} to ` +
+        `${input.zoneAfter}: ${shown}. A schedule's own zone decides when it fires.`,
+    };
+  }
+
+  return {
+    id,
+    title,
+    status: 'PASS',
+    detail:
+      `All ${String(was.length)} dose(s) are still scheduled for the same instant after the ` +
+      `device moved from ${input.zoneBefore} to ${input.zoneAfter}.`,
   };
 }
 

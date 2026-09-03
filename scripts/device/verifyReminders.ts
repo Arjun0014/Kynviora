@@ -48,6 +48,7 @@ import {
   rebootRecoveryCheck,
   reminderArrivedCheck,
   remindersOverall,
+  timeZoneShiftCheck,
   type Check,
 } from './reminders.js';
 
@@ -85,6 +86,17 @@ const LEAD_SECONDS = 300;
  * and "never" are otherwise the same reading.
  */
 const REBOOT_RESTORE_TIMEOUT_MS = 420_000;
+
+/**
+ * Where the device is sent for the travel check.
+ *
+ * Far enough from the seed's `Asia/Calcutta` that a dose re-expanded in the device's zone lands on
+ * a visibly different instant rather than within a rounding error, and on the other side of a DST
+ * boundary so the offset is not a whole number of hours the arithmetic could get right by accident.
+ * The fallback is used only if a device is already in the first one.
+ */
+const TRAVEL_ZONE = 'Europe/London';
+const FALLBACK_TRAVEL_ZONE = 'America/New_York';
 
 interface Fetched {
   readonly ok: boolean;
@@ -207,6 +219,31 @@ function killProcess(): void {
 /** Grant notifications up front. Android 13+ refuses to post anything without it. */
 function grantNotifications(): void {
   adb(['shell', 'pm', 'grant', PACKAGE, 'android.permission.POST_NOTIFICATIONS']);
+}
+
+/** The device's own IANA zone. */
+function deviceTimeZone(): string {
+  return adb(['shell', 'getprop', 'persist.sys.timezone']).stdout.trim();
+}
+
+/**
+ * Move the device to another time zone, and say whether it actually moved.
+ *
+ * `setprop persist.sys.timezone` needs root, which an emulator grants and a production device does
+ * not, so this reports failure rather than assuming. The return value is the zone the device is in
+ * afterwards - read back rather than echoed, because a `setprop` that silently did nothing and one
+ * that worked are otherwise indistinguishable.
+ */
+function setDeviceTimeZone(zone: string): string {
+  adb(['root']);
+  adb(['wait-for-device']);
+  sleep(3_000);
+  adb(['shell', 'setprop', 'persist.sys.timezone', zone]);
+  sleep(3_000);
+  // `adb root` restarts adbd, which drops the reverse tunnels the app reaches the API through.
+  adb(['reverse', `tcp:${String(API_PORT)}`, `tcp:${String(API_PORT)}`]);
+  adb(['reverse', 'tcp:8081', 'tcp:8081']);
+  return deviceTimeZone();
 }
 
 /** Every schedule this harness created, so a run does not leave the seed carrying test reminders. */
@@ -409,6 +446,49 @@ async function main(): Promise<void> {
     reminderArrivedCheck(posted, afterDose.available, 'after the process was killed', 'REM-3'),
   );
   checks.push(lockScreenDisclosureCheck(posted, FORBIDDEN_IN_NOTIFICATION, afterDose.available));
+
+  // ---- Travelling ---------------------------------------------------------
+  // `19`'s clock/time-zone-change scenario. A schedule is authored in local wall-clock time and
+  // carries its own IANA zone, so flying from Kolkata to London must not move a dose by five and a
+  // half hours - the zone that decides the instant is the schedule's, not the phone's.
+  //
+  // WHY THE APP IS WIPED BETWEEN THE TWO READINGS
+  // Because otherwise this check passes without testing anything. Android stores an alarm as an
+  // absolute instant, so alarms that merely *survive* a zone change are unchanged by definition;
+  // and `expo-notifications` re-registers from its own store on launch, so even a force-stop and
+  // relaunch can restore the old instants without the schedule being expanded again. `pm clear`
+  // leaves nothing to survive or restore: every alarm read afterwards was computed from the
+  // schedule row, in the new zone, on this launch. That is the only reading that can distinguish
+  // the rule from the platform's memory of the last answer.
+  const zoneBefore = deviceTimeZone();
+  const travelBeforeDump = alarmDump();
+  const travelBefore = pendingAlarmsFor(travelBeforeDump.text, PACKAGE);
+
+  process.stdout.write(`Moving the device out of ${zoneBefore}...
+`);
+  adb(['shell', 'pm', 'clear', PACKAGE]);
+  sleep(3_000);
+  const zoneAfter = setDeviceTimeZone(
+    zoneBefore === TRAVEL_ZONE ? FALLBACK_TRAVEL_ZONE : TRAVEL_ZONE,
+  );
+  grantNotifications();
+  launch();
+  sleep(45_000);
+
+  const travelAfterDump = alarmDump();
+  checks.push(
+    timeZoneShiftCheck({
+      before: travelBefore,
+      after: pendingAlarmsFor(travelAfterDump.text, PACKAGE),
+      zoneBefore,
+      zoneAfter,
+      available: travelBeforeDump.available && travelAfterDump.available,
+    }),
+  );
+
+  // Put the device back where it was, whatever the check said. A harness that leaves a device in
+  // another zone makes the next run's readings mean something different.
+  setDeviceTimeZone(zoneBefore);
 
   // ---- Device restart -----------------------------------------------------
   // A second dose, so there is something pending to survive the reboot.

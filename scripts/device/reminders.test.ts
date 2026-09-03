@@ -9,6 +9,7 @@ import {
   postedNotifications,
   processDeathCheck,
   rebootRecoveryCheck,
+  timeZoneShiftCheck,
   reminderArrivedCheck,
   remindersOverall,
 } from './reminders.js';
@@ -135,7 +136,7 @@ describe('whether the reminders are exact', () => {
 
   it('fails when one was coalesced', () => {
     const check = exactAlarmCheck(
-      [{ exact: false, tag: 'x', when: '2026-09-03 12:42:00.000' }],
+      [{ exact: false, tag: 'x', when: '2026-09-03 12:42:00.000', epochMs: 1788419520000 }],
       true,
     );
     expect(check.status).toBe('FAIL');
@@ -369,5 +370,124 @@ describe('whether the process actually died', () => {
       processDeathCheck({ running: false, alarmsBefore: 1, alarmsAfter: 1, available: false })
         .status,
     ).toBe('INCONCLUSIVE');
+  });
+});
+
+/**
+ * `19`'s clock/time-zone-change scenario.
+ *
+ * The rule under test is `schedule.ts`'s: a schedule is authored in local wall-clock time and keeps
+ * firing at those local times "through a DST transition or a journey across zones". The zone that
+ * decides the instant is the schedule's, not the phone's - so the alarms a device holds must be the
+ * same absolute instants before and after somebody travels.
+ */
+describe('whether a dose moves when the device changes time zone', () => {
+  const at = (iso: string, epochMs: number) => ({
+    exact: true,
+    tag: '*walarm*:expo.modules.notifications.NOTIFICATION_EVENT',
+    when: iso,
+    epochMs,
+  });
+
+  // The same two instants, rendered in Kolkata and then in London. Every printed string differs
+  // and not one alarm has moved - which is the whole reason the comparison is on `epochMs`.
+  const inKolkata = [
+    at('2026-09-04 08:00:00.000', 1788_490_800_000),
+    at('2026-09-05 08:00:00.000', 1788_577_200_000),
+  ];
+  const inLondon = [
+    at('2026-09-04 03:30:00.000', 1788_490_800_000),
+    at('2026-09-05 03:30:00.000', 1788_577_200_000),
+  ];
+
+  it('passes when the instants are unchanged, however they are printed', () => {
+    const check = timeZoneShiftCheck({
+      before: inKolkata,
+      after: inLondon,
+      zoneBefore: 'Asia/Kolkata',
+      zoneAfter: 'Europe/London',
+      available: true,
+    });
+    expect(check.status).toBe('PASS');
+    expect(check.detail).toMatch(/same instant/i);
+  });
+
+  it('fails when a dose was re-expanded in the device zone', () => {
+    // What the defect would look like: the wall-clock time kept, so 08:00 became 08:00 London and
+    // the dose moved five and a half hours. Somebody travels and their morning tablet is due at
+    // lunchtime, silently.
+    const reExpanded = [
+      at('2026-09-04 08:00:00.000', 1788_510_600_000),
+      at('2026-09-05 08:00:00.000', 1788_597_000_000),
+    ];
+    const check = timeZoneShiftCheck({
+      before: inKolkata,
+      after: reExpanded,
+      zoneBefore: 'Asia/Kolkata',
+      zoneAfter: 'Europe/London',
+      available: true,
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toMatch(/no longer scheduled/i);
+  });
+
+  it('is inconclusive when the device zone never changed', () => {
+    // The positive control. Without it this check passes on a device that refused the zone
+    // change, because two identical readings under identical conditions are trivially equal
+    // (DEC-102).
+    const check = timeZoneShiftCheck({
+      before: inKolkata,
+      after: inKolkata,
+      zoneBefore: 'Asia/Kolkata',
+      zoneAfter: 'Asia/Kolkata',
+      available: true,
+    });
+    expect(check.status).toBe('INCONCLUSIVE');
+    expect(check.detail).toMatch(/did not change/i);
+  });
+
+  it('is inconclusive when nothing was pending to move', () => {
+    expect(
+      timeZoneShiftCheck({
+        before: [],
+        after: [],
+        zoneBefore: 'Asia/Kolkata',
+        zoneAfter: 'Europe/London',
+        available: true,
+      }).status,
+    ).toBe('INCONCLUSIVE');
+  });
+
+  it('refuses to compare dumps that carried no absolute time', () => {
+    // A build printing a different header shape would leave `epochMs` null, and comparing the
+    // rendered strings across a zone change would fail every row for the wrong reason.
+    const noEpoch = [{ ...inKolkata[0]!, epochMs: null }];
+    const check = timeZoneShiftCheck({
+      before: noEpoch,
+      after: noEpoch,
+      zoneBefore: 'Asia/Kolkata',
+      zoneAfter: 'Europe/London',
+      available: true,
+    });
+    expect(check.status).toBe('INCONCLUSIVE');
+    expect(check.detail).toMatch(/no absolute time/i);
+  });
+
+  it('is inconclusive when the dump could not be read', () => {
+    expect(
+      timeZoneShiftCheck({
+        before: inKolkata,
+        after: inLondon,
+        zoneBefore: 'Asia/Kolkata',
+        zoneAfter: 'Europe/London',
+        available: false,
+      }).status,
+    ).toBe('INCONCLUSIVE');
+  });
+
+  it('reads the absolute instant out of a real dump header', () => {
+    // `origWhen 1788419520000` on the header, not the detail line's rendering.
+    const alarms = pendingAlarmsFor(ALARM_DUMP, PACKAGE);
+    expect(alarms.map((alarm) => alarm.epochMs)).toEqual([1788419520000, 1788505920000]);
   });
 });

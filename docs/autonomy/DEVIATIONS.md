@@ -1069,12 +1069,12 @@ route.
 
 ---
 
-## DEV-040 - Five of `19`'s fourteen device scenarios are covered, and the other nine are not waiting on a device
+## DEV-040 - Six of `19`'s fourteen device scenarios are covered, and the other eight are not waiting on a device
 
 - **Affected specification**: `19` "Device E2E tests" lists fourteen scenarios that must be
   covered.
 - **Expected behaviour**: all fourteen exercised on a device.
-- **Implemented behaviour**: five, plus three automated harnesses that re-run them
+- **Implemented behaviour**: six, plus three automated harnesses that re-run them
   (`npm run verify:device`, `npm run verify:device:a11y`, `npm run verify:device:reminders`).
 
   | `19` scenario                         | State                                                      |
@@ -1091,15 +1091,15 @@ route.
   | Visit Pack export                     | Built and untested on device                               |
   | Camera/file permissions               | Notification permission covered; camera/file untested      |
   | TalkBack smoke suite                  | **Covered**                                                |
-  | Clock/time-zone change                | Untested on device; the rule has deterministic tests       |
+  | Clock/time-zone change                | **Covered** - a dose does not move when the phone does     |
   | Low storage/network disruption        | **Network disruption covered.** Low storage untested       |
 
-- **Reason**: the environment blocker is gone, and what is left divides into three kinds. Five
+- **Reason**: the environment blocker is gone, and what is left divides into two kinds. Four
   scenarios are about a feature that does not exist, and each names the blocker or deviation that
   explains why. Four are about features that do exist and simply have not been driven on a device
   yet - which is work, not a decision. Nothing here is waiting on hardware.
 
-  The three worth being explicit about, because their state is easy to misread:
+  The four worth being explicit about, because their state is easy to misread:
 
   **"Medicine reminder after process death" is now genuinely covered, and getting there found a
   measurement error worth remembering.** The harness first used `am force-stop`, which cancels an
@@ -1121,18 +1121,27 @@ route.
   announcements are any good is a question for somebody listening, which `04` Phase 9.4 already
   says needs people this build does not have.
 
-  **"Clock/time-zone change" is the next one to become worth doing**, and it is now worth doing for
-  a reason it was not before: a schedule carries its own IANA zone and the device expands it, so
-  moving the emulator's clock across a zone boundary is a test with a right answer. The rule has
-  deterministic tests either side of a DST transition; what is untested is the device honouring
-  them.
+  **"Clock/time-zone change" is covered, and getting it to mean anything took more than changing
+  the clock.** `REM-7` moves the device from `Asia/Calcutta` to `Europe/London` and asserts every
+  pending dose is still at the same absolute instant - the rule being that a schedule carries its
+  own zone, so the phone's zone must not decide when a dose fires (`schedule.ts`; DEC-104).
+
+  Two things had to be true before that reading was worth having. The comparison is on the
+  `origWhen` epoch from the dump's header, never on the rendered time: `dumpsys` prints every alarm
+  in the device's _current_ zone, so a check comparing the printed strings would fail every row for
+  a reason that is not about alarms. And the app is wiped between the two readings, because
+  otherwise the check passes without testing anything - Android stores an alarm as an absolute
+  instant, so alarms that merely survive a zone change are unchanged by definition, and
+  `expo-notifications` re-registers from its own store on launch even after a force-stop. After
+  `pm clear` every alarm read was expanded from the schedule row, in the new zone, on that launch
+  (trap 177).
 
 - **Temporary or permanent**: temporary.
 - **Risk**: low, and the shape of it is known rather than hidden. The claim being avoided is "the
-  device suite passes", which would read as fourteen scenarios when it is five.
+  device suite passes", which would read as fourteen scenarios when it is six.
 - **Required future work**: drive the four built-but-untested flows on the emulator and add them to
-  a harness; add the clock/time-zone scenario, which the schedule work has made meaningful; the
-  other five unblock with the blockers they name.
+  a harness - profile creation, caregiver invite/revoke, Visit Pack export, and an update over an
+  existing install; the other four unblock with the blockers they name.
 
 ---
 
