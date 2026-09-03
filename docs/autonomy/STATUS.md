@@ -35,8 +35,8 @@ npm run verify
 
 ### On a device
 
-Five harnesses need an attached Android device or emulator and are **not** part of `npm run
-verify`. Their judgements are, though: 173 of the tests above exercise the rules they apply, so a
+Eight harnesses need an attached Android device or emulator and are **not** part of `npm run
+verify`. Their judgements are, though: 226 of the tests above exercise the rules they apply, so a
 rule cannot change without CI noticing even where no hardware exists.
 
 ```bash
@@ -93,6 +93,37 @@ The switch between the phone and the API is a separate process on purpose (`apiS
 that loop answers nothing while an app is starting - so the phone reads "No connection" on a launch
 the harness believes is online. Removing `adb reverse` is not enough either, because OkHttp's
 pooled connections outlive it (trap 183).
+
+```bash
+npm run verify:device:profile
+```
+
+Four checks on adding a person to a household. `PRO-0` is the control - profiles cannot be deleted,
+so every earlier run is still in the household and a fixed name would let last week answer this
+week's question. `PRO-3` is the half no API test can reach: a row nobody can see is not, to the
+person who made it, a profile that was created. Last run **4/4 PASS**.
+
+```bash
+npm run verify:device:caregiver
+```
+
+Five checks on giving access and taking it back. The owner's half is driven on the device and the
+caregiver's through the API as the second seeded identity, because what is being measured is whether
+the **server** still answers - `12` puts that decision there so no client can be it. `CAR-4` is the
+one the scenario exists for: the caregiver's very next request, same session, no sign-out, returns
+nothing. Last run **5/5 PASS**, seeing 2 of the owner's 3 items while granted - the two medicines,
+not the personal-care product - and 0 immediately after. Needs `EXPO_PUBLIC_DEV_STEP_UP=1` and a
+Metro restart, because `14` puts caregiver administration behind step-up.
+
+```bash
+npm run verify:device:visitpack
+```
+
+Five checks on an export, and the one that matters is a subtraction. A Visit Pack is the only thing
+in this app that leaves it, and `16` rests that on the promise the screen makes twice: nothing is
+included until you choose it. A run that ticked everything would confirm the promise and test none
+of it, so one of two medicines is ticked and `PACK-3` asks about the other. Last run **5/5 PASS**:
+one entry, the one that was ticked. Also needs step-up.
 
 Nine checks on the local reminder engine, and the two that matter most cannot be inferred from the
 code: after the app's process is killed, a notification still arrives, and its text names neither
@@ -173,7 +204,7 @@ the API will not distinguish them.
 | The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)           |
 | Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
 | Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
-| Device harnesses: storage, 48dp, reminders, update, offline | Complete, 173 tests; 8 of `19`'s 14 scenarios (`DEV-040`)   |
+| Device harnesses: eight, from storage to an export          | Complete, 226 tests; 11 of `19`'s 14 scenarios (`DEV-040`)  |
 | Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                  |
 | CI pipeline                                                 | Written; not yet run on a real runner                       |
 
@@ -1227,7 +1258,12 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
 186. An empty Android text field reports its **placeholder** as its `text` in a `uiautomator` dump.
      "The field is non-empty" is therefore always true, and a check written that way passes over a
      form nobody filled in. Compare against the value you typed.
-187. Do not use Node's `fetch` between long synchronous `sleep`s without allowing for a dead
+187. A PGlite `RuntimeError: Aborted()` in `main.test.ts` under load is the machine, not the code.
+     Seen once with an emulator, Metro, a seeded API and the full suite running together; the test
+     boots its own PGlite in a fresh `mkdtemp` directory, so it is not trap 175's contention. It
+     passed alone and the next full run was green. Re-run before investigating - but re-run rather
+     than assuming, because the failure is indistinguishable from a real one.
+188. Do not use Node's `fetch` between long synchronous `sleep`s without allowing for a dead
      connection. The device harnesses block the event loop for forty-five seconds at a time, Fastify
      closes the idle keep-alive connection well before that, and the next call reuses the corpse and
      fails with `ECONNRESET` - which crashes a run for a reason that has nothing to do with the app.

@@ -46,6 +46,27 @@ const READY_FILE = join(directory, 'ready');
 let mode: SwitchMode = 'pass';
 const live = new Set<Socket>();
 
+/**
+ * The top-level `id` of a JSON answer, and nothing else from it.
+ *
+ * Deliberately one field. These responses carry medicine names, and a switch that recorded bodies
+ * would be making exactly the copy the scenarios it serves exist to bound - so it records an
+ * identifier, which is what lets a run read a created resource back and says nothing about anybody.
+ * A body that is not JSON, or is large, is not parsed at all.
+ */
+function identifierIn(chunks: readonly Buffer[]): string | null {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  if (total === 0 || total > 1_000_000) return null;
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const id = (parsed as { readonly id?: unknown }).id;
+    return typeof id === 'string' ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 function headerValue(raw: string | string[] | undefined): string | null {
   if (raw === undefined) return null;
   if (typeof raw === 'string') return raw;
@@ -80,6 +101,7 @@ const server = createServer((incoming, outgoing) => {
             status: answer.statusCode ?? 0,
             replay: headerValue(answer.headers['idempotent-replay']),
             key: headerValue(incoming.headers['idempotency-key']),
+            createdId: identifierIn(chunks),
           })}\n`,
           'utf8',
         );

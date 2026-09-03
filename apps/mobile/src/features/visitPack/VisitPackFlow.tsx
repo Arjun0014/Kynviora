@@ -66,6 +66,25 @@ export function VisitPackFlow({ onClose }: { readonly onClose: () => void }) {
   const { activeProfileId } = useProfiles();
 
   const [step, setStep] = useState<Step>('CHOOSE');
+
+  /**
+   * The idempotency key for the export being reviewed, minted once when the review is entered.
+   *
+   * Not once per press, which is what it was. `13` puts a key on a retryable mutation so a repeat
+   * lands once, and this is the route where a repeat is worst: an export is a copy of somebody's
+   * medicines that leaves Kynviora, each copy with its own expiry, and a person who pressed twice
+   * would know about one of them.
+   *
+   * The screen already replaces the button with its own state while a request is in flight, so a
+   * double tap in one moment was never the risk. The risk was the ordinary one: a slow request, a
+   * failure the person is invited to retry, and a second press that the server has no way to
+   * recognise as the same intent - which is exactly what an idempotency key is for and what a key
+   * minted at the moment of pressing cannot do (`DEV-047`).
+   *
+   * A new key each time the review is entered, because going back and changing the selection makes
+   * it a different export - replaying the old key would hand somebody the pack they rejected.
+   */
+  const [exportKey, setExportKey] = useState(() => newIdempotencyKey());
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
   const [note, setNote] = useState('');
   const [sendState, setSendState] = useState<ScreenStateKind | null>(null);
@@ -133,7 +152,7 @@ export function VisitPackFlow({ onClose }: { readonly onClose: () => void }) {
           return;
         }
 
-        void elevated.createVisitPack(draft.body, newIdempotencyKey()).then(
+        void elevated.createVisitPack(draft.body, exportKey).then(
           (outcome) => {
             if (outcome.kind === 'OK') {
               setSendState(null);
@@ -164,7 +183,7 @@ export function VisitPackFlow({ onClose }: { readonly onClose: () => void }) {
         setSendMessage(null);
       },
     );
-  }, [client, elevate, activeProfileId, resource.value, selectedIds, note, reload]);
+  }, [client, elevate, activeProfileId, resource.value, selectedIds, note, reload, exportKey]);
 
   if (step === 'DONE') {
     return (
@@ -255,6 +274,9 @@ export function VisitPackFlow({ onClose }: { readonly onClose: () => void }) {
         label="Check what you are sharing"
         disabled={selectedIds.length === 0 && note.trim() === ''}
         onPress={() => {
+          // A fresh key for a fresh review: this selection is a different export from any
+          // previously reviewed one.
+          setExportKey(newIdempotencyKey());
           setStep('REVIEW');
         }}
       />

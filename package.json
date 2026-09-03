@@ -33,7 +33,8 @@
     "verify:device:update": "tsx scripts/device/verifyUpdate.ts",
     "verify:device:offline": "tsx scripts/device/verifyOfflineWrites.ts",
     "verify:device:profile": "tsx scripts/device/verifyProfileCreation.ts",
-    "verify:device:caregiver": "tsx scripts/device/verifyCaregiverAccess.ts"
+    "verify:device:caregiver": "tsx scripts/device/verifyCaregiverAccess.ts",
+    "verify:device:visitpack": "tsx scripts/device/verifyVisitPackExport.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

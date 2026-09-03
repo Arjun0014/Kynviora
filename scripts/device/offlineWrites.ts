@@ -36,6 +36,15 @@ export interface ObservedRequest {
   readonly replay: string | null;
   /** The `idempotency-key` header the phone sent, where it sent one. */
   readonly key: string | null;
+  /**
+   * The top-level `id` of a JSON answer, where there was one.
+   *
+   * **An identifier and nothing else.** The switch never records a response body: these answers
+   * carry medicine names, and a harness that wrote them to disk would be making the copy the
+   * scenarios exist to bound. What an id buys is the ability to read a created resource back -
+   * a Visit Pack, which the app deliberately never names on screen (`19`, `16`).
+   */
+  readonly createdId: string | null;
 }
 
 /** Requests that created a schedule on the medicine under test. */

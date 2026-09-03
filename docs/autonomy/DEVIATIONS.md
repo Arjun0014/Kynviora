@@ -1107,15 +1107,16 @@ route.
 
 ---
 
-## DEV-040 - Ten of `19`'s fourteen device scenarios are covered, and the other four are not waiting on a device
+## DEV-040 - Eleven of `19`'s fourteen device scenarios are covered, and the other three are not waiting on a device
 
 - **Affected specification**: `19` "Device E2E tests" lists fourteen scenarios that must be
   covered.
 - **Expected behaviour**: all fourteen exercised on a device.
-- **Implemented behaviour**: ten, plus seven automated harnesses that re-run them
+- **Implemented behaviour**: eleven, plus eight automated harnesses that re-run them
   (`npm run verify:device`, `npm run verify:device:a11y`, `npm run verify:device:reminders`,
   `npm run verify:device:update`, `npm run verify:device:offline`,
-  `npm run verify:device:profile`, `npm run verify:device:caregiver`).
+  `npm run verify:device:profile`, `npm run verify:device:caregiver`,
+  `npm run verify:device:visitpack`).
 
   | `19` scenario                         | State                                                       |
   | ------------------------------------- | ----------------------------------------------------------- |
@@ -1128,7 +1129,7 @@ route.
   | Offline create/edit/sync              | **Covered** - queued, survives a kill, arrives exactly once |
   | Safety alert open/resolution          | Nothing is publishable (`BLK-006`)                          |
   | Caregiver invite/revoke               | **Covered** - and revocation measured as immediate          |
-  | Visit Pack export                     | Built and untested on device                                |
+  | Visit Pack export                     | **Covered** - what was ticked, and nothing that was not     |
   | Camera/file permissions               | Notification permission covered; camera/file untested       |
   | TalkBack smoke suite                  | **Covered**                                                 |
   | Clock/time-zone change                | **Covered** - a dose does not move when the phone does      |
@@ -1216,8 +1217,22 @@ route.
   granted - the two medicines, not the personal-care product, which is `08.2`'s scoping - and 0
   immediately afterwards.
 
-- **Required future work**: drive Visit Pack export on the emulator and add it to a harness; the
-  other three unblock with the blockers they name.
+  **"Visit Pack export" is covered, and the check that matters is a subtraction.** An export is
+  the one thing in this app that leaves it: a copy of somebody's medicines handed to a person
+  Kynviora knows nothing about, and `16` rests that on the promise the screen makes twice - nothing
+  is included until you choose it. A run that ticked everything would confirm the promise and test
+  none of it, so the harness ticks one of two medicines and asks about the other. Measured: one
+  entry, the one that was ticked, and not the one that was not. It also found a third defect
+  (`DEV-047`): the export's idempotency key was minted when the button was pressed rather than when
+  the export was decided, so a retry after a slow request made a second copy with its own expiry
+  that the person would not know about.
+
+  All three of the "built and untested" scenarios turned out to be broken rather than untested. The
+  phrase was doing more work than it could carry.
+
+- **Required future work**: the remaining three unblock with the blockers they name - authentication
+  (`BLK-010`), a scanner (`04` Phase 2.2), an OCR provider (`BLK-007`) - plus camera and file
+  permissions and a low-storage run, neither of which is waiting on anything but time.
 
 ---
 
@@ -1543,3 +1558,43 @@ its own limit on pending local notifications, which is lower than Android's and 
   open.
 - **Required future work**: extend `verify:device:a11y` to open the sheets rather than only the
   destinations, so "every control is reachable" is measured where the controls actually are.
+
+---
+
+## DEV-047 - A Visit Pack's idempotency key was minted when the button was pressed, not when the export was decided
+
+- **Affected specification**: `13` (an idempotency key on a mutation that can be retried), `04`
+  Phase 8.3, `16` (Kynviora never shares anything on its own), `21` (no more health data retained
+  than is needed), DEC-111.
+- **Expected behaviour**: one export per intent, however many times the person presses.
+- **Implemented behaviour before this session**: `VisitPackFlow` called
+  `createVisitPack(draft.body, newIdempotencyKey())` - generating the key **at the moment of the
+  call**. Every press was a different intent as far as the server could tell.
+
+  The screen replaces the button with its own state while a request is in flight, so a double tap in
+  one instant was never the risk. The ordinary case was: a slow request, a failure the person is
+  invited to retry, a second press - and a second Visit Pack, with its own expiry, holding a copy of
+  the same medicines. The person knows about one of them. `21` asks for no more health data retained
+  than is needed and this is a second copy nobody chose to make.
+
+  `AddItem.tsx` gets this right - `useState(() => newIdempotencyKey())` - which is what makes the
+  difference a decision rather than a convention nobody had settled.
+
+- **Reason it was not found**: `apps/**` is outside the test run and the lint run (`DEV-043`), and
+  the API tests cover what the server does with a repeated key rather than whether the client sends
+  the same one twice. On a device it is invisible unless something is watching the wire, which is
+  what the export harness now does.
+
+- **What was done**: the key is minted when the **review step is entered** and reused for every
+  attempt at that export. A fresh one each time the review is re-entered, because going back and
+  changing the selection makes it a different export - replaying the old key there would hand
+  somebody the pack they had rejected.
+
+- **Temporary or permanent**: fixed.
+- **Risk now**: low. What is not proven on the device is the replay itself: the route checks the
+  reviewed-content digest before it reaches its duplicate branch, so a harness cannot repeat the
+  create without reconstructing a body it never saw. `PACK-1` measures that a key was sent; that the
+  server commits once under a repeated one is covered by the API suite.
+- **Required future work**: none for this route. The general question - which creates mint per
+  intent and which per press - is worth a sweep, and the two known-correct examples are `AddItem`
+  and now this.

@@ -30,6 +30,7 @@ function create(overrides: Partial<ObservedRequest> = {}): ObservedRequest {
     status: 201,
     replay: null,
     key: 'aaaaaaaa-0000-4000-8000-000000000001',
+    createdId: null,
     ...overrides,
   };
 }
@@ -40,6 +41,7 @@ const read: ObservedRequest = {
   status: 200,
   replay: null,
   key: null,
+  createdId: null,
 };
 
 describe('scheduleCreates', () => {
