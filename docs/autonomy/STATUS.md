@@ -20,7 +20,7 @@ Last updated: 2026-09-04
 
 ## Verification state
 
-- **3932 tests passing**, 0 failing, across 137 files.
+- **3933 tests passing**, 0 failing, across 137 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -240,72 +240,57 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**`BLK-002` is resolved.** There is a real Android toolchain on this machine, the app builds and
-launches on an Android 16 emulator, and `14`'s "encrypted local storage validated" release gate has
-evidence behind it: `npm run verify:device` reports 7/7, including a positive control - the app is
-killed, the API is put out of reach, and it still shows "Synthetic Tablet A", which can only have
-come out of a file whose 12,288 bytes contain no readable trace of it.
+**Every scenario `19` names that does not need a feature this build lacks is now covered.** Eleven
+of fourteen, with eight harnesses, and the three that remain each name a blocker rather than an
+effort.
 
-Six things that were invisible to every gate this project runs, because nothing had ever compiled
-the native side or run Metro, and which are worth not undoing:
+What this session should be read for is not the count. Six defects were fixed and **five of them
+were invisible from the code**:
 
-- **The dependency set was from an earlier SDK line** and the first Gradle build failed on it.
-  `expo install --check` is now the source of truth for the mobile packages (DEC-101). TypeScript
-  is deliberately still 5.9 - that bump is a compiler change across every package.
-- **Metro could not resolve the workspace packages at all.** They are TypeScript source with
-  `./x.js` relative imports, which `verbatimModuleSyntax` requires and which tsc, vitest and eslint
-  all resolve. The rewrite in `metro.config.js` is scoped to `packages/` on purpose.
-- **`secureDatabase.ts` had never been called**, so no database existed and the release gate could
-  not have been attempted even with a device attached. The encrypted read projection is what fills
-  it, and it is `03` group J working rather than a diagnostic (DEC-100).
-- **A NUL in a projection key was truncated by `expo-sqlite`** and every screen collided on one
-  row. Keys are length-prefixed now, in `contracts`, with injectivity tested.
-- **Two races between the request and the store, and the store lost both.** Opening SQLCipher is a
-  keystore round trip; a loopback failure is milliseconds. The write is deferred to an effect that
-  also fires when the store opens, and whether a stored copy may be shown now goes through
-  `retainsPreviousContent` rather than through "is it still LOADING".
-- **The tab bar clipped Safety at 2x font scale.** `18` forbids exactly that, wrapping cannot fix a
-  single word, and the label is now sized to its slot (DEC-103).
+- **No write the app makes had ever worked on a phone.** `crypto.randomUUID()` in eight call sites,
+  on an engine with no `crypto` (`DEV-043`). Every gate was green because `apps/**` is outside the
+  test run and the lint run, and the one gate it had was being told a phone is a browser.
+- **A queued edit was not sent on the launch it was waiting for**, and each such launch spent one of
+  its retry attempts (`DEV-044`).
+- **A medicine with no schedule could never be given one** (`DEV-045`), and the Care tab could not
+  be scrolled, so nobody could finish inviting a caregiver (`DEV-046`).
+- **A Visit Pack's idempotency key was minted per press**, so a retry made a second copy of somebody's
+  medicines (`DEV-047`).
 
-**Two things a device turned out not to unblock, and it matters which.**
-
-`04` Phase 4.2's reminder engine was recorded as `BLOCKED_TECHNICAL` on `BLK-002`. It is not
-blocked on hardware and never really was: **no route creates a medicine schedule**. The table has
-had full row-level security since migration `0004` and `schedule.ts` computes occurrences from it
-with deterministic tests, but the entire API surface is items, dose events, profiles, health facts,
-consents, households, alerts and the Lens. A reminder engine over an empty table would schedule
-nothing and its exit criterion would be measured against zero reminders (`DEV-039`).
-
-`19`'s device E2E suite has fourteen scenarios and four are covered. The other ten are not waiting
-on a device either - six are about a feature that does not exist, each naming its blocker, and four
-are built and simply have not been driven on the emulator yet (`DEV-040`).
-
-**What no device could touch.** Every other blocker was checked against this environment rather
-than restated: no database URL, no provider keys, no push credentials, no labelled dataset, no
-reviewer. All unchanged, and nothing was invented to fill the gap.
+The thing that found all of them was driving the app. The thing that will find the next one is the
+same, until `apps/**` has tests.
 
 ## Next three planned tasks
 
-1. **Phase 4.1's missing surface** - create, list, update and deactivate a medicine schedule behind
-   `MANAGE_MEDICINES`, with the local times and IANA zone `schedule.ts` already expects. It is the
-   one thing standing in front of Phase 4.2, which is now the only `BLOCKED_TECHNICAL` phase left
-   and the only one whose blocker is inside this repository.
-2. **Phase 4.2's local reminder engine**, on top of it: `expo-notifications`, permission handling, a
-   generic lock-screen body from the detail dial Phase 7.5 already computes, and restart recovery -
-   with the reliability across process death now measurable, because `KEY-2` already does exactly
-   that for the store.
-3. **The four built-but-untested device scenarios** from `DEV-040` - profile creation, caregiver
-   invite and revoke, Visit Pack export, manual medicine entry - driven on the emulator and added
-   to a harness, so `19`'s suite grows by measurement rather than by assertion.
+1. **The three `19` scenarios that are not waiting on a feature.** Camera and file permissions, and
+   a low-storage run, are work rather than a decision - `verify:device` already knows how to drive
+   the app and read `dumpsys`. The other three (`Sign-up/sign-in`, `scan`, `OCR`) unblock with
+   `BLK-010`, `04` Phase 2.2 and `BLK-007` respectively and cannot be brought forward.
+2. **Open the sheets in `verify:device:a11y`.** It measures the five destinations at font scale 1
+   and 2, and `DEV-046` was a sheet three taps in whose controls were drawn below the fold with no
+   way to scroll to them. "Every control is reachable" is currently measured where the controls are
+   fewest. This is the gate that would have caught it.
+3. **Tests over `apps/**`, which has none.** Six defects were fixed this session and every one was
+   in that tree: it is excluded from `vitest.config.ts` and ignored by `eslint.config.js`, so the
+   mobile typecheck and one source-scanning check are the whole of its automated coverage
+   (`DEV-043`). Everything else about it is found by running it.
 
-**Not next, and why.** The offline write half (`DEV-038`) looks like the obvious sequel to the read
-half and is not: `13`'s conflict policy is per entity type, `sync.ts` encodes it, and queueing
-writes without wiring that into each call site is the global last-write-wins the specification
-refuses. The first entity it would be wrong for is a profile fact somebody recorded about their own
-allergy.
+**Not next, and why.** Wiring the remaining offline writes. `dose_event` and `owned_item` CREATE
+still wait on the phases they depend on, and `allergy_record` CREATE waits on a route that takes an
+idempotency key - a journal replays on its own, which is not the hand-retry that route's contract
+reasoned about (`DEV-038`). Queueing them anyway to make the queue look finished is the global
+last-write-wins the specification refuses, one entity at a time.
 
 ## Recent decisions worth knowing
 
+- **DEC-114** - an operation nothing can send has not been attempted. `drainPendingOperations` asks
+  `canSend` before `send` and reports what it skipped, untouched: there is no `ApiOutcome` meaning
+  "nothing was asked", and answering `OFFLINE` charged an attempt for the app having been opened.
+- **DEC-113** - a sender belongs to the app's lifetime, not a screen's. The same argument
+  `_layout.tsx` already made about the reminder engine, which the queue had to learn the hard way.
+- **DEC-112** - the mobile typecheck is told what a phone actually has: `lib: ["ESNext"]`,
+  `types: []`. It is the only automated gate over `apps/**`, and it had been told a phone is a
+  browser.
 - **DEC-103** - a tab label is sized to the slot it has. `18` forbids clipping a critical action's
   name under font scaling; the five destination names are single words so wrapping cannot help; and
   `06` will not let a sixth slot be freed. A name a size smaller conveys more than one cut off, and

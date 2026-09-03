@@ -54,6 +54,7 @@ import {
 } from './offlineWrites.js';
 import {
   captureFailure,
+  currentNodes,
   dismissKeyboard,
   killApp,
   launch,
@@ -180,10 +181,25 @@ async function deactivateAll(): Promise<void> {
   }
 }
 
-function coldStart(): void {
-  adb(['shell', 'am', 'force-stop', PACKAGE]);
-  launch();
-  sleep(45_000);
+/**
+ * Start the app and wait until it is actually the thing on screen.
+ *
+ * A launch that did not happen is "could not look", not "the app is broken", and the difference is
+ * not academic: a run whose first launch failed reported the screen as having told somebody their
+ * medicine time was lost. Metro rebuilds the bundle on every cold start here, and a hiccup leaves
+ * the launcher on screen with no trace in the app at all - so the launch is confirmed and retried
+ * once before anything is judged.
+ */
+function coldStart(): boolean {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    adb(['shell', 'am', 'force-stop', PACKAGE]);
+    launch();
+    sleep(45_000);
+    const nodes = currentNodes();
+    if (nodes !== null && nodes.some((node) => node.packageName === PACKAGE)) return true;
+    captureFailure('offline-launch');
+  }
+  return false;
 }
 
 /**
@@ -280,7 +296,8 @@ async function runOffline(apiSwitch: ApiSwitch): Promise<readonly Check[]> {
       ? unreadableServer('OFF-1', 'An edit made with no signal is queued, not lost')
       : queuedRatherThanFailedCheck({
           requestsWhileOffline: seenWhileOffline,
-          screenShowedError: saved.showedError || !saved.saved,
+          saveAttempted: form.reached && saved.saved,
+          screenShowedError: saved.showedError,
           activeAfterSave: activeTimes(afterSave).length,
         }),
   );

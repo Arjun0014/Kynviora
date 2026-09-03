@@ -114,6 +114,14 @@ export function preconditionCheck(evidence: PreconditionEvidence): Check {
 export interface QueuedEvidence {
   /** Requests the switch saw while the API was unreachable. Must be none. */
   readonly requestsWhileOffline: readonly ObservedRequest[];
+  /**
+   * Whether the save was actually driven.
+   *
+   * Separate from what the screen then said, because conflating the two is how this check reported
+   * "the screen told the person their change was lost" about a run in which nothing was ever
+   * pressed - a finding about the harness dressed as a finding about the app.
+   */
+  readonly saveAttempted: boolean;
   /** Whether the screen reported a failure to the person. */
   readonly screenShowedError: boolean;
   /** Active schedules on the server after the save. */
@@ -130,6 +138,14 @@ export interface QueuedEvidence {
  */
 export function queuedRatherThanFailedCheck(evidence: QueuedEvidence): Check {
   const reached = evidence.requestsWhileOffline.length;
+  if (!evidence.saveAttempted) {
+    return {
+      id: 'OFF-1',
+      title: 'An edit made with no signal is queued, not lost',
+      status: 'INCONCLUSIVE',
+      detail: 'The save was never driven, so nothing here was measured (see OFF-0).',
+    };
+  }
   if (reached > 0) {
     return {
       id: 'OFF-1',

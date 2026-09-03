@@ -94,6 +94,7 @@ describe('OFF-1, queued rather than lost', () => {
     // queued reached the server. The run was not offline, so it measured nothing.
     const check = queuedRatherThanFailedCheck({
       requestsWhileOffline: [create()],
+      saveAttempted: true,
       screenShowedError: false,
       activeAfterSave: 1,
     });
@@ -104,6 +105,7 @@ describe('OFF-1, queued rather than lost', () => {
   it('fails when the screen told the person the save did not happen', () => {
     const check = queuedRatherThanFailedCheck({
       requestsWhileOffline: [],
+      saveAttempted: true,
       screenShowedError: true,
       activeAfterSave: 0,
     });
@@ -113,16 +115,31 @@ describe('OFF-1, queued rather than lost', () => {
   it('fails when the server gained a schedule it could not have received', () => {
     const check = queuedRatherThanFailedCheck({
       requestsWhileOffline: [],
+      saveAttempted: true,
       screenShowedError: false,
       activeAfterSave: 1,
     });
     expect(check.status).toBe('FAIL');
   });
 
+  it('is inconclusive when the save was never driven', () => {
+    // The run whose first launch failed reported the screen as having told somebody their medicine
+    // time was lost. Nothing had been pressed at all.
+    const check = queuedRatherThanFailedCheck({
+      requestsWhileOffline: [],
+      saveAttempted: false,
+      screenShowedError: false,
+      activeAfterSave: 0,
+    });
+    expect(check.status).toBe('INCONCLUSIVE');
+    expect(check.detail).toContain('never driven');
+  });
+
   it('passes when nothing left the phone and the screen showed it as saved', () => {
     expect(
       queuedRatherThanFailedCheck({
         requestsWhileOffline: [],
+        saveAttempted: true,
         screenShowedError: false,
         activeAfterSave: 0,
       }).status,

@@ -3539,3 +3539,112 @@ Pixel 7 / Android 16 emulator: `verify:device` 7/7, `verify:device:a11y` 34/34,
 `verify:device:reminders` 9/9, `verify:device:update` 6/6, `verify:device:offline` 6/6. Their
 judgements are covered by 173 tests that need no device. `19`'s device scenarios go from seven
 covered to eight.
+
+### Then the three flows nobody had driven, which were not untested but broken
+
+`DEV-040` listed three scenarios as "built and untested on device", which read like a queue of easy
+work. All three turned out to be broken, and each in a different way that no gate here could see.
+
+**Profile creation** could not have worked at all - both of its idempotency keys came from a
+`crypto` Hermes does not have (`DEV-043`). `npm run verify:device:profile` is **4/4 PASS**, and its
+control is the one worth keeping: profiles cannot be deleted, so every earlier run is still in the
+household and a fixed name would let last week's run answer this week's question. Each run creates
+a name with its own suffix. `PRO-3` is the half no API test can reach - a row nobody can see is not,
+to the person who made it, a profile that was created; they would add the same person again.
+
+**Caregiver invite/revoke** could not be _finished_. The Care tab was the only one rendering its
+sheets in a plain `View` rather than inside `Screen`, whose `ScrollView` is what makes the other
+four reachable. Six capability rows fill a 1080x2400 screen on their own, so the email field, the
+review control and Cancel were drawn past the bottom with nothing able to bring them into view -
+`uiautomator` reported the container as `scrollable=false`. Nobody could send an invitation, or
+cancel out of the form (`DEV-046`). `npm run verify:device:caregiver` is **5/5 PASS**.
+
+The measurement there is a count and not a status code, on purpose. `13` does not let the route say
+whether a profile exists, so "you may not" and "there is nothing" are both `200` with an empty list;
+a check written against status codes would pass identically before the invitation, after acceptance
+and after revocation. Measured: 2 of the owner's 3 items while granted - the two medicines, not the
+personal-care product, which is `08.2`'s scoping doing its job - and **0 on the very next request**
+after the removal, on the session that was working a moment earlier. That is `12`'s "authorization
+loss invalidates local access", and it is the sentence the app itself puts on the screen of the
+person doing it: "This takes effect straight away."
+
+**Visit Pack export** worked, and its harness found the third defect. `DEV-047`: the export's
+idempotency key was minted at the moment of the press rather than when the export was decided. The
+screen replaces the button with its own state while a request is in flight, so a double tap was
+never the risk - the ordinary one was, a slow request and a retry the person is invited to make,
+producing a second copy of their medicines with its own expiry that they would not know about.
+`npm run verify:device:visitpack` is **5/5 PASS**, and the check that matters is a subtraction: an
+export is the only thing in this app that leaves it, `16` rests that on the promise the screen makes
+twice, and a run that ticked everything would confirm the promise and test none of it. One of two
+medicines is ticked; `PACK-3` asks about the other. One entry, the one that was ticked.
+
+Finding the pack afterwards took a decision worth recording. The app deliberately shows nothing
+identifying when it is done and there is no route that lists packs - a list of somebody's exports is
+itself a record of who they have discussed their health with. So the switch records the top-level
+`id` of a JSON answer and **only** that: never a body, because these bodies carry medicine names and
+a harness that wrote them to disk would be making exactly the copy these scenarios exist to bound. A
+replay of the create was tried first and abandoned honestly - the route checks the reviewed-content
+digest before it reaches its duplicate branch, so a repeat with a body the harness never saw is
+refused as a bad digest and says nothing about idempotency.
+
+### And then the half of `12` that was still a state
+
+`12` asks for a pending-operation journal **and a resolvable failure state**, and the app had the
+first. `needsUserAttention` has counted the operations that stopped retrying since the journal
+shipped, and nothing has ever shown them - so an edit held safely was indistinguishable, from
+outside, from an edit that was saved. It is also why `DEV-044` could only be found by watching the
+wire: the store is SQLCipher-encrypted, so `sqlite3` cannot answer it either.
+
+`PendingQueue` lists them in the words a person uses - "A change to when a medicine is taken", not
+`medicine_schedule` - and offers each row only what it can honestly support:
+
+- **a conflict** gets both "try again" and "remove", because `13` says the person decides and
+  offering only "remove" would discard their change because somebody else got there first;
+- **a rejection** gets only "remove", because the server has read the change and will not take it
+  as written, and a "try again" there produces the same refusal and teaches a person to distrust
+  every other button on the screen;
+- **a change that is simply waiting** gets nothing at all - it is not a question, and offering to
+  discard it invites throwing away an edit seconds from being saved.
+
+Those decisions are `pendingQueueView`'s, in `@kynviora/presentation`, where they are tested. The
+screen renders them and calls the provider, which gained `list`, `retry` and `discard`. Retry resets
+the attempt count, which is the point: an operation that stopped retrying has spent its budget and
+`isUploadable` would pass over it for ever, so without the reset the button is a no-op that looks
+like one.
+
+It unblocks the entity `DEV-038` was holding for exactly this reason. The **review** of an allergy
+or sensitivity now queues offline - `13` resolves `allergy_record` `ASK_USER` and the write is
+conditional on `expectedVersion`, so a replay lands once or comes back as a conflict somebody can
+now resolve. **Adding** a fact stays unwired, and the reason is now specific rather than
+structural: that route deliberately carries no idempotency key, on the contract's reasoning that a
+retried create makes a visible, correctable duplicate - and that reasoning is about a person tapping
+twice, not about a journal replaying on its own after an answer was lost with nobody watching.
+`condition_record` stays unwired because there is no such feature to queue from (`DEV-035`), which
+is a better reason than the one `DEV-038` used to give.
+
+Driven on the device: a schedule saved with the API switched off appears as "1 change is waiting to
+be sent" with no controls, and the section is gone after the next foreground with the server holding
+the change. It renders only when there is something in it, so it is not a permanent reminder that
+syncing exists.
+
+### One harness defect, kept because it is the kind that matters
+
+A run failed at its first step with the launcher on screen: Metro rebuilds the bundle on every cold
+start and one hiccup leaves the app never started. The harness reported that as **`OFF-1` FAIL - the
+screen told the person their change was lost**, about a run in which nothing had been pressed. A
+finding about the harness wearing a finding about the app is the exact failure `DEC-102` exists to
+prevent, so `coldStart` now confirms the app is on screen and retries once, and `OFF-1` distinguishes
+"the save was never driven" from "the screen said it failed".
+
+### State
+
+3932 tests across 137 files, `npm run verify` exit 0. Eight device harnesses green against a
+Pixel 7 / Android 16 emulator: `verify:device` 7/7, `verify:device:a11y` 34/34,
+`verify:device:reminders` 9/9, `verify:device:update` 6/6, `verify:device:offline` 6/6,
+`verify:device:profile` 4/4, `verify:device:caregiver` 5/5, `verify:device:visitpack` 5/5. Their
+judgements are covered by 226 tests that need no device. `19`'s device scenarios go from seven
+covered at the start of this session to eleven.
+
+Six defects were fixed, and the common thread is worth stating once: every one of them was in
+`apps/**`, which is excluded from the test run and ignored by the lint config, and five of the six
+were invisible from reading the code. What found them was driving the app.
