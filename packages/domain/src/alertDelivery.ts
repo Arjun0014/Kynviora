@@ -71,6 +71,20 @@ export const NOTIFICATION_DETAIL_LEVELS = ['GENERIC', 'CATEGORY', 'NAMED'] as co
 export type NotificationDetailLevel = (typeof NOTIFICATION_DETAIL_LEVELS)[number];
 
 /**
+ * Whether a string is a level this build knows.
+ *
+ * The wire type is deliberately `string` in `@kynviora/contracts`, so that a level a later server
+ * adds does not fail a client's parse. That leaves somebody with the narrowing, and the narrowing
+ * has one safe direction: an unrecognised level must fall back to `GENERIC` and never be cast.
+ * Casting it would let a future `FULL` arrive at a client that renders the widest branch it has,
+ * which on this vocabulary means putting a medicine name on a lock screen because the server said
+ * a word the client did not understand.
+ */
+export function isNotificationDetailLevel(value: string): value is NotificationDetailLevel {
+  return (NOTIFICATION_DETAIL_LEVELS as readonly string[]).includes(value);
+}
+
+/**
  * The default, and the value assumed whenever a preference is missing.
  *
  * `03` group H: "generic notification content by default". A missing row must therefore mean the

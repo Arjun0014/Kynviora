@@ -285,21 +285,65 @@ corroboration state, coverage statement - already exists in the domain and catal
 
 ## Stage 4 - Medicine Care Workflows
 
-| Phase | Title                             | Status              |
-| ----- | --------------------------------- | ------------------- |
-| 4.1   | Medicine schedule model           | `COMPLETE`          |
-| 4.2   | Local reminder engine             | `BLOCKED_TECHNICAL` |
-| 4.3   | Dose events and adherence history | `COMPLETE`          |
-| 4.4   | Refill awareness                  | `COMPLETE`          |
+| Phase | Title                             | Status     |
+| ----- | --------------------------------- | ---------- |
+| 4.1   | Medicine schedule model           | `COMPLETE` |
+| 4.2   | Local reminder engine             | `COMPLETE` |
+| 4.3   | Dose events and adherence history | `COMPLETE` |
+| 4.4   | Refill awareness                  | `COMPLETE` |
 
-**4.2** was recorded as blocked on `BLK-002` - a device, to measure reminder reliability across
-process death and restart. `BLK-002` resolved on 2026-09-03 and Phase 4.2 did not: what actually
-blocks it was underneath, and is that **no route creates a medicine schedule**. `medicine_schedule`
-has existed since migration `0004` with full row-level security and `packages/safety/src/schedule.ts`
-computes occurrences from it with deterministic tests, but the whole API surface is `/v1/items`,
-`/v1/dose-events`, `/v1/profiles`, `/v1/health-facts`, `/v1/consents`, `/v1/households`,
-`/v1/alerts` and `/v1/regulatory-lens`. A reminder engine over an empty table would schedule
-nothing, and its exit criterion would be measured against zero reminders (`DEV-039`).
+**4.1** had a complete model and no surface. `medicine_schedule` has existed since migration `0004`
+with full row-level security, and the occurrence computation has had deterministic tests since
+Stage 4 - but no route ever wrote a row, so Phase 4.1's exit criteria were met by a table nothing
+could reach (`DEV-039`). It now has one: `POST`/`GET /v1/items/:itemId/schedules`,
+`PATCH /v1/schedules/:scheduleId`, and `GET /v1/profiles/:profileId/schedules` for the device, with
+a schedule editor on the medicine's own row on the Shelf.
+
+Building that surface exposed an authorization defect that had been latent for sixteen migrations:
+`0004`'s `schedule_insert` and `schedule_update` required only that the caller could _see_ the
+owned item, which reduces to `VIEW_MEDICINES`. A read-only caregiver could have set, moved, or
+silently switched off somebody's reminders. Migration `0020` narrows both to `MANAGE_MEDICINES`
+(DEC-107), and `db/medicineSchedule.test.ts` holds the asymmetry.
+
+**4.2** was recorded as blocked on `BLK-002`. That was already wrong when it was written: what
+blocked it was 4.1's missing write path, not the absence of a device. Both are now done, and the
+phase's two exit criteria are measured rather than asserted:
+
+- **Reliability across process death and device restart** - `npm run verify:device:reminders` drives
+  a real emulator: it creates a schedule through the API, lets the app plan, kills the process, and
+  asks `dumpsys` whether the notification arrived. Last run **8/8 PASS**: the process was gone, 15
+  exact alarms survived the kill, a notification arrived, and after a reboot 29 of 29 alarms were
+  restored by the boot receiver 31 seconds later with the app never opened.
+
+  Three corrections were needed before that number meant anything, and each is kept because each
+  would otherwise be re-derived. The first harness used `am force-stop`, which _cancels_ an app's
+  pending alarms (28 → 0 on this device), so it reported a working engine as broken; `am kill` is
+  process death, and what force-stop costs a real person is `DEV-041`. A later run failed the reboot
+  check after a fixed 30-second settle - the alarms had come back, just not yet, and the same device
+  held 28 a few minutes on with the app still never launched, so the settle is now a poll that
+  reports how long the restore took. And one run turned a transient failure in the harness's own
+  HTTP client into a device verdict, which is now retried once.
+
+- **The engine has to actually run** - and for a while it did not. With one active schedule, three
+  consecutive cold launches held **0** alarms; a background-and-return held 15. `ReminderProvider`
+  refused, rather than deferred, the one reconciliation that carried all of its inputs, so a
+  schedule somebody created was not applied until they happened to leave the app and come back
+  (DEC-108, trap 174). Every unit test passed throughout. Cold launch now plans, retimes and cancels
+  on its own, measured on a wiped app in all three directions.
+- **No sensitive medicine name on a lock screen by default** - the default detail level is
+  `GENERIC` and `reminderContent` has no branch that names anything at that level. The harness reads
+  the posted notification's text out of `dumpsys notification --noredact` and fails if it contains a
+  seeded medicine or profile name.
+
+The plan is expanded on the device from wall-clock times plus an IANA zone, never from a platform
+repeat rule, so a dose does not move when somebody travels (DEC-104 moved the occurrence
+computation into `domain` for this). Quiet hours deliberately do not hold a dose reminder the
+person scheduled themselves (DEC-105). `USE_EXACT_ALARM` is declared and the harness checks the
+platform honoured it (DEC-106).
+
+What the engine does **not** do is `DEV-041`: force-stop ends reminders silently, an app unopened
+for more than a fortnight runs out of them, nothing is reconciled against recorded doses (by
+decision), and iOS is unverified.
 
 ---
 

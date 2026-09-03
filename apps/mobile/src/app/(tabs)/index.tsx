@@ -16,10 +16,16 @@
  * server refuses a completion with an empty change set, and a tick box on this screen would
  * promise something it would then have to take back.
  *
- * Dose reminders are not here because Phase 4.2 needs a device (`BLK-002`) - an empty schedule
- * strip would be a promise the app cannot keep. Recording what happened (Phase 4.3) lives on the
- * Shelf instead, on the medicine's own row, because that is where a person looking for "the one I
- * take in the morning" already is.
+ * DOSE REMINDERS DO NOT APPEAR ON THIS SCREEN, AND THAT IS STILL DELIBERATE
+ * Phase 4.2 is built and the device holds the reminders (`ReminderProvider`), so the reason has
+ * changed: it is no longer that reminders do not exist. A "due today" strip here would be a
+ * second place a person reads when a medicine is due, and the first is the notification that
+ * arrives whether or not the app is open. Two of them disagree the moment one is stale, and the
+ * one somebody acts on at 8am is the one on the lock screen.
+ *
+ * Setting the times, and recording what happened (Phase 4.3), both live on the Shelf, on the
+ * medicine's own row - which is where a person looking for "the one I take in the morning"
+ * already is.
  */
 
 import { useCallback, useMemo, useState } from 'react';

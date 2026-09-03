@@ -22,10 +22,15 @@
  *
  * RECORDING A DOSE LIVES HERE BECAUSE THE MEDICINE DOES
  * `04` Phase 4.3 is about recording what happened, and what happened, happened to one of these.
- * Phase 4.2's reminders need a device (`BLK-002`), so there is no schedule strip to hang it off -
- * and an item's own row is where a person looking for "the one I take in the morning" already is.
- * The control is offered on medicines only: a dose is a medicine's idea, and a recorded dose of
+ * An item's own row is where a person looking for "the one I take in the morning" already is. The
+ * control is offered on medicines only: a dose is a medicine's idea, and a recorded dose of
  * shampoo is a row nobody can read back meaningfully.
+ *
+ * SO DOES SETTING WHEN IT IS TAKEN
+ * `04` Phase 4.1, on the same row and for the same reason. The times belong to one medicine, and
+ * a separate "schedules" destination would be a second list of the medicines that already have a
+ * list. Medicines only, again: `medicine_schedule` is scoped to `MANAGE_MEDICINES` and a schedule
+ * on a shampoo is refused by the database as well as by this screen.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -39,7 +44,13 @@ import {
   manualEntryForm,
   type ScreenState as ScreenStateKind,
 } from '@kynviora/presentation';
-import { ITEM_KINDS, type DoseEventKind, type ItemKind } from '@kynviora/domain';
+import {
+  DEFAULT_NOTIFICATION_DETAIL,
+  ITEM_KINDS,
+  isNotificationDetailLevel,
+  type DoseEventKind,
+  type ItemKind,
+} from '@kynviora/domain';
 import {
   doseHistory,
   itemDetailScreenView,
@@ -47,6 +58,8 @@ import {
   shelfView,
   type DoseHistoryView,
   type ItemDetailScreenView,
+  type ScheduleBody,
+  type ScheduleChangeBody,
   type ShelfItemView,
 } from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
@@ -60,12 +73,18 @@ import { RecordDose } from '@/features/doses/RecordDose';
 import { AddItem } from '@/features/shelf/AddItem';
 import { EditItem } from '@/features/shelf/EditItem';
 import { ItemDetail } from '@/features/shelf/ItemDetail';
+import { MedicineSchedules } from '@/features/schedules/MedicineSchedules';
+import { useReminders } from '@/reminders/ReminderProvider';
 
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
 
 export default function ShelfScreen() {
   const { client } = useApi();
   const { activeProfileId } = useProfiles();
+  // Read rather than inferred: whether a reminder will actually arrive is the platform's answer,
+  // and a screen that offered a schedule without saying notifications are off would promise
+  // something the phone has already refused.
+  const { status: reminderStatus, resync: resyncReminders } = useReminders();
 
   const [recording, setRecording] = useState<ShelfItemView | null>(null);
   const [recordState, setRecordState] = useState<ScreenStateKind | null>(null);
@@ -80,6 +99,16 @@ export default function ShelfScreen() {
    * second list of the same things.
    */
   const [detailFor, setDetailFor] = useState<ShelfItemView | null>(null);
+
+  /**
+   * The medicine whose schedule is open, or `null`.
+   *
+   * `04` Phase 4.1. Reached from the row, like recording a dose, because the times belong to one
+   * medicine and this screen is where that medicine already is.
+   */
+  const [scheduling, setScheduling] = useState<ShelfItemView | null>(null);
+  const [scheduleState, setScheduleState] = useState<ScreenStateKind | null>(null);
+  const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
 
   /**
    * The category being added, or `null`.
@@ -177,6 +206,57 @@ export default function ShelfScreen() {
     [historyResource.value],
   );
 
+  /**
+   * The schedules on the medicine being scheduled, and what a reminder may say.
+   *
+   * Two requests, because they are two questions with two failures: the schedule list not loading
+   * and the disclosure preference not loading are different states, and folding them together
+   * would take the screen down when one of them did not arrive. The disclosure falls back to
+   * `GENERIC` - the safe direction, and what the engine itself falls back to.
+   */
+  const loadSchedules = useMemo(
+    () =>
+      client === null || scheduling === null || activeProfileId === null
+        ? null
+        : async () => {
+            const [schedules, settings, detail] = await Promise.all([
+              client.schedules(scheduling.id),
+              client.notificationSettings(activeProfileId),
+              // For the prescriber's own words. The shelf row does not carry them, and it should
+              // not: `04` Phase 4.1 preserves them as source text on the item, and a list that
+              // carried every medicine's directions would be putting clinical wording on a screen
+              // nobody opened to read it.
+              client.itemDetail(scheduling.id),
+            ]);
+            if (schedules.kind !== 'OK') return schedules;
+            return {
+              kind: 'OK' as const,
+              correlationId: schedules.correlationId,
+              value: {
+                schedules: schedules.value.schedules,
+                detailLevel:
+                  settings.kind === 'OK'
+                    ? settings.value.effectiveDetail
+                    : DEFAULT_NOTIFICATION_DETAIL,
+                // The stored value, not a rendered label. `null` where nobody recorded any, and
+                // `null` where the detail did not load - never a placeholder, and never this
+                // screen's guess at what the prescription said.
+                directionsText:
+                  detail.kind === 'OK'
+                    ? (detail.value.editableValues['directionsText'] ?? null)
+                    : null,
+                mayEdit: detail.kind === 'OK' ? detail.value.mayEdit : false,
+              },
+            };
+          },
+    [client, scheduling, activeProfileId],
+  );
+
+  const { resource: scheduleResource, reload: reloadSchedules } = useResource(loadSchedules, {
+    enabled: scheduling !== null,
+    isEmpty: (value) => value.schedules.length === 0,
+  });
+
   const onRetry = useCallback(() => {
     reload();
   }, [reload]);
@@ -220,6 +300,74 @@ export default function ShelfScreen() {
     },
     [client, reloadHistory],
   );
+
+  const onCreateSchedule = useCallback(
+    (body: ScheduleBody) => {
+      if (client === null || scheduling === null) return;
+      setScheduleState('LOADING');
+      setScheduleMessage(null);
+
+      // One key for this attempt, kept across retries of the same intent. Two schedules on one
+      // medicine is not a duplicate row on a list: it is being told twice, at the same minute, to
+      // take the same tablet.
+      const idempotencyKey = crypto.randomUUID();
+
+      void client.createSchedule(scheduling.id, body, idempotencyKey).then(
+        (outcome) => {
+          if (outcome.kind === 'OK') {
+            setScheduleState(null);
+            reloadSchedules();
+            // The device holds the reminders, so the plan has to be rebuilt now rather than at
+            // the next launch - otherwise somebody saves a schedule, closes the app, and is not
+            // reminded until they happen to open it again.
+            resyncReminders();
+            return;
+          }
+          setScheduleState(screenStateForFailure(outcome));
+          setScheduleMessage(outcome.kind === 'REFUSED' ? outcome.message : null);
+        },
+        () => {
+          setScheduleState('RECOVERABLE_ERROR');
+          setScheduleMessage(null);
+        },
+      );
+    },
+    [client, scheduling, reloadSchedules, resyncReminders],
+  );
+
+  const onUpdateSchedule = useCallback(
+    (scheduleId: string, body: ScheduleChangeBody) => {
+      if (client === null) return;
+      setScheduleState('LOADING');
+      setScheduleMessage(null);
+
+      // No idempotency key, and that is not an omission: the write is conditional on the version,
+      // so a retry either lands once or comes back as a conflict.
+      void client.updateSchedule(scheduleId, body).then(
+        (outcome) => {
+          if (outcome.kind === 'OK') {
+            setScheduleState(null);
+            reloadSchedules();
+            resyncReminders();
+            return;
+          }
+          setScheduleState(screenStateForFailure(outcome));
+          setScheduleMessage(outcome.kind === 'REFUSED' ? outcome.message : null);
+        },
+        () => {
+          setScheduleState('RECOVERABLE_ERROR');
+          setScheduleMessage(null);
+        },
+      );
+    },
+    [client, reloadSchedules, resyncReminders],
+  );
+
+  const onCloseSchedule = useCallback(() => {
+    setScheduling(null);
+    setScheduleState(null);
+    setScheduleMessage(null);
+  }, []);
 
   const onCloseRecord = useCallback(() => {
     setRecording(null);
@@ -275,6 +423,37 @@ export default function ShelfScreen() {
             setDetailFor(null);
             setEditing(false);
           }}
+        />
+      </Screen>
+    );
+  }
+
+  if (scheduling !== null) {
+    const level = scheduleResource.value?.detailLevel ?? DEFAULT_NOTIFICATION_DETAIL;
+    return (
+      <Screen title="Shelf" intro={scheduling.displayName}>
+        <MedicineSchedules
+          displayName={scheduling.displayName}
+          // The prescriber's own words, from the detail this row already carries. `null` where
+          // nobody recorded any - never a placeholder, and never Kynviora's reading of them.
+          directionsText={scheduleResource.value?.directionsText ?? null}
+          schedules={scheduleResource.value?.schedules ?? []}
+          listState={scheduleResource.state}
+          detailLevel={isNotificationDetailLevel(level) ? level : DEFAULT_NOTIFICATION_DETAIL}
+          remindersPermitted={reminderStatus !== 'NOT_PERMITTED'}
+          // The device's own zone as the starting point for a new schedule. The person can change
+          // it: a schedule authored for somewhere else is exactly what `04` Phase 4.1's time-zone
+          // rule exists for.
+          deviceTimeZone={Intl.DateTimeFormat().resolvedOptions().timeZone}
+          // The server's own answer, evaluated with the same expression the update policy uses.
+          // A caregiver who may read a medicine and not change it sees the times and no controls
+          // (DEC-045) - and the database refuses the write regardless (migration 0020).
+          mayEdit={scheduleResource.value?.mayEdit ?? false}
+          onCreate={onCreateSchedule}
+          onUpdate={onUpdateSchedule}
+          onClose={onCloseSchedule}
+          state={scheduleState}
+          stateMessage={scheduleMessage}
         />
       </Screen>
     );
@@ -371,6 +550,9 @@ export default function ShelfScreen() {
               onRecord={() => {
                 setRecording(item);
               }}
+              onSchedule={() => {
+                setScheduling(item);
+              }}
             />
           ))}
 
@@ -387,10 +569,12 @@ function ShelfRow({
   item,
   onOpen,
   onRecord,
+  onSchedule,
 }: {
   readonly item: ShelfItemView;
   readonly onOpen: () => void;
   readonly onRecord: () => void;
+  readonly onSchedule: () => void;
 }) {
   return (
     <View style={styles.item}>
@@ -425,7 +609,12 @@ function ShelfRow({
       {/* Medicines only, and absent rather than disabled for everything else - a greyed-out
           control here would say a dose of shampoo is a thing Kynviora expects you to record. */}
       {item.itemKind === 'MEDICINE' ? (
-        <PrimaryButton label="Record what happened" variant="secondary" onPress={onRecord} />
+        <>
+          <PrimaryButton label="Record what happened" variant="secondary" onPress={onRecord} />
+          {/* `04` Phase 4.1. Medicines only, for the same reason and one more: migration 0020
+              refuses a schedule on a personal-care item outright. */}
+          <PrimaryButton label="When do you take this?" variant="secondary" onPress={onSchedule} />
+        </>
       ) : null}
     </View>
   );

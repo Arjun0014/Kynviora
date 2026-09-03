@@ -9,7 +9,11 @@
     "newArchEnabled": true,
     "android": {
       "package": "com.kynviora.app",
-      "permissions": ["android.permission.CAMERA", "android.permission.POST_NOTIFICATIONS"],
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.USE_EXACT_ALARM"
+      ],
       "blockedPermissions": [
         "android.permission.READ_CONTACTS",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -29,7 +33,8 @@
         {
           "useSQLCipher": true
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true

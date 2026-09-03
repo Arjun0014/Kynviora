@@ -170,6 +170,10 @@ describe('a route on the wrong surface is absent, not refused', () => {
       url: '/v1/items/00000000-0000-4000-8000-0000000000cc/schedules',
     },
     { method: 'PATCH' as const, url: '/v1/schedules/00000000-0000-4000-8000-0000000000dd' },
+    {
+      method: 'GET' as const,
+      url: '/v1/profiles/00000000-0000-4000-8000-0000000000bb/schedules',
+    },
   ];
 
   for (const { method, url } of householdRequests) {

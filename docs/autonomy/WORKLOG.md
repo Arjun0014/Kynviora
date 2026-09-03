@@ -3069,3 +3069,132 @@ attached.
 
 `BLK-002` is resolved. `04` Phase 0.1's four exit criteria hold, Phase 0.3 is complete, and `14`'s
 "encrypted local storage validated" release gate has evidence behind it for the first time.
+
+---
+
+## 2026-09-03 - Session: reminders, and the launch that planned nothing
+
+Resumed on the Phase 4.2 reminder engine, which the previous session had left substantially
+written, entirely uncommitted, and verified only by a harness run that was interrupted. The
+starting position was reconciled against the repository rather than the handoff note: `npm run
+verify` was green on the working tree at 3733 tests across 126 files, so the code was sound as
+written. What had never been established was whether any of it worked on a phone.
+
+### What the emulator said about the engine, before any harness ran
+
+Three schedules left over from the previous session were deactivated through the API. The app was
+launched. The device was still holding **42 pending alarms** for reminders that no longer existed.
+
+That is the whole session in one observation. The engine's own unit tests are exhaustive and they
+were all passing; `reconcileReminders` cancels what the plan no longer wants and there is a test
+that says so. None of it had ever run on a cold start.
+
+Pressing HOME and returning cancelled all 42 immediately, which is what made the shape of the
+defect visible: the reconciliation was correct and was not being reached. With one active schedule,
+three consecutive cold launches held **0** alarms. A single background-and-return held **15**.
+
+The mechanism was read out of the device rather than guessed at. Temporary `console.log` calls in
+the effect, and `logcat`:
+
+    effect { client: true,  activeProfileId: null, projection: false } -> returned early
+    effect { client: true,  activeProfileId: set,  projection: false } -> started a sync
+    cleanup: live=false                                                 (projection arrived)
+    effect { client: true,  activeProfileId: set,  projection: true  } -> DROPPED by syncing guard
+
+`ReminderProvider` guarded its sync with "already running, do nothing". Its inputs arrive in stages
+
+- the API client, then the active profile, then the encrypted projection - so the pass that began
+  without the projection was superseded by the one that had it, and that one was refused. Nothing
+  re-triggered it. The `AppState` listener could not save it either: it fires on a _change_ to
+  `active`, and a cold launch is already active.
+
+The rule moved into `packages/domain` as `requestReminderSync` / `finishReminderSync` with seven
+tests (DEC-108). It is a rule with a wrong answer and the wrong answer had shipped, which is
+trap 164 arriving from a new direction: a `useRef` boolean inside a `useEffect` is not reviewable
+as a rule, and `apps/**` is outside the test run. A refused request is now deferred and re-run from
+the `finally`.
+
+Measured after the change, on a wiped app so nothing could be restored from `expo-notifications`'
+own store, with no background-and-return anywhere in it:
+
+| Cold launch only                            | Pending alarms          |
+| ------------------------------------------- | ----------------------- |
+| Schedule at 22:10                           | 15, all exact, at 22:10 |
+| Retimed to 20:45 while the process was dead | 15, all exact, at 20:45 |
+| Deactivated while the process was dead      | 0                       |
+
+The second and third rows are Phase 4.2's edit and cancellation paths. Both had been silently a
+launch behind since the day they were written.
+
+### The harness, which was wrong twice before it was right
+
+`npm run verify:device:reminders` creates a schedule through the real route, lets the app plan,
+kills the process, and asks `dumpsys` what the platform is holding and what it posted. Three runs
+were needed and the two failures were both the harness's.
+
+**A transport failure decided a device verdict.** The first run reported REM-5 `INCONCLUSIVE` with
+"the API refused the schedule (0)" while the API was up throughout - its own log shows a request
+from that same run succeeding twelve seconds later. The obvious theory was wrong and was tested
+rather than assumed: a keep-alive socket was suspected of going stale across the harness's
+390-second blocking sleep, but a connection was measured surviving that intact, and forcing
+`connection: close` made things _worse_ (ECONNRESET after a 100-second block). So the fix is a
+single retry on a transport failure and the comment says only what was established. Two failures in
+a row are still a failure.
+
+**A thirty-second sleep reported a working engine as broken.** The second run failed REM-5 outright:
+"None of the 29 pending alarm(s) came back. Reminders stop at the first restart." They had come
+back. Asked again a few minutes later, the same device held **28**, with the app never launched -
+`dumpsys activity` showed no `MainActivity`, and the process had been started by the boot receiver.
+`sys.boot_completed` is not the finish line: the property flips, then `BOOT_COMPLETED` goes to a
+queue of 113 receivers (49s of reported completion latency), and the activity manager had _frozen_
+the app's process for over a minute before it finished re-registering.
+
+A false FAIL is worse than an inconclusive - it sends somebody hunting a defect that is not there.
+The settle is now a poll with a deadline, and it reports how long the restore took, because that is
+a real property: a dose due in the first minutes after a restart has nothing holding an alarm for
+it.
+
+### Four processes on one database
+
+`npm run dev` failed with `EADDRINUSE` against an API that was answering, which is how four
+`tsx watch` servers from previous sessions were found holding the same PGlite directory. The port
+check does not catch this: the losers exit their listener and keep watching. The first edit to a
+shared package restarted all of them onto that directory at once and PGlite died with `Aborted()`,
+taking the development database with it. It was recreated from the synthetic seed - traps 175 and
+176 record this and the `expo-notifications` restore that makes a post-force-stop alarm count
+meaningless as evidence.
+
+### What the device now says about Phase 4.2
+
+`npm run verify:device:reminders`, eight checks, **8/8 PASS**, exit 0:
+
+| Check    | What the device showed                                                               |
+| -------- | ------------------------------------------------------------------------------------ |
+| `REM-0`  | a schedule was created through the real route, for 16:37 Asia/Calcutta               |
+| `REM-1`  | 15 pending alarms after the app planned, from one schedule over the 14-day horizon   |
+| `REM-2`  | all 15 exact - `window=0`, `exactAllowReason=policy_permission` (DEC-106 honoured)   |
+| `REM-6`  | 15 before a relaunch and 15 after: re-planning converges rather than doubling        |
+| `REM-3a` | no process for the package, and all 15 alarms survived the `am kill`                 |
+| `REM-3`  | a notification was posted after the process was killed                               |
+| `REM-4`  | its text was "Kynviora" / "Kynviora has a reminder for you" - no medicine, no person |
+| `REM-5`  | 29 of 29 alarms restored by the boot receiver, 31s after boot, the app never opened  |
+
+The two that could not be inferred from reading the code are REM-3 and REM-4: the process was gone,
+nothing of Kynviora was running, and a notification arrived saying "Kynviora has a reminder for
+you" - naming neither the medicine nor the person. That is Phase 4.2's second exit criterion
+measured against what the platform actually held, not against the function that produced it.
+
+### State
+
+**3743 tests passing across 126 files**, up from 3603 across 121 at the last commit. Typecheck,
+mobile typecheck, lint and format all clean via `npm run verify`, exit 0 read from the log. Ten of
+the new tests are this session's: seven for the sync gate (DEC-108) and three for the reboot check's
+timing, both written against defects the device found rather than ahead of them.
+
+Three device harnesses, all green against a Pixel 7 / Android 16 emulator: `npm run verify:device`
+7/7, `npm run verify:device:a11y` 34/34, and `npm run verify:device:reminders` 8/8. Their judgements
+are covered by 101 tests that need no device.
+
+`04` Stage 4 is complete. What the engine does not do is `DEV-041`, unchanged by this session:
+force-stop ends reminders silently, an app unopened for more than a fortnight runs out of them,
+nothing is reconciled against recorded doses (by decision), and iOS is unverified.

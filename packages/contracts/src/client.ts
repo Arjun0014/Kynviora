@@ -510,6 +510,27 @@ export interface SchedulesResponse {
   readonly serverTime: string;
 }
 
+/**
+ * A schedule with the medicine it belongs to named, as the profile-scoped read returns it.
+ *
+ * The name is here because the device plans reminders from this one response. Joining it against
+ * a separate shelf read would be two moments, and a schedule whose item was missing from the
+ * other one would be planned with no name - so at the disclosure level that shows names, the
+ * person would get a reminder that could not say what it was for.
+ */
+export interface ScheduleWithItem extends Schedule {
+  readonly itemDisplayName: string;
+}
+
+/** Everything a device needs to plan a profile's reminders, from one request. */
+export interface ProfileSchedulesResponse {
+  readonly profileId: string;
+  /** Null where the caller cannot read the profile. Never a placeholder. */
+  readonly profileDisplayName: string | null;
+  readonly schedules: readonly ScheduleWithItem[];
+  readonly serverTime: string;
+}
+
 export interface ScheduleWritten {
   readonly schedule: Schedule;
   readonly replayed?: boolean;
@@ -1465,6 +1486,15 @@ export interface KynvioraClient {
    * a refusal arrives as the same not-found an unknown medicine gets.
    */
   schedules(itemId: string): Promise<ApiOutcome<SchedulesResponse>>;
+  /**
+   * Every schedule on a profile, with the medicine each belongs to named.
+   *
+   * What the reminder engine reads (`04` Phase 4.2). One request rather than one per medicine,
+   * because the offline copy keeps whole responses (`12`): several rows that can each be
+   * separately stale is a plan assembled from several different moments, and the medicine whose
+   * row failed simply gets no reminders.
+   */
+  profileSchedules(profileId: string): Promise<ApiOutcome<ProfileSchedulesResponse>>;
   createSchedule(
     itemId: string,
     body: ScheduleBody,
@@ -1720,6 +1750,9 @@ export function createClient(options: ClientOptions): KynvioraClient {
 
     schedules: (itemId) =>
       get<SchedulesResponse>(`/v1/items/${encodeURIComponent(itemId)}/schedules`),
+
+    profileSchedules: (profileId) =>
+      get<ProfileSchedulesResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/schedules`),
 
     // The body is passed through untouched. Rounding a time to the nearest five minutes or
     // guessing a zone from the device here would be the client altering what somebody entered

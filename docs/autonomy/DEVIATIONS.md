@@ -1023,52 +1023,59 @@ route.
 
 ## DEV-039 - Phase 4.2 has no schedule to remind anybody about
 
+- **Status**: **Closed on 2026-09-03.** Phase 4.1's write path and Phase 4.2's reminder engine both
+  exist, and the engine has been measured on a device. What follows is kept because the shape of
+  the gap is worth remembering: a phase recorded as blocked on the environment, whose real blocker
+  was underneath and had nothing to do with hardware.
 - **Affected specification**: `04` Phase 4.2 (local reminder engine): local notification
   scheduling, restart/reboot recovery, permission handling, generic lock-screen default,
   quiet-hour behaviour. Its exit criteria are reminder reliability measured across process death
   and device restart, and no sensitive medicine name on the lock screen by default.
 - **Expected behaviour**: reminders fire at the times a person entered, survive the app being
   killed and the device restarting, and say nothing identifying on a locked screen.
-- **Implemented behaviour**: nothing. `expo-notifications` is not a dependency and no reminder is
-  scheduled.
-- **Reason**: the phase was recorded as `BLOCKED_TECHNICAL` on `BLK-002` because measuring
-  reliability across process death needs a device. That is now false - a device exists, and
-  `KEY-2` in the storage harness exercises process death against it. What blocks Phase 4.2 is
-  something else, and it was underneath the environment blocker the whole time: **there is no way
-  to create a medicine schedule.**
+- **Implemented behaviour at the time**: nothing. `expo-notifications` was not a dependency and no
+  reminder was scheduled.
+- **Reason at the time**: the phase was recorded as `BLOCKED_TECHNICAL` on `BLK-002` because
+  measuring reliability across process death needs a device. That was already false when it was
+  written - a device existed, and `KEY-2` in the storage harness exercised process death against
+  it. What blocked Phase 4.2 was something else, and it had been underneath the environment blocker
+  the whole time: **there was no way to create a medicine schedule.**
 
-  `medicine_schedule` has existed since migration `0004` with full row-level security, and
-  `packages/safety/src/schedule.ts` computes occurrences from it with deterministic tests -
-  Phase 4.1's model, complete. What does not exist is any route that writes or reads a row:
-  `/v1/items`, `/v1/dose-events`, `/v1/profiles`, `/v1/health-facts`, `/v1/consents`,
-  `/v1/households`, `/v1/alerts` and `/v1/regulatory-lens` are the whole surface. A dose event can
-  reference a `scheduleId`, and nothing can produce one.
+  `medicine_schedule` had existed since migration `0004` with full row-level security, and
+  `packages/safety/src/schedule.ts` computed occurrences from it with deterministic tests -
+  Phase 4.1's model, complete. What did not exist was any route that wrote or read a row. A dose
+  event could reference a `scheduleId`, and nothing could produce one.
 
-  A reminder engine over an empty table would schedule nothing, and its exit criterion - measured
-  reliability across restart - would be measured against zero reminders. That is the structural
-  zero DEC-099 is about, in a different part of the codebase.
+  A reminder engine over an empty table would have scheduled nothing, and its exit criterion -
+  measured reliability across restart - would have been measured against zero reminders.
 
-- **Temporary or permanent**: temporary, and no longer environmental. Phase 4.1 needs its write
-  and read path before Phase 4.2 can begin.
-- **Risk**: none created by the omission itself. `(tabs)/index.tsx` deliberately shows no schedule
-  strip and says why, so nobody is promised a reminder that is not coming. The risk being avoided
-  is the opposite one: a person who believes Kynviora will remind them and stops setting their own
-  alarm.
-- **Required future work**: Phase 4.1's surface - create, list, update and deactivate a schedule
-  behind `MANAGE_MEDICINES`, with the local times and IANA zone `schedule.ts` already expects -
-  and then Phase 4.2 on top of it: `expo-notifications`, permission handling, a generic
-  lock-screen body from the notification-detail dial that Phase 7.5 already computes, restart
-  recovery, and quiet hours once `DEV-030`'s local-time gap is closed.
+- **How it was closed**:
+  - Migration `0020` added the idempotency key and the version a write path needs, and narrowed
+    `schedule_insert` and `schedule_update` to `MANAGE_MEDICINES` (DEC-107). The narrowing was a
+    second defect the write path exposed: 0004's policies asked only whether the caller could _see_
+    the item, so a read-only caregiver could have set, moved or silently switched off somebody's
+    reminders.
+  - `POST`/`GET /v1/items/:itemId/schedules`, `PATCH /v1/schedules/:scheduleId` and
+    `GET /v1/profiles/:profileId/schedules` - the last being what a device plans from, in one
+    request rather than one per medicine.
+  - `scheduleEntry.ts` in `domain` (the vocabulary both sides need), `scheduleForm.ts` in
+    `contracts` (what a person typed and what gets sent), `schedule.ts` in `presentation` (the
+    words), and a schedule editor on the medicine's own row on the Shelf.
+  - Phase 4.2 itself: `reminderPlan.ts` in `domain`, `reminders.ts` in `contracts`,
+    `expo-notifications` behind a thin adapter, and a `ReminderProvider` that re-plans on every
+    foreground.
+- **Temporary or permanent**: closed.
+- **What replaced it**: `DEV-041`, which records what the reminder engine does _not_ do.
 
 ---
 
-## DEV-040 - Four of `19`'s fourteen device scenarios are covered, and the other ten are not waiting on a device
+## DEV-040 - Five of `19`'s fourteen device scenarios are covered, and the other nine are not waiting on a device
 
 - **Affected specification**: `19` "Device E2E tests" lists fourteen scenarios that must be
   covered.
 - **Expected behaviour**: all fourteen exercised on a device.
-- **Implemented behaviour**: four, plus two automated harnesses that re-run them
-  (`npm run verify:device`, `npm run verify:device:a11y`).
+- **Implemented behaviour**: five, plus three automated harnesses that re-run them
+  (`npm run verify:device`, `npm run verify:device:a11y`, `npm run verify:device:reminders`).
 
   | `19` scenario                         | State                                                      |
   | ------------------------------------- | ---------------------------------------------------------- |
@@ -1077,27 +1084,34 @@ route.
   | Profile creation                      | Built and untested on device                               |
   | Medicine add/scan/manual path         | Manual path built; no scanner (`04` Phase 2.2)             |
   | Personal-care add/scan/OCR/confirm    | No OCR provider (`BLK-007`)                                |
-  | Medicine reminder after process death | No reminder engine (`DEV-039`)                             |
+  | Medicine reminder after process death | **Covered**, and after a device restart as well            |
   | Offline create/edit/sync              | **Read covered.** No pending-operation journal (`DEV-038`) |
   | Safety alert open/resolution          | Nothing is publishable (`BLK-006`)                         |
   | Caregiver invite/revoke               | Built and untested on device                               |
   | Visit Pack export                     | Built and untested on device                               |
-  | Camera/file permissions               | Nothing requests either yet                                |
+  | Camera/file permissions               | Notification permission covered; camera/file untested      |
   | TalkBack smoke suite                  | **Covered**                                                |
-  | Clock/time-zone change                | Untested                                                   |
+  | Clock/time-zone change                | Untested on device; the rule has deterministic tests       |
   | Low storage/network disruption        | **Network disruption covered.** Low storage untested       |
 
-- **Reason**: the environment blocker is gone, and what is left divides into three kinds. Six
+- **Reason**: the environment blocker is gone, and what is left divides into three kinds. Five
   scenarios are about a feature that does not exist, and each names the blocker or deviation that
   explains why. Four are about features that do exist and simply have not been driven on a device
   yet - which is work, not a decision. Nothing here is waiting on hardware.
 
-  The two that are worth being explicit about, because their absence is easy to misread as
-  coverage:
+  The three worth being explicit about, because their state is easy to misread:
 
-  **"Offline create/edit/sync" is half done and the visible half is the read half.** The shelf and
-  the profile list come back with no network and are labelled as older than they look. Nothing can
-  be created or edited offline (`DEV-038`), so the sync half of that scenario has nothing to sync.
+  **"Medicine reminder after process death" is now genuinely covered, and getting there found a
+  measurement error worth remembering.** The harness first used `am force-stop`, which cancels an
+  app's pending alarms outright - so it reported a working engine as broken. `am kill` is process
+  death; `force-stop` is the settings button. `REM-3a` now asserts both halves of the precondition
+  (no process, alarms intact) before the delivery check is allowed to mean anything, and what
+  force-stop costs a real person is recorded as `DEV-041`.
+
+  **"Offline create/edit/sync" is half done and the visible half is the read half.** The shelf, the
+  profile list and now the schedule list come back with no network and are labelled as older than
+  they look. Nothing can be created or edited offline (`DEV-038`), so the sync half of that scenario
+  has nothing to sync.
 
   **The TalkBack suite is a smoke test and the report says so.** It shows the app starts under a
   screen reader, keeps running, and exposes controls with names. It does not navigate: TalkBack
@@ -1107,8 +1121,82 @@ route.
   announcements are any good is a question for somebody listening, which `04` Phase 9.4 already
   says needs people this build does not have.
 
+  **"Clock/time-zone change" is the next one to become worth doing**, and it is now worth doing for
+  a reason it was not before: a schedule carries its own IANA zone and the device expands it, so
+  moving the emulator's clock across a zone boundary is a test with a right answer. The rule has
+  deterministic tests either side of a DST transition; what is untested is the device honouring
+  them.
+
 - **Temporary or permanent**: temporary.
 - **Risk**: low, and the shape of it is known rather than hidden. The claim being avoided is "the
-  device suite passes", which would read as fourteen scenarios when it is four.
+  device suite passes", which would read as fourteen scenarios when it is five.
 - **Required future work**: drive the four built-but-untested flows on the emulator and add them to
-  a harness; the other six unblock with the blockers they name.
+  a harness; add the clock/time-zone scenario, which the schedule work has made meaningful; the
+  other five unblock with the blockers they name.
+
+---
+
+## DEV-041 - Four things the reminder engine does not do, and the one a person could not find out
+
+- **Affected specification**: `04` Phase 4.2 (local reminder engine).
+- **Expected behaviour**: reminders arrive at the times a person set, for as long as those times
+  are set.
+- **Implemented behaviour**: they do, and the device harness measures it. Four limits are worth
+  writing down rather than discovering later, and they are listed in order of how badly a person
+  would be served by not knowing.
+
+### 1. "Force stop" silently ends the reminders, and nothing says so
+
+Pressing **Force stop** in Android's app settings does not merely kill the process. It puts the app
+in the stopped state and **cancels every alarm it had registered** - measured on this emulator as 28
+pending alarms before and 0 after - and Android will not let a stopped app re-register anything
+until a person launches it again. So somebody who force-stops Kynviora to "close it properly" gets
+no reminders, indefinitely, with no error and nothing on any screen to say so.
+
+This is the one on the list that a person could not find out for themselves, which is why it is
+first. Ordinary process death is fine and is measured: `am kill` leaves the alarms intact and the
+reminder still arrives. Swiping the app away from recents behaves like `am kill`, not like force
+stop.
+
+**Required future work**: the schedule screen should say what a force stop costs, in the same
+sentence style as `SCHEDULE_COPY.reliability`. That is copy plus a place to put it, not a mechanism
+
+- there is no way for an app to detect that it was force-stopped, so the honest move is to warn
+  rather than to recover.
+
+### 2. An app left unopened for more than a fortnight runs out of reminders
+
+`REMINDER_HORIZON_DAYS` is 14 and the plan is a list of absolute instants, so a device that is never
+opened again stops being reminded on day fifteen. The horizon exists because a platform repeat rule
+is re-evaluated in the device's _current_ zone, which would move a dose when somebody travels -
+`04` Phase 4.1's time-zone rule is what forbids the cheaper option.
+
+The app re-plans on every foreground, so this only bites somebody who has stopped opening it
+entirely. **Required future work**: a background task that re-plans without a launch. `12` bounds
+what may run in the background and no such task exists yet, so this is deliberate rather than
+missed.
+
+### 3. Nothing is reconciled against what was actually taken
+
+A reminder fires whether or not the dose it is about was already recorded as taken. Phase 4.3's
+dose events exist and the engine does not read them.
+
+This is deliberate and it is not an oversight to be tidied up later: suppressing a reminder because
+an event exists is Kynviora deciding somebody has already taken a medicine, and the record it would
+be deciding from is one a person can create by tapping the wrong row. `02` names gamified adherence
+as an anti-feature and `04` Phase 4.1 forbids inferring dose changes from adherence history. Being
+reminded about something already taken costs a glance; not being reminded about something not taken
+costs the dose.
+
+### 4. iOS is entirely unverified
+
+`expo-notifications` covers both platforms and every rule in `reminderPlan.ts` is platform-neutral,
+but nothing here has run on an iOS device. iOS has no equivalent of `USE_EXACT_ALARM` (DEC-106) and
+its own limit on pending local notifications, which is lower than Android's and which
+`MAX_PLANNED_REMINDERS` was not chosen against. No claim is made about iOS reminder reliability.
+
+- **Temporary or permanent**: 1 and 2 are temporary. 3 is permanent by decision. 4 is temporary and
+  needs hardware this build has never had.
+- **Risk**: 1 is the material one - a person who believes they are being reminded and is not.
+  2 is bounded by a fortnight of not opening the app at all. 3 is a small annoyance in the direction
+  that fails safe. 4 is an unmade claim rather than a broken promise.

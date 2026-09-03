@@ -12,6 +12,11 @@
  * The encrypted local store is opened here for the same reason: `12` requires one projection per
  * install, keyed to the identity that filled it, and a store opened per screen would be several
  * connections to one SQLCipher file racing each other's schema creation.
+ *
+ * The reminder engine is mounted here rather than on a screen because `04` Phase 4.2 requires
+ * reminders to survive the app being killed and the device restarting. A sync that only ran when
+ * somebody opened a particular tab would stop extending the horizon the moment they stopped
+ * visiting it, and the person would find out by not being reminded.
  */
 
 import { Stack } from 'expo-router';
@@ -19,6 +24,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ApiProvider } from '@/api/ApiProvider';
 import { ProfileProvider } from '@/api/ProfileProvider';
 import { ProjectionProvider } from '@/storage/ProjectionProvider';
+import { ReminderProvider } from '@/reminders/ReminderProvider';
 
 export default function RootLayout() {
   return (
@@ -29,9 +35,15 @@ export default function RootLayout() {
             (`03` group J). */}
         <ProjectionProvider>
           <ProfileProvider>
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="(tabs)" />
-            </Stack>
+            {/* Inside the profile provider because reminders are planned for the profile being
+                looked at, and inside the projection provider because a device with no signal
+                still has to be reminded - it re-plans from the last response the store kept
+                (`03` group J, `04` Phase 4.2). */}
+            <ReminderProvider>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="(tabs)" />
+              </Stack>
+            </ReminderProvider>
           </ProfileProvider>
         </ProjectionProvider>
       </ApiProvider>

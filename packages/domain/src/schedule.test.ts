@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  parseLocalTime,
   localTimeToInstant,
   isoWeekdayOf,
   addDays,
@@ -11,7 +10,11 @@ import {
   estimateRefill,
   type MedicineSchedule,
 } from './schedule.js';
-import { calendarDate, instantFrom } from '@kynviora/domain';
+import { calendarDate, instantFrom } from './ports.js';
+// The vocabulary moved to `scheduleEntry.ts` when the write path needed it on both sides. The
+// block below stays here because it asserts the contract *this* module depends on: a time it
+// cannot parse is a reminder that would fire at the wrong hour.
+import { parseLocalTime } from './scheduleEntry.js';
 
 const IN = 'Asia/Kolkata'; // UTC+05:30, no DST - the India-first default.
 const UK = 'Europe/London'; // UTC+00:00 / +01:00 - has DST.

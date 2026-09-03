@@ -9,6 +9,14 @@
  * computes **when a reminder is due** from what the user entered. It never derives a dose, never
  * adjusts a schedule from missed events, and never interprets adherence as a clinical signal.
  *
+ * WHY THIS IS IN `domain` AND NOT IN `safety`
+ * It was in `@kynviora/safety` until Phase 4.2, because the first caller was the server. DEC-010
+ * keeps that package off the phone, and rightly: the client must never evaluate a safety rule or
+ * decide how urgent something is. This is not that. `04` Phase 4.2 requires reminders "without
+ * relying on server timing", and a device that is offline for a week still has to fire them - so
+ * the phone must expand its own schedule. What it expands is calendar arithmetic over times the
+ * person typed themselves, which is the same kind of thing as `parseLocalTime` next door.
+ *
  * WHY TIME ZONES ARE HANDLED EXPLICITLY
  * A schedule is authored in local wall-clock time - "08:00 and 20:00" - and must keep firing at
  * those local times through a DST transition or a journey across zones. Storing a UTC instant
@@ -16,14 +24,9 @@
  * IANA zone, and occurrences are computed from them.
  */
 
-import type { CalendarDate, Instant, IsoWeekday, ScheduleKind } from '@kynviora/domain';
-import { calendarDate, instantFrom, parseLocalTime } from '@kynviora/domain';
-
-// The vocabulary a person enters a schedule in lives in `@kynviora/domain`, because the client
-// needs the same words and DEC-010 keeps this package off the phone. What is here is the half a
-// phone has no business doing: turning a wall-clock pattern into instants.
-export type { IsoWeekday, ScheduleKind };
-export { parseLocalTime };
+import type { CalendarDate, Instant } from './ports.js';
+import { calendarDate, instantFrom } from './ports.js';
+import { parseLocalTime, type IsoWeekday, type ScheduleKind } from './scheduleEntry.js';
 
 export interface MedicineSchedule {
   readonly id: string;
@@ -126,6 +129,28 @@ function zoneOffsetMs(instantMs: number, timeZone: string): number {
   );
 
   return asUtc - instantMs;
+}
+
+/**
+ * The local calendar date an instant falls on, in a given zone.
+ *
+ * The inverse of {@link localTimeToInstant}, and the thing a device needs before it can ask "what
+ * is due from today onwards": a phone in Auckland reading a schedule authored in Kolkata must
+ * expand from Kolkata's today, not from its own. Formatting in the zone and reading the fields
+ * back is the only way to get this right across a DST boundary without a zone database of our own.
+ */
+export function localDateIn(at: Instant, timeZone: string): CalendarDate {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(at));
+
+  const read = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? '';
+
+  return calendarDate(`${read('year')}-${read('month')}-${read('day')}`);
 }
 
 /** The ISO weekday of a calendar date in a given zone. */

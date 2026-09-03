@@ -4,6 +4,8 @@
  *   POST  /v1/items/:itemId/schedules   - say when a medicine is meant to be taken
  *   GET   /v1/items/:itemId/schedules   - what is currently set, and what a reminder would use
  *   PATCH /v1/schedules/:scheduleId     - move a time, end a course, or stop the reminders
+ *   GET   /v1/profiles/:profileId/schedules
+ *                                       - everything one device needs to plan its reminders
  *
  * Spec references: `04` Phase 4.1 (fixed-time and selected-day patterns, start and end dates,
  * as-needed separated from fixed reminders, time-zone handling, directions preserved as entered),
@@ -64,6 +66,7 @@ export interface ScheduleRouteDeps {
 const uuidSchema = z.string().uuid();
 const itemParamsSchema = z.object({ itemId: uuidSchema });
 const scheduleParamsSchema = z.object({ scheduleId: uuidSchema });
+const profileParamsSchema = z.object({ profileId: uuidSchema });
 
 /**
  * A schedule somebody is creating.
@@ -349,6 +352,77 @@ export function registerScheduleRoutes(app: FastifyInstance, deps: ScheduleRoute
       serverTime: ctx.now,
     });
   });
+
+  // -------------------------------------------------------------------------
+  // GET /v1/profiles/:profileId/schedules
+  // -------------------------------------------------------------------------
+  // Everything a device needs to plan its reminders, in one request.
+  //
+  // WHY THIS EXISTS ALONGSIDE THE PER-ITEM READ
+  // A phone planning reminders needs every schedule on the profile at once, and per-item it would
+  // be one request per medicine - on the launch path, on a connection that may be about to fail.
+  // Worse, `12` keeps the offline copy as whole responses: N rows that can be individually stale
+  // is a plan assembled from several different moments, and the medicine whose row failed simply
+  // has no reminders. One response is one moment.
+  //
+  // WHY IT CARRIES THE MEDICINE'S NAME
+  // Because the alternative is the device joining this against a separate shelf read, which is the
+  // same several-moments problem with an extra way to go wrong: a schedule whose item is missing
+  // from the other response would be planned with no name, and at `NAMED` the person would get a
+  // reminder that could not say what it was for. The name is already readable to this caller -
+  // `schedule_select` requires it - so nothing is disclosed that a shelf read would not disclose.
+  app.get<{ Params: { profileId: string } }>(
+    '/v1/profiles/:profileId/schedules',
+    async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      const params = profileParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        return fail(reply, domainError('NOT_FOUND', 'No such profile.'), ctx.correlationId);
+      }
+      const profileId = params.data.profileId;
+
+      // No capability check. Row-level security decides: a caller without `VIEW_MEDICINES` reads
+      // an empty list, which is the same answer a profile with no schedules gives, and `13`
+      // requires a profile ID in a request to be no proof of access.
+      const result = await ctx.db((db) =>
+        db.query<ScheduleRow & { item_display_name: string }>(
+          `SELECT s.id, s.owned_item_id, s.schedule_kind, s.times_local, s.days_of_week,
+                  s.timezone, s.starts_on, s.ends_on, s.active, s.version, s.updated_at,
+                  i.display_name AS item_display_name
+             FROM medicine_schedule s
+             -- An inner join, and the policy on owned_item is what makes it an authorization
+             -- boundary: a schedule whose medicine this caller cannot read has no row to join to
+             -- and disappears, rather than arriving with a blank name. (No backtick in a SQL
+             -- comment inside a template literal - it closes the string, trap 155.)
+             JOIN owned_item i ON i.id = s.owned_item_id
+            WHERE i.profile_id = $1 AND i.deleted_at IS NULL
+            ORDER BY s.active DESC, i.display_name ASC, s.created_at ASC`,
+          [profileId],
+        ),
+      );
+
+      // The profile's own name, for the disclosure level that may show it. Read separately rather
+      // than joined onto every row, and null where the caller cannot see the profile - which is
+      // the same state a device gets before it has ever loaded one.
+      const profile = await ctx.db((db) =>
+        db.query<{ display_name: string }>(`SELECT display_name FROM profile WHERE id = $1`, [
+          profileId,
+        ]),
+      );
+
+      return reply.status(200).send({
+        profileId,
+        profileDisplayName: profile.rows[0]?.display_name ?? null,
+        schedules: result.rows.map((row) => ({
+          ...scheduleView(row),
+          itemDisplayName: row.item_display_name,
+        })),
+        serverTime: ctx.now,
+      });
+    },
+  );
 
   // -------------------------------------------------------------------------
   // PATCH /v1/schedules/:scheduleId

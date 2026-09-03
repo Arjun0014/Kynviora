@@ -3358,3 +3358,228 @@ which is untidy, and too high clips it, which is the failure the whole decision 
 **Sources.** `18` (font scaling without clipping; meaning never carried by an icon alone); `06`
 (five primary destinations); `01`; `04` Phase 9.4; the 2x screenshots in this session's WORKLOG
 entry.
+
+---
+
+## DEC-104 - Schedule occurrence computation moved into `domain`, because a phone has to expand its own reminders
+
+**Date:** 2026-09-03
+**Phase:** 4.2 (local reminder engine)
+
+**Status:** Accepted
+
+**Context.** `packages/safety/src/schedule.ts` had held `localTimeToInstant`, `isActiveOn`,
+`occurrencesOn` and `occurrencesBetween` since Stage 4. `packages/safety` is server-side only
+(DEC-010): the client never evaluates a safety rule and must not be able to.
+
+**Decision.** The file moved to `packages/domain/src/schedule.ts`. `packages/safety` no longer
+exports it, and the two callers now read it from `@kynviora/domain`.
+
+**Rationale.** `04` Phase 4.2 requires reminders "without relying on server timing", and a phone
+that has been offline for a week still has to fire them. That is not a preference about
+architecture - it is the phase. A device cannot expand a schedule it is not allowed to compute
+with, so the alternatives were to move this, or to have the server send a list of instants, which
+is the thing the phase forbids.
+
+**What DEC-010 actually protects, and why this does not touch it.** The boundary is _rule
+evaluation_: deciding that a substance interacts with a condition, and how urgent that is. A client
+that could do that could raise a severity, or claim an assessment nobody produced. Turning "08:00
+in Asia/Kolkata" into an instant is calendar arithmetic over a time the person typed themselves. It
+was in `safety` because the first caller was the server, not because it was ever a rule - and the
+file's own comment already said `12` required bounded memory on device, which is a sentence about a
+phone.
+
+`rules.ts` and `shadow.ts` stay where they are. This is the only file that moved, and the package's
+index says why in the place where the export used to be.
+
+**Sources.** `04` Phase 4.2 ("without relying on server timing"); DEC-010; `12`; `03` group J.
+
+---
+
+## DEC-105 - Quiet hours do not hold a dose reminder the person scheduled themselves
+
+**Date:** 2026-09-03
+**Phase:** 4.2 (local reminder engine)
+
+**Status:** Accepted
+
+**Context.** `04` Phase 4.2 lists "quiet-hour behavior where appropriate" as expected output.
+`profile_notification_policy` already stores a quiet window, `withinQuietHours` and
+`deliveryDecision` apply it, and `04` Phase 7.5 is where it was built.
+
+**Decision.** `planReminders` takes no quiet-hours parameter and there must not be one. A scheduled
+dose reminder fires at the time it was set, and is neither held nor silenced.
+
+**Rationale.** "Where appropriate" is doing real work in that sentence, and this is the case where
+it is not appropriate. Quiet hours exist so Kynviora does not wake somebody for something
+_Kynviora_ decided to say - a safety alert, a missed-dose nudge to a caregiver. A dose reminder is
+not Kynviora interrupting: it is the person's own alarm, at a time they typed, on a medicine they
+take.
+
+Holding a 22:00 dose until 07:00 because a window says so **moves the dose**, which is the one
+thing this whole stage refuses to do - and it moves it silently, on the night somebody was relying
+on it. Firing it silently is the same failure with a quieter symptom. A person who does not want to
+be woken for a medicine sets the medicine's time, which is a control they already have and which
+says exactly what it does.
+
+The asymmetry with DEC-078 is deliberate and points the other way from the obvious reading. There,
+a `CRITICAL` alert _pierces_ a quiet window because the window is a timing preference and the alert
+still has to arrive. Here the reminder is not piercing anything, because the window was never about
+the person's own alarms.
+
+**What this costs, and where it is said.** Somebody who sets a 03:00 dose is woken at 03:00. That
+is correct, and the settings screen already describes quiet hours in terms of what Kynviora sends
+rather than as a global mute.
+
+**Sources.** `04` Phase 4.2 ("quiet-hour behavior where appropriate"); `04` Phase 7.5; DEC-078;
+`18`; `09`.
+
+---
+
+## DEC-106 - `USE_EXACT_ALARM` is declared, and the harness measures that it was honoured
+
+**Date:** 2026-09-03
+**Phase:** 4.2 (local reminder engine)
+
+**Status:** Accepted
+
+**Context.** `expo-notifications` calls `setExactAndAllowWhileIdle` when
+`AlarmManager.canScheduleExactAlarms()` is true and `setAndAllowWhileIdle` otherwise. On Android 12
+and later the answer is false unless the app declares an exact-alarm permission, so the default is
+an alarm Doze may defer.
+
+**Decision.** `apps/mobile/app.json` declares `android.permission.USE_EXACT_ALARM`, and
+`scripts/device/reminders.ts` has its own check (`REM-2`) asserting the alarms the device is
+actually holding are exact.
+
+**Rationale.** An inexact alarm can be deferred by minutes or considerably longer in Doze. For a
+notification saying "there is a safety update to review", that is fine. For "take this tablet now"
+it is a different feature: the value of a dose reminder is almost entirely in its punctuality, and
+one that arrives at an unpredictable time teaches somebody to stop trusting it, which is worse than
+not having it.
+
+`USE_EXACT_ALARM` rather than `SCHEDULE_EXACT_ALARM`: the latter is denied by default on Android 13
+and later and has to be granted in a system settings screen, so relying on it means most people
+silently get the deferred version. `USE_EXACT_ALARM` is the permission Android added for apps whose
+core function is timed reminders, and it is granted at install.
+
+**What this commits Kynviora to.** A Play Store policy declaration: `USE_EXACT_ALARM` is restricted
+to apps whose core functionality is alarms or reminders, and using it obliges the listing to say so.
+Medicine reminders are a named part of `03`'s MVP and of `04` Stage 4, so the claim is true - but it
+is a commitment, not a free flag, and it is recorded here so that a later build which drops
+reminders knows to drop the permission with them.
+
+**Why it is measured rather than assumed.** Declaring a permission is not the same as the platform
+honouring it, and the failure mode is invisible: reminders still arrive, just late. `REM-2` reads
+`window=0` and `exactAllowReason` out of `dumpsys alarm`, so the claim is checked against the device
+on every run. On this emulator the reason reads `policy_permission`, which is the declaration being
+honoured.
+
+**Sources.** `04` Phase 4.2 (reminder reliability); `12`; `18`; the `dumpsys alarm` capture in
+`scripts/device/reminders.test.ts`.
+
+---
+
+## DEC-107 - Writing a medicine schedule needs `MANAGE_MEDICINES`, and the policy says which item kind it is for
+
+**Date:** 2026-09-03
+**Phase:** 4.1 (medicine schedule model)
+
+**Status:** Accepted
+
+**Context.** Migration `0004` gave `medicine_schedule` these policies:
+
+    schedule_insert: WITH CHECK (EXISTS (SELECT 1 FROM owned_item i WHERE i.id = owned_item_id))
+    schedule_update: the same, on both sides
+
+The subquery runs under `owned_item_select`, so the whole condition reduces to `VIEW_MEDICINES`.
+That was invisible for sixteen migrations because no route ever wrote a row.
+
+**Decision.** Migration `0020` replaces both with a check requiring
+`kynviora.has_capability(i.profile_id, 'MANAGE_MEDICINES')` and `i.item_kind = 'MEDICINE'`.
+`schedule_select` is left exactly as it was.
+
+**Rationale.** Building the write path is what made the gap real: with a route, a caregiver granted
+read-only access to somebody's medicines could create their reminders, move them, or set
+`active = false` so no reminder ever arrived again. The last of those is the one a person would
+never see - no error, no reminder, and a medicine they believe they are being told about. `08.2`
+requires caregiver capabilities to be scoped separately, and every sibling table already got this
+right: `review_task` writes need `MANAGE_CARE`, `allergy` writes need `MANAGE_MEDICINES`.
+`dose_event` is reachability-scoped on purpose and is a different kind of thing - a record of
+something that happened, not a decision about the future.
+
+**Why the item kind is in the policy.** The capability governing a personal-care item is
+`MANAGE_SHELF`, so a policy naming only `MANAGE_MEDICINES` over any kind would check the wrong
+capability for a shampoo. Rather than branch, the write path says what the table's name has always
+said. No row anywhere is affected: the table was empty, because until `0020` nothing could write
+one.
+
+**Reading stays where it was.** A caregiver who can see a medicine may see when it is taken. The
+asymmetry between reading and writing is the point of a capability model, and there is a test that
+holds both halves against the same caller.
+
+**Sources.** `08.2`; `04` Phase 4.1; `12` (authorization in the database); `13`; migration `0004`;
+`db/medicineSchedule.test.ts`.
+
+---
+
+## DEC-108 - A reconciliation refused while another is running is deferred, never dropped
+
+**Date:** 2026-09-03
+**Phase:** 4.2 (local reminder engine)
+
+**Status:** Accepted
+
+**Context.** `ReminderProvider` runs one reconciliation at a time, because two overlapping passes
+read the same held set and each schedules what the other has not yet placed. The first version
+enforced that with a plain boolean: if a sync was in flight, the new request returned and did
+nothing.
+
+**What the device said.** With one active schedule, three consecutive cold launches held **0**
+pending alarms. A single background-and-return then held **15**. The reminder engine did nothing at
+all on a cold start, and had done nothing on a cold start since it was written.
+
+Instrumenting the effect and reading `logcat` gave the mechanism exactly, rather than a plausible
+story about it:
+
+    effect { client: true,  activeProfileId: null, projection: false } -> returned early
+    effect { client: true,  activeProfileId: set,  projection: false } -> started a sync
+    cleanup: live=false                                                 (projection arrived)
+    effect { client: true,  activeProfileId: set,  projection: true  } -> DROPPED by syncing guard
+
+The provider's inputs arrive in stages - the API client, then the active profile, then the
+encrypted projection. The pass that began without the projection was superseded a moment later by
+the one that had it, and that one was refused. Nothing re-triggered it. The `AppState` listener
+only fires on a _change_ to `active`, and a cold launch is already active, so the one path that
+could have repaired it never ran either.
+
+**Decision.** The rule moved into `packages/domain/src/reminderPlan.ts` as `requestReminderSync` /
+`finishReminderSync` over a two-field `ReminderSyncGate`, with seven tests. A request that cannot
+start now is **deferred**, and the `finally` that releases the gate re-triggers the effect.
+
+**Rationale for where it lives.** This is a rule with a wrong answer, and the wrong answer shipped -
+which is trap 164 arriving from a new direction. `apps/**` is outside the test run, so a decision
+made there is one nothing checks; a `useRef` boolean read in a `useEffect` is not reviewable as a
+rule. As a pure function it is, and the tests state the four properties directly: one at a time,
+deferred not dropped, any number collapse into one re-run, and the gate releases even when the run
+it was holding threw.
+
+**Why deferral is the right rule and not just the safe one.** What is in flight was computed from
+inputs that have since moved, so its answer is already stale; the request that superseded it is the
+one that matters. Collapsing several into a single re-run is not a shortcut either - by the time it
+happens they would all read the same state, and each extra pass is a full read of what the device
+holds plus a write of the difference.
+
+**What was measured after the change**, on a wiped app so nothing could be restored from
+`expo-notifications`' own store, and with no background-and-return anywhere in it:
+
+| Cold launch only                            | Pending alarms          |
+| ------------------------------------------- | ----------------------- |
+| Schedule at 22:10                           | 15, all exact, at 22:10 |
+| Retimed to 20:45 while the process was dead | 15, all exact, at 20:45 |
+| Deactivated while the process was dead      | 0                       |
+
+The second and third rows are Phase 4.2's edit and cancellation paths, and before this fix both
+were silently a launch behind.
+
+**Sources.** `04` Phase 4.2; trap 164; `12`; the `logcat` capture above; `reminderPlan.test.ts`.

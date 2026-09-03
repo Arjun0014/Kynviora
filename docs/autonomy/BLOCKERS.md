@@ -171,12 +171,21 @@ implemented, the exact configuration required is documented, and independent wor
 
 - **Class**: `EXTERNAL_CREDENTIAL`
 - **Status**: OPEN - worked around
-- **Blocks**: actual delivery of any notification to a device; end-to-end verification that a
-  lock-screen body renders as designed; delivery-failure and retry behaviour under a real
-  provider; `15` A6 verification on a physical locked device.
+- **Blocks**: delivery of any **server-originated** notification to a device - caregiver alerts,
+  safety alerts, missed-dose nudges; delivery-failure and retry behaviour under a real provider;
+  `15` A6 verification for those on a physical locked device.
+- **Narrowed on 2026-09-03.** This used to say it blocked "actual delivery of any notification to a
+  device" and "end-to-end verification that a lock-screen body renders as designed". Both are now
+  too broad by exactly one case: a **local** notification needs no provider at all. Phase 4.2's
+  reminder engine schedules through Android's own `AlarmManager`, and `npm run verify:device:reminders`
+  reads what arrived out of `dumpsys notification --noredact` after killing the app's process - the
+  posted text was "Kynviora" / "Kynviora has a reminder for you", naming neither the medicine nor
+  the person. So the disclosure rule is verified end to end on a device for the one notification
+  kind that can be. Everything the `NotificationTransport` port sends is still unverified on the
+  wire, and that is what remains here.
 - **Detail**: no FCM, APNs or Expo push credentials are available in this environment, and `14`
   lists notification server credentials among the secrets that must be held server-side. Nothing
-  here can demonstrate that a device received a notification.
+  here can demonstrate that a device received a notification **that a server sent**.
 - **Workaround in place**: delivery is decided, recorded and rendered behind a
   `NotificationTransport` port. The only implementation is `recordingTransport`, which records
   what it was asked to send and claims nothing about arrival. The recipient decision, the
@@ -184,8 +193,8 @@ implemented, the exact configuration required is documented, and independent wor
   are written before the transport is called, so a provider failure leaves a recorded delivery
   rather than an unrecorded arrival.
 - **To resolve**: obtain provider credentials, set the corresponding `KYNVIORA_PUSH_*` values,
-  implement the adapter behind the existing port, and re-run the delivery suite against it. The
-  lock-screen assertions in `15` A6 additionally need a physical device (`BLK-002`).
+  implement the adapter behind the existing port, and re-run the delivery suite against it. `15` A6
+  for a server-sent notification additionally needs a device, which now exists (`BLK-002`).
 
 ## BLK-010 - No strong authentication for a reviewer account
 

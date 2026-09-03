@@ -7,11 +7,12 @@ import {
   calendarDate,
   instantFrom,
   noopLogger,
+  occurrencesBetween,
   unsafeId,
   type Instant,
+  type MedicineSchedule,
   type UserId,
 } from '@kynviora/domain';
-import { occurrencesBetween, type MedicineSchedule } from '@kynviora/safety';
 import { ALL_FIXTURE_SOURCES, asApprovedSourceForTest } from '@kynviora/fixtures';
 import type { SourceRegistryEntry } from '@kynviora/regulatory';
 
@@ -540,6 +541,93 @@ describe('changing a schedule', () => {
     });
     expect(response.statusCode).toBe(400);
     expect(response.json<WireError>().error.detail?.field).toBe('daysOfWeek');
+  });
+});
+
+describe('everything one device needs to plan its reminders', () => {
+  interface ProfileListBody {
+    readonly profileId: string;
+    readonly profileDisplayName: string | null;
+    readonly schedules: readonly (ScheduleBody & { readonly itemDisplayName: string })[];
+    readonly serverTime: string;
+  }
+
+  const profileList = (as: Principal | null, profileId: string) =>
+    request(as, { method: 'GET', url: `/v1/profiles/${profileId}/schedules` });
+
+  it('returns every schedule on the profile with its medicine named', async () => {
+    const other = testUuid(33);
+    await t.asOwner((db) =>
+      db.query(
+        `INSERT INTO owned_item (id, profile_id, item_kind, display_name)
+         VALUES ($1, $2, 'MEDICINE', 'Another Synthetic Tablet')`,
+        [other, PROFILE],
+      ),
+    );
+    await seeded();
+    await create(principalFor(OWNER), other, { ...FIXED, timesLocal: ['12:00'] });
+
+    const response = await profileList(principalFor(OWNER), PROFILE);
+    expect(response.statusCode).toBe(200);
+    const body = response.json<ProfileListBody>();
+    expect(body.schedules).toHaveLength(2);
+    expect(body.schedules.map((s) => s.itemDisplayName).sort()).toEqual([
+      'Another Synthetic Tablet',
+      'Synthetic Tablet',
+    ]);
+    expect(body.profileDisplayName).toBe('Parent A (synthetic)');
+  });
+
+  it('is one response rather than one per medicine, so the plan is one moment', async () => {
+    // The whole reason this route exists beside the per-item read. `12` keeps the offline copy as
+    // whole responses; several rows that can each be separately stale is a plan assembled from
+    // several different moments, and the medicine whose row failed gets no reminders at all.
+    await seeded();
+    const body = (await profileList(principalFor(OWNER), PROFILE)).json<ProfileListBody>();
+    expect(body.serverTime ?? null).not.toBe(undefined);
+    expect(body.profileId).toBe(PROFILE);
+  });
+
+  it('shows a viewing caregiver the schedules', async () => {
+    await seeded();
+    const body = (await profileList(principalFor(READER), PROFILE)).json<ProfileListBody>();
+    expect(body.schedules).toHaveLength(1);
+  });
+
+  it('shows nothing to a caller who cannot read the medicines', async () => {
+    // An empty list rather than a refusal: the same answer a profile with no schedules gives, so
+    // a profile ID in a request is no proof of access (`13`).
+    await seeded();
+    const shelfOnly = testUuid(6);
+    await t.asService(async (db) => {
+      await db.query(
+        `INSERT INTO app_user (id, external_auth_id, email_normalized, email_verified_at)
+         VALUES ($1, $2, $3, now()) ON CONFLICT DO NOTHING`,
+        [shelfOnly, `auth|${shelfOnly}`, 'shelfonly@example.test'],
+      );
+      await db.query(
+        `INSERT INTO caregiver_grant
+           (profile_id, grantee_user_id, granted_by_user_id, capabilities, status, accepted_at)
+         VALUES ($1, $2, $3, ARRAY['VIEW_SHELF']::text[], 'ACTIVE', now())
+         ON CONFLICT DO NOTHING`,
+        [PROFILE, shelfOnly, OWNER],
+      );
+    });
+
+    const response = await profileList(principalFor(shelfOnly), PROFILE);
+    expect(response.statusCode).toBe(200);
+    expect(response.json<ProfileListBody>().schedules).toEqual([]);
+  });
+
+  it('omits a schedule whose medicine was archived out of the shelf', async () => {
+    // `deleted_at` is a soft delete and the join filters it, so a device does not keep firing
+    // reminders for a medicine the shelf no longer shows.
+    await seeded();
+    await t.asOwner((db) =>
+      db.query(`UPDATE owned_item SET deleted_at = now() WHERE id = $1`, [MEDICINE]),
+    );
+    const body = (await profileList(principalFor(OWNER), PROFILE)).json<ProfileListBody>();
+    expect(body.schedules).toEqual([]);
   });
 });
 
