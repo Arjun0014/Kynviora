@@ -1107,26 +1107,27 @@ route.
 
 ---
 
-## DEV-040 - Eight of `19`'s fourteen device scenarios are covered, and the other six are not waiting on a device
+## DEV-040 - Ten of `19`'s fourteen device scenarios are covered, and the other four are not waiting on a device
 
 - **Affected specification**: `19` "Device E2E tests" lists fourteen scenarios that must be
   covered.
 - **Expected behaviour**: all fourteen exercised on a device.
-- **Implemented behaviour**: eight, plus five automated harnesses that re-run them
+- **Implemented behaviour**: ten, plus seven automated harnesses that re-run them
   (`npm run verify:device`, `npm run verify:device:a11y`, `npm run verify:device:reminders`,
-  `npm run verify:device:update`, `npm run verify:device:offline`).
+  `npm run verify:device:update`, `npm run verify:device:offline`,
+  `npm run verify:device:profile`, `npm run verify:device:caregiver`).
 
   | `19` scenario                         | State                                                       |
   | ------------------------------------- | ----------------------------------------------------------- |
   | Android install/update                | **Covered** - data, key and reminders survive a replace     |
   | Sign-up/sign-in/recovery              | No authentication exists (`BLK-010`, Phase 1.1)             |
-  | Profile creation                      | Built and untested on device                                |
+  | Profile creation                      | **Covered** - a person is added, once, and shows up         |
   | Medicine add/scan/manual path         | Manual path built; no scanner (`04` Phase 2.2)              |
   | Personal-care add/scan/OCR/confirm    | No OCR provider (`BLK-007`)                                 |
   | Medicine reminder after process death | **Covered**, and after a device restart as well             |
   | Offline create/edit/sync              | **Covered** - queued, survives a kill, arrives exactly once |
   | Safety alert open/resolution          | Nothing is publishable (`BLK-006`)                          |
-  | Caregiver invite/revoke               | Built and untested on device                                |
+  | Caregiver invite/revoke               | **Covered** - and revocation measured as immediate          |
   | Visit Pack export                     | Built and untested on device                                |
   | Camera/file permissions               | Notification permission covered; camera/file untested       |
   | TalkBack smoke suite                  | **Covered**                                                 |
@@ -1199,10 +1200,23 @@ route.
 - **Temporary or permanent**: temporary.
 - **Risk**: low, and the shape of it is known rather than hidden. The claim being avoided is "the
   device suite passes", which would read as fourteen scenarios when it is seven.
-- **Required future work**: drive the three built-but-untested flows on the emulator and add them
-  to a harness - profile creation, caregiver invite/revoke, and Visit Pack export. All three are
-  now worth driving in a way they were not before: each one creates something through a route that
-  needed an idempotency key, so each was crashing on `crypto` until this session (`DEV-043`). The
+  **"Profile creation" and "Caregiver invite/revoke" are now covered, and neither was the tidying-up
+  exercise the old wording implied.** Profile creation could not have worked at all - both of its
+  idempotency keys came from a `crypto` Hermes does not have (`DEV-043`). The caregiver flow could
+  not be **finished**: the Care tab was the only one whose sheets were not inside a `ScrollView`, so
+  the review and confirm controls were drawn below the fold with no way to reach them (`DEV-046`).
+  Two of the three "built and untested" scenarios turned out to be broken rather than untested,
+  which is the argument for driving the third.
+
+  What the caregiver run measures that no API test can is the pair: the invitation is created from
+  the phone, carrying only the one capability that was ticked, and the removal is confirmed on the
+  phone - and the caregiver's very next request, on the session that was working a moment earlier,
+  returns nothing. `12` requires authorization loss to invalidate access and the app tells the
+  person doing it that this "takes effect straight away". Measured: 2 of the owner's 3 items while
+  granted - the two medicines, not the personal-care product, which is `08.2`'s scoping - and 0
+  immediately afterwards.
+
+- **Required future work**: drive Visit Pack export on the emulator and add it to a harness; the
   other three unblock with the blockers they name.
 
 ---
@@ -1488,3 +1502,44 @@ its own limit on pending local notifications, which is lower than Android's and 
   tree, which does not exist (`DEV-043`).
 - **Required future work**: driving the remaining `DEV-040` scenarios will exercise the other
   screens' empty states, which is the only way this class is currently found.
+
+---
+
+## DEV-046 - The Care screen did not scroll, so nobody could finish inviting a caregiver
+
+- **Affected specification**: `04` Phase 8.1 (caregiver invitation and revocation), `06` Journey 6,
+  `18` (every control must stay usable at font scale 2), `19` ("Caregiver invite/revoke").
+- **Expected behaviour**: a person ticks what a caregiver may see, reviews it, and creates the
+  link.
+- **Implemented behaviour before this session**: the ticking worked. Nothing below it could be
+  reached. `care.tsx` was the only tab rendering its sheets in a plain `View` under a
+  `SafeAreaView`, instead of inside `Screen` - whose `ScrollView` is what makes the other four
+  scroll. On a 1080x2400 device the invitation form's six capability rows already fill the screen,
+  so the email field, "Review what you are sharing" and "Cancel" were drawn past the bottom with
+  nothing able to bring them into view. `uiautomator` reported the container as
+  `scrollable=false`; a person could not send an invitation at all, and could not cancel out of the
+  form either.
+
+  The removal sheet is in the same branch and had the same problem waiting for it, on a longer list
+  of capabilities than this seed happens to grant.
+
+- **Reason it was not found**: nothing had ever opened the screen on a device. `DEV-040` recorded
+  the caregiver flow as "built and untested", and the four device harnesses in existence read
+  rather than wrote. The accessibility harness measures the five destinations at font scale 1 and
+  2 - it visits the Care **list**, which is short and fits, and not the sheets, which do not.
+
+  It is also invisible from the code unless the four tabs are compared side by side: each screen's
+  own file looks reasonable, and the missing thing is a wrapper three of its siblings have.
+
+- **What was done**: each branch of `care.tsx` renders inside a `ScrollView` with the same padding
+  and gap `Screen` uses. Not `Screen` itself, because `Screen` also draws a destination heading and
+  this tab has never had one - adding it is a design change, and what was wrong here is that a
+  screen could not be finished.
+
+- **Temporary or permanent**: fixed.
+- **Risk now**: low for this screen, and the class is worth naming: any screen not built on
+  `Screen` can grow past the viewport without anybody noticing, and font scale 2 makes every screen
+  taller. `18`'s requirement is measured for the five destinations and not for the sheets they
+  open.
+- **Required future work**: extend `verify:device:a11y` to open the sheets rather than only the
+  destinations, so "every control is reachable" is measured where the controls actually are.

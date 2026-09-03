@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LIGHT_THEME, SPACING, type ScreenState as ScreenStateKind } from '@kynviora/presentation';
 import {
@@ -316,7 +316,7 @@ export default function CareScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
       {removing !== null ? (
-        <View style={styles.sheet}>
+        <ScrollView contentContainerStyle={styles.sheet}>
           <RemoveCaregiverAccess
             target={removing}
             onConfirm={onConfirmRemoval}
@@ -325,9 +325,9 @@ export default function CareScreen() {
             stateMessage={removeMessage}
             removed={removed}
           />
-        </View>
+        </ScrollView>
       ) : inviting && activeProfileId !== null ? (
-        <View style={styles.sheet}>
+        <ScrollView contentContainerStyle={styles.sheet}>
           <InviteCaregiver
             profileId={activeProfileId}
             authority={authority}
@@ -338,43 +338,59 @@ export default function CareScreen() {
             state={sendState}
             stateMessage={sendMessage}
           />
-        </View>
+        </ScrollView>
       ) : (
-        <CaregiverAccessList
-          // EMPTY is passed through as READY so the list renders its own empty copy, which says
-          // something specific - "no one else has access to this profile" - rather than the
-          // generic "nothing here yet". On this screen that distinction is the whole answer to
-          // the question the user came to ask.
-          // EMPTY and PARTIAL both render the list: EMPTY so it can say "no one else has access
-          // to this profile" rather than the generic copy, PARTIAL because the rows that did load
-          // are still worth showing.
-          state={
-            resource.state === 'EMPTY' || resource.state === 'PARTIAL' ? 'READY' : resource.state
-          }
-          rows={rows}
-          onRetry={onRetry}
-          // DEC-045 one level up: a caregiver who may delegate nothing is not offered the
-          // control, rather than being asked to fill in a form whose only outcome is a refusal.
-          // The server decides again either way.
-          onInvite={
-            mayInvite(authority)
-              ? () => {
-                  setInviting(true);
-                }
-              : null
-          }
-          // Never applied locally. `12` forbids optimistic authorization changes, and a row
-          // that vanishes on a failed request misstates who can read this profile - so this
-          // opens a confirmation, and the list only changes when the server says it has.
-          onRevoke={onRevoke}
-          history={history}
-        />
+        <ScrollView contentContainerStyle={styles.sheet}>
+          <CaregiverAccessList
+            // EMPTY is passed through as READY so the list renders its own empty copy, which says
+            // something specific - "no one else has access to this profile" - rather than the
+            // generic "nothing here yet". On this screen that distinction is the whole answer to
+            // the question the user came to ask.
+            // EMPTY and PARTIAL both render the list: EMPTY so it can say "no one else has access
+            // to this profile" rather than the generic copy, PARTIAL because the rows that did load
+            // are still worth showing.
+            state={
+              resource.state === 'EMPTY' || resource.state === 'PARTIAL' ? 'READY' : resource.state
+            }
+            rows={rows}
+            onRetry={onRetry}
+            // DEC-045 one level up: a caregiver who may delegate nothing is not offered the
+            // control, rather than being asked to fill in a form whose only outcome is a refusal.
+            // The server decides again either way.
+            onInvite={
+              mayInvite(authority)
+                ? () => {
+                    setInviting(true);
+                  }
+                : null
+            }
+            // Never applied locally. `12` forbids optimistic authorization changes, and a row
+            // that vanishes on a failed request misstates who can read this profile - so this
+            // opens a confirmation, and the list only changes when the server says it has.
+            onRevoke={onRevoke}
+            history={history}
+          />
+        </ScrollView>
       )}
     </SafeAreaView>
   );
 }
 
+/**
+ * Every branch of this screen scrolls, and that is a fix rather than a preference.
+ *
+ * This tab was the only one not rendering its sheets inside `Screen`, whose `ScrollView` is what
+ * makes the other four reachable. On a 1080x2400 device the invite form's capability list already
+ * fills the screen, so the email field, "Review what you are sharing" and "Cancel" were drawn
+ * below the fold with nothing able to bring them into view: `uiautomator` reported the container
+ * as `scrollable=false` and a person could not invite anybody at all (`DEV-046`). `18` requires
+ * every control to remain usable at font scale 2, where less of the form fits still.
+ *
+ * A `ScrollView` here rather than adopting `Screen`, because `Screen` also draws a destination
+ * heading and this tab has never had one - adding it is a design change, and this is a screen that
+ * could not be finished.
+ */
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: LIGHT_THEME.surface.background },
-  sheet: { padding: SPACING.lg },
+  sheet: { padding: SPACING.lg, gap: SPACING.md },
 });
