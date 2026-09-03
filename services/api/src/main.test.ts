@@ -44,9 +44,15 @@ const dataDirs: string[] = [];
  * failed one run and passed the next with nothing changed, and the migration count only grows.
  *
  * Raised here rather than globally, because 30s is the right default for a test that is only slow
- * by accident, and these are slow on purpose. `beforeAll` already gets 60s for the same reason.
+ * by accident, and these are slow on purpose.
+ *
+ * Raised again, from 60s, after `clientIntegration.test.ts` crossed 60s in a `beforeAll` doing the
+ * same work and passed in 17s on its own moments later. The number is chosen against the machine
+ * this actually runs on, which has an Android emulator attached for the device harnesses - which is
+ * not an exotic condition to be generous about, it is what `npm run verify` runs alongside whenever
+ * somebody is also working on the device tests.
  */
-const PROCESS_BOOT_TIMEOUT_MS = 60_000;
+const PROCESS_BOOT_TIMEOUT_MS = 180_000;
 async function startServer(overrides: Partial<MainConfig> = {}): Promise<StartedServer> {
   const dataDir = mkdtempSync(join(tmpdir(), 'kynviora-main-'));
   dataDirs.push(dataDir);
@@ -70,9 +76,12 @@ async function startServer(overrides: Partial<MainConfig> = {}): Promise<Started
 /** One seeded server, shared by every test that only reads. */
 let shared: StartedServer;
 
+// The hook gets the same allowance the tests do. The global `hookTimeout` is 60s, which is what
+// `clientIntegration.test.ts` crossed under the full suite - and this hook boots exactly the same
+// thing, so it was one busy machine away from the identical failure (trap 159).
 beforeAll(async () => {
   shared = await startServer();
-});
+}, PROCESS_BOOT_TIMEOUT_MS);
 
 afterAll(async () => {
   for (const server of started) await server.stop();

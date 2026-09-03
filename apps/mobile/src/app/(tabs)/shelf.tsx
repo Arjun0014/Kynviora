@@ -309,12 +309,14 @@ export default function ShelfScreen() {
       setScheduleState('LOADING');
       setScheduleMessage(null);
 
-      // One key for this attempt, kept across retries of the same intent. Two schedules on one
-      // medicine is not a duplicate row on a list: it is being told twice, at the same minute, to
-      // take the same tablet.
+      // One key for this attempt, kept across retries of the same intent - including a retry that
+      // happens tomorrow out of the offline journal. Two schedules on one medicine is not a
+      // duplicate row on a list: it is being told twice, at the same minute, to take the same
+      // tablet.
       const idempotencyKey = crypto.randomUUID();
+      const itemId = scheduling.id;
 
-      void client.createSchedule(scheduling.id, body, idempotencyKey).then(
+      void client.createSchedule(itemId, body, idempotencyKey).then(
         (outcome) => {
           if (outcome.kind === 'OK') {
             setScheduleState(null);
@@ -323,6 +325,25 @@ export default function ShelfScreen() {
             // the next launch - otherwise somebody saves a schedule, closes the app, and is not
             // reminded until they happen to open it again.
             resyncReminders();
+            return;
+          }
+          if (outcome.kind === 'OFFLINE') {
+            // The same key the failed attempt used. `OFFLINE` means the request never reached a
+            // server, but that is inferred from a failed fetch - which is also what a request that
+            // arrived and lost its answer looks like. Under a fresh key the replay would create a
+            // second schedule.
+            void queueEdit({
+              entityType: 'medicine_schedule',
+              entityId: itemId,
+              mutation: 'CREATE',
+              payload: body,
+              baseVersion: null,
+              operationId: idempotencyKey,
+            }).then((queued) => {
+              setScheduleState(queued ? null : screenStateForFailure(outcome));
+              setScheduleMessage(null);
+              if (queued) reloadSchedules();
+            });
             return;
           }
           setScheduleState(screenStateForFailure(outcome));
@@ -334,7 +355,7 @@ export default function ShelfScreen() {
         },
       );
     },
-    [client, scheduling, reloadSchedules, resyncReminders],
+    [client, scheduling, reloadSchedules, resyncReminders, queueEdit],
   );
 
   /**

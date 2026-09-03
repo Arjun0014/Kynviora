@@ -91,6 +91,23 @@ let stranger: KynvioraClient;
 /** No session at all. */
 let anonymous: KynvioraClient;
 
+/**
+ * How long booting the process for this suite is allowed.
+ *
+ * The global `hookTimeout` is 60s and this crossed it: one run of `npm run verify` failed here with
+ * "Hook timed out in 60000ms" and the same suite passed in 17s on its own with nothing changed.
+ * That is trap 159 a second time, in a second file - a PGlite instance plus every migration plus
+ * the seed takes most of a minute alone, and under the full suite several files hold their own
+ * engine at once.
+ *
+ * The number is chosen against the machine this actually runs on, which has an Android emulator
+ * attached for the device harnesses. That is not an unusual condition to be generous about: it is
+ * the condition `npm run verify` runs in whenever somebody is also working on the device tests, and
+ * a suite that only passes on an idle machine is a suite that fails for reasons unrelated to the
+ * code. The migration count only grows.
+ */
+const PROCESS_BOOT_TIMEOUT_MS = 180_000;
+
 beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'kynviora-client-'));
   server = await start(
@@ -110,7 +127,7 @@ beforeAll(async () => {
   owner = createClient({ config, session: developmentSession(SEED.userId) });
   stranger = createClient({ config, session: developmentSession(STRANGER) });
   anonymous = createClient({ config, session: ANONYMOUS });
-});
+}, PROCESS_BOOT_TIMEOUT_MS);
 
 afterAll(async () => {
   await server.stop();

@@ -64,6 +64,20 @@ export interface QueueRequest {
   readonly payload: unknown;
   /** The version the screen had, or `null` for a create (`13`'s precondition). */
   readonly baseVersion: number | null;
+  /**
+   * The idempotency key the screen already used, where it used one.
+   *
+   * **This is not an optimisation.** `OFFLINE` says the request never reached a server, but the
+   * client learns that from a failed fetch - which is also what a request that *did* reach the
+   * server and lost its response looks like. Queueing a create under a fresh key would then commit
+   * it a second time, and on `medicine_schedule` a duplicate is not a duplicate row on a list: it
+   * is being told twice, at the same minute, to take the same tablet.
+   *
+   * So one intent keeps one key, whether it goes now or later. Omitted for a mutation that carries
+   * no key - an update is conditional on `expectedVersion` instead, and a replay of one either
+   * lands once or comes back as a conflict.
+   */
+  readonly operationId?: string;
 }
 
 /** How one queued operation is sent when the drain reaches it. */
@@ -126,9 +140,10 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
       if (!isOptimisticallyApplicable(request.entityType)) return false;
 
       const operation: PendingOperation = {
-        // The idempotency key, generated once and stable across every retry (`13`). Generating a
-        // new one per attempt is how one edit becomes two rows.
-        operationId: unsafeId<OperationId>(crypto.randomUUID()),
+        // The idempotency key, stable across every retry (`13`). Reused from the attempt that
+        // failed where the screen had one, because a fresh key on a create is how one edit becomes
+        // two rows when the original landed and its answer did not come back.
+        operationId: unsafeId<OperationId>(request.operationId ?? crypto.randomUUID()),
         entityType: request.entityType,
         entityId: request.entityId,
         mutation: request.mutation,

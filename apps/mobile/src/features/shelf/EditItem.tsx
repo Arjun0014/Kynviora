@@ -27,7 +27,7 @@
  * drew itself would survive a conflict it did not notice.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import {
   LIGHT_THEME,
@@ -49,6 +49,7 @@ import {
   type ItemUpdateBody,
 } from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
+import { usePendingSync } from '@/sync/PendingSyncProvider';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 
@@ -61,6 +62,7 @@ export interface EditItemProps {
 
 export function EditItem({ view, onChanged, onClose }: EditItemProps) {
   const { client } = useApi();
+  const { queue: queueEdit, registerSender } = usePendingSync();
 
   const form = useMemo(() => manualEntryForm(view.itemKind), [view.itemKind]);
 
@@ -93,6 +95,29 @@ export function EditItem({ view, onChanged, onClose }: EditItemProps) {
   /** Set where the person chose to take the saved version over what they had typed. */
   const [reloaded, setReloaded] = useState(false);
 
+  /**
+   * How a queued item edit is sent when the drain reaches it.
+   *
+   * Only `UPDATE`. A queued `CREATE` would reach Phase 8.5's reconciliation as a second copy of
+   * one medicine (`DEV-038`), and nothing here should quietly acquire that behaviour by handling
+   * a mutation it was never wired to queue.
+   */
+  useEffect(() => {
+    if (client === null) return;
+    registerSender('owned_item', async (operation) => {
+      if (operation.mutation !== 'UPDATE') {
+        return {
+          kind: 'REFUSED',
+          code: 'VALIDATION_FAILED',
+          message: 'Unsupported offline change.',
+          retryable: false,
+          correlationId: null,
+        };
+      }
+      return client.updateItem(operation.entityId, operation.payload as ItemUpdateBody);
+    });
+  }, [client, registerSender]);
+
   const send = useCallback(
     (body: ItemUpdateBody, note: string) => {
       if (client === null) return;
@@ -120,6 +145,27 @@ export function EditItem({ view, onChanged, onClose }: EditItemProps) {
             // Not a failure. Told apart by the reason code rather than by the message text (`13`).
             setState(null);
             setUnchanged(true);
+            return;
+          }
+
+          // Queued rather than lost, for the one failure that says nothing about the edit.
+          // `owned_item` resolves `ASK_USER` under `13`, so it may be applied before the server
+          // has agreed - and unlike a create, an update cannot produce a second copy of a
+          // medicine, which is the reason `DEV-038` still holds creation back. The write is
+          // conditional on `expectedVersion`, so a replay either lands once or comes back as a
+          // conflict.
+          if (outcome.kind === 'OFFLINE') {
+            void queueEdit({
+              entityType: 'owned_item',
+              entityId: view.id,
+              mutation: 'UPDATE',
+              payload: body,
+              baseVersion: body.expectedVersion,
+            }).then((queued) => {
+              setState(queued ? null : screenStateForFailure(outcome));
+              setMessage(queued ? null : messageForFailure(outcome));
+              if (queued) setSaved(note);
+            });
             return;
           }
 

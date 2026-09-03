@@ -3682,3 +3682,28 @@ not written, and `DEV-038` says so rather than the count implying otherwise.
 
 **Sources.** `12`; `13` (conflict policy per entity type); `04` Phase 4.1, 4.3, 8.5; `DEV-038`;
 `sync.ts`; trap 164.
+
+---
+
+## DEC-111 - A create that failed offline is queued under the key it already used, not a fresh one
+
+**Date:** 2026-09-03
+**Phase:** 12 / 13 (offline write journal), `DEV-038`
+
+**Status:** Accepted
+
+**Context.** `PendingSyncProvider.queue` generated a new UUID for every queued operation. On an
+UPDATE that is fine - the write is conditional on `expectedVersion`, so a replay either lands once
+or comes back as a conflict. On a CREATE it is a real correctness defect.
+
+**Decision.** `QueueRequest` carries an optional `operationId`, and a call site that already used an
+idempotency key on the failed attempt passes it in. `queue` reuses it instead of generating one.
+The schedule create path is wired accordingly.
+
+**Rationale.** `OFFLINE` says the request never reached a server, but the client learns that from a
+failed `fetch` - which is also what a request that _did_ reach the server and lost its response
+looks like. Under a fresh key the replay would create a second schedule, and on `medicine_schedule`
+a duplicate is not a duplicate row on a list: it is being told twice, at the same minute, to take
+the same tablet. One intent keeps one key, whether it goes now or later.
+
+**Sources.** `13` (idempotency keys); `12` (a resolvable failure state); `DEV-038`; trap 179.

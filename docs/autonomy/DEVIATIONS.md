@@ -979,7 +979,7 @@ route.
 
 ---
 
-## DEV-038 - Offline writes exist for one entity type, and the other two are not waiting on engineering
+## DEV-038 - Offline writes exist for schedules and item edits, and the ones still open are not waiting on engineering
 
 - **Affected specification**: `12` "Repository behavior" lists a pending-operation journal,
   idempotency keys, conflict status and sync metadata alongside local query/write; `03` group J
@@ -987,13 +987,20 @@ route.
   and `packages/domain/src/sync.ts` implements all of it.
 - **Expected behaviour**: a person with no network can add an item, record a dose or correct a
   record, and the change uploads later exactly once.
-- **Implemented behaviour**: the read half, and the write half for **medicine schedules**.
+- **Implemented behaviour**: the read half, and the write half for **medicine schedules** (both
+  CREATE and UPDATE) and for **item edits** (UPDATE).
 
   The journal is built and wired: `pending_operation_v1` is a table in the same SQLCipher database
   as the projection, scoped to the session like every projection row; `drainPendingOperations`
   sends what is queued on every foreground; and `classifyUpload` reads each answer against `13`'s
-  codes. A schedule edit that fails as `OFFLINE` is queued and lands on the next connection. Every
-  other write still goes straight to the API and fails as `OFFLINE`, exactly as before - and
+  codes. An eligible write that fails as `OFFLINE` is queued and lands on the next connection.
+
+  The create path preserves the idempotency key the failed attempt used (DEC-111) - a fresh key on
+  a replay is how one CREATE becomes two rows when the original arrived and its answer did not come
+  back. UPDATE queues do not need this because the write is conditional on `expectedVersion`, so a
+  replay either lands once or comes back as a conflict.
+
+  Every other write still goes straight to the API and fails as `OFFLINE`, exactly as before - and
   deliberately, per the reason below.
 
 - **Reason**: the journal is not the missing piece; a decision about each entity is. `13`'s
@@ -1024,9 +1031,13 @@ route.
   retry either lands once or comes back as a conflict, with no third outcome to design.
 
 - **What is still open, and why it is not engineering**:
-  - **`owned_item`** reaches Phase 8.5's reconciliation, where two copies of one medicine read as
-    two medicines somebody is taking.
+  - **`owned_item` CREATE** reaches Phase 8.5's reconciliation, where two copies of one medicine
+    read as two medicines somebody is taking - which is why only the UPDATE path is wired.
   - **`dose_event`** needs Phase 4.3's duplicate suppression to have a client that retries.
+  - **`allergy_record` and `condition_record`** are `ASK_USER` under `13` and technically eligible.
+    Their call sites (`HealthContext.tsx`) are not yet wired, because the conflict-resolution
+    screen `12` calls "a resolvable failure state" is not built - and offering to queue a change
+    the person cannot then resolve is worse than saying "not saved" upfront on this class of fact.
   - **Nothing shows a person the queue.** `needsUserAttention` counts the operations that have
     stopped retrying and the count is exposed, but no screen acts on it - so a conflicted schedule
     edit is held safely and is not yet resolvable by the person it belongs to. That is the half of

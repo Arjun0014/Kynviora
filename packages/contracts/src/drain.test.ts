@@ -204,3 +204,110 @@ describe('draining the queue', () => {
     expect(result.stoppedEarly).toBe('OFFLINE');
   });
 });
+
+/**
+ * Idempotency, from the journal's side (`13`, `DEV-038`).
+ *
+ * The server's half is covered at the route and at the constraint (`schedule.test.ts`,
+ * `db/medicineSchedule.test.ts`). What those cannot show is that the client sends the *same* key
+ * twice - and a key regenerated on retry is not an idempotency key, it is a second create. On
+ * `medicine_schedule` that is being told twice, at the same minute, to take the same tablet.
+ */
+describe('the key a retry is sent under', () => {
+  it('does not change when an attempt fails', async () => {
+    const original = operation('j1', 1);
+    const afterFailure = await drainPendingOperations([original], () =>
+      Promise.resolve(serverError),
+    );
+    expect(afterFailure.updated[0]?.operationId).toBe(original.operationId);
+  });
+
+  it('is the same on the next drain as it was on the first', async () => {
+    // The whole point. A create that failed, was written back, and is sent again on the next
+    // foreground must arrive under the key the server may already have seen.
+    const original = operation('j2', 1);
+    const seen: string[] = [];
+
+    const first = await drainPendingOperations([original], (op) => {
+      seen.push(op.operationId);
+      return Promise.resolve(serverError);
+    });
+    await drainPendingOperations(first.updated, (op) => {
+      seen.push(op.operationId);
+      return Promise.resolve(ok);
+    });
+
+    expect(seen).toEqual([original.operationId, original.operationId]);
+  });
+
+  it('survives the whole retry budget unchanged', async () => {
+    let current: readonly PendingOperation[] = [operation('j3', 1)];
+    const seen = new Set<string>();
+
+    for (let attempt = 0; attempt < MAX_UPLOAD_ATTEMPTS; attempt += 1) {
+      const result = await drainPendingOperations(current, (op) => {
+        seen.add(op.operationId);
+        return Promise.resolve(serverError);
+      });
+      current = result.updated;
+    }
+
+    // One key across every attempt, and the operation has stopped retrying rather than mutating.
+    expect(seen.size).toBe(1);
+    expect(isUploadable(current[0]!)).toBe(false);
+  });
+
+  it('sends each queued operation exactly once per pass', async () => {
+    // A pass that sent one operation twice would double every create it touched, and the server's
+    // idempotency would be the only thing standing between that and two reminders.
+    const queue = [operation('k1', 1), operation('k2', 2), operation('k3', 3)];
+    const seen: string[] = [];
+
+    await drainPendingOperations(queue, (op) => {
+      seen.push(op.operationId);
+      return Promise.resolve(ok);
+    });
+
+    expect(seen).toHaveLength(3);
+    expect(new Set(seen).size).toBe(3);
+  });
+});
+
+/**
+ * What the journal looks like after a pass, which is what the device writes back.
+ *
+ * These assert the shape the caller depends on: committed operations are named so they can be
+ * deleted, everything else is returned so it can be replaced, and nothing is in both lists or
+ * neither. A row that appeared in neither would be an edit silently dropped, which is the outcome
+ * `12` says must not happen.
+ */
+describe('what a pass hands back to the journal', () => {
+  it('accounts for every operation it was given', async () => {
+    const queue = [operation('m1', 1), operation('m2', 2), operation('m3', 3), operation('m4', 4)];
+    const answers: ApiOutcome<unknown>[] = [ok, refused, offline, ok];
+    let index = 0;
+
+    const result = await drainPendingOperations(queue, () => Promise.resolve(answers[index++]!));
+
+    const accounted = [
+      ...result.committed,
+      ...result.updated.map((op) => op.operationId),
+      ...result.untouched.map((op) => op.operationId),
+    ];
+    expect(accounted).toHaveLength(queue.length);
+    expect(new Set(accounted).size).toBe(queue.length);
+  });
+
+  it('puts no operation in two lists at once', async () => {
+    const queue = [operation('n1', 1), operation('n2', 2)];
+    const answers: ApiOutcome<unknown>[] = [ok, offline];
+    let index = 0;
+
+    const result = await drainPendingOperations(queue, () => Promise.resolve(answers[index++]!));
+
+    const committed = new Set<string>(result.committed);
+    for (const op of [...result.updated, ...result.untouched]) {
+      expect(committed.has(op.operationId)).toBe(false);
+    }
+  });
+});
