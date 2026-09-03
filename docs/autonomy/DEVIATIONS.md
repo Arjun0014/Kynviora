@@ -1042,6 +1042,12 @@ route.
     stopped retrying and the count is exposed, but no screen acts on it - so a conflicted schedule
     edit is held safely and is not yet resolvable by the person it belongs to. That is the half of
     `12`'s "resolvable failure state" that is still a state and not yet resolvable.
+
+    It is also why `DEV-044` could only be found on a device and only by watching the wire: with no
+    screen showing what is waiting, "the edit was queued and not sent" and "the edit was sent" look
+    identical from inside the app, and the store is SQLCipher-encrypted so `sqlite3` cannot answer
+    it either. The queue screen is the first thing that would make the journal observable to the
+    person whose edit is in it, and to anyone verifying that it moved.
 - **Temporary or permanent**: temporary, and now partial rather than absent.
 - **Risk**: low and visible, and lower than it was. Somebody offline can set a medicine time and it
   arrives when the connection does. What they cannot yet do is see that it is waiting, or act on one
@@ -1101,31 +1107,31 @@ route.
 
 ---
 
-## DEV-040 - Seven of `19`'s fourteen device scenarios are covered, and the other seven are not waiting on a device
+## DEV-040 - Eight of `19`'s fourteen device scenarios are covered, and the other six are not waiting on a device
 
 - **Affected specification**: `19` "Device E2E tests" lists fourteen scenarios that must be
   covered.
 - **Expected behaviour**: all fourteen exercised on a device.
-- **Implemented behaviour**: seven, plus four automated harnesses that re-run them
+- **Implemented behaviour**: eight, plus five automated harnesses that re-run them
   (`npm run verify:device`, `npm run verify:device:a11y`, `npm run verify:device:reminders`,
-  `npm run verify:device:update`).
+  `npm run verify:device:update`, `npm run verify:device:offline`).
 
-  | `19` scenario                         | State                                                      |
-  | ------------------------------------- | ---------------------------------------------------------- |
-  | Android install/update                | **Covered** - data, key and reminders survive a replace    |
-  | Sign-up/sign-in/recovery              | No authentication exists (`BLK-010`, Phase 1.1)            |
-  | Profile creation                      | Built and untested on device                               |
-  | Medicine add/scan/manual path         | Manual path built; no scanner (`04` Phase 2.2)             |
-  | Personal-care add/scan/OCR/confirm    | No OCR provider (`BLK-007`)                                |
-  | Medicine reminder after process death | **Covered**, and after a device restart as well            |
-  | Offline create/edit/sync              | **Read covered.** No pending-operation journal (`DEV-038`) |
-  | Safety alert open/resolution          | Nothing is publishable (`BLK-006`)                         |
-  | Caregiver invite/revoke               | Built and untested on device                               |
-  | Visit Pack export                     | Built and untested on device                               |
-  | Camera/file permissions               | Notification permission covered; camera/file untested      |
-  | TalkBack smoke suite                  | **Covered**                                                |
-  | Clock/time-zone change                | **Covered** - a dose does not move when the phone does     |
-  | Low storage/network disruption        | **Network disruption covered.** Low storage untested       |
+  | `19` scenario                         | State                                                       |
+  | ------------------------------------- | ----------------------------------------------------------- |
+  | Android install/update                | **Covered** - data, key and reminders survive a replace     |
+  | Sign-up/sign-in/recovery              | No authentication exists (`BLK-010`, Phase 1.1)             |
+  | Profile creation                      | Built and untested on device                                |
+  | Medicine add/scan/manual path         | Manual path built; no scanner (`04` Phase 2.2)              |
+  | Personal-care add/scan/OCR/confirm    | No OCR provider (`BLK-007`)                                 |
+  | Medicine reminder after process death | **Covered**, and after a device restart as well             |
+  | Offline create/edit/sync              | **Covered** - queued, survives a kill, arrives exactly once |
+  | Safety alert open/resolution          | Nothing is publishable (`BLK-006`)                          |
+  | Caregiver invite/revoke               | Built and untested on device                                |
+  | Visit Pack export                     | Built and untested on device                                |
+  | Camera/file permissions               | Notification permission covered; camera/file untested       |
+  | TalkBack smoke suite                  | **Covered**                                                 |
+  | Clock/time-zone change                | **Covered** - a dose does not move when the phone does      |
+  | Low storage/network disruption        | **Network disruption covered.** Low storage untested        |
 
 - **Reason**: the environment blocker is gone, and what is left divides into two kinds. Four
   scenarios are about a feature that does not exist, and each names the blocker or deviation that
@@ -1141,10 +1147,22 @@ route.
   (no process, alarms intact) before the delivery check is allowed to mean anything, and what
   force-stop costs a real person is recorded as `DEV-041`.
 
-  **"Offline create/edit/sync" is half done and the visible half is the read half.** The shelf, the
-  profile list and now the schedule list come back with no network and are labelled as older than
-  they look. Nothing can be created or edited offline (`DEV-038`), so the sync half of that scenario
-  has nothing to sync.
+  **"Offline create/edit/sync" is now covered, and getting there found two defects that every
+  other gate was green over.** `npm run verify:device:offline` saves a schedule with the API
+  switched off, kills the app's process, reconnects, and launches once: the queued create must go
+  out on **that** launch. Then it does the same thing again with the request forwarded and its
+  _answer_ destroyed, so the server commits and the phone cannot tell that from being offline - the
+  replay must carry the same idempotency key and leave exactly one schedule.
+
+  The second run is the one that cannot be faked, and it is what DEC-111 was written for. Measured:
+  one key across both creates, `idempotent-replay: true` on the second, one row. A client minting a
+  fresh key would pass the first run perfectly and leave somebody being told twice, at the same
+  minute, to take the same tablet.
+
+  What it took to get there was not the harness. It was `crypto.randomUUID()` in eight write paths
+  that cannot run on Hermes (`DEV-043`) - so no write from the app had ever worked on a device - and
+  a drain whose senders lived on tab screens, so the launch after a kill was the one launch
+  guaranteed not to send (`DEV-044`).
 
   **The TalkBack suite is a smoke test and the report says so.** It shows the app starts under a
   screen reader, keeps running, and exposes controls with names. It does not navigate: TalkBack
@@ -1182,8 +1200,10 @@ route.
 - **Risk**: low, and the shape of it is known rather than hidden. The claim being avoided is "the
   device suite passes", which would read as fourteen scenarios when it is seven.
 - **Required future work**: drive the three built-but-untested flows on the emulator and add them
-  to a harness - profile creation, caregiver invite/revoke, and Visit Pack export; the other four
-  unblock with the blockers they name.
+  to a harness - profile creation, caregiver invite/revoke, and Visit Pack export. All three are
+  now worth driving in a way they were not before: each one creates something through a route that
+  needed an idempotency key, so each was crashing on `crypto` until this session (`DEV-043`). The
+  other three unblock with the blockers they name.
 
 ---
 
@@ -1293,3 +1313,178 @@ its own limit on pending local notifications, which is lower than Android's and 
   implement it on open, drop the old table once its rows have been dealt with either way, and
   extend `verify:device:update` to install a build whose local schema differs - which is the only
   version of this scenario that measures the thing rather than the platform underneath it.
+
+---
+
+## DEV-043 - Every write needing an idempotency key was broken on a device, and every gate was green
+
+- **Affected specification**: `07` (non-guessable identifiers), `13` (an idempotency key on a
+  mutation that can be retried), `12` (a queued operation's ID is its idempotency key), `04`
+  Phase 2.1, 4.1, 4.3, `08.2`, `19` (device E2E).
+- **Expected behaviour**: a person can create a schedule, record a dose, add a medicine, set up a
+  household and profile, export a Visit Pack, and queue an edit made offline.
+- **Implemented behaviour before this session**: none of those worked on a phone. Every one of them
+  called `crypto.randomUUID()`, and there is no global `crypto` on Hermes. The result was an
+  uncaught `Property 'crypto' doesn't exist` at the instant somebody pressed Save - a red screen in
+  development and a crash in a release build - on eight call sites across six files:
+
+  | File                                        | What a person was doing               |
+  | ------------------------------------------- | ------------------------------------- |
+  | `app/(tabs)/shelf.tsx` (x2)                 | creating a schedule; recording a dose |
+  | `app/(tabs)/care.tsx`                       | inviting a caregiver                  |
+  | `features/shelf/AddItem.tsx`                | adding a medicine by hand             |
+  | `features/profiles/SetUpHousehold.tsx` (x2) | creating a household and a profile    |
+  | `features/visitPack/VisitPackFlow.tsx`      | exporting a Visit Pack                |
+  | `sync/PendingSyncProvider.tsx`              | queueing an edit made with no signal  |
+
+- **Reason it survived every gate**, which is the part worth keeping:
+  - **`apps/**` is outside the test run.** `vitest.config.ts` excludes it, so none of the 3,808
+    tests ever loaded these files.
+  - **`apps/**` is outside the lint run.** `eslint.config.js` ignores it, so no lint rule this
+    project relies on ever saw them.
+  - **The mobile typecheck is therefore the only gate over the app - and it was being told a phone
+    is a browser.** `expo/tsconfig.base` sets `lib: ["DOM", "ESNext"]`, and the monorepo's hoisted
+    `@types/node` was picked up ambiently. Between them, `crypto` was declared twice over.
+
+  So the code was wrong in the one tree nothing checks, in a way the one checker it had was
+  configured not to see. `04` Phase 9's release gates would have been signed off against a suite
+  that had never executed a line of it.
+
+  The four device harnesses did not catch it either, and that is not an oversight in them: storage,
+  accessibility, reminders and update **only read**. `verify:device:reminders` creates its schedule
+  through the API from the host, never through the app. Nothing had ever driven a write on a
+  device, so nothing had ever run this line.
+
+- **What was done**: `apps/mobile/src/platform/ids.ts` is now the one place the app asks for a
+  random identifier, bound to `expo-crypto` - the same secure source `secureDatabase.ts` derives
+  the SQLCipher key from. All eight call sites use it. `cryptoIdGenerator` in
+  `packages/domain/src/ports.ts` no longer reads an ambient `globalThis.crypto` either; it takes
+  its source as a parameter, so the platform binding is something a reader can see.
+
+  Two gates were closed behind it, because one fix to eight lines is not a fix to the reason:
+  - **The mobile typecheck compiles with `lib: ["ESNext"]` and `types: []`** (DEC-112). Reaching
+    for `crypto`, `document` or `localStorage` is now a compile error. Run against the code as it
+    stood, it named all eight lines and nothing else.
+  - **`scripts/checks/mobileGlobals.test.ts` reads the real `apps/mobile/src` tree** and fails the
+    suite on any of them. It is the only test in `npm run verify` that looks at app source at all,
+    and it exists because a `tsconfig` is one line away from being convenient again.
+
+- **Temporary or permanent**: fixed.
+- **Risk now**: low, and the class is closed rather than the instance. What remains is that
+  `apps/**` is still untested and unlinted - the new check covers a list of names, not behaviour.
+- **Required future work**: the honest one is that the app tree needs tests, not more scanning.
+  `04` Phase 9.4 already says the screens need people; what it does not yet say is that nothing
+  automated executes them either.
+
+---
+
+## DEV-044 - A queued edit was not sent on the launch it had been waiting for
+
+- **Affected specification**: `12` ("Repository behavior" - a pending-operation journal that syncs
+  deterministically), `13` (bounded retry), `03` group J, `19` ("Offline create/edit/sync").
+- **Expected behaviour**: an edit made with no signal is sent when the app next comes to the front
+  with a connection.
+- **Implemented behaviour before this session**: it was sent on the _second_ foreground, and only
+  if the person happened to visit the tab that owned the write - and each intervening launch spent
+  one of its retry attempts.
+
+  Both halves came from one decision. A sender was registered by the screen that knew the shape of
+  the write (`shelf.tsx` for a schedule, `EditItem.tsx` for an item edit), and the registry was
+  consulted inside the drain. But the encrypted store opens at the root, before any tab beyond the
+  first has mounted, so the single pass a cold launch runs found an empty registry. With no sender,
+  the provider reported the operation as `OFFLINE` - and `classifyUpload` reads `OFFLINE` as
+  `RETRYABLE`, so `recordUploadOutcome` incremented the attempt count, marked the row
+  `FAILED_RETRYABLE`, and `endsTheDrain` stopped the pass.
+
+  The consequence is the failure `12` is written to prevent, arriving by a route nobody would look
+  down. The launch after a person's phone killed the app is exactly the launch their queued
+  medicine time was waiting for; it was the one launch guaranteed not to send it. Repeat over
+  enough launches and the edit reaches `MAX_UPLOAD_ATTEMPTS` and is "waiting for somebody to look
+  at it" - with no screen that shows it (`DEV-038`) - having never been sent once.
+
+- **How it was found**: by driving it. The chain was queued offline, `am kill`ed, reconnected and
+  relaunched, and the server did not change. It changed on the next background-and-foreground.
+  Nothing in either file reads as wrong; the ordering between a provider and a tab is not visible
+  in either one.
+
+- **What was done**:
+  - **`drainPendingOperations` takes a `canSend` predicate** and reports what it skipped
+    (DEC-114). An operation nothing can carry is not attempted, keeps its full attempt budget and
+    its `PENDING` state, and does not stop the operations behind it - a schedule with no sender
+    must not hold up an item edit that has one.
+  - **Senders are registered for the app's lifetime, not a screen's** (DEC-113). `PendingSenders`
+    is mounted at the root next to the reminder engine, whose comment already made this exact
+    argument: "a sync that only ran when somebody opened a particular tab would stop extending the
+    horizon the moment they stopped visiting it, and the person would find out by not being
+    reminded."
+  - **`registerSender` re-drains when a type becomes sendable for the first time**, so a registry
+    that fills after the store opens does not leave the queue waiting for the next foreground.
+  - **`npm run verify:device:offline`** measures it, and `OFF-3` asserts the **first** launch
+    specifically. A check that accepted "it arrived eventually" would have called the old
+    behaviour correct.
+
+- **Temporary or permanent**: fixed.
+- **Risk now**: low. What is still true is that a person cannot see the queue at all (`DEV-038`),
+  so any future variant of this is again something only a device run would find.
+- **Required future work**: the queue-review screen `DEV-038` names. It is also the only way the
+  attempt count and `needsUserAttention` become observable from the app rather than inferred from
+  what a proxy saw.
+
+---
+
+## DEV-045 - A medicine with no schedule could never be given one
+
+- **Affected specification**: `04` Phase 4.1 (a person sets when a medicine is taken), `08.2`
+  (capability scoping), `12`, `19` ("Offline create/edit/sync", which needs a create to exist).
+- **Expected behaviour**: the schedule editor offers "Add a schedule" to anybody who may manage
+  medicines, and absent it to anybody who may only look (DEC-045).
+- **Implemented behaviour before this session**: the button was drawn only when the medicine
+  **already had** a schedule. On every medicine with none - which is the only state a newly added
+  medicine is ever in - the editor said "Nothing is scheduled for this medicine." and offered no way
+  to schedule one. Phase 4.1's create route was therefore unreachable from the app in exactly the
+  case it exists for.
+
+- **Cause**, which is worth stating precisely because it is a pattern rather than a typo. The
+  screen's payload is not one list:
+
+  ```
+  { schedules, detailLevel, directionsText, mayEdit }
+  ```
+
+  It was loaded with `isEmpty: (value) => value.schedules.length === 0`, and `resourceFor` answers
+  `EMPTY` by setting **`value` to `null`** - correctly, because `EMPTY` means "there is nothing to
+  show". But `isEmpty` is a question about a whole payload and this one was empty in a single
+  field, so an empty schedule list discarded the notification detail level, the prescriber's
+  directions and `mayEdit` along with it. `mayEdit` then fell back to its safe default of `false`,
+  and a control that is deliberately **absent rather than disabled** for a caller who may only look
+  (DEC-045) was absent for everybody.
+
+  Every gate was green over it. `apps/**` is outside the test run and the lint run (`DEV-043`), the
+  server was right, `resourceFor` was right and is tested, and both halves read correctly on their
+  own.
+
+- **How it was found**: the offline-write harness picked a medicine by name rather than by
+  coordinates, landed on the seed's second medicine - which had no schedules - and reported that it
+  could not fill in the form. Every earlier attempt had been driven by hand against the first
+  medicine, which previous sessions had left fifteen schedules on.
+
+- **What was done**: the schedule editor's resource no longer declares itself empty. There was
+  nothing to gain by it - the editor renders "Nothing is scheduled for this medicine." from
+  `schedules.length === 0` itself, and `ScreenState` is not shown for `EMPTY` anyway.
+
+  The same shape was found once more and fixed with it: the Care screen called itself empty when
+  there were no grants and no invitations, discarding the **access history** in the same move. A
+  household that has just revoked its last caregiver would see no record that anybody ever had
+  access - at the moment somebody is most likely to be looking for exactly that. "Nobody has
+  access" and "nobody has ever had access" are different sentences, and `08.2`'s audit trail is
+  the difference. Its emptiness test now includes the history.
+
+  The four remaining `isEmpty` call sites were checked and are sound: their payloads are read only
+  through the field the test asks about, or through a defaulted fallback.
+
+- **Temporary or permanent**: fixed.
+- **Risk now**: low for these two. The class is not closed - nothing prevents the next composite
+  payload being declared empty on one field - and the honest guard would be a test over the app
+  tree, which does not exist (`DEV-043`).
+- **Required future work**: driving the remaining `DEV-040` scenarios will exercise the other
+  screens' empty states, which is the only way this class is currently found.

@@ -30,7 +30,8 @@
     "verify:device": "tsx scripts/device/verifyLocalStorage.ts",
     "verify:device:a11y": "tsx scripts/device/verifyAccessibility.ts",
     "verify:device:reminders": "tsx scripts/device/verifyReminders.ts",
-    "verify:device:update": "tsx scripts/device/verifyUpdate.ts"
+    "verify:device:update": "tsx scripts/device/verifyUpdate.ts",
+    "verify:device:offline": "tsx scripts/device/verifyOfflineWrites.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -3379,3 +3379,163 @@ written. That is the half of `12`'s "resolvable failure state" that is still a s
 ### State
 
 3802 tests across 129 files, `npm run verify` exit 0.
+
+---
+
+## 2026-09-04 - Driving the offline write, and the three things in the way
+
+The previous session wired the pending-operation journal and left one thing undone: nobody had
+watched a queued edit make the journey. Queue with no signal, kill the process, reconnect, and see
+it land - once. That was the task. Getting there took three defects out of the app, and none of
+them was visible from any gate this project runs.
+
+### The first write anybody ever made on a device
+
+The chain got as far as pressing Save and produced a red screen:
+
+```
+Uncaught Error
+Property 'crypto' doesn't exist
+  shelf.tsx (316:30)   const idempotencyKey = crypto.randomUUID();
+```
+
+There is no global `crypto` on Hermes. `crypto.randomUUID()` was in **eight call sites across six
+files**, and it is the first line of every write that needs an idempotency key: creating a
+schedule, recording a dose, adding a medicine, setting up a household, creating a profile, inviting
+a caregiver, exporting a Visit Pack, and queueing an edit made offline. Every one of them threw at
+the moment somebody pressed Save. Nothing the app writes had ever worked on a phone.
+
+**Why every gate was green over it** is the part worth keeping, because the gap is structural.
+`vitest.config.ts` excludes `apps/**` and `eslint.config.js` ignores it, so the 3,808 tests and
+every lint rule had never seen these files. That leaves the mobile typecheck as the only automated
+gate over the one tree whose code runs on a person's phone - and it was being told a phone is a
+browser: `expo/tsconfig.base` sets `lib: ["DOM", "ESNext"]`, and the monorepo's hoisted
+`@types/node` was picked up ambiently. `crypto` was declared twice over.
+
+The four existing device harnesses could not have caught it either, and that is not a fault in
+them: storage, accessibility, reminders and update **only read**. `verify:device:reminders` creates
+its schedule through the API from the host. No harness had ever driven a write.
+
+The fix is one binding (`apps/mobile/src/platform/ids.ts`, on `expo-crypto` - the same secure source
+`secureDatabase.ts` derives the SQLCipher key from) and two gates behind it. The mobile project now
+compiles with `lib: ["ESNext"]` and `types: []` (DEC-112): run against the code as it stood, it
+named all eight lines and nothing else, because everything the app genuinely uses - `fetch`,
+`console`, timers, `URL` - comes from React Native's own types through imports.
+`scripts/checks/mobileGlobals.test.ts` states the same rule where the suite can run it, and reads
+the real `apps/mobile/src` tree; it is the only test in `npm run verify` that looks at app source at
+all. Pointed at the previous commit's `shelf.tsx` it reports lines 282 and 316, which are exactly
+right (`DEV-043`).
+
+### The launch a queued edit had been waiting for
+
+With writes working, the chain ran: save offline, `am kill`, reconnect, relaunch. The server did
+not change. It changed on the **next** background-and-foreground.
+
+A sender was registered by the screen that knew the shape of the write, and the encrypted store
+opens at the root, before any tab beyond the first has mounted. So the single drain pass a cold
+launch runs found an empty registry - and the launch after a person's phone killed the app is
+precisely the launch their queued medicine time was waiting for.
+
+It was worse than waiting. With no sender the provider answered `OFFLINE`, `classifyUpload` reads
+that as `RETRYABLE`, and `recordUploadOutcome` increments the attempt count and marks the row
+`FAILED_RETRYABLE`. Every launch spent an attempt on an operation nothing had asked a server about,
+and enough launches would leave a person's edit "needing attention" on a screen that does not exist
+(`DEV-038`) having never been sent once. That is the same failure DEC-109 refused - one dropped
+tunnel spending everybody's budget - arriving through a different door.
+
+`drainPendingOperations` now asks `canSend` before `send`, and reports what it passed over in a
+`skipped` list: untouched, full budget, still `PENDING`, and not blocking the operations behind it
+(DEC-114). Senders moved to `PendingSenders`, mounted at the root (DEC-113) - which is the argument
+`_layout.tsx` already made about the reminder engine, in as many words: "a sync that only ran when
+somebody opened a particular tab would stop... and the person would find out by not being
+reminded." (`DEV-044`.)
+
+### A medicine with no schedule could never be given one
+
+The harness picks controls by accessible name rather than by coordinates, so it landed on the
+seed's _second_ medicine - which had no schedules - and reported that it could not open the
+new-schedule form. It was right. There was no button.
+
+The editor's payload is `{ schedules, detailLevel, directionsText, mayEdit }`, and it was loaded
+with `isEmpty: (value) => value.schedules.length === 0`. `EMPTY` sets `value` to `null`, correctly,
+because `EMPTY` means there is nothing to show - so an empty schedule list discarded `mayEdit` with
+it, and a control that is deliberately **absent rather than disabled** for a caller who may only
+look (DEC-045) was absent for everybody. Phase 4.1's create route was unreachable from the app in
+the only state a newly added medicine is ever in.
+
+Every gate was green over this one too, and every part was individually right: the server, the
+screen, and `resourceFor`, which is tested. The bug is that `isEmpty` asks about a whole payload
+and this one was empty in a single field. Every other call site was checked; one more had the same
+shape - the Care screen called itself empty with no grants and no invitations, discarding the
+**access history**, so a household that had just revoked its last caregiver would see no record
+that anybody ever had access (`DEV-045`).
+
+Only by hand did this stay hidden: the first seeded medicine had fifteen schedules left over from
+earlier sessions.
+
+### The harness, and what it took to make it honest
+
+`npm run verify:device:offline` - **6/6 PASS**:
+
+| Check   | What the device showed                                                                           |
+| ------- | ------------------------------------------------------------------------------------------------ |
+| `OFF-0` | the form held the time and the medicine had no live schedule - so anything after it is this save |
+| `OFF-1` | with the API switched off, no request left the phone and the screen did not call it a failure    |
+| `OFF-2` | pid gone after `am kill`, so the journal was read off disk by a new process                      |
+| `OFF-3` | the create went out on the **first** launch, and the server has the new time                     |
+| `OFF-4` | 3 creates under **one** key, `idempotent-replay` on two, and exactly one live schedule           |
+| `OFF-5` | a further foreground sent nothing: the committed operation left the journal                      |
+
+`OFF-4` is the one that cannot be faked, and the run is built to make it possible. `13` says the
+operation ID _is_ the idempotency key, and DEC-111 keeps the key a failed attempt used - because
+`OFFLINE` is inferred from a failed fetch, which is also exactly what a request that **arrived and
+lost its answer** looks like. So the switch forwards the request, waits for the server to commit,
+and destroys the socket before the answer reaches the phone. Under a fresh key the replay makes a
+second schedule, and on this table that is not a duplicate row on a list: it is being told twice,
+at the same minute, to take the same tablet.
+
+Four things had to be true before any of those readings was worth having, and each was learned by
+getting it wrong first.
+
+**Removing `adb reverse` does not put a device offline.** adbd's listener goes, but OkHttp's
+already-established connections keep working, so the write meant to be queued went straight to the
+server. The scenario reported a successful save, which was true and was not the claim. Hence a
+switch this harness controls, which cuts live sockets as well as refusing new ones (trap 183).
+
+**That switch cannot live in the harness process.** `sleep` is `Atomics.wait` - synchronous on
+purpose, so a failure is attributable to the step that caused it - and it blocks the event loop for
+forty-five seconds at a time while an app starts. A server sharing that loop accepts nothing during
+almost the entire run: the phone rendered "No connection. Kynviora could not reach the internet" on
+a launch the harness believed was online, and requests made while it was supposed to be _offline_
+were served later, when it was passing them again, and recorded as having got through. Both
+readings are wrong and both look like findings about the app. `apiSwitchServer.ts` is its own
+process, controlled through files, because `readFileSync` needs no event loop.
+
+**`am kill` does not kill a foreground process.** The first run reported a journal surviving process
+death while the pid never changed. The app is backgrounded first and the pid's absence is asserted -
+and it is still `am kill`, never `force-stop`, which cancels every alarm (`DEV-041`, trap 182).
+
+**Counting rows is not counting schedules.** `0004` grants the app role no DELETE, so every
+schedule this harness has ever created is still in the table, deactivated. `OFF-4` counts the
+**live** ones - which is also the honest form of the claim, since a duplicate created by a replay
+would be active, and a row that reminds nobody of anything is not an instruction to take a medicine.
+
+Two smaller ones, both about the emulator rather than the app: Android's stylus-handwriting tutorial
+opens over a text field and swallows `input text`, leaving a form that looks ignored (trap 185); and
+an empty Android field reports its **placeholder** as its text, so "the field is non-empty" is
+always true (trap 186). `typeInto` reads the value back and compares it.
+
+And one about `adb` itself that cost most of an hour: `adb reverse` registered successfully and
+forwarded nothing, because the adb server had been started before the emulator. The app reported
+`isMetroRunning(): false` and died with "Unable to load script" while Metro was plainly running.
+`adb kill-server && adb start-server` with the device already up fixes it. The false trail was
+`printf ... | nc`, which closes the socket at stdin EOF before the response arrives - so a working
+tunnel looks broken too (trap 184).
+
+### State
+
+3863 tests across 133 files, `npm run verify` exit 0. Five device harnesses green against a
+Pixel 7 / Android 16 emulator: `verify:device` 7/7, `verify:device:a11y` 34/34,
+`verify:device:reminders` 9/9, `verify:device:update` 6/6, `verify:device:offline` 6/6. Their
+judgements are covered by 173 tests that need no device. `19`'s device scenarios go from seven
+covered to eight.

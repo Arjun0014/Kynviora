@@ -3,24 +3,24 @@
 **Resume checkpoint.** Read this first on any autonomous restart, then `git log`, then the tail
 of `WORKLOG.md`, then `BLOCKERS.md`.
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 ---
 
 ## Current position
 
-|                    |                                                                      |
-| ------------------ | -------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 - Medicine Care Workflows                                    |
-| **Current phase**  | Phase 4.1 and 4.2 complete; Stage 4 complete                         |
-| **Last completed** | Local reminders, measured arriving on a device after a kill          |
-| **Branch**         | `master`                                                             |
-| **Latest commit**  | `feat(care): saying when a medicine is taken, and who may decide it` |
-| **Baseline tag**   | `baseline-spec-only`                                                 |
+|                    |                                                                     |
+| ------------------ | ------------------------------------------------------------------- |
+| **Current stage**  | Stage 4 - Medicine Care Workflows                                   |
+| **Current phase**  | Phase 4.1 and 4.2 complete; Stage 4 complete                        |
+| **Last completed** | Offline writes, measured arriving on a device once and only once    |
+| **Branch**         | `master`                                                            |
+| **Latest commit**  | `feat(device): an edit made with no signal, and the proof it lands` |
+| **Baseline tag**   | `baseline-spec-only`                                                |
 
 ## Verification state
 
-- **3802 tests passing**, 0 failing, across 129 files.
+- **3863 tests passing**, 0 failing, across 133 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -35,8 +35,8 @@ npm run verify
 
 ### On a device
 
-Four harnesses need an attached Android device or emulator and are **not** part of `npm run
-verify`. Their judgements are, though: 131 of the tests above exercise the rules they apply, so a
+Five harnesses need an attached Android device or emulator and are **not** part of `npm run
+verify`. Their judgements are, though: 173 of the tests above exercise the rules they apply, so a
 rule cannot change without CI noticing even where no hardware exists.
 
 ```bash
@@ -70,6 +70,29 @@ the reminders come back after the package replace. `UPD-1` is the control that m
 anything - `firstInstallTime` unchanged and `lastUpdateTime` moved, because a clean install also
 produces a working app with none of the person's data in it. Last run **6/6 PASS**. What it does not
 cover is a build whose local schema differs from the one on disk (`DEV-042`).
+
+```bash
+npm run verify:device:offline
+```
+
+Six checks on an edit made with no signal, and the sixth is the one that cannot be faked. The first
+five drive the ordinary chain: a schedule is saved with the API switched off, the app's process is
+killed - `am kill` after backgrounding, because Android will not kill a foreground process at all -
+the network comes back, and the app is launched **once**. The queued create has to go out on that
+launch, and nothing may be left in the journal afterwards.
+
+`OFF-4` then runs the same scenario with the request _forwarded_ and its answer destroyed. The
+server commits; the phone cannot tell that from being offline and queues; and the replay must carry
+the same idempotency key and leave exactly one live schedule. A client minting a fresh key passes
+every other check and leaves somebody being told twice, at the same minute, to take the same tablet
+(DEC-111). Last run **6/6 PASS**, with three creates under one key, `idempotent-replay` on two of
+them, and one schedule.
+
+The switch between the phone and the API is a separate process on purpose (`apiSwitchServer.ts`):
+`sleep` here is `Atomics.wait`, which blocks the event loop for most of a run, and a server sharing
+that loop answers nothing while an app is starting - so the phone reads "No connection" on a launch
+the harness believes is online. Removing `adb reverse` is not enough either, because OkHttp's
+pooled connections outlive it (trap 183).
 
 Nine checks on the local reminder engine, and the two that matter most cannot be inferred from the
 code: after the app's process is killed, a notification still arrives, and its text names neither
@@ -117,42 +140,42 @@ the API will not distinguish them.
 
 ## What is genuinely built and tested
 
-| Area                                                         | State                                                       |
-| ------------------------------------------------------------ | ----------------------------------------------------------- |
-| Domain vocabularies, IDs, provenance, untrusted quarantine   | Complete, 94 tests                                          |
-| Database schema, 19 migrations, full RLS                     | Complete, 311 tests incl. threats A1/A2/A3                  |
-| Catalog engine, capture pipeline, Trust Passport             | Complete, 178 tests                                         |
-| Regulatory registry, Citation Gate, Lens                     | Complete, 72 tests                                          |
-| Safety rule engine with replay; schedule and refill          | Complete, 88 tests                                          |
-| Ingestion pipeline with hostile-source defences              | Complete, 37 tests                                          |
-| Presentation layer, accessibility tokens, safety copy        | Complete, 436 tests                                         |
-| API boundary (Fastify), RLS-scoped context                   | Complete, 37 tests                                          |
-| Offline sync protocol, per-entity conflict policy            | Complete, 43 tests                                          |
-| Caregiver invitation, acceptance, revocation, audit          | Complete, 214 tests                                         |
-| Visit Pack export, reviewed-content gate, expiry             | Complete, 100 tests                                         |
-| Caregiver alert delivery, notification privacy               | Complete, 126 tests; **not sent** (BLK-009)                 |
-| Household Review Inbox, record-writing completion            | Complete, 95 tests                                          |
-| Medicine Reconciliation, two lists and no chosen answer      | Complete, 109 tests                                         |
-| Reviewer console: roles, two-person approval, withdrawal     | Complete, 116 tests; **publishes nothing** (BLK-006)        |
-| Staff surface split, console package, console process        | Complete, 172 tests; **authenticates nobody** (BLK-010)     |
-| Alert detail, explainability, report-incorrect               | Complete, 89 tests; **no alert to open** (BLK-006)          |
-| Notification delivery policy, quiet hours, revalidation      | Complete, 139 tests; **holds nothing** (`DEV-030`)          |
-| Household and profile creation, the profile switcher         | Complete, 90 tests; no emergency contact (`DEV-034`)        |
-| Allergy and sensitivity records, provenance, review date     | Complete, 86 tests; no conditions (`DEV-035`)               |
-| Consent state, withdrawal, and what withdrawing stops        | Complete, 87 tests; no export/deletion (`DEV-036`)          |
-| Typed term mapped to a canonical substance                   | Complete, 27 tests; no review queue (`DEV-037`)             |
-| Regulatory version diff and change attribution               | Complete, 27 tests; **no route yet** (BLK-004)              |
-| Shadow runs, before/after comparison, assessment replay      | Complete, 74 tests; substance rules now measurable          |
-| Manual entry: the write path, the form and the screen        | Complete, 105 tests; the only surface that creates an item  |
-| Item update, the three lifecycle states, mark-as-checked     | Complete, 105 tests; no deletion (`DEV-032`)                |
-| End-to-end vertical slice, 7 required scenarios              | Complete, 36 tests                                          |
-| Mobile app shell, encrypted store, accessible primitives     | **Runs on Android 16; storage and 48dp verified on device** |
-| The encrypted read projection, offline shelf and profiles    | Complete, 11 tests; no offline writes (`DEV-038`)           |
-| Medicine schedules: the write path, the editor, the reads    | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
-| Local reminders: plan, reconcile, exact alarms, lock screen  | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
-| Device harnesses: storage, keys, 48dp, 2x, reminders, update | Complete, 131 tests; 7 of `19`'s 14 scenarios (`DEV-040`)   |
-| Caregiver, export, inbox, reconciliation, add-an-item UI     | Wired; **not device-verified** (`DEV-007`)                  |
-| CI pipeline                                                  | Written; not yet run on a real runner                       |
+| Area                                                        | State                                                       |
+| ----------------------------------------------------------- | ----------------------------------------------------------- |
+| Domain vocabularies, IDs, provenance, untrusted quarantine  | Complete, 94 tests                                          |
+| Database schema, 19 migrations, full RLS                    | Complete, 311 tests incl. threats A1/A2/A3                  |
+| Catalog engine, capture pipeline, Trust Passport            | Complete, 178 tests                                         |
+| Regulatory registry, Citation Gate, Lens                    | Complete, 72 tests                                          |
+| Safety rule engine with replay; schedule and refill         | Complete, 88 tests                                          |
+| Ingestion pipeline with hostile-source defences             | Complete, 37 tests                                          |
+| Presentation layer, accessibility tokens, safety copy       | Complete, 436 tests                                         |
+| API boundary (Fastify), RLS-scoped context                  | Complete, 37 tests                                          |
+| Offline sync protocol, per-entity conflict policy           | Complete, 43 tests                                          |
+| Caregiver invitation, acceptance, revocation, audit         | Complete, 214 tests                                         |
+| Visit Pack export, reviewed-content gate, expiry            | Complete, 100 tests                                         |
+| Caregiver alert delivery, notification privacy              | Complete, 126 tests; **not sent** (BLK-009)                 |
+| Household Review Inbox, record-writing completion           | Complete, 95 tests                                          |
+| Medicine Reconciliation, two lists and no chosen answer     | Complete, 109 tests                                         |
+| Reviewer console: roles, two-person approval, withdrawal    | Complete, 116 tests; **publishes nothing** (BLK-006)        |
+| Staff surface split, console package, console process       | Complete, 172 tests; **authenticates nobody** (BLK-010)     |
+| Alert detail, explainability, report-incorrect              | Complete, 89 tests; **no alert to open** (BLK-006)          |
+| Notification delivery policy, quiet hours, revalidation     | Complete, 139 tests; **holds nothing** (`DEV-030`)          |
+| Household and profile creation, the profile switcher        | Complete, 90 tests; no emergency contact (`DEV-034`)        |
+| Allergy and sensitivity records, provenance, review date    | Complete, 86 tests; no conditions (`DEV-035`)               |
+| Consent state, withdrawal, and what withdrawing stops       | Complete, 87 tests; no export/deletion (`DEV-036`)          |
+| Typed term mapped to a canonical substance                  | Complete, 27 tests; no review queue (`DEV-037`)             |
+| Regulatory version diff and change attribution              | Complete, 27 tests; **no route yet** (BLK-004)              |
+| Shadow runs, before/after comparison, assessment replay     | Complete, 74 tests; substance rules now measurable          |
+| Manual entry: the write path, the form and the screen       | Complete, 105 tests; the only surface that creates an item  |
+| Item update, the three lifecycle states, mark-as-checked    | Complete, 105 tests; no deletion (`DEV-032`)                |
+| End-to-end vertical slice, 7 required scenarios             | Complete, 36 tests                                          |
+| Mobile app shell, encrypted store, accessible primitives    | **Runs on Android 16; storage and 48dp verified on device** |
+| The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)           |
+| Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
+| Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
+| Device harnesses: storage, 48dp, reminders, update, offline | Complete, 173 tests; 8 of `19`'s 14 scenarios (`DEV-040`)   |
+| Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                  |
+| CI pipeline                                                 | Written; not yet run on a real runner                       |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
 alert-delivery, Review Inbox, reconciliation and reviewer-console rows each count tests that
@@ -1173,3 +1196,39 @@ last_session_messeges.md` is untracked on purpose and was swept into a feature c
      warned that several connections to one SQLCipher file race each other's schema creation, and
      the journal is a second table, not a second store - one `openSecureDatabase`, two
      `ensureSchema` calls on the handle it returns (`openLocalStore`).
+181. Do not trust a green `npm run verify` as evidence about `apps/**`. That tree is excluded from
+     the test run (`vitest.config.ts`) and ignored by the lint config, so the mobile typecheck is
+     the only gate over it - and until this session that typecheck inherited `lib: ["DOM"]` from
+     `expo/tsconfig.base` plus the hoisted `@types/node`, which is how `crypto.randomUUID()` sat in
+     eight write paths that could never run on a phone (`DEV-043`, DEC-112). If you add a global to
+     app code, check that React Native actually defines it;
+     `scripts/checks/mobileGlobals.test.ts` covers a list of names, not the idea.
+182. `am kill` does not kill a foreground process. Android kills only what is already killable, so
+     a scenario that asks for process death while the app is on screen gets the same pid back and
+     reports a journal surviving something that never happened. Press HOME first and assert the pid
+     is gone. It is still `am kill` and never `force-stop`, which additionally cancels every alarm
+     (`DEV-041`).
+183. Removing `adb reverse` does **not** put the device offline. adbd's listener goes away, but
+     OkHttp's already-established connections keep working, so a write meant to be queued goes
+     straight to the server - and the run then measures a successful save rather than the queue.
+     Put something you control in the path (`scripts/device/apiSwitch.ts`) and cut live sockets as
+     well as new ones.
+184. `adb reverse` can register successfully and forward nothing. If the adb server was started
+     before the emulator came up, `adb reverse --list` shows the mapping, adbd listens on the port,
+     and every connection is accepted and immediately closed - the app reports
+     `isMetroRunning(): false` and dies with "Unable to load script" while Metro is plainly running.
+     `adb kill-server && adb start-server` with the device already up fixes it. Do **not** diagnose
+     this with `printf ... | nc`: nc closes the socket at stdin EOF before the response arrives, so
+     a working tunnel looks broken too. That false negative cost most of an hour.
+185. Android's stylus-handwriting tutorial opens over a text field and swallows `adb shell input
+text`. The field stays empty, nothing errors, and the run reads as a form that ignored two
+     attempts at typing. `scripts/device/ui.ts` turns it off at the start of a run
+     (`stylus_handwriting_enabled 0`) and `typeInto` reads the field back rather than assuming.
+186. An empty Android text field reports its **placeholder** as its `text` in a `uiautomator` dump.
+     "The field is non-empty" is therefore always true, and a check written that way passes over a
+     form nobody filled in. Compare against the value you typed.
+187. Do not use Node's `fetch` between long synchronous `sleep`s without allowing for a dead
+     connection. The device harnesses block the event loop for forty-five seconds at a time, Fastify
+     closes the idle keep-alive connection well before that, and the next call reuses the corpse and
+     fails with `ECONNRESET` - which crashes a run for a reason that has nothing to do with the app.
+     Send `connection: close` and retry.

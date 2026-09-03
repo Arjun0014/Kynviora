@@ -3707,3 +3707,93 @@ a duplicate is not a duplicate row on a list: it is being told twice, at the sam
 the same tablet. One intent keeps one key, whether it goes now or later.
 
 **Sources.** `13` (idempotency keys); `12` (a resolvable failure state); `DEV-038`; trap 179.
+
+---
+
+## DEC-112 - The mobile typecheck is told what a phone actually has, and nothing more
+
+**Context.** `apps/mobile/tsconfig.json` extended `expo/tsconfig.base`, which sets
+`lib: ["DOM", "ESNext"]`, and inherited the monorepo's hoisted `@types/node` ambiently. The app
+therefore typechecked against a browser and a Node process, and ran on neither.
+
+**Decision.** The mobile project compiles with `lib: ["ESNext"]` and `types: []`.
+
+**Rationale.** `apps/**` is excluded from the test run and ignored by the lint config, so the
+typecheck is the only automated gate over the one tree whose code runs on a person's phone. A gate
+that has been told the wrong platform is worse than no gate: it produces a green result about a
+question it was not asked. Run against the code as it stood, this change named eight uses of a
+global `crypto` that Hermes does not define, in six files, on every write path that needs an
+idempotency key (`DEV-043`) - and named nothing else, because everything the app genuinely uses
+(`fetch`, `console`, timers, `URL`, `AbortController`) is declared by React Native's own types,
+which arrive through imports rather than through `@types`.
+
+The narrower fix - keep `DOM` and forbid `crypto` by name - was rejected because the wrong answer
+here is a category, not a word. `document`, `localStorage`, `sessionStorage` and `XMLHttpRequest`
+fail identically and silently, and a list maintained by hand is a list that lags the next mistake.
+
+**Consequences.** A genuinely needed web API now has to be declared deliberately rather than
+inherited. That is the intended cost: declaring it is where somebody asks whether React Native has
+it.
+
+**Sources.** `12` (the client is a device); `07`; `DEV-043`; trap 181.
+
+---
+
+## DEC-113 - A sender belongs to the app's lifetime, not to a screen's
+
+**Context.** `PendingSyncProvider` lets a screen register how its entity type is uploaded, on the
+reasoning that the wire call belongs to the code that knows the shape of the write. The shape
+argument is right. The placement was not: a tab that has not been opened is not mounted, and the
+encrypted store opens at the root before any tab beyond the first exists.
+
+**Decision.** Every sender is registered by `PendingSenders`, mounted at the root inside
+`PendingSyncProvider`. Screens still decide whether to queue; they no longer decide whether
+anything can be sent.
+
+**Rationale.** `_layout.tsx` already made this argument for the reminder engine, in as many words:
+"a sync that only ran when somebody opened a particular tab would stop extending the horizon the
+moment they stopped visiting it, and the person would find out by not being reminded." A queue
+whose drain depends on navigation fails the same way and is harder to notice - a reminder that
+stops is at least a thing somebody might miss, whereas a medicine time that never reached the
+server looks exactly like one that did.
+
+Measured rather than reasoned: with senders on screens, a queued schedule edit survived
+`am kill`, was not sent on the following launch, and went out only after a further background and
+foreground (`DEV-044`).
+
+**Consequences.** `PendingSenders` imports the body types of the writes it sends, which is a
+coupling the screens used to hold. That is the price of the write being sendable when nobody is
+looking at the screen that made it.
+
+**Sources.** `12`; `13`; `03` group J; `DEV-038`; `DEV-044`.
+
+---
+
+## DEC-114 - An operation nothing can send has not been attempted
+
+**Context.** When the drain found no registered sender for an operation's type, the provider
+answered `{ kind: 'OFFLINE' }`. `classifyUpload` reads `OFFLINE` as `RETRYABLE`, so
+`recordUploadOutcome` incremented the attempt count and marked the row `FAILED_RETRYABLE`, and
+`endsTheDrain` stopped the pass.
+
+**Decision.** `drainPendingOperations` asks `canSend(entityType)` before calling `send`. An
+operation it refuses is reported in a new `skipped` list: not attempted, attempt count untouched,
+still `PENDING`, and it does not stop the operations behind it.
+
+**Rationale.** There is no `ApiOutcome` that means "nothing was asked", and `OFFLINE` is the
+closest-looking one, which is exactly why it was the wrong answer. Charging an attempt for the app
+having been opened is the same failure DEC-109 refused - one dropped tunnel spending everybody's
+retry budget - arriving through a different door: over enough launches an edit reaches
+`MAX_UPLOAD_ATTEMPTS` and is waiting for somebody to resolve it, having never been sent once, on a
+screen that does not exist (`DEV-038`).
+
+`skipped` is kept separate from `untouched` because the two answer different questions.
+`untouched` is "the drain stopped before reaching these"; `skipped` is "the drain reached these and
+there was nothing to send them with". Collapsing them would hide which of the app and the network
+the queue is waiting on.
+
+Skipping does not disturb `uploadOrder`'s guarantee. The dependency it protects - an update to
+something created offline being meaningless before the create lands - is within one entity type,
+and `canSend` refuses whole types rather than individual operations.
+
+**Sources.** `12`; `13` (bounded retry); DEC-109; `DEV-044`.
