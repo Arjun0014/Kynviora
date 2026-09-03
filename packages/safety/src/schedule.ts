@@ -16,14 +16,14 @@
  * IANA zone, and occurrences are computed from them.
  */
 
-import type { CalendarDate, Instant } from '@kynviora/domain';
-import { calendarDate, instantFrom } from '@kynviora/domain';
+import type { CalendarDate, Instant, IsoWeekday, ScheduleKind } from '@kynviora/domain';
+import { calendarDate, instantFrom, parseLocalTime } from '@kynviora/domain';
 
-export const SCHEDULE_KINDS = ['FIXED_TIMES', 'SELECTED_DAYS', 'AS_NEEDED'] as const;
-export type ScheduleKind = (typeof SCHEDULE_KINDS)[number];
-
-/** ISO-8601 weekday: 1 = Monday through 7 = Sunday. */
-export type IsoWeekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+// The vocabulary a person enters a schedule in lives in `@kynviora/domain`, because the client
+// needs the same words and DEC-010 keeps this package off the phone. What is here is the half a
+// phone has no business doing: turning a wall-clock pattern into instants.
+export type { IsoWeekday, ScheduleKind };
+export { parseLocalTime };
 
 export interface MedicineSchedule {
   readonly id: string;
@@ -57,17 +57,6 @@ export interface ScheduleOccurrence {
   readonly localDate: CalendarDate;
   /** The local time as authored, so the UI can show what the user entered. */
   readonly localTime: string;
-}
-
-const TIME_PATTERN = /^([01][0-9]|2[0-3]):([0-5][0-9])$/;
-
-/** Parse `HH:MM` into hours and minutes, rejecting anything malformed. */
-export function parseLocalTime(value: string): { hours: number; minutes: number } {
-  const match = TIME_PATTERN.exec(value);
-  if (!match) {
-    throw new TypeError(`Invalid local time (expected HH:MM, 24-hour): ${value}`);
-  }
-  return { hours: Number(match[1]), minutes: Number(match[2]) };
 }
 
 /**

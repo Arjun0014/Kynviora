@@ -65,6 +65,7 @@ import { resolveTermForProfile } from './substanceMapping.js';
 import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
 import { registerOperationsRoutes } from './operations.js';
 import { registerSafetyInboxRoutes } from './safetyInbox.js';
+import { registerScheduleRoutes } from './schedule.js';
 import { registerShadowModeRoutes } from './shadowMode.js';
 
 /**
@@ -2467,6 +2468,19 @@ export function createServer(options: ServerOptions): FastifyInstance {
     // compile-time question instead of a comment nobody re-read.
 
     registerSafetyInboxRoutes(app, { contextFor, fail });
+
+    // -------------------------------------------------------------------------
+    // Medicine schedules (spec 04 Phase 4.1)
+    // -------------------------------------------------------------------------
+    // The write path `medicine_schedule` never had. Migration 0004 built the table, its
+    // constraints and its policies, and `@kynviora/safety` has computed occurrences from it since
+    // Stage 4 - but no route wrote a row, so Phase 4.2's reminder engine had nothing to read
+    // (`DEV-039`). Migration 0020 adds the idempotency key and the version these routes need, and
+    // narrows the insert and update policies to `MANAGE_MEDICINES`: until then a caregiver granted
+    // read-only access to a person's medicines could have set, moved or silently switched off
+    // their reminders.
+
+    registerScheduleRoutes(app, { contextFor, fail });
   }
 
   function registerStaffSurface(): void {

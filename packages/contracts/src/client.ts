@@ -455,6 +455,67 @@ export interface ItemUpdated {
   readonly serverTime: string;
 }
 
+/**
+ * When a medicine is meant to be taken (`04` Phase 4.1).
+ *
+ * There is no dose, quantity or instruction field, and there must not be one. `09` forbids
+ * Kynviora reinterpreting a prescriber's instruction; the written directions live on the item as
+ * `directionsText`, in the words they were given in. A schedule says *when*.
+ *
+ * Times are local wall-clock plus an IANA zone rather than instants, which is `04` Phase 4.1's
+ * time-zone rule: "08:00" survives a daylight-saving transition and a flight, and an instant
+ * computed once at save time would move a dose by an hour twice a year.
+ */
+export interface ScheduleBody {
+  readonly scheduleKind: string;
+  /** `HH:MM`, 24-hour. Absent or empty for `AS_NEEDED`. */
+  readonly timesLocal?: readonly string[];
+  /** ISO weekdays, 1 = Monday. Absent means every day; only `SELECTED_DAYS` may carry them. */
+  readonly daysOfWeek?: readonly number[] | null;
+  readonly timeZone: string;
+  readonly startsOn?: string | null;
+  readonly endsOn?: string | null;
+}
+
+/**
+ * A change to a schedule that already exists.
+ *
+ * Whole-document rather than partial, which is why it repeats the kind and the times. A
+ * schedule's kind, times and days are one statement: "twice a day" with the times omitted is not
+ * a partial edit, and patching them independently is how a `SELECTED_DAYS` row ends up with no
+ * days - a schedule that never fires, on a medicine somebody believes they are reminded about.
+ */
+export interface ScheduleChangeBody extends ScheduleBody {
+  readonly expectedVersion: number;
+  /** Absent leaves it alone. `false` is how reminders stop; nothing here deletes a row. */
+  readonly active?: boolean;
+}
+
+export interface Schedule {
+  readonly id: string;
+  readonly ownedItemId: string;
+  readonly scheduleKind: string;
+  readonly timesLocal: readonly string[];
+  readonly daysOfWeek: readonly number[] | null;
+  readonly timeZone: string;
+  readonly startsOn: string | null;
+  readonly endsOn: string | null;
+  readonly active: boolean;
+  readonly version: number;
+  readonly updatedAt: string | null;
+}
+
+export interface SchedulesResponse {
+  readonly schedules: readonly Schedule[];
+  readonly serverTime: string;
+}
+
+export interface ScheduleWritten {
+  readonly schedule: Schedule;
+  readonly replayed?: boolean;
+  readonly serverTime: string;
+}
+
 export interface AlertSummary {
   readonly id: string;
   readonly profileId: string;
@@ -1387,6 +1448,33 @@ export interface KynvioraClient {
   ): Promise<ApiOutcome<Record<string, unknown>>>;
   completeReconciliation(id: string): Promise<ApiOutcome<Record<string, unknown>>>;
 
+  /**
+   * When a medicine is meant to be taken (`04` Phase 4.1), and what Phase 4.2 reminds from.
+   *
+   * `createSchedule` takes an idempotency key and the server requires one. A key regenerated on
+   * retry would put two schedules on one medicine, and the reminder engine reads every active
+   * schedule for an item - so the symptom is not a duplicate row on a list. It is being told
+   * twice, at the same minute, to take the same tablet.
+   *
+   * `updateSchedule` takes no key and is conditional on `expectedVersion` instead, which gives
+   * the same once-only guarantee from the mechanism `13`'s per-entity conflict policy already
+   * required: a retry either lands once or comes back as a conflict.
+   *
+   * Reading and writing are different permissions (`08.2`). A caregiver granted `VIEW_MEDICINES`
+   * lists the times and cannot move them; `MANAGE_MEDICINES` is what the write path requires, and
+   * a refusal arrives as the same not-found an unknown medicine gets.
+   */
+  schedules(itemId: string): Promise<ApiOutcome<SchedulesResponse>>;
+  createSchedule(
+    itemId: string,
+    body: ScheduleBody,
+    idempotencyKey: string,
+  ): Promise<ApiOutcome<ScheduleWritten>>;
+  updateSchedule(
+    scheduleId: string,
+    body: ScheduleChangeBody,
+  ): Promise<ApiOutcome<ScheduleWritten>>;
+
   /** The same client acting as somebody else. Used by tests and by profile switching. */
   withSession(session: ClientSession): KynvioraClient;
 }
@@ -1629,6 +1717,25 @@ export function createClient(options: ClientOptions): KynvioraClient {
         `/v1/reconciliations/${encodeURIComponent(id)}/complete`,
         {},
       ),
+
+    schedules: (itemId) =>
+      get<SchedulesResponse>(`/v1/items/${encodeURIComponent(itemId)}/schedules`),
+
+    // The body is passed through untouched. Rounding a time to the nearest five minutes or
+    // guessing a zone from the device here would be the client altering what somebody entered
+    // about when they take a medicine. The domain refuses and names the field.
+    createSchedule: (itemId, body, idempotencyKey) =>
+      send<ScheduleWritten>(
+        'POST',
+        `/v1/items/${encodeURIComponent(itemId)}/schedules`,
+        body,
+        idempotencyKey,
+      ),
+
+    // Addressed by schedule rather than by item: the row already knows which medicine it belongs
+    // to, and a path carrying both would let the two disagree.
+    updateSchedule: (scheduleId, body) =>
+      send<ScheduleWritten>('PATCH', `/v1/schedules/${encodeURIComponent(scheduleId)}`, body),
 
     withSession: (session) => createClient({ ...options, session }),
   };

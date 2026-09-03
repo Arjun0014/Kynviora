@@ -159,12 +159,25 @@ describe('a route on the wrong surface is absent, not refused', () => {
     { method: 'GET' as const, url: '/v1/visit-packs/candidates' },
     { method: 'POST' as const, url: '/v1/dose-events' },
     { method: 'POST' as const, url: '/v1/reconciliations' },
+    // `04` Phase 4.1. A staff origin serving these would let a reviewer account read when a
+    // household takes its medicines, and decide when they are reminded to.
+    {
+      method: 'GET' as const,
+      url: '/v1/items/00000000-0000-4000-8000-0000000000cc/schedules',
+    },
+    {
+      method: 'POST' as const,
+      url: '/v1/items/00000000-0000-4000-8000-0000000000cc/schedules',
+    },
+    { method: 'PATCH' as const, url: '/v1/schedules/00000000-0000-4000-8000-0000000000dd' },
   ];
 
   for (const { method, url } of householdRequests) {
     it('the staff surface does not serve ' + method + ' ' + url, async () => {
       const response = await staff.inject(
-        method === 'POST' || method === 'PUT' ? { method, url, payload: {} } : { method, url },
+        method === 'POST' || method === 'PUT' || method === 'PATCH'
+          ? { method, url, payload: {} }
+          : { method, url },
       );
       expect(response.statusCode).toBe(404);
       expect(response.json<WireBody>().error.code).toBe('NOT_FOUND');

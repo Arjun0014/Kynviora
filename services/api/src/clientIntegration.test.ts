@@ -2686,6 +2686,171 @@ describe('what a household records about a person, end to end', () => {
   });
 });
 
+describe('when a medicine is meant to be taken, end to end', () => {
+  /**
+   * `04` Phase 4.1's write path, through the code path the Expo screens use (`DEV-039`).
+   *
+   * The property worth proving over a real connection is the one no unit test on either side can:
+   * that a schedule written by the client is a schedule the server stores, reads back and will
+   * hand to Phase 4.2's reminder engine - and that a person who taps Save twice on a bad
+   * connection ends up being reminded once.
+   */
+
+  const freshMedicine = async (name: string): Promise<string> => {
+    const created = await owner.createItem(
+      manualEntryDraft({
+        profileId: SEED.profileId,
+        itemKind: 'MEDICINE',
+        values: { displayName: name, strengthText: '500 mg', dosageForm: 'Tablet' },
+      }),
+      randomUUID(),
+    );
+    if (created.kind !== 'OK') throw new Error('expected the item to be created');
+    return created.value.id;
+  };
+
+  it('writes a twice-daily schedule and reads it back', async () => {
+    const id = await freshMedicine('Scheduled Tablet (synthetic)');
+
+    const created = await owner.createSchedule(
+      id,
+      { scheduleKind: 'FIXED_TIMES', timesLocal: ['20:00', '08:00'], timeZone: 'Asia/Kolkata' },
+      randomUUID(),
+    );
+    expect(created.kind).toBe('OK');
+    if (created.kind !== 'OK') return;
+
+    // Ordered by the domain, so two ways of writing one schedule are one schedule.
+    expect(created.value.schedule.timesLocal).toEqual(['08:00', '20:00']);
+    expect(created.value.schedule.version).toBe(1);
+
+    const listed = await owner.schedules(id);
+    expect(listed.kind).toBe('OK');
+    if (listed.kind !== 'OK') return;
+    expect(listed.value.schedules.map((entry) => entry.id)).toEqual([created.value.schedule.id]);
+  });
+
+  it('gives one reminder to somebody who tapped Save twice', async () => {
+    // The key is the caller's and is deliberately not regenerated, because a key regenerated on
+    // retry is not an idempotency key. Two schedules here is not a duplicate row on a list - it
+    // is being told twice, at the same minute, to take the same tablet.
+    const id = await freshMedicine('Twice-Saved Tablet (synthetic)');
+    const key = randomUUID();
+    const body = {
+      scheduleKind: 'FIXED_TIMES' as const,
+      timesLocal: ['09:00'],
+      timeZone: 'Asia/Kolkata',
+    };
+
+    const first = await owner.createSchedule(id, body, key);
+    const second = await owner.createSchedule(id, body, key);
+    expect(first.kind).toBe('OK');
+    expect(second.kind).toBe('OK');
+
+    const listed = await owner.schedules(id);
+    if (listed.kind !== 'OK') return;
+    expect(listed.value.schedules).toHaveLength(1);
+  });
+
+  it('refuses a stale edit rather than letting one carer overwrite another', async () => {
+    const id = await freshMedicine('Contested Tablet (synthetic)');
+    const created = await owner.createSchedule(
+      id,
+      { scheduleKind: 'FIXED_TIMES', timesLocal: ['08:00'], timeZone: 'Asia/Kolkata' },
+      randomUUID(),
+    );
+    if (created.kind !== 'OK') return;
+    const scheduleId = created.value.schedule.id;
+
+    const moved = await owner.updateSchedule(scheduleId, {
+      expectedVersion: 1,
+      scheduleKind: 'FIXED_TIMES',
+      timesLocal: ['09:00'],
+      timeZone: 'Asia/Kolkata',
+    });
+    expect(moved.kind).toBe('OK');
+
+    const stale = await owner.updateSchedule(scheduleId, {
+      expectedVersion: 1,
+      scheduleKind: 'FIXED_TIMES',
+      timesLocal: ['22:00'],
+      timeZone: 'Asia/Kolkata',
+    });
+    expect(stale.kind).toBe('REFUSED');
+    if (stale.kind !== 'REFUSED') return;
+    expect(stale.code).toBe('VERSION_CONFLICT');
+
+    const listed = await owner.schedules(id);
+    if (listed.kind !== 'OK') return;
+    expect(listed.value.schedules[0]?.timesLocal).toEqual(['09:00']);
+  });
+
+  it('stops the reminders without losing the row a dose event points at', async () => {
+    const id = await freshMedicine('Stopped Tablet (synthetic)');
+    const created = await owner.createSchedule(
+      id,
+      { scheduleKind: 'FIXED_TIMES', timesLocal: ['08:00'], timeZone: 'Asia/Kolkata' },
+      randomUUID(),
+    );
+    if (created.kind !== 'OK') return;
+
+    const stopped = await owner.updateSchedule(created.value.schedule.id, {
+      expectedVersion: 1,
+      scheduleKind: 'FIXED_TIMES',
+      timesLocal: ['08:00'],
+      timeZone: 'Asia/Kolkata',
+      active: false,
+    });
+    expect(stopped.kind).toBe('OK');
+
+    // Still there and still listed, because a dose event references the schedule it was recorded
+    // against and a person deciding what to change needs to see the course they stopped.
+    const listed = await owner.schedules(id);
+    if (listed.kind !== 'OK') return;
+    expect(listed.value.schedules).toHaveLength(1);
+    expect(listed.value.schedules[0]?.active).toBe(false);
+  });
+
+  it('says nothing about a medicine belonging to somebody else', async () => {
+    const id = await freshMedicine('Private Tablet (synthetic)');
+    await owner.createSchedule(
+      id,
+      { scheduleKind: 'FIXED_TIMES', timesLocal: ['08:00'], timeZone: 'Asia/Kolkata' },
+      randomUUID(),
+    );
+
+    // An empty list rather than a refusal - the same answer a medicine with no schedule gives.
+    const seen = await stranger.schedules(id);
+    expect(seen.kind).toBe('OK');
+    if (seen.kind !== 'OK') return;
+    expect(seen.value.schedules).toEqual([]);
+
+    // `UNAVAILABLE`, not `REFUSED`. There is deliberately no outcome in this API meaning "you are
+    // not allowed" (trap 89): a 404 reaches the client as the same absence an unknown medicine
+    // gives, so a screen cannot accidentally confirm that somebody else's medicine exists.
+    const written = await stranger.createSchedule(
+      id,
+      { scheduleKind: 'FIXED_TIMES', timesLocal: ['08:00'], timeZone: 'Asia/Kolkata' },
+      randomUUID(),
+    );
+    expect(written.kind).toBe('UNAVAILABLE');
+  });
+
+  it('refuses an as-needed medicine a time to be reminded at', async () => {
+    // `04` Phase 4.1 separates as-needed from fixed reminders, and `18` is why: a reminder about
+    // something taken only when needed is nagging somebody about a decision they have not made.
+    const id = await freshMedicine('As-Needed Tablet (synthetic)');
+    const refused = await owner.createSchedule(
+      id,
+      { scheduleKind: 'AS_NEEDED', timesLocal: ['08:00'], timeZone: 'Asia/Kolkata' },
+      randomUUID(),
+    );
+    expect(refused.kind).toBe('REFUSED');
+    if (refused.kind !== 'REFUSED') return;
+    expect(refused.detail?.['field']).toBe('timesLocal');
+  });
+});
+
 describe('what you have agreed to, end to end', () => {
   /**
    * `04` Phase 1.4, through the code path the Expo screen uses.
