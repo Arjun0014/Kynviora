@@ -39,6 +39,7 @@ import {
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   MIN_TOUCH_TARGET_DP,
+  SCAN_COPY,
   manualEntryForm,
   type ManualField,
   type ScreenState as ScreenStateKind,
@@ -58,17 +59,41 @@ import { newIdempotencyKey } from '@/platform/ids';
 export interface AddItemProps {
   readonly itemKind: ItemKind;
   readonly profileId: string;
+  /**
+   * Values the form starts with.
+   *
+   * The scan path uses this to hand over a barcode somebody confirmed. It is a **prefill**, not a
+   * lock: every field it touches stays editable, because a scanned number that turned out to be
+   * the wrong pack has to be correctable on the screen where it is visible - and because `09`
+   * does not let a machine reading become a value a person cannot change.
+   */
+  readonly initialValues?: Readonly<Record<string, string>>;
+  /**
+   * Opens the barcode scanner.
+   *
+   * Absent for a personal-care product, where the barcode field is not on the form at all -
+   * a control that scanned into a field that does not exist would be a control that appears to
+   * do nothing. Absent, not disabled (DEC-045).
+   */
+  readonly onScan?: () => void;
   /** Called once an item exists, so the shelf re-reads rather than drawing a row it invented. */
   readonly onSaved: () => void;
   readonly onClose: () => void;
 }
 
-export function AddItem({ itemKind, profileId, onSaved, onClose }: AddItemProps) {
+export function AddItem({
+  itemKind,
+  profileId,
+  onSaved,
+  onClose,
+  initialValues,
+  onScan,
+}: AddItemProps) {
   const { client } = useApi();
 
   const form = useMemo(() => manualEntryForm(itemKind), [itemKind]);
 
-  const [values, setValues] = useState<Readonly<Record<string, string>>>({});
+  const [values, setValues] = useState<Readonly<Record<string, string>>>(initialValues ?? {});
   const [state, setState] = useState<ScreenStateKind | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   /** The field the server's refusal was about, so the form can point at it rather than guess. */
@@ -170,6 +195,18 @@ export function AddItem({ itemKind, profileId, onSaved, onClose }: AddItemProps)
       {/* Why nothing here will show as confirmed. A person reading "not confirmed" with no
           explanation would reasonably think Kynviora doubted them. */}
       <Text style={styles.help}>{form.verificationNote}</Text>
+
+      {/* Below the fields rather than above them. The form is the complete path and the scan is
+          a shortcut into one of its boxes, so putting the camera first would make typing look
+          like the fallback it is not. */}
+      {onScan === undefined ? null : (
+        <PrimaryButton
+          label={SCAN_COPY.openLabel}
+          accessibilityHint={SCAN_COPY.openHint}
+          variant="secondary"
+          onPress={onScan}
+        />
+      )}
 
       <PrimaryButton
         label="Save"

@@ -17,7 +17,11 @@
       "blockedPermissions": [
         "android.permission.READ_CONTACTS",
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION"
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
       "allowBackup": false
     },
@@ -34,7 +38,15 @@
           "useSQLCipher": true
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Kynviora uses the camera to read the number under a barcode. It does not take a photograph, and nothing from the camera is stored or sent anywhere.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

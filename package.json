@@ -40,7 +40,8 @@
     "verify:device:doseaccess": "tsx scripts/device/verifyDoseAccess.ts",
     "verify:device:privacy": "tsx scripts/device/verifyPrivacyLeakage.ts",
     "verify:device:lowstorage": "tsx scripts/device/verifyLowStorage.ts",
-    "purge": "npm --prefix db run purge"
+    "purge": "npm --prefix db run purge",
+    "verify:device:camera": "tsx scripts/device/verifyCameraPermission.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

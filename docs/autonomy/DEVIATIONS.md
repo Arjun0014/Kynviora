@@ -2216,3 +2216,33 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Verified**: `db/purge.test.ts` - 12 checks, including the widest statement the retention role
   can express issued with no predicate at all, and a live shelf surviving it.
 - **Status**: **RESOLVED 2026-09-05**.
+
+---
+
+## DEV-059 - The scan path is built and its device scenario has not been run on a device
+
+- **Affected specification**: `19` (camera and file permissions, the thirteenth of its fourteen
+  device scenarios), `04` Phase 2.2 (scan-assisted entry), `16`.
+- **Expected behaviour**: `npm run verify:device:camera` runs against an attached device and
+  reports five checks.
+- **Implemented behaviour**: everything except the run. The screen, the permission state machine,
+  the GTIN check-digit arithmetic, the copy and the harness's judgements are built and measured in
+  CI - 45 tests across the domain, the screen and the device module. What has not happened is the
+  run itself.
+- **Reason**: `expo-camera` is a native module, so the development build on the emulator predates
+  it and a scan screen that cannot mount is not a scan screen. `npx expo prebuild` and a Gradle
+  assemble are what fix that, and both are minutes of wall-clock rather than a decision.
+- **Temporary or permanent**: temporary, and it is work rather than a blocker - no credential, no
+  reviewer and no external service is involved.
+- **Risk**: low and narrow. What CI cannot answer is exactly what the harness's own docstring
+  says: that Android's dialog appears when the control is pressed rather than at launch, that
+  declining leaves the app usable, and that the merged manifest carries no media permission. Each
+  is a claim the code makes and none has been observed.
+- **Required future work**: rebuild and run `npm run verify:device:camera`.
+
+  **A real read of a real symbol is separately out of scope, and permanently so for a harness.**
+  Holding a printed barcode in front of an emulator's virtual camera is not something a script can
+  arrange, and the emulator's virtual scene is not a product pack. That check is manual, and
+  `verifyCameraPermission.ts` says so rather than putting a green tick over a fixture.
+
+- **Status**: OPEN.

@@ -66,6 +66,11 @@ export default defineConfig({
               replacement: `${mobileRoot}/test/stubs/expo-secure-store.ts`,
             },
             { find: /^expo-sqlite$/, replacement: `${mobileRoot}/test/stubs/expo-sqlite.ts` },
+            // The one stub that answers rather than throwing. What `ScanBarcode` decides - which
+            // control a refusal offers, whether a read is held for confirmation, what is said
+            // about a number nothing has checked - is decidable in Node, and none of it needs a
+            // camera. What a camera is still needed for is written at the top of the stub.
+            { find: /^expo-camera$/, replacement: `${mobileRoot}/test/stubs/expo-camera.tsx` },
             {
               find: /^expo-notifications$/,
               replacement: `${mobileRoot}/test/stubs/expo-notifications.ts`,

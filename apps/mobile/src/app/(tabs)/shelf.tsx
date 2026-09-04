@@ -72,6 +72,7 @@ import { ResourceState } from '@/components/ScreenState';
 import { StatusChip } from '@/components/StatusChip';
 import { RecordDose } from '@/features/doses/RecordDose';
 import { AddItem } from '@/features/shelf/AddItem';
+import { ScanBarcode } from '@/features/shelf/ScanBarcode';
 import { EditItem } from '@/features/shelf/EditItem';
 import { DeleteItem } from '@/features/shelf/DeleteItem';
 import { ItemDetail } from '@/features/shelf/ItemDetail';
@@ -131,6 +132,17 @@ export default function ShelfScreen() {
    * is the reduction to a generic note Phase 2.1's first exit criterion forbids.
    */
   const [adding, setAdding] = useState<ItemKind | null>(null);
+
+  /**
+   * Whether the scan screen is open, and what it has handed back.
+   *
+   * A scan is a shortcut into the same form manual entry uses, not a second way to create an
+   * item - so the barcode is carried into `AddItem` as a prefill and the item is created by
+   * exactly one path. `04` Phase 2.2 makes the manual form the complete route, and two create
+   * paths would be two places for a required field to be forgotten.
+   */
+  const [scanning, setScanning] = useState(false);
+  const [scannedGtin, setScannedGtin] = useState<string | null>(null);
 
   /**
    * Whether the open item is being edited.
@@ -543,6 +555,31 @@ export default function ShelfScreen() {
     setRecordQueued(false);
   }, []);
 
+  if (scanning && adding !== null) {
+    return (
+      <Screen title="Shelf" intro="Reading the number under the barcode.">
+        <ScanBarcode
+          onConfirmed={(gtin) => {
+            // Into the form, never straight into a record. `09`: the number is unverified
+            // observed data and the person has already confirmed reading it - what they have not
+            // done is finish entering the medicine.
+            setScannedGtin(gtin);
+            setScanning(false);
+          }}
+          onEnterManually={() => {
+            setScannedGtin(null);
+            setScanning(false);
+          }}
+          onCancel={() => {
+            setScanning(false);
+            setAdding(null);
+            setScannedGtin(null);
+          }}
+        />
+      </Screen>
+    );
+  }
+
   if (adding !== null && activeProfileId !== null) {
     return (
       <Screen title="Shelf" intro="Only the name is needed.">
@@ -550,8 +587,17 @@ export default function ShelfScreen() {
           itemKind={adding}
           profileId={activeProfileId}
           onSaved={onRetry}
+          {...(scannedGtin === null ? {} : { initialValues: { recordedGtin: scannedGtin } })}
+          {...(adding === 'MEDICINE'
+            ? {
+                onScan: () => {
+                  setScanning(true);
+                },
+              }
+            : {})}
           onClose={() => {
             setAdding(null);
+            setScannedGtin(null);
           }}
         />
       </Screen>
