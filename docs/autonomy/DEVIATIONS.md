@@ -1125,38 +1125,46 @@ route.
 
 ---
 
-## DEV-040 - Eleven of `19`'s fourteen device scenarios are covered, and the other three are not waiting on a device
+## DEV-040 - Thirteen of `19`'s fourteen device scenarios have something measured on a device, five of them only in part
 
 - **Affected specification**: `19` "Device E2E tests" lists fourteen scenarios that must be
   covered.
 - **Expected behaviour**: all fourteen exercised on a device.
-- **Implemented behaviour**: eleven, plus eight automated harnesses that re-run them
-  (`npm run verify:device`, `npm run verify:device:a11y`, `npm run verify:device:reminders`,
+- **Implemented behaviour**: thirteen have something measured, and ten automated harnesses re-run
+  it (`npm run verify:device`, `npm run verify:device:a11y`, `npm run verify:device:reminders`,
   `npm run verify:device:update`, `npm run verify:device:offline`,
   `npm run verify:device:profile`, `npm run verify:device:caregiver`,
-  `npm run verify:device:visitpack`).
+  `npm run verify:device:visitpack`, `npm run verify:device:personalcare`,
+  `npm run verify:device:safety`).
 
-  | `19` scenario                         | State                                                       |
-  | ------------------------------------- | ----------------------------------------------------------- |
-  | Android install/update                | **Covered** - data, key and reminders survive a replace     |
-  | Sign-up/sign-in/recovery              | No authentication exists (`BLK-010`, Phase 1.1)             |
-  | Profile creation                      | **Covered** - a person is added, once, and shows up         |
-  | Medicine add/scan/manual path         | Manual path built; no scanner (`04` Phase 2.2)              |
-  | Personal-care add/scan/OCR/confirm    | No OCR provider (`BLK-007`)                                 |
-  | Medicine reminder after process death | **Covered**, and after a device restart as well             |
-  | Offline create/edit/sync              | **Covered** - queued, survives a kill, arrives exactly once |
-  | Safety alert open/resolution          | Nothing is publishable (`BLK-006`)                          |
-  | Caregiver invite/revoke               | **Covered** - and revocation measured as immediate          |
-  | Visit Pack export                     | **Covered** - what was ticked, and nothing that was not     |
-  | Camera/file permissions               | Notification permission covered; camera/file untested       |
-  | TalkBack smoke suite                  | **Covered**                                                 |
-  | Clock/time-zone change                | **Covered** - a dose does not move when the phone does      |
-  | Low storage/network disruption        | **Network disruption covered.** Low storage untested        |
+  **"Thirteen" is not "thirteen scenarios done", and the table is what to read rather than the
+  number.** Five of the thirteen are partial, each because a named half of the scenario does not
+  exist in this build - a scanner, an OCR provider, a camera feature, a device with no space left,
+  or a published alert nobody is allowed to approve. What every one of the thirteen does have is a
+  run on a phone that would fail if the half that _is_ built stopped working. The fourteenth has
+  nothing at all, and it is the one whose feature has not been chosen yet.
 
-- **Reason**: the environment blocker is gone, and what is left divides into two kinds. Four
-  scenarios are about a feature that does not exist, and each names the blocker or deviation that
-  explains why. Three are about features that do exist and simply have not been driven on a device
-  yet - which is work, not a decision. Nothing here is waiting on hardware.
+  | `19` scenario                         | State                                                              |
+  | ------------------------------------- | ------------------------------------------------------------------ |
+  | Android install/update                | **Covered** - data, key and reminders survive a replace            |
+  | Sign-up/sign-in/recovery              | **Nothing measured.** No authentication exists (`BLK-010`)         |
+  | Profile creation                      | **Covered** - a person is added, once, and shows up                |
+  | Medicine add/scan/manual path         | Manual path built; no scanner (`04` Phase 2.2)                     |
+  | Personal-care add/scan/OCR/confirm    | **Manual path and "confirm" covered**; no scan, no OCR (`BLK-007`) |
+  | Medicine reminder after process death | **Covered**, and after a device restart as well                    |
+  | Offline create/edit/sync              | **Covered** - queued, survives a kill, arrives exactly once        |
+  | Safety alert open/resolution          | **Having nothing to say covered**; publishing needs `BLK-006`      |
+  | Caregiver invite/revoke               | **Covered** - and revocation measured as immediate                 |
+  | Visit Pack export                     | **Covered** - what was ticked, and nothing that was not            |
+  | Camera/file permissions               | Notification permission covered; camera/file untested              |
+  | TalkBack smoke suite                  | **Covered**                                                        |
+  | Clock/time-zone change                | **Covered** - a dose does not move when the phone does             |
+  | Low storage/network disruption        | **Network disruption covered.** Low storage untested               |
+
+- **Reason**: the environment blocker is gone, and what is left is one scenario with nothing
+  measured and five with a named half missing. Nothing here is waiting on hardware, and almost
+  nothing is waiting on work either: every gap but one now names a decision or a credential
+  somebody outside this build has to supply.
 
   The five worth being explicit about, because their state is easy to misread:
 
@@ -1248,9 +1256,45 @@ route.
   All three of the "built and untested" scenarios turned out to be broken rather than untested. The
   phrase was doing more work than it could carry.
 
-- **Required future work**: the remaining three unblock with the blockers they name - authentication
-  (`BLK-010`), a scanner (`04` Phase 2.2), an OCR provider (`BLK-007`) - plus camera and file
-  permissions and a low-storage run, neither of which is waiting on anything but time.
+  **"Personal-care add/scan/OCR/confirm" now has its manual half measured, and the "confirm" step
+  inverts.** `npm run verify:device:personalcare` types a product in by hand, chooses a category
+  from the radio group, pastes an ingredient declaration, and saves. What comes back is compared
+  character for character: `09` reads a declaration in printed order, so a list this app had
+  tidied would be a different list from the one on the pack.
+
+  Two of its checks are the ones worth having. `PC-4` is a subtraction - the barcode, the batch
+  code and the expiry are left blank and the declaration is filled in, so three limits have to be
+  stated afterwards and the fourth must not be. A screen printing the same four sentences whatever
+  somebody typed passes every other reading of "the limits are stated", and is telling a person
+  their ingredient list is missing while it is on file. `PC-5` is the confirm step as this build
+  can have it: with no extraction there is nothing for anybody to confirm, so what has to be true
+  is that a record somebody typed is **never** presented as confirmed. Measured on the phone, on
+  the item's own screen: "Product not verified" and "Formula not verified", over a record the
+  server holds as `UNVERIFIED` on both. Last run **6/6 PASS**.
+
+  **"Safety alert open/resolution" now has the half that can exist measured, and the other half is
+  refused on purpose.** Opening a published alert needs a publication, and nothing in this build
+  can produce one: `BLK-006` has no qualified reviewer and DEC-016 has every shipped regulatory
+  fixture refused by the Citation Gate. Seeding an approval to make a device test go green is the
+  precise failure the governance chapter exists to prevent, so `npm run verify:device:safety` does
+  not, and says so in its own report.
+
+  What it measures instead is the state every profile in this build is in, and that most items in
+  any build will be in: Kynviora has nothing to say and has to say so without that reading as an
+  all-clear. `23` D-014 is a safety requirement in its own right, and it is the one a person is
+  exposed to today. Seven checks: every item on the shelf has a line (an omission is the quietest
+  way to render an absence as approval), every line announces the limitation with its
+  qualification attached, the coverage statement is on screen, no control offers to explain an
+  alert that does not exist (DEC-045 - absent, not disabled), nothing counts or ranks what needs
+  attention (`02`), and a filter matching nothing still says it is showing none of five and still
+  carries the coverage statement underneath. That last is where somebody would most reasonably
+  conclude their shelf had been cleared. Last run **7/7 PASS**.
+
+- **Required future work**: what is left now names a decision or a credential rather than a task.
+  Authentication needs Phase 1.1's provider chosen (`BLK-010`); the scanner needs building (`04`
+  Phase 2.2); OCR needs a credentialed provider (`BLK-007`); opening an alert needs a reviewer
+  (`BLK-006`). Camera and file permissions need a feature that uses them. A low-storage run needs
+  nothing but time and is the one genuinely unblocked piece of work remaining here.
 
 ---
 

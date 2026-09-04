@@ -35,9 +35,15 @@ npm run verify
 
 ### On a device
 
-Eight harnesses need an attached Android device or emulator and are **not** part of `npm run
-verify`. Their judgements are, though: 226 of the tests above exercise the rules they apply, so a
+Ten harnesses need an attached Android device or emulator and are **not** part of `npm run
+verify`. Their judgements are, though: 265 of the tests above exercise the rules they apply, so a
 rule cannot change without CI noticing even where no hardware exists.
+
+Every one of them wakes the screen first (`prepareDeviceForDriving`). An emulator left alone turns
+its display off, and a display that is off has no view hierarchy at all - `uiautomator dump`
+answers "null root node" to every read, which is the same answer it gives mid-transition. A run
+without this spends twenty minutes concluding that a control is missing from a screen nobody was
+looking at (trap 189).
 
 ```bash
 npm run verify:device
@@ -135,6 +141,44 @@ Last run **9/9 PASS** against a Pixel 7 / Android 16 emulator. It needs the seed
 because it creates its schedule through the real route, and it reboots the device and moves its
 clock, so it is not something to run against a phone somebody is using.
 
+```bash
+npm run verify:device:personalcare
+```
+
+Six checks on writing a personal-care product down by hand: the form takes a name, a category from
+its radio group and an ingredient declaration; the item arrives once, as `PERSONAL_CARE`; and the
+declaration comes back character for character, because `09` reads one in printed order and a list
+this app had tidied is a different list.
+
+Two of the six are the ones worth having. `PC-4` is a subtraction - the barcode, the batch code and
+the expiry are left blank and the declaration is filled in, so three limits have to be stated
+afterwards and the fourth must not be. A screen printing the same four sentences whatever somebody
+typed passes every other reading of "the limits are stated" while telling a person their ingredient
+list is missing when it is on file. `PC-5` is `19`'s "confirm" step as this build can have it: with
+no extraction provider there is nothing for anybody to confirm, so what has to be true is that a
+typed record is **never** shown as confirmed - measured on the item's own screen, over a record the
+server holds as `UNVERIFIED`. Last run **6/6 PASS**. The scan and OCR halves are unbuilt, not
+untested (`BLK-007`).
+
+```bash
+npm run verify:device:safety
+```
+
+Seven checks on what the app says about a shelf it has nothing to say about, which is every shelf
+in this build and most items in any build. It does **not** seed a published alert: publishing needs
+a reviewer nobody has staffed (`BLK-006`) and every shipped regulatory fixture is refused by the
+Citation Gate (DEC-016), so manufacturing an approval to make a device test go green is the exact
+failure the governance chapter exists to prevent.
+
+What it measures is `23` D-014 - an absence of a matched rule must never render as approval. Every
+item has a line, because leaving the row out is the quietest way to render an absence as approval;
+every line announces the limitation with its qualification attached, not the bare label the filter
+of the same name also carries; the coverage statement is on screen; no control offers to explain an
+alert that does not exist (DEC-045, absent rather than disabled); nothing counts or ranks what needs
+attention (`02`); and a filter matching nothing still says it is showing none of five and still
+carries the coverage statement underneath - which is where somebody would most reasonably conclude
+their shelf had been cleared. Last run **7/7 PASS**.
+
 A check that could not be performed reports `INCONCLUSIVE` and fails the run. Two of the storage
 checks are absence tests, and an absence test over an empty input passes trivially (DEC-102).
 
@@ -204,7 +248,7 @@ the API will not distinguish them.
 | The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)           |
 | Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
 | Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
-| Device harnesses: eight, from storage to an export          | Complete, 226 tests; 11 of `19`'s 14 scenarios (`DEV-040`)  |
+| Device harnesses: ten, from storage to a safety screen      | Complete, 265 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
 | Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                  |
 | CI pipeline                                                 | Written; not yet run on a real runner                       |
 
@@ -1248,7 +1292,31 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      boots its own PGlite in a fresh `mkdtemp` directory, so it is not trap 175's contention. It
      passed alone and the next full run was green. Re-run before investigating - but re-run rather
      than assuming, because the failure is indistinguishable from a real one.
-188. Do not use Node's `fetch` between long synchronous `sleep`s without allowing for a dead
+188. An emulator left alone turns its screen off, and a screen that is off has no view hierarchy.
+     `uiautomator dump` answers `ERROR: null root node returned by UiTestAutomationBridge` to every
+     read, which is byte for byte what it answers mid-transition - so `scrollTo` reads it as "keep
+     going", `waitForNamed` waits out its whole deadline, and a run spends twenty minutes deciding
+     that a control is missing from a screen nobody was looking at. The first check to fail then
+     reads as a finding about the app. `prepareDeviceForDriving` sends `KEYCODE_WAKEUP` and
+     `svc power stayon true` at the start of every run. `dumpsys window | grep mCurrentFocus`
+     answering `null` while `pidof` returns a live process is the signature.
+189. Do not look for a form field by the label above it. `AddItem` gives the `TextInput` the same
+     `accessibilityLabel` the label `Text` renders, so both nodes carry the same accessible name -
+     unlike `SetUpHousehold`, whose input announces "Name. <help>" against a label of "Name" and is
+     therefore distinguishable by prefix. `nodeNamed` prefers a clickable node and an Android
+     `EditText` reports itself clickable, so this happens to work; a field that did not would be
+     typed into by tapping its label, silently.
+190. A list draws one identically-named control per row. Every shelf row carries "Open this item",
+     so a plain lookup opens whichever row is first in the hierarchy and the run measures the wrong
+     medicine while reporting the right name. `nodeNamedBelow` scopes the control to the row
+     heading - and has to scroll first, because `scrollTo` stops as soon as the heading is anywhere
+     on screen, including the ten clipped pixels at the bottom edge where a newly added item lands
+     with its button not drawn at all.
+191. Do not check for a state chip by its label alone on the Safety screen. The state filters carry
+     exactly the same strings as the chips - "Not enough information" is both a filter and a line's
+     state - so a check for the label is answered by the filter over a screen whose lines show no
+     state at all. Compare the whole announcement, which only a line carries.
+192. Do not use Node's `fetch` between long synchronous `sleep`s without allowing for a dead
      connection. The device harnesses block the event loop for forty-five seconds at a time, Fastify
      closes the idle keep-alive connection well before that, and the next call reuses the corpse and
      fails with `ECONNRESET` - which crashes a run for a reason that has nothing to do with the app.
