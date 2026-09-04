@@ -768,9 +768,21 @@ and the review screen typechecks but is not wired (`DEV-007`).
   scoped or replaced by an App Link is entangled with the authentication provider Phase 1.1 has
   not selected.
 
-  Still outstanding: penetration testing, the secret scan on a real runner, network communication
-  (the transport rule is a client-side check today and there is no production endpoint to verify a
-  certificate chain against - `BLK-001`), and tampering/rooted-device behaviour.
+  **Low storage** is covered too, by `verify:device:lowstorage` - 5/5, and the last of `19`'s
+  fourteen device scenarios that needed neither a credential nor a decision. It found `DEV-055`:
+  with the store unwritable, `queue` let its rejection escape and the screen told somebody their
+  dose was kept on this phone. `LOW-3` now fails a run on any uncaught promise rejection.
+
+  Still outstanding, and each for a reason rather than for effort: penetration testing; the secret
+  scan on a real runner; network communication, which has no production endpoint to verify a
+  certificate chain against (`BLK-001`) - testing the transport rule against loopback measures the
+  exception rather than the rule; and tampering/rooted-device behaviour, which `14` scopes "per
+  the threat model" while `15` names no posture, so choosing one is a decision about who this app
+  defends against.
+
+  The dependency gate's numbers moved: `npm audit --audit-level=high` still exits 0, now over **2**
+  moderate findings rather than 13, both in the Expo toolchain (`expo-router`'s `query-string`
+  and `xcode`'s `uuid`) and neither in anything that ships.
 
 - **9.3 / 9.4**: require qualified reviewers (`BLK-006`) and human usability participants.
 - **9.5**: requires legal and regulatory-classification review.
@@ -866,7 +878,13 @@ become two deployments unchanged when `BLK-001` clears.
 ## Immediate next work
 
 **There is no unblocked engineering task left that does not first need a decision or a credential.**
-That is a finding rather than a shortage of ambition, and it is what the three items below are:
+That is a finding rather than a shortage of ambition, and it is what the three items below are.
+
+It has now been tested from the other direction. The three engineering tasks `STATUS.md` was still
+carrying - tests and lint over `apps/**`, accessibility beyond the five destinations, and `19`'s
+low-storage scenario - were all completed on 2026-09-04, and nothing unblocked behind them. The one
+piece of ordinary work anybody could still pick up is `19`'s camera/file permissions scenario,
+which is small: `verify:device` already knows how to drive the app and read `dumpsys`.
 
 1. **The retention matrix.** Six deviations now converge on one missing document - `DEV-009`,
    `DEV-032`, `DEV-034`, `DEV-035`, `DEV-036` and the deletion half of `16`. It unblocks Phase 2.5's

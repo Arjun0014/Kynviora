@@ -9,20 +9,29 @@ Last updated: 2026-09-04
 
 ## Current position
 
-|                    |                                                                     |
-| ------------------ | ------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 - Medicine Care Workflows                                   |
-| **Current phase**  | Phase 4.1 and 4.2 complete; Stage 4 complete                        |
-| **Last completed** | Recording a dose is its own capability (DEC-116, `BLK-011` closed)  |
-| **Branch**         | `master`                                                            |
-| **Latest commit**  | `feat(access): the grant that said one thing and permitted another` |
-| **Baseline tag**   | `baseline-spec-only`                                                |
+|                    |                                                                    |
+| ------------------ | ------------------------------------------------------------------ |
+| **Current stage**  | Stage 4 - Medicine Care Workflows                                  |
+| **Current phase**  | Phase 4.1 and 4.2 complete; Stage 4 complete                       |
+| **Last completed** | Recording a dose is its own capability (DEC-116, `BLK-011` closed) |
+| **Branch**         | `master`                                                           |
+| **Latest commit**  | `fix(mobile): a dose nothing could keep, described as kept`        |
+| **Baseline tag**   | `baseline-spec-only`                                               |
 
 ## Verification state
 
-- **4082 tests passing**, 0 failing, across 144 files.
+- **4184 tests passing**, 0 failing, across 152 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
+- The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
+  everything that runs on Node or in Postgres. `mobile` is `apps/mobile` - 55 tests that render
+  real components, with `react-native` and the Expo modules resolved to stubs, because React
+  Native's source is Flow-annotated JavaScript esbuild cannot parse and expects a native bridge
+  Node does not have. What each stub substitutes and what it therefore cannot measure is written
+  at the top of it.
+- `apps/**` is **linted** now, type-aware through the app's own tsconfig, with
+  `react-hooks/exhaustive-deps` as an error. Between that and the mobile typecheck (DEC-112),
+  `DEV-043`'s "the one tree nothing checks" is closed.
 
 ```bash
 npm run verify
@@ -45,8 +54,8 @@ npm run verify
 
 ### On a device
 
-Twelve harnesses need an attached Android device or emulator and are **not** part of `npm run
-verify`. Their judgements are, though: 350 of the tests above exercise the rules they apply, so a
+Thirteen harnesses need an attached Android device or emulator and are **not** part of `npm run
+verify`. Their judgements are, though: 397 of the tests above exercise the rules they apply, so a
 rule cannot change without CI noticing even where no hardware exists.
 
 Every one of them wakes the screen first (`prepareDeviceForDriving`). An emulator left alone turns
@@ -68,9 +77,31 @@ a Pixel 7 / Android 16 emulator.
 npm run verify:device:a11y
 ```
 
-Thirty-four checks: every control on all five destinations, at font scale 1 and at 2, measured
-against the 48dp minimum and against having a name a screen reader can announce, plus a TalkBack
-smoke test. Last run **34/34 PASS**.
+Sixty-six checks. Every control on all five destinations at font scale 1 and at 2, measured against
+the 48dp minimum and against having a name a screen reader can announce; a TalkBack smoke test; and
+**four sheets** surveyed at both scales - the invitation form, the record-a-dose sheet, the schedule
+editor and manual entry.
+
+The sheets are the half that was missing, and `DEV-046` is why: it reported 34/34 over the five
+destinations while a sheet three taps in had its controls drawn below the fold with no way to reach
+them, so nobody could finish inviting a caregiver. "Every control is reachable" was being measured
+exactly where the controls are fewest and the screen is shortest.
+
+**Reachability is the measurement, not visibility.** `checkScreen` asks what is on screen now,
+which is right for a destination and wrong for a form: a Save button below the fold is not a
+control of unknown size, it is either something a person can scroll to or something they cannot
+use. So a sheet is scrolled top to bottom, dumped at each step, and every control is judged on
+whether it was _ever_ fully visible. A control seen only as a sliver counts as unreachable, because
+`uiautomator` reports visible bounds and a tap on a thirty-pixel strip lands on whatever is drawn
+over it (trap 194).
+
+The five destinations are excluded from a sheet's survey. They are drawn over every sheet, they are
+not part of one, and the leftmost and rightmost tabs cannot pass by construction - their outer
+edges _are_ the screen's, which `isFullyVisible` reads as clipped.
+
+Last run **66/66 PASS**: 13 controls on the invitation form, 6 on the dose sheet, 11 on the
+schedule editor and 14 on manual entry, every one of them reachable, announced and at least 48dp at
+both scales.
 
 ```bash
 npm run verify:device:reminders
@@ -266,6 +297,40 @@ product question entangled with an authentication provider nobody has chosen, re
 `DEV-052`. Last run **5/5 PASS**: 241 lines from the app's own process and 26,825 elsewhere, all
 clean, after removing 4,045 written by the instrumentation.
 
+```bash
+npm run verify:device:lowstorage
+```
+
+Five checks on `19`'s fourteenth scenario, and the last one on that list that needed neither a
+credential nor a decision.
+
+**What "low storage" is taken to mean, said plainly.** A device with no room left is a device whose
+apps cannot write, and for this app that lands in one place: the encrypted store, which holds the
+projection and the offline journal. The run removes write permission from that directory inside the
+app's own sandbox, then proves the condition by trying a write and requiring a refusal (`LOW-1`).
+
+It is a stand-in. A genuinely full filesystem also fails a temporary file, a log line and Android's
+own bookkeeping, and the system behaves differently under it. What this reproduces is the same
+failure at the same layer - where SQLCipher's write returns an error - which is where every
+consequence this app can have begins. It is also the version that can be undone: filling a 10GB
+partition to zero is reversible only while the run is alive to reverse it, and a harness that can
+wedge the device it is measuring is one nobody runs twice. The directory is restored in a
+`finally`, and again by the next run before it starts.
+
+`LOW-0` is the positive control and this scenario needs one more than most: every other check is
+about the app **not** doing something, and an app that failed at everything would satisfy all of
+them. It requires a dose to queue with storage untouched, the screen to say so, and nothing to
+reach the server.
+
+`LOW-2` is what the scenario exists for. A dose the journal refused must not be described as kept:
+the person stops thinking about a record that does not exist, and there is no later moment at which
+they find out. It found `DEV-055` - and so did `LOW-3`, which fails a run on **any** uncaught
+promise rejection, because every store call rejects under this condition and any one that is
+started and not awaited becomes one.
+
+Last run **5/5 PASS**, with the shelf holding the same 7 items after write permission was restored
+as before it was taken away.
+
 A check that could not be performed reports `INCONCLUSIVE` and fails the run. Two of the storage
 checks are absence tests, and an absence test over an empty input passes trivially (DEC-102).
 
@@ -335,7 +400,8 @@ the API will not distinguish them.
 | The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)           |
 | Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
 | Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
-| Device harnesses: twelve, storage to what reaches a log     | Complete, 350 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
+| Device harnesses: thirteen, storage to a store that is full | Complete, 397 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
+| The mobile app itself: rendering, hooks, providers          | 55 tests, and `apps/**` linted at last (`DEV-043` closed)   |
 | Recording a dose: `RECORD_DOSES`, its own capability        | Complete, 47 tests; 7/7 on a device (DEC-116)               |
 | Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                  |
 | CI pipeline                                                 | Written; not yet run on a real runner                       |
@@ -373,55 +439,61 @@ appears here.
 
 ## Immediate next task
 
-**`BLK-011` is closed.** Recording a dose is `RECORD_DOSES`, its own capability, and no grant that
-already existed acquired it (DEC-116, migration `0021`). `19`'s device coverage is unchanged at 13
-of 14 - the fourteenth is sign-up/sign-in and waits on `BLK-010` - but there is an eleventh
-harness, because the half of that decision that lives on a screen is not visible from the API suite.
+**The three tasks this list named are done, and the list is now empty of engineering.** Every
+remaining item in `IMPLEMENTATION_PLAN.md`'s "immediate next work", and every remaining `19` device
+scenario, waits on a decision or a credential that is not mine to invent.
 
-Two things this session should be read for, neither of which is the count.
+What this session should be read for is not the three ticks. It is that **the tree with no tests
+had four defects in it**, and three of them were found by the act of giving it tests rather than by
+the tests themselves.
 
-**A migration that keeps working software working can be the defect.** Backfilling `RECORD_DOSES`
-onto every grant holding `VIEW_MEDICINES` would have kept every existing caregiver recording doses
-and would have been `DEV-049` arriving by migration instead of by policy - a capability in
-somebody's grant that they never granted. It is also unsound in a way no later fix repairs, because
-the set of owners who would have chosen it is not derivable from a list that never offered it. The
-test asserts each grant's capabilities **whole** rather than counting who holds the new one, since
-a count would also pass if a migration had taken something away.
+- `DEV-053` - a save held the version of `queue` that existed before the encrypted store opened, so
+  an offline edit was reported as failed and dropped. Found by `exhaustive-deps`, on the first run
+  of ESLint over `apps/**` ever.
+- `DEV-054` - a test file written next to the component it tests, which is inside Expo Router's
+  route directory, made the app's bundle fail. **Every gate stayed green over a build that could
+  not start**, because none of them bundles the app. It surfaced eighteen minutes into a device run
+  as every check reporting `INCONCLUSIVE`.
+- `DEV-055` - with an unwritable store, `queue` let its rejection escape and the screen told
+  somebody their dose was kept on this phone. Found by implementing `19`'s low-storage scenario,
+  which is what that scenario is for.
+- And the harness's own `DEV-050` shape appeared twice more: a fixed scroll budget that had quietly
+  stopped reaching the bottom of a growing list, and a full-visibility test that no tab bar can
+  ever pass.
 
-**A guard that never fires is invisible to the run it is guarding.** `verifyCaregiverAccess.ts`
-read `caregiverUserId` where the route sends `granteeUserId`, and the field was _optional_, so
-TypeScript said nothing: `activeGrantsFor` counted zero whatever the database held, `CAR-0` could
-never refuse to run, `CAR-3` confirmed revocation against the same zero, and the cleanup revoked
-nothing (`DEV-050`). It took a second harness against the same route to find it, because that one
-needs two grants in sequence and therefore needs the cleanup to actually work.
+The pattern worth carrying: **a gate that has never failed is not evidence, and a green suite over
+a tree it does not compile is not coverage.**
 
 ## Next three planned tasks
 
-1. **Tests over `apps/**`, which still has none.** Every defect found by driving the app has been
-   in that tree, it is excluded from `vitest.config.ts` and ignored by `eslint.config.js`, and the
-   mobile typecheck plus one source-scanning check are the whole of its automated coverage
-   (`DEV-043`). The shelf now withholds a control on a server-sent flag, which is exactly the kind
-   of logic a component test would hold still and a device run costs twelve minutes to answer.
-2. **Open the sheets in `verify:device:a11y`.** It measures the five destinations at font scale 1
-   and 2, and `DEV-046` was a sheet three taps in whose controls were drawn below the fold with no
-   way to scroll to them. "Every control is reachable" is currently measured where the controls are
-   fewest - and the invitation form has just gained a row, so the sheet is longer than it was.
-3. **The low-storage run**, which is the one remaining `19` scenario that is work rather than a
-   decision. `verify:device` already knows how to drive the app and read `dumpsys`.
+There are none that are unblocked. What follows is what each remaining candidate is waiting for, so
+the next session can tell at a glance whether anything has changed.
 
-Phase 9.2's other two MASVS categories are **not** on that list, and the reason is different for
-each. Network communication has no production endpoint to verify a certificate chain against
-(`BLK-001`); the transport rule is a client-side check today and testing it against loopback would
-measure the exception rather than the rule. Tampering and rooted-device behaviour is scoped "per
-the threat model" by `14`, and `15` does not name a posture for it - deciding one is a product
-decision about who this app is defending against.
+1. **The retention matrix.** Six deviations converge on it - `DEV-009`, `DEV-032`, `DEV-034`,
+   `DEV-035`, `DEV-036` and the deletion half of `16`. It unblocks item deletion, the
+   export-and-deletion shell, emergency information and Visit Pack retention in one stroke, and it
+   is the largest single unblocking left. **Waiting on:** a retention and disclosure decision.
+   `audit_event` and `consent_receipt` refuse DELETE to every role and `dose_event` is what a Visit
+   Pack is built from, so "remove it" cannot be answered without a statement of what is kept
+   regardless.
+2. **A licensed substance vocabulary.** Every mechanism that would use one exists and is tested; with
+   an empty vocabulary all of it is correct and finds nothing. **Waiting on:** `BLK-003` - a
+   commercial agreement and credentials.
+3. **Phase 5.5's possible-formula-change task.** `diffIngredients`, the Trust Passport and the
+   Review Inbox all exist; what does not is a _second_ observation to compare against, because
+   nothing can read a label. **Waiting on:** `BLK-007` - an OCR/multimodal provider.
 
-**Not next, and why.** Wiring the remaining offline writes. `owned_item` CREATE still waits on the
-phase it depends on, `allergy_record` CREATE waits on a route that takes an idempotency key - a
-journal replays on its own, which is not the hand-retry that route's contract reasoned about
-(`DEV-038`) - and `profile` CREATE is refused with its reasoning written down (DEC-115). Queueing
-them anyway to make the queue look finished is the global last-write-wins the specification
-refuses, one entity at a time.
+**The `19` device scenarios that remain, and what each waits for.** Sign-up/sign-in/recovery has
+nothing measured because Phase 1.1 has not chosen an authentication provider (`BLK-010`). Scan
+waits on `04` Phase 2.2, OCR on `BLK-007`. Camera and file permissions are the one remaining piece
+of ordinary work, and it is small: `verify:device` already knows how to drive the app and read
+`dumpsys`.
+
+**Phase 9.2's other two MASVS categories** are also decision-shaped rather than work-shaped.
+Network communication has no production endpoint to verify a certificate chain against
+(`BLK-001`), and testing the transport rule against loopback measures the exception rather than
+the rule. Tampering and rooted-device behaviour is scoped "per the threat model" by `14`, and `15`
+names no posture - choosing one is a decision about who this app defends against.
 
 ## Recent decisions worth knowing
 

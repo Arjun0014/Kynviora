@@ -3990,3 +3990,102 @@ credential, and inventing any of them is what the operating brief forbids. Phase
 outstanding MASVS categories are left for the same kind of reason rather than for effort: network
 communication has no production endpoint to verify a certificate chain against (`BLK-001`), and
 `14` scopes tampering "per the threat model" while `15` names no posture for it.
+
+---
+
+## 2026-09-04 - Three tasks off the list, and the four defects they turned up
+
+Resumed from a clean tree at `0713b06` with `npm run verify` green at 4082/144. The three tasks
+STATUS had named were taken in order. All three are done; what they cost is the interesting part.
+
+### One: the tree nothing had ever checked
+
+`apps/**` was outside the test run and outside the lint run, and the mobile typecheck was the whole
+of its automated coverage. That is `DEV-043`'s standing explanation for eight call sites reaching
+for `crypto.randomUUID()` on an engine with no `crypto`, and for every defect found since - all of
+them by driving the app for twelve minutes at a time.
+
+**Linting first, because it found a defect.** Twenty-two findings on the first run of ESLint over
+that tree, ever. Twenty-one were declarations, redundant assertions, a disable comment for a rule
+nothing runs, and three `new Date()` calls that are legitimately device-local and now say so per
+site rather than by exempting the tree. The twenty-second is `DEV-053`: `EditItem`'s `onSave` closed
+over `queueEdit` without listing it, and `queueEdit` changes identity when the encrypted store opens
+and again when the session does. A save holding the first version calls a `queue` that returns
+`false` before writing anything, and the edit is reported as failed and dropped.
+
+**Then rendering.** A second Vitest project, because the two trees are two runtimes: React Native's
+source is Flow-annotated JavaScript esbuild cannot parse and expects a native bridge Node does not
+have, so `react-native` and the Expo modules resolve to stubs. What each substitutes and what it
+therefore cannot measure is written at the top of it, and the platform stubs throw if anything calls
+them - a test in Node that reached the keystore would be claiming coverage of what only
+`verify:device` can measure.
+
+The queries mirror `scripts/device/ui.ts` on purpose. `findByName` resolves an accessible name the
+way `nodeNamed` does, prefers an interactive node the way `nodeNamed` prefers a clickable one, and
+counts only host elements - a React component is not a view and has no counterpart on a device. The
+two are then asking one question rather than two that happen to agree.
+
+55 tests over the five places the device runs kept finding things.
+
+### Two: measuring reachability where the controls actually are
+
+`verify:device:a11y` reported 34/34 over the five destinations while `DEV-046` was a sheet three
+taps in whose controls were below the fold with no way to reach them. "Every control is reachable"
+was being measured exactly where the controls are fewest and the screen is shortest.
+
+Four sheets now, at both font scales, surveyed rather than dumped: scrolled top to bottom with every
+control judged on whether it was _ever_ fully visible. **66/66 PASS**, up from 34.
+
+**The first run of it found `DEV-054`, and it was mine.** Eighteen minutes in, every check reported
+`INCONCLUSIVE` - including the five destination ones that had passed for weeks. The app was not on
+screen at all: the new `ShelfRow.test.tsx` had been written next to the component it tests, which is
+inside Expo Router's route directory, and that directory is enumerated with `require.context`. The
+test was a route, it was bundled, it imported `react-test-renderer`, and the bundle failed.
+
+No gate could see it. `npm run verify` typechecks, lints and runs four thousand tests without ever
+bundling the app, so everything was green over a build that could not start. `DEV-043`'s shape
+exactly, arriving on the one tree that had just been given tests, and arriving _because_ it had.
+
+Two further harness faults, both the shape of `DEV-050`: a fixed budget of twelve swipes that had
+quietly stopped reaching the bottom of the Care list - which grows by one revoked grant per
+caregiver run, on purpose, because `08.2` wants the audit trail - and a full-visibility requirement
+before tapping that no tab bar can ever satisfy, since the outer tabs' edges _are_ the screen's.
+
+### Three: a dose nothing could keep, described as kept
+
+`19`'s low-storage scenario, and the last item on that list needing neither a credential nor a
+decision. The condition is produced by removing write permission from the store's directory inside
+the app's own sandbox, and proven by trying a write and requiring a refusal. It is a stand-in and
+the harness says so: a full filesystem also fails a temporary file and Android's own bookkeeping.
+It is the version that can be undone, which matters more - a harness that can wedge the device it is
+measuring is one nobody runs twice.
+
+It found `DEV-055`, in two halves. The loud one: four store calls started and not awaited, because
+their result is a cache rather than somebody's data. Every one rejects under this condition, and
+with no `catch` each became an unhandled rejection - which on the device drew React Native's error
+banner **across the tab bar**, so the app could not be navigated at all.
+
+The quiet one is what `12` is about. `queue` awaited `pending.put` and let the rejection escape.
+Every caller renders "Recorded on this phone. It will reach Kynviora when you are back online." on
+`true` and a failure on `false`, and a rejection is neither - so a person records a dose with no
+signal, is told it is safe, and stops thinking about it. Nothing has their record and nothing ever
+will.
+
+`LOW-3` fails a run on **any** uncaught rejection now, which is the check that finds the next one
+without a person reading a log. **5/5 PASS.**
+
+### State
+
+4184 tests across 152 files, `npm run verify` exit 0. Thirteen device harnesses; three run this
+session on a Pixel 7 / Android 16 emulator - `verify:device:a11y` 66/66,
+`verify:device:lowstorage` 5/5, and the earlier `verify:device:doseaccess` 7/7 still standing.
+
+`DEV-043` is closed. `DEV-053`, `DEV-054` and `DEV-055` are new and resolved. Traps 201 and 202.
+
+**What is next is nothing, and that is the finding.** Every remaining item in the plan's own
+"immediate next work" waits on the retention matrix, a licensed substance vocabulary (`BLK-003`) or
+an OCR provider (`BLK-007`). Every remaining `19` device scenario waits on an authentication
+provider (`BLK-010`), Phase 2.2, or `BLK-007` - except camera and file permissions, which is small
+ordinary work and is the one thing a next session could pick up without asking anybody anything.
+Phase 9.2's last two MASVS categories are decision-shaped too: there is no production endpoint to
+verify a certificate chain against (`BLK-001`), and `15` names no posture for tampering.
