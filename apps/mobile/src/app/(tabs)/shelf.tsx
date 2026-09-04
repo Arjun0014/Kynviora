@@ -93,6 +93,14 @@ export default function ShelfScreen() {
   const [recordState, setRecordState] = useState<ScreenStateKind | null>(null);
   const [recordMessage, setRecordMessage] = useState<string | null>(null);
   const [recorded, setRecorded] = useState(false);
+  /**
+   * Whether the dose went into the journal rather than to the server.
+   *
+   * Held apart from `recorded`, because the two are different promises. "Recorded." means the
+   * server has it; a queued dose is on this phone and nowhere else yet, and saying the shorter
+   * sentence would be telling somebody their record is safe on the strength of a failed request.
+   */
+  const [recordQueued, setRecordQueued] = useState(false);
 
   /**
    * The item whose detail is open, or `null`.
@@ -289,6 +297,7 @@ export default function ShelfScreen() {
       setRecordState('LOADING');
       setRecordMessage(null);
       setRecorded(false);
+      setRecordQueued(false);
 
       // Generated once for this attempt, so a retry of the same intent replays rather than
       // recording a second event. `04` Phase 4.3 makes that an exit criterion, because an event
@@ -306,6 +315,30 @@ export default function ShelfScreen() {
             reloadHistory();
             return;
           }
+          if (outcome.kind === 'OFFLINE') {
+            // The dose a person is most likely to record is one they took at home, and a kitchen
+            // is where a phone has least signal. Before this, the answer was "Kynviora could not
+            // reach the server" and the record was gone - so the history a doctor reads was
+            // missing a dose that was taken, and nothing said so.
+            //
+            // Under the key the failed attempt used, never a fresh one. `OFFLINE` is inferred from
+            // a failed fetch, which is also what a request that arrived and lost its answer looks
+            // like - and `13` resolves this table `MERGE_BY_ID` precisely so the replay lands on
+            // the row that already exists (DEC-111).
+            void queueEdit({
+              entityType: 'dose_event',
+              entityId: body.ownedItemId,
+              mutation: 'CREATE',
+              payload: body,
+              baseVersion: null,
+              operationId: idempotencyKey,
+            }).then((queued) => {
+              setRecordState(queued ? null : screenStateForFailure(outcome));
+              setRecordMessage(null);
+              setRecordQueued(queued);
+            });
+            return;
+          }
           setRecordState(screenStateForFailure(outcome));
           setRecordMessage(outcome.kind === 'REFUSED' ? outcome.message : null);
         },
@@ -315,7 +348,7 @@ export default function ShelfScreen() {
         },
       );
     },
-    [client, reloadHistory],
+    [client, reloadHistory, queueEdit],
   );
 
   const onCreateSchedule = useCallback(
@@ -430,6 +463,7 @@ export default function ShelfScreen() {
     setRecordState(null);
     setRecordMessage(null);
     setRecorded(false);
+    setRecordQueued(false);
   }, []);
 
   if (adding !== null && activeProfileId !== null) {
@@ -529,6 +563,7 @@ export default function ShelfScreen() {
           state={recordState}
           stateMessage={recordMessage}
           recorded={recorded}
+          queued={recordQueued}
         />
       </Screen>
     );

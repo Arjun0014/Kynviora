@@ -52,6 +52,14 @@ export interface RecordDoseProps {
   readonly state?: ScreenStateKind | null;
   readonly stateMessage?: string | null;
   readonly recorded?: boolean;
+  /**
+   * Whether the dose is in the offline journal rather than on the server.
+   *
+   * A different promise from {@link recorded} and said in different words. "Recorded." means the
+   * server has it; this one says where it actually is and when it will move, because a person who
+   * was told their record was safe and then reinstalled the app would find it gone.
+   */
+  readonly queued?: boolean;
 }
 
 export function RecordDose({
@@ -65,6 +73,7 @@ export function RecordDose({
   state,
   stateMessage,
   recorded,
+  queued,
 }: RecordDoseProps) {
   const [note, setNote] = useState('');
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -124,6 +133,15 @@ export function RecordDose({
       {recorded === true ? (
         <Text accessibilityLiveRegion="polite" style={styles.body}>
           {DOSE_COPY.recordedDone}
+        </Text>
+      ) : null}
+
+      {/* Said instead of "Recorded.", never as well as it. The two are different promises, and
+          the shorter one would be telling somebody the server has their record when a request has
+          just failed. `12` requires a queued change to be visible rather than assumed. */}
+      {queued === true ? (
+        <Text accessibilityLiveRegion="polite" style={styles.body}>
+          {DOSE_COPY.offlineNote}
         </Text>
       ) : null}
 

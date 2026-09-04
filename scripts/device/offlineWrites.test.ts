@@ -10,8 +10,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { DOSE_COPY } from '@kynviora/presentation';
 import {
   committedOnceCheck,
+  doseCommittedOnceCheck,
+  doseCreates,
+  doseQueuedOnScreenCheck,
   drainedOnFirstLaunchCheck,
   nothingLeftWaitingCheck,
   preconditionCheck,
@@ -274,5 +278,111 @@ describe('OFF-5, nothing left waiting', () => {
 
   it('passes when a later foreground sends no schedule write', () => {
     expect(nothingLeftWaitingCheck({ requestsAfterSettling: [read] }).status).toBe('PASS');
+  });
+});
+
+describe('recognising a dose create', () => {
+  it('picks out the dose route and nothing else', () => {
+    const dose: ObservedRequest = { ...create(), path: '/v1/dose-events' };
+    expect(doseCreates([dose, create(), read])).toEqual([dose]);
+  });
+
+  it('does not mistake the read for a write', () => {
+    const list: ObservedRequest = { ...read, path: '/v1/dose-events' };
+    expect(doseCreates([list])).toEqual([]);
+  });
+});
+
+describe('OFF-6, what the person is told about a queued dose', () => {
+  const sentences = {
+    offlineSentence: DOSE_COPY.offlineNote,
+    recordedSentence: DOSE_COPY.recordedDone,
+  };
+
+  it('passes when the screen says the dose is on this phone', () => {
+    const check = doseQueuedOnScreenCheck({
+      screenText: ['What happened?', DOSE_COPY.offlineNote],
+      ...sentences,
+    });
+    expect(check.status).toBe('PASS');
+  });
+
+  it('fails a screen claiming the dose was saved when the request failed', () => {
+    // The worse of the two failures: "Recorded." is the sentence that stops somebody recording
+    // it again, so a false one loses the dose and hides that it was lost.
+    const check = doseQueuedOnScreenCheck({
+      screenText: ['What happened?', DOSE_COPY.recordedDone],
+      ...sentences,
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('recording it again');
+  });
+
+  it('fails a screen that says nothing at all', () => {
+    const check = doseQueuedOnScreenCheck({ screenText: ['What happened?'], ...sentences });
+    expect(check.status).toBe('FAIL');
+  });
+
+  it('is inconclusive rather than passing when the screen could not be read', () => {
+    expect(doseQueuedOnScreenCheck({ screenText: null, ...sentences }).status).toBe('INCONCLUSIVE');
+  });
+});
+
+describe('OFF-7, a dose whose answer was lost', () => {
+  const KEY = 'bbbbbbbb-0000-4000-8000-000000000001';
+  const dose = (overrides: Partial<ObservedRequest> = {}): ObservedRequest => ({
+    ...create({ key: KEY }),
+    path: '/v1/dose-events',
+    ...overrides,
+  });
+
+  it('passes on two creates under one key, a replay answer, and one row', () => {
+    const check = doseCommittedOnceCheck({
+      creates: [dose(), dose({ status: 200, replay: 'true' })],
+      rowsWithNote: 1,
+      note: 'offline dose QQ1',
+    });
+    expect(check.status).toBe('PASS');
+  });
+
+  it('fails when only one create was seen, however tidy the server looks', () => {
+    // The reason this run swallows an answer instead of going offline. With no journal at all the
+    // swallowed request still commits, so "exactly one row" is passed by an app that kept nothing.
+    const check = doseCommittedOnceCheck({
+      creates: [dose()],
+      rowsWithNote: 1,
+      note: 'offline dose QQ1',
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('kept nothing');
+  });
+
+  it('fails a replay sent under a fresh key', () => {
+    const check = doseCommittedOnceCheck({
+      creates: [dose(), dose({ key: 'cccccccc-0000-4000-8000-000000000002', status: 201 })],
+      rowsWithNote: 2,
+      note: 'offline dose QQ1',
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('not an idempotency key');
+  });
+
+  it('fails when the history gained a second dose', () => {
+    const check = doseCommittedOnceCheck({
+      creates: [dose(), dose({ status: 201 })],
+      rowsWithNote: 2,
+      note: 'offline dose QQ1',
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('another number');
+  });
+
+  it('is inconclusive when the server never said it was a replay', () => {
+    const check = doseCommittedOnceCheck({
+      creates: [dose(), dose()],
+      rowsWithNote: 1,
+      note: 'offline dose QQ1',
+    });
+    expect(check.status).toBe('INCONCLUSIVE');
   });
 });

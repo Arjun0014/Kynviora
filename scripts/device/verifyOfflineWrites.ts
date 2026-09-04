@@ -43,8 +43,12 @@
 import { PACKAGE, adb, isInstalled, sleep } from './adb.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
 import { startApiSwitch, type ApiSwitch } from './apiSwitch.js';
+import { DOSE_COPY } from '@kynviora/presentation';
 import {
   committedOnceCheck,
+  doseCommittedOnceCheck,
+  doseCreates,
+  doseQueuedOnScreenCheck,
   drainedOnFirstLaunchCheck,
   nothingLeftWaitingCheck,
   preconditionCheck,
@@ -54,16 +58,18 @@ import {
 } from './offlineWrites.js';
 import {
   captureFailure,
-  currentNodes,
+  collectScreenText,
   dismissKeyboard,
   killApp,
   launch,
   pressHome,
+  prepareDeviceForDriving,
   screenShowsFailure,
   scrollToAndTap,
-  suppressStylusHandwriting,
+  scrollToAndTapBelow,
   tapNamed,
   typeInto,
+  waitForAppReady,
 } from './ui.js';
 
 const API_PORT = 3000;
@@ -81,6 +87,18 @@ const ITEM_ID = '00000000-0000-4000-8000-00000000d030';
  */
 const RUN_A_TIME = '05:25';
 const RUN_B_TIME = '04:10';
+
+/** The seed's first medicine, by the name its row is headed with. */
+const ITEM_NAME = 'Synthetic Tablet A';
+
+/**
+ * The note Run C writes, carrying this run's own suffix.
+ *
+ * `0004` grants the app role no DELETE on `dose_event` either, so every event any run ever
+ * recorded is still there. A fixed note would let last week's run answer this week's question
+ * about how many exist.
+ */
+const RUN_C_NOTE = `offline dose ${Date.now().toString(36).slice(-4).toUpperCase()}`;
 
 interface ServerSchedule {
   readonly id: string;
@@ -132,6 +150,15 @@ async function apiFetch(path: string, init: RequestInit = {}): Promise<Response 
  * to stay different: an unreachable API would otherwise report every check as a clean pass over an
  * empty result.
  */
+async function doseEventsNoted(note: string): Promise<number | null> {
+  const response = await apiFetch(`/v1/dose-events?ownedItemId=${ITEM_ID}`);
+  if (response === null || !response.ok) return null;
+  const body = (await response.json()) as {
+    readonly events?: readonly { readonly note: string | null }[];
+  };
+  return (body.events ?? []).filter((event) => event.note === note).length;
+}
+
 async function serverSchedules(): Promise<readonly ServerSchedule[] | null> {
   const response = await apiFetch(`/v1/items/${ITEM_ID}/schedules`);
   if (response === null || !response.ok) return null;
@@ -194,9 +221,10 @@ function coldStart(): boolean {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     adb(['shell', 'am', 'force-stop', PACKAGE]);
     launch();
-    sleep(45_000);
-    const nodes = currentNodes();
-    if (nodes !== null && nodes.some((node) => node.packageName === PACKAGE)) return true;
+    // Waited for rather than slept through. A cold start behind Metro takes anywhere between
+    // fifteen and fifty seconds depending on whether the bundle is cached, so a fixed wait is
+    // either a run that fails on a slow start or a minute added to every run that did not need it.
+    if (waitForAppReady()) return true;
     captureFailure('offline-launch');
   }
   return false;
@@ -421,6 +449,131 @@ async function runLostAnswer(apiSwitch: ApiSwitch): Promise<readonly Check[]> {
   ];
 }
 
+/**
+ * Run C: a dose recorded with no signal, on the second entity type the queue carries.
+ *
+ * The scenario is Run B's - the request is forwarded and its answer destroyed - and it is that one
+ * rather than a plain disconnection for a reason the check spells out. With no journal at all the
+ * swallowed request still commits, so a run that merely counted rows afterwards would pass an app
+ * that kept nothing. Two creates under one key, with the server answering `idempotent-replay` to
+ * the second, is the shape only a replay produces.
+ *
+ * `04` Phase 4.3's exit criterion is exactly this: an event created offline may be uploaded more
+ * than once, and a duplicate sync must not create a duplicate event. Until this session nothing in
+ * the app queued a dose at all (`DEV-048`).
+ */
+async function runOfflineDose(apiSwitch: ApiSwitch): Promise<readonly Check[]> {
+  const inconclusive = (id: string, title: string, detail: string): Check => ({
+    id,
+    title,
+    status: 'INCONCLUSIVE',
+    detail,
+  });
+
+  const before = await doseEventsNoted(RUN_C_NOTE);
+  if (before === null || before !== 0) {
+    const detail =
+      before === null
+        ? 'The dose history could not be read before the run started.'
+        : `${String(before)} dose event(s) already carry this run's note, so "exactly one" would ` +
+          'have been true before the phone did anything.';
+    return [
+      inconclusive(
+        'OFF-6',
+        'The person is told the dose is on this phone, not that it is saved',
+        detail,
+      ),
+      inconclusive(
+        'OFF-7',
+        'A dose whose answer was lost is committed once, under the key it first used',
+        detail,
+      ),
+    ];
+  }
+
+  apiSwitch.setMode('pass');
+  apiSwitch.clear();
+  coldStart();
+
+  process.stdout.write('Run C: opening the record-a-dose screen...\n');
+  // By the row's own heading: every shelf row draws an identically named "Record what happened",
+  // and a plain lookup would record a dose against whichever medicine is first.
+  if (!tapNamed('Shelf') || !scrollToAndTapBelow('Record what happened', ITEM_NAME)) {
+    const evidence = captureFailure('offline-open-the-dose-screen');
+    const detail = `The record-a-dose screen could not be opened (see ${evidence.join(', ')}).`;
+    return [
+      inconclusive(
+        'OFF-6',
+        'The person is told the dose is on this phone, not that it is saved',
+        detail,
+      ),
+      inconclusive(
+        'OFF-7',
+        'A dose whose answer was lost is committed once, under the key it first used',
+        detail,
+      ),
+    ];
+  }
+  sleep(6_000);
+
+  const typed = typeInto(DOSE_COPY.noteLabel, RUN_C_NOTE);
+  if (!typed.typed) {
+    const evidence = captureFailure('offline-type-the-dose-note');
+    const detail =
+      `The note field held ${typed.held === null ? 'nothing readable' : JSON.stringify(typed.held)} ` +
+      `rather than ${JSON.stringify(RUN_C_NOTE)} (see ${evidence.join(', ')}).`;
+    return [
+      inconclusive(
+        'OFF-6',
+        'The person is told the dose is on this phone, not that it is saved',
+        detail,
+      ),
+      inconclusive(
+        'OFF-7',
+        'A dose whose answer was lost is committed once, under the key it first used',
+        detail,
+      ),
+    ];
+  }
+
+  process.stdout.write('Run C: swallowing the answer and recording the dose...\n');
+  apiSwitch.setMode('swallow');
+  apiSwitch.clear();
+  const recorded = scrollToAndTap('I took it');
+  sleep(15_000);
+
+  const checks: Check[] = [];
+  checks.push(
+    doseQueuedOnScreenCheck({
+      screenText: recorded ? collectScreenText() : null,
+      offlineSentence: DOSE_COPY.offlineNote,
+      recordedSentence: DOSE_COPY.recordedDone,
+    }),
+  );
+
+  process.stdout.write('Run C: killing the process and reconnecting...\n');
+  killApp();
+  apiSwitch.setMode('pass');
+  launch();
+  sleep(55_000);
+
+  const after = await doseEventsNoted(RUN_C_NOTE);
+  checks.push(
+    after === null
+      ? inconclusive(
+          'OFF-7',
+          'A dose whose answer was lost is committed once, under the key it first used',
+          `The API on 127.0.0.1:${String(API_PORT)} could not be read after the relaunch.`,
+        )
+      : doseCommittedOnceCheck({
+          creates: doseCreates(apiSwitch.seen()),
+          rowsWithNote: after,
+          note: RUN_C_NOTE,
+        }),
+  );
+  return checks;
+}
+
 async function main(): Promise<void> {
   if (!isInstalled()) {
     process.stdout.write(
@@ -442,7 +595,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  suppressStylusHandwriting();
+  prepareDeviceForDriving();
   const apiSwitch = startApiSwitch({ port: SWITCH_PORT, upstreamPort: API_PORT });
 
   // The phone keeps addressing 127.0.0.1:3000, so the client's loopback rule still holds; only
@@ -454,6 +607,7 @@ async function main(): Promise<void> {
   try {
     checks.push(...(await runOffline(apiSwitch)));
     checks.push(...(await runLostAnswer(apiSwitch)));
+    checks.push(...(await runOfflineDose(apiSwitch)));
   } finally {
     await deactivateAll();
     apiSwitch.setMode('pass');

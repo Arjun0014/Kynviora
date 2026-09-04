@@ -34,6 +34,7 @@
 
 import { useEffect } from 'react';
 import type {
+  DoseEventBody,
   HealthFactChangeBody,
   ItemUpdateBody,
   ScheduleBody,
@@ -68,6 +69,38 @@ export function PendingSenders() {
         );
       }
       return client.updateSchedule(operation.entityId, operation.payload as ScheduleChangeBody);
+    });
+
+    /**
+     * A dose somebody recorded with no signal.
+     *
+     * `13` resolves `dose_event` `MERGE_BY_ID`, which is the one policy in the table written for
+     * this: the comment on it says "offline-created events with stable IDs. Merging by ID is what
+     * makes an offline retry safe." `04` Phase 4.3 goes further and makes it an exit criterion -
+     * "an event created offline may be uploaded more than once", "duplicate sync does not create
+     * duplicate dose events" - and the route holds up its end, answering a repeated operation ID
+     * with the row it already wrote rather than a second one.
+     *
+     * So this is the only queueable mutation this app had a feature for and had not wired, and
+     * what it cost is specific: somebody in a kitchen with no signal takes a tablet, records it,
+     * and is told Kynviora could not reach the server. The record they just made is gone, and the
+     * history a doctor reads is missing a dose that was taken.
+     *
+     * `CREATE` only. There is no route that edits or deletes a dose event and none is wanted: `04`
+     * Phase 4.3 keeps a record of what happened, and a correction is a further event rather than a
+     * rewrite of the first.
+     */
+    registerSender('dose_event', async (operation) => {
+      if (operation.mutation !== 'CREATE') {
+        return {
+          kind: 'REFUSED',
+          code: 'VALIDATION_FAILED',
+          message: 'Unsupported offline change.',
+          retryable: false,
+          correlationId: null,
+        };
+      }
+      return client.recordDoseEvent(operation.payload as DoseEventBody, operation.operationId);
     });
 
     /**

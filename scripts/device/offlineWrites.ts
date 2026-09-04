@@ -431,3 +431,167 @@ export function nothingLeftWaitingCheck(evidence: SettledEvidence): Check {
     detail: 'A further background and foreground sent no schedule writes: the queue is empty.',
   };
 }
+
+// ---------------------------------------------------------------------------
+// OFF-6 and OFF-7 - a dose recorded with no signal
+// ---------------------------------------------------------------------------
+
+/**
+ * Why the queue was extended to a second entity type, and why to this one.
+ *
+ * `13` resolves `dose_event` `MERGE_BY_ID` and the table's own comment says why: "offline-created
+ * events with stable IDs. Merging by ID is what makes an offline retry safe." `04` Phase 4.3 goes
+ * further and makes it an exit criterion - an event created offline may be uploaded more than once,
+ * and a duplicate sync must not create a duplicate event. The route holds up its end already,
+ * answering a repeated operation ID with the row it wrote the first time.
+ *
+ * So this was the one mutation the policy allows, the app has a feature for, and nothing had wired
+ * (`DEV-048`). What it cost is specific: a person in a kitchen with no signal takes a tablet,
+ * records it, is told Kynviora could not reach the server, and the record is gone - so the history
+ * somebody reads later is missing a dose that was taken, with nothing saying so.
+ */
+
+/** Requests that recorded a dose. */
+export function doseCreates(requests: readonly ObservedRequest[]): readonly ObservedRequest[] {
+  return requests.filter(
+    (request) => request.method === 'POST' && /\/v1\/dose-events$/.test(request.path),
+  );
+}
+
+export interface DoseQueuedEvidence {
+  /** Every accessible name on the screen after the save, or `null` where it could not be read. */
+  readonly screenText: readonly string[] | null;
+  /** What the app says when a dose is on the phone and not yet on the server. */
+  readonly offlineSentence: string;
+  /** What it says when the server has it. Must not be on screen at the same time. */
+  readonly recordedSentence: string;
+}
+
+/**
+ * The person is told where their record actually is.
+ *
+ * Both halves, because either alone passes a screen nobody should ship. A screen saying nothing
+ * leaves somebody who has just recorded a dose unable to tell a save from a failure; a screen
+ * saying "Recorded." over a request that failed is worse, because it is the sentence that stops
+ * them recording it again. `12` requires a queued change to be visible rather than assumed, and
+ * this is the moment the promise is made to the person rather than to the journal.
+ */
+export function doseQueuedOnScreenCheck(evidence: DoseQueuedEvidence): Check {
+  const title = 'The person is told the dose is on this phone, not that it is saved';
+  if (evidence.screenText === null) {
+    return {
+      id: 'OFF-6',
+      title,
+      status: 'INCONCLUSIVE',
+      detail: 'The screen could not be read after the dose was recorded.',
+    };
+  }
+  const says = (fragment: string): boolean =>
+    evidence.screenText?.some((text) => text.includes(fragment)) ?? false;
+
+  if (says(evidence.recordedSentence) && !says(evidence.offlineSentence)) {
+    return {
+      id: 'OFF-6',
+      title,
+      status: 'FAIL',
+      detail:
+        'The screen said the dose was recorded, and the request had failed. That is the sentence ' +
+        'that stops somebody recording it again.',
+    };
+  }
+  if (!says(evidence.offlineSentence)) {
+    return {
+      id: 'OFF-6',
+      title,
+      status: 'FAIL',
+      detail:
+        `Nothing on the screen said ${JSON.stringify(evidence.offlineSentence)}. A person who has ` +
+        'just recorded a dose cannot tell a save from a failure.',
+    };
+  }
+  return {
+    id: 'OFF-6',
+    title,
+    status: 'PASS',
+    detail:
+      'The screen says the dose is kept on this phone and will be sent when it can, and does not ' +
+      'claim it is saved.',
+  };
+}
+
+export interface DoseReplayEvidence {
+  /** Every dose create the switch saw, across the swallowed attempt and the replay. */
+  readonly creates: readonly ObservedRequest[];
+  /** Dose events on the server carrying this run's own note. */
+  readonly rowsWithNote: number;
+  /** The note, for a report somebody has to read. */
+  readonly note: string;
+}
+
+/**
+ * A dose whose answer was lost is committed once, under the key it first used.
+ *
+ * The counting is what makes this hard to fake, and it is why the run swallows an answer rather
+ * than simply going offline. If the phone had queued nothing at all, the swallowed request would
+ * still have committed and the server would still hold exactly one event - so "one row" on its own
+ * is passed by an app with no journal. Two creates under one key, with the server answering
+ * `idempotent-replay` to the second, is the shape only a replay produces.
+ */
+export function doseCommittedOnceCheck(evidence: DoseReplayEvidence): Check {
+  const title = 'A dose whose answer was lost is committed once, under the key it first used';
+  const keys = new Set(evidence.creates.map((create) => create.key).filter((key) => key !== null));
+  const replayed = evidence.creates.filter((create) => create.replay === 'true');
+
+  if (evidence.creates.length < 2) {
+    return {
+      id: 'OFF-7',
+      title,
+      status: 'FAIL',
+      detail:
+        `Only ${String(evidence.creates.length)} dose create(s) were seen. The answer was ` +
+        'destroyed, so the phone had every reason to queue and replay - one request means it ' +
+        'kept nothing, and the dose exists only because the swallowed attempt happened to commit.',
+    };
+  }
+  if (keys.size !== 1) {
+    return {
+      id: 'OFF-7',
+      title,
+      status: 'FAIL',
+      detail:
+        `The replay used a different idempotency key (${String(keys.size)} distinct keys across ` +
+        `${String(evidence.creates.length)} creates). A fresh key on a replay is not an ` +
+        'idempotency key: it is a second dose in a history somebody reads as a record of what ' +
+        'they did (DEC-111).',
+    };
+  }
+  if (evidence.rowsWithNote !== 1) {
+    return {
+      id: 'OFF-7',
+      title,
+      status: 'FAIL',
+      detail:
+        `The server holds ${String(evidence.rowsWithNote)} dose events noted ` +
+        `${JSON.stringify(evidence.note)}. One recorded dose has become another number.`,
+    };
+  }
+  if (replayed.length === 0) {
+    return {
+      id: 'OFF-7',
+      title,
+      status: 'INCONCLUSIVE',
+      detail:
+        'One row and one key, but the server never answered `idempotent-replay`, so the second ' +
+        'request may not have reached it at all.',
+    };
+  }
+  return {
+    id: 'OFF-7',
+    title,
+    status: 'PASS',
+    detail:
+      `${String(evidence.creates.length)} dose creates went out under one key, the server ` +
+      `answered \`idempotent-replay\` to ${String(replayed.length)} of them, and exactly one ` +
+      `event noted ${JSON.stringify(evidence.note)} exists.`,
+  };
+}
