@@ -10,15 +10,20 @@
  *   npm run verify:device:camera
  *
  * WHAT IT NEEDS
- * An attached device with a build that **includes `expo-camera`**. That is a native module, so a
- * build made before it was added does not have it and this run will report `CAM-0` inconclusive -
- * correctly, because a scan screen that cannot mount is not a scan screen. `npx expo prebuild` and
- * a Gradle assemble are what fix that, and there is no way around it from here.
+ * The seeded API on `127.0.0.1:3000`, a Metro bundler, and an attached device with a build that
+ * **includes `expo-camera`**. That is a native module, so a build made before it was added does not
+ * have it and this run reports `CAM-0` inconclusive - correctly, because a scan screen that cannot
+ * mount is not a scan screen. `npx expo prebuild` and a Gradle assemble are what fix that.
  *
  * WHAT IT DOES TO THE DEVICE
- * Revokes `android.permission.CAMERA` to establish a known starting state, drives the app to the
- * scan screen, presses the control, refuses the dialog, and reads `dumpsys package` at three
- * points. It records what the permission was before it started and puts it back in a `finally`.
+ * Runs `pm reset-permissions`, which returns **every app's** runtime permissions to their
+ * default state - see `resetPermissionState` for why nothing narrower works - then drives the app
+ * to the scan screen, presses the control, refuses the dialog, and reads `dumpsys package` at
+ * three points. It records what the camera permission was before it started and puts it back in a
+ * `finally`, and dismisses any dialog it left open.
+ *
+ * That device-wide reset is the one thing here that reaches outside this app. It is acceptable on
+ * a dedicated test emulator and would not be on a phone somebody uses.
  *
  * WHY REVOKING IS PART OF THE MEASUREMENT
  * `CAM-1` asks whether the app holds the camera permission after a launch that never scanned, and
@@ -51,6 +56,7 @@ import {
   captureFailure,
   coldStart,
   collectScreenText,
+  currentNodes,
   prepareDeviceForDriving,
   processId,
   scrollToAndTap,
@@ -59,6 +65,19 @@ import {
 } from './ui.js';
 
 const CAMERA = 'android.permission.CAMERA';
+/**
+ * Not what this scenario measures, and exactly what gets in its way.
+ *
+ * `pm reset-permissions` is device-wide, so it clears this one too - and the app asks for it at
+ * launch, which is correct for a reminder feature and fatal for a run trying to drive the app to a
+ * different screen. A notification dialog on top of the shelf makes every tap land on it, and the
+ * report then reads "the scan screen was never reached", which is a fact about this permission
+ * rather than about the camera.
+ *
+ * So it is granted for the duration and put back afterwards. Granting is the neutral choice: a
+ * granted permission shows no dialog, and this run has nothing to say about notifications.
+ */
+const NOTIFICATIONS = 'android.permission.POST_NOTIFICATIONS';
 const METRO_PORT = 8081;
 
 function dumpsys(): string | null {
@@ -71,35 +90,141 @@ function cameraIsGranted(): boolean | null {
   return output === null ? null : grantedPermissions(output).includes(CAMERA);
 }
 
+function setPermission(permission: string, granted: boolean): boolean {
+  return adb(['shell', 'pm', granted ? 'grant' : 'revoke', PACKAGE, permission]).ok;
+}
+
 function setCamera(granted: boolean): boolean {
-  return adb(['shell', 'pm', granted ? 'grant' : 'revoke', PACKAGE, CAMERA]).ok;
+  return setPermission(CAMERA, granted);
+}
+
+function isGranted(permission: string): boolean | null {
+  const output = dumpsys();
+  return output === null ? null : grantedPermissions(output).includes(permission);
 }
 
 /**
- * Whether Android's own permission dialog is on screen.
+ * Put every runtime permission back to "not yet asked".
+ *
+ * **`pm revoke` is not enough, and finding that out cost three runs.** Revoking clears the grant
+ * and leaves the `USER_SET` and `USER_FIXED` flags, so a permission a person has refused twice
+ * stays permanently refused - Android will not show a dialog for it again. A run that revoked to
+ * establish a clean baseline therefore established a *blocked* one, and the app correctly drew
+ * "The camera is switched off for Kynviora" while `CAM-0` reported the disclosure missing.
+ *
+ * The reading is worth keeping: the harness was refusing the dialog on every run, which is
+ * exactly how a person reaches "don't ask again" - so this scenario poisons its own precondition
+ * by doing its job.
+ *
+ * `pm reset-permissions` is the only command that clears the flags, and it is **device-wide**:
+ * every app's runtime permissions return to their default state, this one's included. That is
+ * acceptable on a dedicated test emulator and would not be on a phone somebody uses, which is why
+ * it is said here rather than left in a script.
+ */
+function resetPermissionState(): boolean {
+  return adb(['shell', 'pm', 'reset-permissions']).ok;
+}
+
+/**
+ * Whether Android's own permission dialog is the window with focus.
  *
  * Identified by the package that owns it rather than by its wording, which is localised and
- * changes between releases. `com.android.permissioncontroller` is the one that draws it on
- * everything this project targets.
+ * changes between releases - but read from `mCurrentFocus` rather than from the window **list**,
+ * and that distinction cost a run. `dumpsys window windows` mentions `permissioncontroller` in
+ * twenty-six places on an idle device sitting on the launcher, because the list includes window
+ * tokens and cached activity records. A check over it is true essentially always, so `CAM-2`
+ * reported "the dialog was not dismissed with a refusal" - the branch for a dialog that appeared
+ * and was answered with a grant - when no dialog had ever appeared.
+ *
+ * The failure is worth naming because of its direction: it made a check that could not run look
+ * like a check that ran and found something else.
  */
 function permissionDialogVisible(): boolean {
-  const result = adb(['shell', 'dumpsys', 'window', 'windows']);
+  const result = adb(['shell', 'dumpsys', 'window']);
   if (!result.ok) return false;
-  return /permissioncontroller|GrantPermissionsActivity/i.test(result.stdout);
+  const focus = /mCurrentFocus=.*/.exec(result.stdout)?.[0] ?? '';
+  return /permissioncontroller|GrantPermissions/i.test(focus);
+}
+
+/**
+ * Leave no dialog on screen, whatever happened.
+ *
+ * A refusal that fails to find its button leaves Android's dialog up, and it belongs to
+ * `permissioncontroller` rather than to this app - so `am force-stop` does not remove it and the
+ * **next** run's `coldStart` launches the app underneath it. Every tap then lands on the dialog,
+ * and `CAM-0` reports the scan screen as missing its disclosure, which is a fact about the
+ * previous run rather than about the app.
+ *
+ * Called before the run as well as after it, for the reason `verify:device:lowstorage` restores
+ * write permission before it starts: the run that leaves a mess is the one that crashed, and it is
+ * not around to clean up.
+ */
+function dismissAnyPermissionDialog(): void {
+  for (let attempt = 0; attempt < 3 && permissionDialogVisible(); attempt += 1) {
+    if (!refusePermissionDialog()) adb(['shell', 'input', 'keyevent', 'KEYCODE_BACK']);
+    sleep(1500);
+  }
 }
 
 /**
  * Press the refusing button on Android's own permission dialog.
  *
- * Its wording differs by release and by whether the permission has been asked before - "Don't
- * allow", "Deny", and "Don't allow" again under a "Ask every time" variant - so several are tried
- * in order rather than one being assumed. `tapNamed` matches an accessible name exactly, which is
- * why these are literals rather than a pattern: the dialog is not this app's and guessing at its
- * text with a loose match risks pressing whichever button happens to contain the word.
+ * **The apostrophe is not an apostrophe.** Android 16 renders the button as `Don’t allow`
+ * with U+2019, and an ASCII `Don't allow` matches nothing at all - which presents as `CAM-2`
+ * reporting that the dialog "was not dismissed with a refusal", indistinguishable from a dialog
+ * that never appeared. It cost a run to find, and the fix is one character.
+ *
+ * Several forms are tried because this dialog belongs to Android rather than to this app, and its
+ * wording changes by release and by whether the permission has been asked before.
+ *
+ * `tapNamed` matches an accessible name exactly, which is deliberate here rather than convenient:
+ * the Android 16 dialog offers "While using the app", "Only this time" and "Don’t allow", and
+ * a loose match risks pressing whichever button happens to contain the word - two of those three
+ * grant the permission this check exists to refuse.
  */
+const REFUSE_LABELS = ['Don’t allow', "Don't allow", 'Deny', 'DENY', 'DON’T ALLOW'];
+
+/** The package that draws the runtime-permission dialog on every release this project targets. */
+const PERMISSION_UI = 'com.google.android.permissioncontroller';
+
+/**
+ * Tap a control **in the permission dialog**, which `tapNamed` structurally cannot do.
+ *
+ * `nodeNamed` filters to `packageName === PACKAGE`, and that filter is a safety property rather
+ * than an oversight: a harness that could tap anything on screen is one that can press a button in
+ * whatever notification, system dialog or other app happens to be in front, and report the result
+ * as the app's behaviour. Every other scenario in this directory wants exactly that restriction.
+ *
+ * This one has to reach outside it, so it opts out **explicitly and narrowly**: only nodes owned
+ * by `com.google.android.permissioncontroller`, only by exact name. Loosening the shared helper
+ * would have given every scenario the ability by accident.
+ *
+ * It cost a run to find, because the symptom is indistinguishable from the dialog not being there:
+ * `tapNamed` returns `false` for "no such node" and for "the node belongs to somebody else".
+ */
+function tapInPermissionDialog(label: string): boolean {
+  const nodes = currentNodes();
+  if (nodes === null) return false;
+  const match = nodes.find(
+    (node) =>
+      node.packageName === PERMISSION_UI &&
+      (node.text === label || node.contentDescription === label),
+  );
+  if (match === undefined) return false;
+  adb([
+    'shell',
+    'input',
+    'tap',
+    String(Math.round((match.bounds.left + match.bounds.right) / 2)),
+    String(Math.round((match.bounds.top + match.bounds.bottom) / 2)),
+  ]);
+  sleep(1500);
+  return true;
+}
+
 function refusePermissionDialog(): boolean {
-  for (const label of ["Don't allow", 'Deny', 'DENY', "DON'T ALLOW"]) {
-    if (tapNamed(label)) return true;
+  for (const label of REFUSE_LABELS) {
+    if (tapInPermissionDialog(label)) return true;
   }
   return false;
 }
@@ -138,11 +263,19 @@ function main(): void {
 
   const checks: Check[] = [];
   const grantedBefore = cameraIsGranted();
+  const notificationsBefore = isGranted(NOTIFICATIONS);
+
+  // Before anything is measured. A crashed earlier run is exactly the one that left a dialog up.
+  dismissAnyPermissionDialog();
 
   try {
-    // A known starting state. On a device where somebody already granted the camera, CAM-1's
-    // answer would be yes for a reason that has nothing to do with this app.
-    setCamera(false);
+    // A known starting state, and "known" has to mean the flags too rather than only the grant.
+    // See `resetPermissionState`: revoking alone leaves a permission this harness has already
+    // refused twice permanently refused, and every check below then measures that instead of the
+    // app.
+    resetPermissionState();
+    // Out of the way. See `NOTIFICATIONS` - its dialog would otherwise eat every tap this makes.
+    setPermission(NOTIFICATIONS, true);
 
     // ---- after a launch that never scanned ---------------------------------
     process.stdout.write('Launching without touching the scan control...\n');
@@ -200,7 +333,9 @@ function main(): void {
   } finally {
     // Whatever happened. A device left with the camera revoked makes the next run's CAM-1 pass
     // for the wrong reason.
+    dismissAnyPermissionDialog();
     if (grantedBefore !== null) setCamera(grantedBefore);
+    if (notificationsBefore !== null) setPermission(NOTIFICATIONS, notificationsBefore);
     adb(['shell', 'am', 'force-stop', PACKAGE]);
   }
 

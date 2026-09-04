@@ -119,6 +119,7 @@ beforeAll(async () => {
       devAuth: true,
       seed: true,
       allowAnonymousStart: false,
+      supabase: null,
     },
     { logger: noopLogger() },
   );

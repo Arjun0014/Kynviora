@@ -29,10 +29,11 @@ import {
 } from '@kynviora/domain';
 import { ALL_FIXTURE_SOURCES } from '@kynviora/fixtures';
 import type { SourceRegistryEntry } from '@kynviora/regulatory';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { createServer } from './server.js';
 import type { DatabasePool, Principal } from './context.js';
 import { DevAuthRefused, createDevAuthenticator } from './devAuth.js';
+import { createSupabaseAuthenticator, httpJwks } from './supabaseAuth.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -53,6 +54,14 @@ export interface MainConfig {
   readonly devAuth: boolean;
   readonly seed: boolean;
   readonly allowAnonymousStart: boolean;
+  /**
+   * The Supabase project this deployment accepts tokens from, or `null`.
+   *
+   * Two values and neither is a secret: an issuer URL and an audience. That is the whole of what
+   * a verifier needs when signatures are asymmetric, and it is why `14`'s rule about secrets in
+   * configuration does not bite here - there is nothing to leak.
+   */
+  readonly supabase: { readonly issuer: string; readonly audience: string } | null;
 }
 
 function readNumber(name: string, fallback: number): number {
@@ -72,6 +81,49 @@ function readOptionalPort(name: string): number | null {
   return readNumber(name, 0);
 }
 
+/**
+ * The Supabase configuration, or `null` where none is set.
+ *
+ * The issuer is the whole switch: setting it turns on token verification. The audience defaults
+ * to `authenticated`, which is what Supabase issues for a signed-in user - a deployment that
+ * needed a different one can say so, and one that does not should not have to.
+ */
+function readSupabase(): { readonly issuer: string; readonly audience: string } | null {
+  const issuer = process.env.KYNVIORA_SUPABASE_ISSUER?.trim();
+  if (issuer === undefined || issuer === '') return null;
+
+  // Refused loudly rather than coerced. A token is verified against this string exactly, and an
+  // issuer with a trailing slash or a missing scheme fails every request in a way that looks
+  // like a broken client.
+  let parsed: URL;
+  try {
+    parsed = new URL(issuer);
+  } catch {
+    throw new Error(
+      'KYNVIORA_SUPABASE_ISSUER must be an absolute URL, e.g. ' +
+        'https://<project-ref>.supabase.co/auth/v1',
+    );
+  }
+  if (
+    parsed.protocol !== 'https:' &&
+    parsed.hostname !== '127.0.0.1' &&
+    parsed.hostname !== 'localhost'
+  ) {
+    // `14`: a token is a bearer credential and a key set fetched over plaintext can be replaced
+    // in transit. Loopback is allowed so a local Supabase stack can be pointed at.
+    throw new Error(
+      'KYNVIORA_SUPABASE_ISSUER must be https, or loopback for a local Supabase stack.',
+    );
+  }
+
+  return {
+    // Trailing slash removed once, here. The issuer is compared to the `iss` claim exactly, and
+    // the key set URL is built by appending - so a stray slash breaks both, in two different ways.
+    issuer: issuer.replace(/\/$/, ''),
+    audience: process.env.KYNVIORA_SUPABASE_AUDIENCE?.trim() ?? 'authenticated',
+  };
+}
+
 export function readConfig(): MainConfig {
   return {
     port: readNumber('KYNVIORA_API_PORT', 3000),
@@ -87,6 +139,7 @@ export function readConfig(): MainConfig {
     devAuth: process.env.KYNVIORA_DEV_AUTH === '1',
     seed: process.env.KYNVIORA_DEV_SEED === '1',
     allowAnonymousStart: process.env.KYNVIORA_ALLOW_ANONYMOUS_START === '1',
+    supabase: readSupabase(),
   };
 }
 
@@ -149,6 +202,53 @@ function loadSources(): Promise<ReadonlyMap<string, SourceRegistryEntry>> {
   return Promise.resolve(new Map(ALL_FIXTURE_SOURCES.map((source) => [source.id, source])));
 }
 
+/**
+ * Choose the authenticator.
+ *
+ * Two exist and they are mutually exclusive by construction, which is the point (DEC-118).
+ *
+ *  - **Supabase**, when `KYNVIORA_SUPABASE_ISSUER` is set. Verifies a signed token, takes identity
+ *    from `sub`, and holds no secret: signatures are checked with a published public key.
+ *  - **The development header**, when `KYNVIORA_DEV_AUTH=1`. Refused outright under
+ *    `NODE_ENV=production` and unchanged since Stage 7.
+ *
+ * BOTH TOGETHER IS A CONFIGURATION ERROR, NOT A FALLBACK
+ * A process that accepted a header *and* a token would be one where the weaker path decides,
+ * because an attacker picks. `14` is specific that a development identity must never run where
+ * real people have accounts, and "both are configured, the good one usually wins" is exactly the
+ * arrangement that produces a header-authenticated production deployment nobody meant to make.
+ */
+function chooseAuthenticator(
+  config: MainConfig,
+  logger: Logger,
+): ((request: FastifyRequest) => Promise<Principal | null>) | null {
+  if (config.supabase !== null) {
+    if (config.devAuth) {
+      throw new Error(
+        'Both KYNVIORA_SUPABASE_ISSUER and KYNVIORA_DEV_AUTH=1 are set. A process that accepts ' +
+          'a header and a token is one where the weaker path decides, because an attacker picks ' +
+          'which to present (spec 14). Configure exactly one.',
+      );
+    }
+    return createSupabaseAuthenticator({
+      issuer: config.supabase.issuer,
+      audience: config.supabase.audience,
+      jwks: httpJwks({ issuer: config.supabase.issuer, now: () => Date.parse(now()) }),
+      now,
+      // The reason never reaches the caller - `13` does not let this API be an oracle, and an
+      // authentication endpoint is the most valuable place for one. It reaches the log instead,
+      // where a deployment can see authentication failing and why.
+      onRefusal: (reason) => {
+        logger.warn('api.auth.refused', { reason });
+      },
+    });
+  }
+
+  // The flag is read from the config rather than from the environment a second time, so a test
+  // can start a server without mutating `process.env` for every other test in the file.
+  return createDevAuthenticator({ now, enabled: config.devAuth ? '1' : '' });
+}
+
 export interface StartedServer {
   readonly url: string;
   /**
@@ -173,21 +273,16 @@ export async function start(
 ): Promise<StartedServer> {
   const logger = overrides.logger ?? consoleLogger(clock);
 
-  // The flag is read from the config rather than from the environment a second time, so a test
-  // can start a server without mutating `process.env` for every other test in the file.
-  const authenticate = createDevAuthenticator({
-    now,
-    enabled: config.devAuth ? '1' : '',
-  });
+  const authenticate = chooseAuthenticator(config, logger);
 
   if (authenticate === null && !config.allowAnonymousStart) {
     // A server that authenticates nobody serves nobody, and it fails in a way that looks like a
     // bug in every route rather than an absent configuration. Say which it is, once, here.
     throw new Error(
-      'No authenticator is configured. Phase 1.1 has not chosen an auth provider, so there is no ' +
-        'production authenticator yet. Set KYNVIORA_DEV_AUTH=1 for header-based development ' +
-        'identity, or KYNVIORA_ALLOW_ANONYMOUS_START=1 to start a server that rejects every ' +
-        'authenticated request on purpose.',
+      'No authenticator is configured. Set KYNVIORA_SUPABASE_ISSUER to verify Supabase access ' +
+        'tokens, KYNVIORA_DEV_AUTH=1 for header-based development identity (refused under ' +
+        'NODE_ENV=production), or KYNVIORA_ALLOW_ANONYMOUS_START=1 to start a server that ' +
+        'rejects every authenticated request on purpose.',
     );
   }
 

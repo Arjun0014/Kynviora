@@ -118,16 +118,37 @@ export type CameraPermissionState =
   /** Refused permanently, or blocked by policy. Only Settings can change it. */
   | 'BLOCKED';
 
+/**
+ * Read a permission response.
+ *
+ * **`canAskAgain` is meaningless until the app has asked once, and that is Android's doing rather
+ * than this module's.** `shouldShowRequestPermissionRationale` - which is where `canAskAgain`
+ * comes from - returns `false` in two entirely different situations: before the first request
+ * ever, and after somebody has said "don't ask again". The platform does not distinguish them.
+ *
+ * So a screen that trusts `canAskAgain` on first load tells a person who has never been asked
+ * that the camera is switched off and Android will not let the app ask again - which is false,
+ * offers no way forward, and is exactly what a device run found this doing (`DEV-060`).
+ *
+ * `hasRequested` is the missing bit, and only the app knows it. Before a request, a
+ * not-yet-granted permission is `UNDETERMINED` whatever the response says; after one, the
+ * response means what it says.
+ */
 export function cameraPermissionState(
   response: {
     readonly granted: boolean;
     readonly canAskAgain: boolean;
     readonly status: string;
   } | null,
+  hasRequested: boolean,
 ): CameraPermissionState {
   if (response === null) return 'UNDETERMINED';
   if (response.granted) return 'GRANTED';
+  // Where the platform does say, it is believed. iOS reports `undetermined` properly, and a
+  // future Android release that did would land here too.
   if (response.status === 'undetermined') return 'UNDETERMINED';
+  // Nothing has been asked, so nothing has been refused.
+  if (!hasRequested) return 'UNDETERMINED';
   return response.canAskAgain ? 'DENIED' : 'BLOCKED';
 }
 

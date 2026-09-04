@@ -90,9 +90,14 @@ describe('the permission is asked for just in time', () => {
 });
 
 describe('a refusal', () => {
-  it('offers to ask again where asking can succeed, and does not blame anybody', () => {
-    setCameraPermission(DENIED);
+  it('offers to ask again where asking can succeed, and does not blame anybody', async () => {
+    // The refusal states are reached by **pressing** first, not by loading. Android reports
+    // `canAskAgain: false` for a permission nobody has ever asked for, so a screen that trusted
+    // the response on first load would show a refusal to a first-time user (`DEV-060`).
+    setCameraPermission(null, DENIED);
     const { rendered } = screen();
+    press(rendered, SCAN_COPY.requestLabel);
+    await flush();
     const text = joined(rendered);
 
     expect(text).toContain(SCAN_COPY.deniedHeading);
@@ -103,11 +108,27 @@ describe('a refusal', () => {
     expect(SCAN_COPY.deniedNote).toMatch(/that is fine/i);
   });
 
-  it('sends a blocked permission to Settings and withholds the retry', () => {
-    // The distinction a naive model loses. A retry control here cannot work, and offering one
-    // teaches somebody the app is broken at the moment they were trying to cooperate.
+  it('shows the disclosure to somebody who has never been asked', async () => {
+    // The defect a device run found. Android cannot distinguish "never asked" from "don’t ask
+    // again", so this exact response arrives for a first-time user - and the screen must offer
+    // the camera rather than tell them it is switched off.
     setCameraPermission(BLOCKED);
     const { rendered } = screen();
+    await flush();
+    const text = joined(rendered);
+
+    expect(text).toContain(SCAN_COPY.disclosure);
+    expect(text).not.toContain(SCAN_COPY.blockedHeading);
+    expect(hasName(rendered, SCAN_COPY.requestLabel)).toBe(true);
+  });
+
+  it('sends a blocked permission to Settings once it has actually been asked', async () => {
+    // The distinction a naive model loses. A retry control here cannot work, and offering one
+    // teaches somebody the app is broken at the moment they were trying to cooperate.
+    setCameraPermission(null, BLOCKED);
+    const { rendered } = screen();
+    press(rendered, SCAN_COPY.requestLabel);
+    await flush();
     const text = joined(rendered);
 
     expect(text).toContain(SCAN_COPY.blockedHeading);

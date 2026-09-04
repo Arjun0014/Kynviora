@@ -74,8 +74,21 @@ export interface ScanBarcodeProps {
 export function ScanBarcode({ onConfirmed, onEnterManually, onCancel }: ScanBarcodeProps) {
   const [permission, requestPermission] = useCameraPermissions();
   const [outcome, setOutcome] = useState<ScanOutcome | null>(null);
+  /**
+   * Whether this screen has asked yet.
+   *
+   * Load-bearing, and Android is why. `canAskAgain` comes from
+   * `shouldShowRequestPermissionRationale`, which returns `false` both before the first request
+   * and after somebody chooses "don't ask again" - the platform does not distinguish them. Only
+   * the app knows which it is, and this is how it knows (`DEV-060`).
+   *
+   * Screen-local rather than persisted. It resets when the screen closes, which is right: a
+   * person returning tomorrow should be offered the ask again, and the response after that first
+   * request tells the truth.
+   */
+  const [hasRequested, setHasRequested] = useState(false);
 
-  const state = cameraPermissionState(permission);
+  const state = cameraPermissionState(permission, hasRequested);
   const words = describeScanPermission(state);
 
   const onBarcode = useCallback(
@@ -166,6 +179,7 @@ export function ScanBarcode({ onConfirmed, onEnterManually, onCancel }: ScanBarc
           label={words.requestLabel}
           accessibilityHint={SCAN_COPY.openHint}
           onPress={() => {
+            setHasRequested(true);
             void requestPermission();
           }}
         />

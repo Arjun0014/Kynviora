@@ -2219,7 +2219,7 @@ its own limit on pending local notifications, which is lower than Android's and 
 
 ---
 
-## DEV-059 - The scan path is built and its device scenario has not been run on a device
+## DEV-059 - The scan path is built and its device scenario has not been run on a device (RESOLVED)
 
 - **Affected specification**: `19` (camera and file permissions, the thirteenth of its fourteen
   device scenarios), `04` Phase 2.2 (scan-assisted entry), `16`.
@@ -2245,4 +2245,65 @@ its own limit on pending local notifications, which is lower than Android's and 
   arrange, and the emulator's virtual scene is not a product pack. That check is manual, and
   `verifyCameraPermission.ts` says so rather than putting a green tick over a fixture.
 
-- **Status**: OPEN.
+- **Resolved 2026-09-05.** `npx expo prebuild` and a Gradle assemble produced a build carrying
+  `expo-camera`, and `npm run verify:device:camera` reports **5/5 PASS** on a Pixel 7 / Android 16
+  emulator: the scan screen opens with its disclosure and no system dialog, the camera permission
+  is not held after a launch that never scanned nor merely by opening the screen, declining it
+  leaves the app running with the manual path on screen, none of eight storage, media, audio,
+  location or contacts permissions is granted or declared, and the run left the permission as it
+  found it.
+
+  It took four runs, and each failure was a defect rather than flakiness - three in the harness
+  and one in the app (`DEV-060`). The harness ones are worth naming because each made a check that
+  **could not run** look like a check that ran and found something:
+
+  | What was wrong                                                                                   | How it presented                                                                               |
+  | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+  | `dumpsys window windows` names permissioncontroller 26 times on an idle launcher                 | `CAM-2`: "the dialog was not dismissed with a refusal" - the branch for a dialog that appeared |
+  | Android renders the button as `Don’t allow` with U+2019                                          | `tapNamed` matched nothing, indistinguishable from no dialog                                   |
+  | `nodeNamed` filters to the app's own package, by design                                          | the same, for a second reason, on the same line                                                |
+  | `pm revoke` leaves `USER_FIXED`, so the harness's own refusals permanently denied the permission | `CAM-0`: the disclosure "missing" from a screen correctly showing the blocked state            |
+
+  The real read of a real symbol remains out of scope for a harness, permanently: an emulator's
+  virtual scene is not a product pack. That check is manual and the runner says so.
+
+- **Status**: **RESOLVED 2026-09-05.**
+
+---
+
+## DEV-060 - A first-time user was told the camera was switched off before ever being asked
+
+- **Affected specification**: `16` (request a permission by a visible feature at the moment it is
+  used; prominent disclosure), `18` (a control that cannot work must not be offered, and a person
+  must be able to tell what happened), `04` Phase 2.2.
+- **Expected behaviour**: somebody opening the scan screen for the first time sees the disclosure
+  and a control that asks for the camera.
+- **Implemented behaviour**: they saw **"The camera is switched off for Kynviora. Android will not
+  let Kynviora ask again."** with no way to ask, on a device where nothing had ever been asked.
+
+  `cameraPermissionState` mapped a response of `granted: false, canAskAgain: false` to `BLOCKED`,
+  which is correct after somebody has chosen "don't ask again" and wrong before anything has
+  happened at all. `canAskAgain` comes from Android's `shouldShowRequestPermissionRationale`, and
+  **that returns `false` in both situations**: before the first request ever, and after a permanent
+  refusal. The platform does not distinguish them, and neither did this.
+
+- **How it was found**: `npm run verify:device:camera`, on hardware, and by nothing else. Every
+  unit test passed throughout, because every one of them supplied a response the app would only
+  ever see _after_ asking - which is the shape of assumption a device run exists to break. The
+  first three failing runs were harness defects (`DEV-059`); this was underneath them.
+- **Reason**: the state machine was written from the four states a permission can be in, which is
+  the right model, and given the response as its only input - which is the wrong input, because
+  one of the four is not derivable from it.
+- **Risk**: high for the feature and zero for anything else. It made the scan path unreachable for
+  every new user on Android, on their first attempt, with copy telling them to go to Settings and
+  turn on a permission that was not off. Nothing else in the app is affected and no data is at
+  risk; what was lost is the feature, silently, for exactly the people meeting it for the first
+  time.
+- **Fix**: `cameraPermissionState` takes `hasRequested`, and `ScanBarcode` holds it. Before a
+  request, a not-yet-granted permission is `UNDETERMINED` whatever the response says; after one,
+  the response means what it says. Screen-local rather than persisted, so somebody returning
+  tomorrow is offered the ask again.
+- **Verified**: `packages/domain/src/barcodeScan.test.ts` pins both readings of the identical
+  response; `ScanBarcode.test.tsx` reaches the refusal states by **pressing** rather than by
+  loading, which is what the old tests were not doing; `npm run verify:device:camera` **5/5 PASS**.
+- **Status**: **RESOLVED 2026-09-05**.

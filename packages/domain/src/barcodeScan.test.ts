@@ -80,22 +80,41 @@ describe('judging a camera read', () => {
 
 describe('the camera permission state', () => {
   it('reads an unasked permission as undetermined', () => {
-    expect(cameraPermissionState(null)).toBe('UNDETERMINED');
+    expect(cameraPermissionState(null, false)).toBe('UNDETERMINED');
     expect(
-      cameraPermissionState({ granted: false, canAskAgain: true, status: 'undetermined' }),
+      cameraPermissionState({ granted: false, canAskAgain: true, status: 'undetermined' }, false),
     ).toBe('UNDETERMINED');
   });
 
+  it('does not read a never-asked Android permission as blocked', () => {
+    // `DEV-060`, found on hardware and by nothing else. `canAskAgain` comes from
+    // `shouldShowRequestPermissionRationale`, which returns `false` both before the first request
+    // ever and after somebody chooses "don’t ask again" - Android does not distinguish them.
+    // Trusting it on first load told a person who had never been asked that the camera was
+    // switched off and that Android would not let the app ask again, with no way forward.
+    const neverAsked = { granted: false, canAskAgain: false, status: 'denied' };
+    expect(cameraPermissionState(neverAsked, false)).toBe('UNDETERMINED');
+    // And after the app has actually asked, the same response means what it says.
+    expect(cameraPermissionState(neverAsked, true)).toBe('BLOCKED');
+  });
+
   it('separates a refusal that can be asked again from one that cannot', () => {
-    // The distinction a naive model loses, and the one that decides which control the screen
-    // offers. Telling somebody who chose "don't ask again" to allow camera access sends them to
-    // press a button that will never appear.
-    expect(cameraPermissionState({ granted: false, canAskAgain: true, status: 'denied' })).toBe(
-      'DENIED',
-    );
-    expect(cameraPermissionState({ granted: false, canAskAgain: false, status: 'denied' })).toBe(
-      'BLOCKED',
-    );
+    // The distinction that decides which control the screen offers. Telling somebody who chose
+    // "don’t ask again" to allow camera access sends them to press a button that will never
+    // appear.
+    expect(
+      cameraPermissionState({ granted: false, canAskAgain: true, status: 'denied' }, true),
+    ).toBe('DENIED');
+    expect(
+      cameraPermissionState({ granted: false, canAskAgain: false, status: 'denied' }, true),
+    ).toBe('BLOCKED');
+  });
+
+  it('reads a grant as a grant whether or not this screen asked', () => {
+    // Somebody who granted it last week arrives with it already held.
+    const granted = { granted: true, canAskAgain: false, status: 'granted' };
+    expect(cameraPermissionState(granted, false)).toBe('GRANTED');
+    expect(cameraPermissionState(granted, true)).toBe('GRANTED');
   });
 
   it('opens the camera only when granted', () => {

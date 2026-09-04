@@ -4024,3 +4024,83 @@ either.
 **Sources.** `16` (retention matrix, deletion enumeration, export); `14` (least privilege,
 high-impact actions, append-only audit); `13`; `20` (audit is not a copy of health content); `07`;
 DEC-005; DEC-013; `DEV-009`, `DEV-032`, `DEV-034`, `DEV-035`, `DEV-036`; `docs/RETENTION.md`.
+
+---
+
+## DEC-118 - Supabase Auth, verified asymmetrically, with step-up read from the token
+
+**Context.** Phase 1.1 has been unstarted since Stage 0 and `BLK-010` records what that costs: the
+only identity in this repository is a development header, which on a household surface is a
+convenience and on the reviewer console is a claim to publication authority with nothing behind it.
+An auth provider has now been chosen as a product decision: **Supabase Auth**, with verified
+email/password plus recovery for a household and mandatory TOTP MFA at AAL2 for reviewers and
+admins.
+
+No Supabase project, credentials or issuer exist in this environment, so this decision covers what
+can be honestly built and measured without one.
+
+**Decision.** Six parts.
+
+**1. Asymmetric signatures only. HS256 is refused.** Supabase supports HS256, ES256 and RS256 and
+its own documentation strongly discourages the first. A shared secret is verifiable by everything
+holding it, so every service that can _check_ a token can also _mint_ one, and `14`'s posture is
+that a compromised component must not be able to manufacture identity. The refusal happens **before
+a key is chosen**, because trusting a token to say how it should be checked is the oldest JWT
+vulnerability there is and `alg: none` is the same bug wearing a different hat.
+
+**2. Identity is `sub`, from a verified token, and nothing else.** No `role` claim is read - `14`
+says reviewer roles are never inferred from client claims, and a `role` claim is exactly such a
+claim. No `email`, no `phone`: the `app_user` row holds what is needed, and a profile field read
+out of a client-presented token is a profile field an attacker chose.
+
+**3. Step-up is the most recent `amr` entry.** `14` requires re-authentication for exports,
+caregiver administration and deletion, and Supabase records each authentication step in `amr` with
+a timestamp. The newest entry is "the last time this person proved something about themselves",
+which is what a step-up window asks; `supabase.auth.reauthenticate()` adds one, so an explicit
+re-authentication moves it. `hasFreshStepUp` compares it against the fifteen-minute window it
+already had.
+
+The consequence, stated rather than hidden: somebody who signed in two minutes ago passes a
+step-up check without doing anything further. That is correct - they authenticated two minutes ago,
+and asking again immediately is ceremony, which `18` treats as something people learn to click
+through. The newest entry is taken with `max` rather than by reading the first, because "ordered
+most recent first" is a property of the provider's serialisation and not of the type.
+
+**4. Reviewers are refused below AAL2, rather than admitted weakly.** `createReviewerAuthenticator`
+produces no principal at all for a verified AAL1 token. A principal carrying "authenticated, but
+only with a password" would be a thing every staff route then has to remember to check, and the one
+that forgot would be the one that publishes. `AuthenticationStrength` gains `SUPABASE_AAL2` and
+deliberately **no** `SUPABASE_AAL1`: modelling a weak reviewer session as a strength makes "weak
+but present" expressible, which is how a banner ends up being the only thing between a password and
+publication authority. The strength still grants nothing - authority is the stored `reviewer` row
+and always was.
+
+**5. The two authenticators are mutually exclusive.** Configuring both `KYNVIORA_SUPABASE_ISSUER`
+and `KYNVIORA_DEV_AUTH=1` throws at startup. A process accepting a header _and_ a token is one
+where the weaker path decides, because an attacker picks which to present - and "both are
+configured, the good one usually wins" is exactly the arrangement that produces a
+header-authenticated production deployment nobody meant to make.
+
+**6. The client carries the token and parses nothing.** `ClientSession` gains a `BEARER` member
+holding the access token verbatim. A phone reading `exp` or `sub` out of a token it cannot verify
+is a phone believing a string an attacker could have written, and the failure that produces -
+treating an invalid token as valid - is what this boundary exists to prevent. The projection's
+cache bucket is a non-reversible digest of the token rather than a subject read from it; a refresh
+therefore rebuilds the projection, which is a slow screen rather than a cache shared across
+identities.
+
+**Rationale for what is deliberately absent.** No refresh loop, no session persistence and no
+sign-in screens. Every one of them would be written against a provider nobody can reach, tested
+against a fixture of this build's own devising, and would look finished. What is built is the part
+whose correctness does not depend on a project existing: verification, claim reading, the AAL and
+step-up model, and the transport.
+
+**Consequences.** `BLK-010` stays open and `19`'s sign-up/sign-in/recovery device scenario stays
+unrun, and neither may be reported otherwise. Every test signs its own tokens with a key pair
+generated in `beforeAll`, which exercises the signature check, the algorithm gate, the key rotation
+path, the issuer and audience checks and the step-up mapping for real - and establishes nothing
+about what a Supabase project issues. The claim shape comes from the published JWT claims
+reference read on 2026-09-05, and a reference is not a measurement.
+
+**Sources.** Supabase JWT claims reference, JWT signing keys, MFA/AAL and user-sessions
+documentation, all read 2026-09-05; `13`; `14`; `11`; `18`; `BLK-010`; `DEV-019`; `DEV-025`.

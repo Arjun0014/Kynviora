@@ -56,9 +56,41 @@ export type ClientSession =
        * only ever be exercised in the satisfied direction.
        */
       readonly stepUp: boolean;
+    }
+  | {
+      readonly kind: 'BEARER';
+      /**
+       * A Supabase access token, verbatim.
+       *
+       * Never parsed on this side. See {@link bearerSession}.
+       */
+      readonly accessToken: string;
     };
 
 export const ANONYMOUS: ClientSession = Object.freeze({ kind: 'ANONYMOUS' });
+
+/**
+ * A signed-in session (DEC-118).
+ *
+ * The access token and nothing derived from it. A client that parsed the token to read a user ID,
+ * an expiry or an assurance level would be deciding those things itself, and `13` puts every one
+ * of them on the server: the API verifies a signature and reads the claims, and this side carries
+ * the bytes.
+ *
+ * That is not a simplification. A phone reading `exp` out of a token it cannot verify is a phone
+ * that believes a clock and a string an attacker could have written, and the failure it produces -
+ * treating an invalid token as valid - is the one this whole boundary exists to prevent.
+ */
+export function bearerSession(accessToken: string): ClientSession {
+  const token = accessToken.trim();
+  if (token === '') {
+    throw new SessionRefused(
+      'An empty access token is not a session. The API would answer 401, which reads as a broken ' +
+        'session rather than as a missing one.',
+    );
+  }
+  return { kind: 'BEARER', accessToken: token };
+}
 
 export class SessionRefused extends Error {}
 
@@ -97,6 +129,11 @@ export function authHeaders(session: ClientSession): Readonly<Record<string, str
       return session.stepUp
         ? { [DEV_USER_HEADER]: session.userId, [DEV_STEP_UP_HEADER]: '1' }
         : { [DEV_USER_HEADER]: session.userId };
+    case 'BEARER':
+      // The whole of it. No step-up header: the server reads freshness from the token's own
+      // `amr` claim (DEC-118), so a client cannot assert re-authentication it did not perform -
+      // which is what the development header does, and why it is a development header.
+      return { authorization: `Bearer ${session.accessToken}` };
   }
 }
 

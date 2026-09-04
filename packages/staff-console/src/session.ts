@@ -57,11 +57,21 @@ export const STAFF_IDEMPOTENCY_HEADER = 'idempotency-key';
 /**
  * How the person at the console proved who they are.
  *
- * A closed union with one member, which is the point. When a passkey provider lands it becomes a
- * second member and every page that renders the standing warning stops rendering it *because the
- * value changed*, not because somebody deleted the banner.
+ * A closed union, and the second member is the one this was designed for: every page that renders
+ * the standing warning stops rendering it **because the value changed**, not because somebody
+ * deleted the banner.
+ *
+ * `SUPABASE_AAL2` is a session whose access token carries `aal: "aal2"` - Supabase's name for
+ * "verified with at least one second factor" - and there is deliberately no `SUPABASE_AAL1`
+ * member. A reviewer session that has only been through a password is not a weaker strength, it
+ * is not a reviewer session: `14` requires strong MFA for a reviewer account, and modelling AAL1
+ * as a strength would make "weak but present" expressible, which is how a banner ends up being
+ * the only thing standing between a password and publication authority.
+ *
+ * The strength still grants nothing. Authority is the stored `reviewer` row and always was; this
+ * says how somebody proved they are the person that row names.
  */
-export const AUTHENTICATION_STRENGTHS = ['DEVELOPMENT_HEADER'] as const;
+export const AUTHENTICATION_STRENGTHS = ['DEVELOPMENT_HEADER', 'SUPABASE_AAL2'] as const;
 export type AuthenticationStrength = (typeof AUTHENTICATION_STRENGTHS)[number];
 
 // ---------------------------------------------------------------------------

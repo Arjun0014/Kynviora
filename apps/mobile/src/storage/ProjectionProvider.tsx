@@ -55,9 +55,45 @@ const ProjectionContext = createContext<ProjectionContextValue>({
   error: null,
 });
 
-/** The stable identity a row is scoped to. Anonymous rows are still scoped, to their own bucket. */
+/**
+ * The stable identity a row is scoped to. Anonymous rows are still scoped, to their own bucket.
+ *
+ * A bearer session is scoped by a **hash of the token**, not by the subject inside it. Reading
+ * `sub` here would mean parsing a token this side cannot verify (DEC-118), and the value is only
+ * ever compared to itself - what it has to be is stable for one session and different for the
+ * next, which a digest of the token is and a claim read out of it would also be, with the
+ * additional property of being attacker-chosen.
+ *
+ * A refresh produces a new token and therefore a new bucket, which is a real cost: the projection
+ * is rebuilt on the first read after a refresh. That is the safe direction - a cache re-fetched is
+ * a slow screen, and a cache shared across identities is somebody's medicines on the wrong
+ * account.
+ */
 export function sessionIdOf(session: ClientSession): string {
-  return session.kind === 'ANONYMOUS' ? 'anonymous' : session.userId;
+  switch (session.kind) {
+    case 'ANONYMOUS':
+      return 'anonymous';
+    case 'DEVELOPMENT':
+      return session.userId;
+    case 'BEARER':
+      return `bearer:${fingerprintOf(session.accessToken)}`;
+  }
+}
+
+/**
+ * A short, stable, non-reversible label for a token.
+ *
+ * FNV-1a over the token's characters. Not a security boundary and not claimed as one - it is a
+ * cache key, it never leaves the device, and the store it names is already encrypted. What it must
+ * not be is the token itself, because a bucket name ends up in a filename and a log line.
+ */
+function fingerprintOf(token: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < token.length; index += 1) {
+    hash ^= token.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 }
 
 export function ProjectionProvider({ children }: { readonly children: ReactNode }) {

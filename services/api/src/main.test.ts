@@ -65,6 +65,7 @@ async function startServer(overrides: Partial<MainConfig> = {}): Promise<Started
       devAuth: true,
       seed: true,
       allowAnonymousStart: false,
+      supabase: null,
       ...overrides,
     },
     { logger: noopLogger() },
@@ -228,6 +229,7 @@ describe('the development seed', () => {
         devAuth: true,
         seed: true,
         allowAnonymousStart: false,
+        supabase: null,
       };
 
       const first = await start(config, { logger: noopLogger() });
