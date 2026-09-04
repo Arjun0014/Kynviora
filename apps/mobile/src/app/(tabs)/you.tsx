@@ -22,8 +22,14 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { Text, StyleSheet } from 'react-native';
-import { LIGHT_THEME, SPACING, FONT_SIZE, LINE_HEIGHT_MULTIPLIER } from '@kynviora/presentation';
+import { Text, StyleSheet, Share } from 'react-native';
+import {
+  LIGHT_THEME,
+  SPACING,
+  FONT_SIZE,
+  LINE_HEIGHT_MULTIPLIER,
+  CONSENT_COPY,
+} from '@kynviora/presentation';
 import type { NotificationDetailLevel, QuietHours } from '@kynviora/domain';
 import {
   asChosenDetailLevel,
@@ -66,6 +72,10 @@ export default function YouScreen() {
   const [saving, setSaving] = useState(false);
   /** `04` Phase 1.2. Open where somebody is adding a person, closed the rest of the time. */
   const [addingPerson, setAddingPerson] = useState(false);
+  const [exportState, setExportState] = useState<ScreenStateKind | null>(null);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [exportReady, setExportReady] = useState(false);
+  const [exportIncomplete, setExportIncomplete] = useState(false);
   const [policyState, setPolicyState] = useState<ScreenStateKind | null>(null);
   const [policyMessage, setPolicyMessage] = useState<string | null>(null);
   const [policySaved, setPolicySaved] = useState<string | null>(null);
@@ -205,6 +215,67 @@ export default function YouScreen() {
    */
   const profilesLoaded = profilesResource.value !== null || profilesResource.state === 'EMPTY';
 
+  /**
+   * Take a copy of everything (`16` export, DEC-117).
+   *
+   * Elevated for this one request and discarded, exactly as every other step-up action here is
+   * (`14`), so the privileged session never outlives the action.
+   *
+   * The copy is handed straight to the system share sheet and is never written to the encrypted
+   * store or held in a ref beyond this call. It is the largest single collection of somebody's
+   * health data this app can hold, and the safest place for it is nowhere: keeping it on the
+   * device would give the app a second, unencrypted-by-nothing copy that outlives the request
+   * that made it, for no purpose the person asked for.
+   */
+  const onExport = useCallback(() => {
+    const elevated = elevate();
+    if (elevated === null) {
+      setExportState('STEP_UP_REQUIRED');
+      return;
+    }
+
+    setExportState('LOADING');
+    setExportMessage(null);
+    setExportReady(false);
+    setExportIncomplete(false);
+
+    void elevated.exportPersonalData().then(
+      (outcome) => {
+        if (outcome.kind !== 'OK') {
+          setExportState(screenStateForFailure(outcome));
+          setExportMessage(messageForFailure(outcome));
+          return;
+        }
+
+        // A section the server could not assemble is `-1`, which no successful read produces.
+        // Reported before the copy is handed over, because a person who has already saved a file
+        // has stopped reading the screen.
+        const incomplete = outcome.value.manifest.sections.some((s) => s.count < 0);
+
+        void Share.share({
+          title: CONSENT_COPY.exportHeading,
+          message: JSON.stringify(outcome.value, null, 2),
+        }).then(
+          () => {
+            setExportState(null);
+            setExportReady(true);
+            setExportIncomplete(incomplete);
+          },
+          () => {
+            // The copy was assembled and the sheet refused it. Not a failure of the export, and
+            // not a success either - saying "ready" here would name a file nobody received.
+            setExportState('RECOVERABLE_ERROR');
+            setExportMessage(null);
+          },
+        );
+      },
+      () => {
+        setExportState('RECOVERABLE_ERROR');
+        setExportMessage(null);
+      },
+    );
+  }, [elevate]);
+
   const onCreated = useCallback(() => {
     setAddingPerson(false);
     // Re-read rather than select what was just made. The selectable set is the server's answer
@@ -282,7 +353,15 @@ export default function YouScreen() {
         consentsResource.value === null ? (
           <ResourceState resource={consentsResource} onRetry={reloadConsents} />
         ) : (
-          <ConsentSettings view={consentView(consentsResource.value)} onChanged={reloadConsents} />
+          <ConsentSettings
+            view={consentView(consentsResource.value)}
+            onChanged={reloadConsents}
+            onExport={onExport}
+            exportState={exportState}
+            exportMessage={exportMessage}
+            exportReady={exportReady}
+            exportIncomplete={exportIncomplete}
+          />
         )
       ) : null}
 

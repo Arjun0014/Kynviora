@@ -94,10 +94,22 @@ describe('the five that stop nothing', () => {
 });
 
 describe('what the screen admits it does not have', () => {
-  it('says export and deletion are not built, rather than showing a button that does nothing', () => {
+  it('offers a copy, and says what the copy leaves out before it is taken', () => {
+    // `16` asks an export to show what will be included, and the harder half of that is what will
+    // not. A person checks a copy once, so an absent section discovered inside the file reads as
+    // "there was nothing" rather than "this was not included".
+    expect(CONSENT_COPY.exportLabel).toMatch(/copy/i);
+    expect(CONSENT_COPY.exportOmissionsNote).toMatch(/names what is not in it/i);
+    expect(CONSENT_COPY.exportOmissionsNote).toMatch(/named rather than copied/i);
+  });
+
+  it('still says account deletion is not built, and points at the deletion that is', () => {
     // A settings row that opens nothing is worse than no row: it tells somebody a control exists.
-    expect(CONSENT_COPY.noExportNote).toMatch(/not built yet/i);
-    expect(CONSENT_COPY.noExportNote).toMatch(/button that does nothing/i);
+    // "Not built yet" over both halves would now be false in the other direction, which sends
+    // somebody looking for a control they have already walked past (DEC-117).
+    expect(CONSENT_COPY.deletionNote).toMatch(/not built yet/i);
+    expect(CONSENT_COPY.deletionNote).toMatch(/button that does nothing/i);
+    expect(CONSENT_COPY.deletionNote).toMatch(/delete any single medicine or product/i);
   });
 
   it('says an unanswered purpose is treated as not agreed', () => {

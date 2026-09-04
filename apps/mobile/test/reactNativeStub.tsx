@@ -154,6 +154,34 @@ export function resetAppState(): void {
   AppState.currentState = 'active';
 }
 
+/**
+ * The system share sheet.
+ *
+ * A stub, and a loud one: it records what it was asked to share and resolves. What it **cannot**
+ * substitute is whether Android actually offers a target, whether the receiving app can take a
+ * payload of this size, and what the person does next - all of which are the interesting half of
+ * handing somebody a copy of their own health record, and none of which exists in Node.
+ *
+ * So a test here can measure that the copy reaching the sheet is the copy the server sent, and
+ * cannot measure that it arrived anywhere. That is a device question (`19`).
+ */
+const sharedPayloads: { title?: string; message: string }[] = [];
+
+export const Share = {
+  share(content: { title?: string; message: string }) {
+    sharedPayloads.push(content);
+    return Promise.resolve({ action: 'sharedAction' as const });
+  },
+};
+
+export function sharedContent(): readonly { title?: string; message: string }[] {
+  return sharedPayloads;
+}
+
+export function resetShare(): void {
+  sharedPayloads.length = 0;
+}
+
 export type AppStateStatus = AppStateStatusValue;
 export type ViewStyle = Record<string, unknown>;
 export type TextStyle = Record<string, unknown>;

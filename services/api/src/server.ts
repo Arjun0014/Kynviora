@@ -67,6 +67,7 @@ import { registerOperationsRoutes } from './operations.js';
 import { registerSafetyInboxRoutes } from './safetyInbox.js';
 import { registerScheduleRoutes } from './schedule.js';
 import { registerItemDeletionRoutes } from './itemDeletion.js';
+import { registerPersonalExportRoutes } from './personalExport.js';
 import { registerShadowModeRoutes } from './shadowMode.js';
 
 /**
@@ -2542,6 +2543,19 @@ export function createServer(options: ServerOptions): FastifyInstance {
     // make at all (`DEV-057`).
 
     registerItemDeletionRoutes(app, { contextFor, fail });
+
+    // -------------------------------------------------------------------------
+    // GET /v1/export  (`04` Phase 1.4, `16` export)
+    // -------------------------------------------------------------------------
+    // The export half of `DEV-036`. Row-level security decides what is in it, so there is no
+    // profile parameter and no ownership filter written here - `13` says a profile ID in a
+    // request is never proof of access, and the way to honour that is not to take one.
+
+    registerPersonalExportRoutes(app, {
+      contextFor,
+      fail,
+      loadSources: () => options.loadSources(),
+    });
   }
 
   function registerStaffSurface(): void {

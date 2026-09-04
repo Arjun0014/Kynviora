@@ -11,6 +11,7 @@ export * from './ids.js';
 export * from './ports.js';
 export * from './result.js';
 export * from './untrusted.js';
+export * from './personalExport.js';
 export * from './provenance.js';
 export * from './sync.js';
 export * from './caregiver.js';

@@ -32,9 +32,12 @@
  * what the screen says is what `consent_receipt` holds - and a screen that showed a withdrawal
  * the server refused would be the one failure this whole phase exists to prevent.
  *
- * THERE IS NO EXPORT OR DELETION ROW
- * `04` Phase 1.4 asks for a shell, and a settings row that opens nothing tells somebody a control
- * exists. `CONSENT_COPY.noExportNote` says so in a sentence instead (`DEV-036`).
+ * THE EXPORT ROW OPENS SOMETHING; THE DELETION ROW STILL DOES NOT
+ * `04` Phase 1.4 asks for both, and a settings row that opens nothing tells somebody a control
+ * exists - which is why neither was here until the thing behind it was (`DEV-036`). Taking a copy
+ * is built, so it has a control. Removing a whole account is not, so it has a sentence, and the
+ * sentence points at the item screen for the deletion that *is* built rather than saying "not
+ * built yet" over both.
  */
 
 import { useCallback, useState } from 'react';
@@ -61,9 +64,37 @@ export interface ConsentSettingsProps {
   readonly view: ConsentView;
   /** Called once the server has written a receipt, so the list re-reads rather than guessing. */
   readonly onChanged: () => void;
+  /**
+   * Take a copy.
+   *
+   * Owned by the caller, for the reason every step-up action in this app is: the elevated client
+   * is built at the moment of the request and discarded, so the privileged session never outlives
+   * the action, and this component never holds one. Absent where no copy can be taken, in which
+   * case the control is withheld rather than drawn and refused (DEC-045).
+   */
+  readonly onExport?: () => void;
+  readonly exportState?: ScreenStateKind | null;
+  readonly exportMessage?: string | null;
+  readonly exportReady?: boolean;
+  /**
+   * Whether a section of the copy could not be assembled.
+   *
+   * Separate from `exportReady` because a file that arrived and a file that is complete are
+   * different facts, and this is the one where saying nothing is the failure: a missing section
+   * looks exactly like a section that was empty.
+   */
+  readonly exportIncomplete?: boolean;
 }
 
-export function ConsentSettings({ view, onChanged }: ConsentSettingsProps) {
+export function ConsentSettings({
+  view,
+  onChanged,
+  onExport,
+  exportState,
+  exportMessage,
+  exportReady,
+  exportIncomplete,
+}: ConsentSettingsProps) {
   const { client } = useApi();
 
   const [state, setState] = useState<ScreenStateKind | null>(null);
@@ -158,8 +189,52 @@ export function ConsentSettings({ view, onChanged }: ConsentSettingsProps) {
         </View>
       ))}
 
-      {/* No button, because there is nothing behind one. See the module note. */}
-      <Text style={styles.help}>{CONSENT_COPY.noExportNote}</Text>
+      {/* Taking a copy. What it contains and what it leaves out are both said before the control,
+          because `16` asks an export to show what will be included and a person checks a copy
+          once. */}
+      <View style={styles.block}>
+        <Text accessibilityRole="header" style={styles.subheading}>
+          {CONSENT_COPY.exportHeading}
+        </Text>
+        <Text style={styles.body}>{CONSENT_COPY.exportIntro}</Text>
+        <Text style={styles.help}>{CONSENT_COPY.exportOmissionsNote}</Text>
+
+        {exportState != null && exportState !== 'READY' ? (
+          <ScreenState state={exportState} message={exportMessage} />
+        ) : null}
+
+        {/* Said only where a section actually failed. A standing caveat would train somebody to
+            skip the sentence on the run where it matters. */}
+        {exportIncomplete === true ? (
+          <Text accessibilityLiveRegion="polite" style={styles.body}>
+            {CONSENT_COPY.exportIncompleteNote}
+          </Text>
+        ) : null}
+
+        {exportReady === true && exportIncomplete !== true ? (
+          <Text accessibilityLiveRegion="polite" style={styles.body}>
+            {CONSENT_COPY.exportReadyNote}
+          </Text>
+        ) : null}
+
+        {onExport === undefined ? null : (
+          <PrimaryButton
+            label={CONSENT_COPY.exportLabel}
+            accessibilityHint={CONSENT_COPY.exportHint}
+            variant="secondary"
+            disabled={exportState === 'LOADING'}
+            onPress={onExport}
+          />
+        )}
+      </View>
+
+      {/* No button, because there is still nothing behind one. See the module note. */}
+      <View style={styles.block}>
+        <Text accessibilityRole="header" style={styles.subheading}>
+          {CONSENT_COPY.deletionHeading}
+        </Text>
+        <Text style={styles.help}>{CONSENT_COPY.deletionNote}</Text>
+      </View>
     </View>
   );
 }
@@ -201,6 +276,21 @@ const styles = StyleSheet.create({
     borderRadius: SPACING.sm,
     borderColor: LIGHT_THEME.surface.border,
     backgroundColor: LIGHT_THEME.surface.background,
+  },
+  // The two sections below the purposes. Same surface as a consent row, because they are the same
+  // kind of thing to the person reading them: something they may do with their own record.
+  block: {
+    gap: SPACING.sm,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderRadius: SPACING.sm,
+    borderColor: LIGHT_THEME.surface.border,
+    backgroundColor: LIGHT_THEME.surface.background,
+  },
+  subheading: {
+    fontSize: FONT_SIZE.body,
+    fontWeight: '600',
+    color: LIGHT_THEME.surface.foreground,
   },
   rowLabel: {
     fontSize: FONT_SIZE.body,

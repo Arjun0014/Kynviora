@@ -19,6 +19,7 @@
  * the compiler to hand it a union it has to destructure - not for a `catch` block it can forget.
  */
 
+import type { PersonalExportManifest } from '@kynviora/domain';
 import type { ApiConfig, ClientSession } from './config.js';
 import { request, type FetchLike, type QueryValue } from './http.js';
 import type { ApiOutcome } from './outcome.js';
@@ -287,6 +288,20 @@ export interface ConsentBody {
   readonly granted: boolean;
   /** The language the policy was read in. `16` asks for consent state to be localizable. */
   readonly locale?: string | null;
+}
+
+/**
+ * A copy of everything held about the caller (spec 16 export, DEC-117).
+ *
+ * The manifest is typed because a screen reads it: what is included, what is not, and which
+ * sources are named rather than copied. The data is not, and that is deliberate - the sections
+ * are database rows, and a client-side type sitting between a person and their own record would
+ * silently drop any column it did not know about. A copy that quietly omits a field is the one
+ * failure this feature cannot have.
+ */
+export interface PersonalExportResponse {
+  readonly manifest: PersonalExportManifest;
+  readonly data: Readonly<Record<string, readonly Readonly<Record<string, unknown>>[]>>;
 }
 
 export interface ConsentRecorded {
@@ -1282,6 +1297,19 @@ export interface KynvioraClient {
    */
   consents(): Promise<ApiOutcome<ConsentsResponse>>;
   recordConsent(body: ConsentBody): Promise<ApiOutcome<ConsentRecorded>>;
+  /**
+   * Everything Kynviora holds about this account, as one document (spec 16 export, DEC-117).
+   *
+   * Requires fresh step-up, so this is called with an elevated client. There is no artifact and
+   * no link: the copy is assembled per request and written to the response, so nothing with a
+   * lifetime exists on the server and there is nothing to expire.
+   *
+   * Returned untyped past the manifest on purpose. The sections are database rows, and giving
+   * them client-side types would mean a shape this build believes in sitting between a person and
+   * their own record - a column the types did not know about would be dropped from the copy
+   * rather than passed through, which is the one failure a copy cannot have.
+   */
+  exportPersonalData(): Promise<ApiOutcome<PersonalExportResponse>>;
 
   /**
    * What a household records about a person (`04` Phase 1.3).
@@ -1621,6 +1649,8 @@ export function createClient(options: ClientOptions): KynvioraClient {
     // second decision. The server still writes a new receipt each time, because the table is
     // append-only and the history is the point.
     recordConsent: (body) => send<ConsentRecorded>('PUT', '/v1/consents', body),
+
+    exportPersonalData: () => get<PersonalExportResponse>('/v1/export'),
 
     healthFacts: (profileId) =>
       get<HealthFactsResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/health-facts`),

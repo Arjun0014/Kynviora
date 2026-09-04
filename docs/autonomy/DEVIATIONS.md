@@ -950,6 +950,30 @@ route.
   a deletion request and on what basis, with the append-only tables named explicitly. Then the
   export shape, then the two controls. This is the same document `DEV-009`, `DEV-032`, `DEV-034` and
   `DEV-035` are all waiting on, and writing it is the largest single unblocking left in Stage 1.
+- **Partly resolved 2026-09-05** (DEC-117). The matrix exists as `docs/RETENTION.md`, and the two
+  halves this deviation named have separated:
+
+  **The export is built.** `GET /v1/export` assembles everything the caller may read - fourteen
+  sections, scoped entirely by row-level security - and the consent screen has a control that
+  opens it. The three things `DEV-036` said made a shell unshippable are all answered:
+
+  | Objection                                   | How it is answered                                                                                                                                 |
+  | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | "A copy of some of it is worse than none"   | The manifest lists **every** section including the empty ones, and a section that failed to read is `-1` - which no successful read produces.      |
+  | "Several sections quote source material"    | Sources are **referenced**: identifier, publisher, coverage statement, last check. No source content is in the file, so `BLK-005` stays untouched. |
+  | "A shell is a control that opens something" | It opens the export. The screen also says what the copy leaves out, before it is taken.                                                            |
+
+  There is no artifact and no link. The copy is assembled per request and handed to the system
+  share sheet, so nothing with a lifetime exists on the server - which satisfies the approved
+  24-hour cap by construction rather than by a sweep, and is the safer of the two designs.
+
+  **Account deletion is not.** Deleting a single item is built (`DEV-032`) and lives on the item
+  screen. Removing a whole account is not, and the consent screen still says so - but it now says
+  which of the two is which, because "not built yet" over both would be false in the other
+  direction and would send somebody looking for a control they have walked past.
+
+- **Status**: **PARTLY RESOLVED 2026-09-05.** The export half and the item-deletion half are
+  built; account deletion remains open and is what this entry now tracks.
 
 ---
 

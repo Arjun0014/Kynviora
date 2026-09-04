@@ -143,14 +143,46 @@ export const CONSENT_COPY = Object.freeze({
   savedNote: 'Saved. Kynviora has recorded your answer.',
 
   /**
-   * The export and deletion controls that are not here.
+   * Taking a copy (`04` Phase 1.4, `16` export, DEC-117).
    *
-   * `04` Phase 1.4 asks for an initial export/deletion workflow shell. A row that opens nothing is
-   * worse than no row - it tells somebody a control exists - so there is no row, and this sentence
-   * says why instead (`DEV-036`).
+   * This was a sentence saying no such control existed, because a row that opens nothing tells
+   * somebody a control exists (`DEV-036`). It opens something now.
    */
-  noExportNote:
-    'Getting a copy of everything, or having it removed, is not built yet. Kynviora will not pretend otherwise by showing a button that does nothing.',
+  exportHeading: 'Your copy of everything',
+  exportIntro:
+    'Kynviora can put everything it holds about you into one file for you to keep. It includes your profiles, your medicines and products, what has been recorded against them, your allergies, who has access, and your consent answers.',
+  /**
+   * What the copy does **not** contain, said before it is taken rather than discovered inside it.
+   *
+   * `16` asks an export to show what will be included, and the harder half of that is what will
+   * not. A person checks a copy once, and an absent section reads as "there was nothing".
+   */
+  exportOmissionsNote:
+    'The file also names what is not in it, and why. Regulatory documents Kynviora consulted are named rather than copied, because they belong to the organisations that published them.',
+  exportLabel: 'Take a copy',
+  exportHint: 'Builds the file now. You will be asked to confirm your identity first.',
+  exportReadyNote: 'Your copy is ready. Save it somewhere you can find it again.',
+  /**
+   * Said where a section of the copy could not be assembled.
+   *
+   * The alternative is silence, and silence is the one failure this feature cannot have: a missing
+   * section looks exactly like a section that was empty.
+   */
+  exportIncompleteNote:
+    'Part of this copy could not be assembled, and the file says which part. Try again, and do not treat this file as complete.',
+
+  /**
+   * Removing everything, which is still not built.
+   *
+   * Narrower than it was. Deleting a single item is built and lives on the item itself, where
+   * somebody looking at a medicine can reach it; what has no control yet is removing an account
+   * and everything in it. The sentence says which is which, because "not built yet" across both
+   * would now be false - and a screen that understates what a product can already do sends
+   * somebody looking for a control they have walked past.
+   */
+  deletionHeading: 'Removing your records',
+  deletionNote:
+    'You can delete any single medicine or product from its own screen. Removing your whole account and everything in it is not built yet, and Kynviora will not show a button that does nothing.',
 });
 
 /** Every sentence this module can put on a screen, for the copy scans. */
