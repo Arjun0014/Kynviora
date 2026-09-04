@@ -15,6 +15,7 @@ export * from './authToken.js';
 export * from './barcodeScan.js';
 export * from './personalExport.js';
 export * from './provenance.js';
+export * from './timeZone.js';
 export * from './sync.js';
 export * from './caregiver.js';
 export * from './visitPack.js';

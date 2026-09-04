@@ -746,6 +746,25 @@ route.
   hands of the device that actually knows it. Either way `deliveryDecision` does not change - it
   already takes the value rather than computing it, which is why this is a wiring gap rather than
   a design one.
+- **Resolved 2026-09-05** (DEC-119). Both halves this entry offered, and a third it did not:
+
+  - The **recipient** records an IANA zone on `app_user`, reported by their device through
+    `PUT /v1/me/time-zone`. Not the profile - a caregiver in London looking after somebody in
+    Kolkata has their own night.
+  - A device-supplied minute still wins where a caller passes one, because a phone reporting its
+    own clock knows better than a zone recorded weeks ago.
+  - And the part neither option anticipated: **the decision had to move inside the recipient
+    loop.** One `deliveryDecision` for a whole dispatch cannot express two recipients in two
+    places, and it was correct only while nobody knew what time it was anywhere. That is the
+    change that makes "recipient-local" mean something.
+
+  `deliveryDecision` did not change, exactly as this entry predicted.
+
+  The safe direction is unchanged and is now real rather than incidental: an unknown zone, an
+  unrecognised one, an offset written where a zone belongs, or an unreadable instant all answer
+  `null`, and `null` does not hold.
+
+- **Status**: **RESOLVED 2026-09-05**.
 
 ---
 
@@ -2306,4 +2325,37 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Verified**: `packages/domain/src/barcodeScan.test.ts` pins both readings of the identical
   response; `ScanBarcode.test.tsx` reaches the refusal states by **pressing** rather than by
   loading, which is what the old tests were not doing; `npm run verify:device:camera` **5/5 PASS**.
+- **Status**: **RESOLVED 2026-09-05**.
+
+---
+
+## DEV-061 - A medicine schedule would have accepted an offset where a time zone belongs
+
+- **Affected specification**: `04` Phase 4.1 (time-zone handling: "08:00" survives a daylight-saving
+  transition and a flight; an instant computed once does not), `04` Phase 4.2, DEC-119.
+- **Expected behaviour**: `normalizeScheduleEntry` refuses anything that is not a named IANA zone,
+  because the whole reason a schedule stores `times_local` plus `timezone` is that an offset is
+  wrong twice a year.
+- **Implemented behaviour**: `isKnownTimeZone` asked only whether `Intl.DateTimeFormat` accepted the
+  string - and **modern ICU accepts `+05:30`**. A schedule submitted with an offset was stored, and
+  would have fired at the right minute until the next transition and an hour out afterwards. For a
+  medicine reminder that is somebody being told to take a tablet an hour early, twice a year,
+  indefinitely.
+- **How it was found**: by writing the same validator a second time for `DEV-030` and testing it
+  against the values a device might report. `+05:30` was in the list of things expected to be
+  refused; it was not refused; and the existing implementation had the same hole.
+- **Reason**: "ask the platform rather than keep a list" is the right instinct and the original
+  comment says so - a bundled list of IANA zones goes stale. What it missed is that the platform is
+  answering a wider question than the one being asked: `Intl` accepts anything it can format
+  against, and an offset is something it can format against.
+- **Risk**: unrealised. Nothing in this build submits an offset - the mobile schedule editor sends
+  `Intl.DateTimeFormat().resolvedOptions().timeZone`, which is always a named zone - so no stored
+  schedule has one. What it left open is any future client, or any hand-written request, putting a
+  reminder an hour out for half the year with nothing refusing it.
+- **Fix**: one validator, in `timeZone.ts`, refusing offset shapes explicitly before asking ICU.
+  `scheduleEntry.ts` re-exports it, so the schedule path and the quiet-hours path cannot drift and
+  the fix applies to both.
+- **Verified**: `packages/domain/src/timeZone.test.ts` refuses `+05:30`, `-0800`, `+07` and `-5`
+  through both `isKnownTimeZone` and `asTimeZone`; `scheduleEntry.test.ts` passes unchanged, which
+  is the point - the narrowing rejects nothing a real client sends.
 - **Status**: **RESOLVED 2026-09-05**.

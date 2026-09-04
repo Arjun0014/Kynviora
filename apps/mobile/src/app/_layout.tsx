@@ -22,6 +22,7 @@
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ApiProvider } from '@/api/ApiProvider';
+import { TimeZoneReporter } from '@/api/TimeZoneReporter';
 import { ProfileProvider } from '@/api/ProfileProvider';
 import { ProjectionProvider } from '@/storage/ProjectionProvider';
 import { ReminderProvider } from '@/reminders/ReminderProvider';
@@ -32,31 +33,36 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ApiProvider>
-        {/* Inside the API provider because the store is scoped to the identity that filled it,
+        {/* Directly inside the API provider and outside everything else: it needs a client and
+            nothing else, it renders nothing, and where a person is does not depend on which
+            profile they are looking at (DEC-119). */}
+        <TimeZoneReporter>
+          {/* Inside the API provider because the store is scoped to the identity that filled it,
             and outside the profile provider because the profile list is one of the things kept
             (`03` group J). */}
-        <ProjectionProvider>
-          <ProfileProvider>
-            {/* Inside the profile provider because reminders are planned for the profile being
+          <ProjectionProvider>
+            <ProfileProvider>
+              {/* Inside the profile provider because reminders are planned for the profile being
                 looked at, and inside the projection provider because a device with no signal
                 still has to be reminded - it re-plans from the last response the store kept
                 (`03` group J, `04` Phase 4.2). */}
-            {/* Inside the projection provider because the journal is a table in the same
+              {/* Inside the projection provider because the journal is a table in the same
                 encrypted store, and outside the reminder provider because a queued schedule edit
                 has to be sendable whether or not reminders could be planned (`12`, `DEV-038`). */}
-            <PendingSyncProvider>
-              {/* Inside the sync provider and outside every screen, for the reason the reminder
+              <PendingSyncProvider>
+                {/* Inside the sync provider and outside every screen, for the reason the reminder
                   engine is not on a screen either: what can be sent must not depend on which tab
                   somebody last opened (`DEV-044`). */}
-              <PendingSenders />
-              <ReminderProvider>
-                <Stack screenOptions={{ headerShown: false }}>
-                  <Stack.Screen name="(tabs)" />
-                </Stack>
-              </ReminderProvider>
-            </PendingSyncProvider>
-          </ProfileProvider>
-        </ProjectionProvider>
+                <PendingSenders />
+                <ReminderProvider>
+                  <Stack screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="(tabs)" />
+                  </Stack>
+                </ReminderProvider>
+              </PendingSyncProvider>
+            </ProfileProvider>
+          </ProjectionProvider>
+        </TimeZoneReporter>
       </ApiProvider>
     </SafeAreaProvider>
   );

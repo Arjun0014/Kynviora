@@ -304,6 +304,20 @@ export interface PersonalExportResponse {
   readonly data: Readonly<Record<string, readonly Readonly<Record<string, unknown>>[]>>;
 }
 
+/** What the server stored, and what it means for quiet hours. */
+export interface TimeZoneRecorded {
+  readonly timeZone: string | null;
+  /**
+   * The server's own sentence about what this setting does.
+   *
+   * Composed there rather than here because the behaviour is the server's: a client that wrote
+   * its own version would be describing a rule it does not implement, and would keep describing
+   * it after the rule changed.
+   */
+  readonly quietHoursNote: string;
+  readonly serverTime: string;
+}
+
 export interface ConsentRecorded {
   readonly purpose: string;
   readonly granted: boolean;
@@ -1298,6 +1312,18 @@ export interface KynvioraClient {
   consents(): Promise<ApiOutcome<ConsentsResponse>>;
   recordConsent(body: ConsentBody): Promise<ApiOutcome<ConsentRecorded>>;
   /**
+   * Tell Kynviora where this device is (DEC-119).
+   *
+   * An IANA zone, never an offset: an offset is a fact about a place *and a date*, correct today
+   * and an hour wrong after the next transition - and what it decides is whether a notification
+   * waits until morning.
+   *
+   * `null` is a real answer rather than a way of saying nothing. A device that cannot determine
+   * its zone reports `null`, and the stored value returns to unknown; leaving a stale one in
+   * place would let last month's continent decide tonight.
+   */
+  reportTimeZone(timeZone: string | null): Promise<ApiOutcome<TimeZoneRecorded>>;
+  /**
    * Everything Kynviora holds about this account, as one document (spec 16 export, DEC-117).
    *
    * Requires fresh step-up, so this is called with an elevated client. There is no artifact and
@@ -1649,6 +1675,8 @@ export function createClient(options: ClientOptions): KynvioraClient {
     // second decision. The server still writes a new receipt each time, because the table is
     // append-only and the history is the point.
     recordConsent: (body) => send<ConsentRecorded>('PUT', '/v1/consents', body),
+
+    reportTimeZone: (timeZone) => send<TimeZoneRecorded>('PUT', '/v1/me/time-zone', { timeZone }),
 
     exportPersonalData: () => get<PersonalExportResponse>('/v1/export'),
 

@@ -4104,3 +4104,63 @@ reference read on 2026-09-05, and a reference is not a measurement.
 
 **Sources.** Supabase JWT claims reference, JWT signing keys, MFA/AAL and user-sessions
 documentation, all read 2026-09-05; `13`; `14`; `11`; `18`; `BLK-010`; `DEV-019`; `DEV-025`.
+
+---
+
+## DEC-119 - Quiet hours are read in the recipient's own night, and unknown means do not hold
+
+**Context.** `DEV-030`: `deliveryDecision` has taken the recipient's local minute since it was
+written, every caller has passed `null`, and quiet hours have therefore held nothing since Phase
+7.5. The logic was never the gap - nobody knew what time it was where the person was. Kynviora
+stored no zone for anybody, and `0014` said so in writing rather than pretending.
+
+The product decision has now been taken: **recipient-local, using the recipient's or device's IANA
+timezone; unknown timezone means do not hold.**
+
+**Decision.** Five parts.
+
+**1. An IANA zone on `app_user`, reported by the device.** Not on `notification_preference`, which
+is keyed `(user_id, profile_id)` - a zone there would let the same person be in two places
+depending on whose medicines were being discussed, which is not a state anybody can be in. Not
+inferred from an IP address either: that is wrong for anybody on a VPN and is a location lookup
+nobody consented to.
+
+**2. A zone, never an offset - and the refusal is explicit, because ICU would accept one.**
+`Intl.DateTimeFormat` formats happily against `+05:30`. A value stored that way is a fact about a
+place _and a date_ masquerading as a fact about a place: correct today, an hour wrong after the
+next transition, and what it decides is whether somebody is woken at three in the morning. `04`
+Phase 4.1 made this decision for schedules; this is the same decision at the other end of the
+system, and the shared validator now enforces it in both places (`DEV-061`).
+
+**3. Unknown means do not hold.** `recipientLocalMinute` answers `null` for an absent zone, an
+unrecognised zone, an offset, or an unreadable instant, and `deliveryDecision` reads `null` as "do
+not hold". The bias is deliberate: the failure it avoids is a `CRITICAL` recall waiting for a
+window that never ends, and the failure it accepts is a phone lighting up at an hour somebody would
+rather it had not. The one-way door is the first.
+
+**4. The decision is per recipient, not per dispatch.** This is the structural half and it is what
+"recipient-local" actually means. A caregiver in London looking after somebody in Kolkata must not
+be woken at four in the morning because the household's night is elsewhere - and one
+`deliveryDecision` computed for the whole dispatch could not express that even in principle. It was
+correct only while nobody knew what time it was anywhere.
+
+**5. A device-supplied minute still wins where a caller passes one.** A phone reporting its own
+clock knows better than a zone recorded weeks ago; somebody on a plane is the case that
+distinguishes them. Where no caller supplies one, the stored zone answers.
+
+**Rationale for what is not built.** No timezone picker. The device knows, it is right, and a
+settings screen for a value a phone already has correct is a screen that exists to be got wrong.
+The reported value returns to unknown when the device cannot determine one, rather than leaving a
+stale zone in place - last month's continent deciding tonight is worse than no zone at all.
+
+**Consequences.** `DEV-030` closes. Quiet hours hold something for the first time, which means the
+copy `notificationPolicyView` shows for an unknown local time now describes a real state rather
+than the only state. A zone is a new personal-data field: coarse, single-purpose, self-readable
+only (`app_user_self_select` is unchanged and self-only), and listed in `docs/RETENTION.md`'s Class
+P alongside the rest of the account.
+
+`BLK-009` is untouched. Nothing here sends a notification anywhere; it decides whether one would
+be held, and the transport still records rather than delivers.
+
+**Sources.** `04` Phase 7.5; `04` Phase 4.1 (time-zone handling); `16` (minimisation); `13`; `14`;
+`18`; `DEV-030`; `DEV-061`; migration `0014`'s own note; DEC-078; DEC-086.

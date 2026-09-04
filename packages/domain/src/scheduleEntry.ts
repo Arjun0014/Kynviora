@@ -26,6 +26,7 @@
  * anybody touching it.
  */
 
+import { isKnownTimeZone } from './timeZone.js';
 import { domainError, err, ok, type DomainError, type Result } from './result.js';
 
 /**
@@ -82,18 +83,16 @@ export function parseLocalTime(value: string): { hours: number; minutes: number 
 /**
  * Whether a string names a time zone this runtime knows.
  *
- * Asked of the platform rather than checked against a list, because a bundled list of IANA zones
- * is a copy that goes stale - and a zone the runtime does not know is one
- * `localTimeToInstant` cannot compute with, which is the failure this is preventing.
+ * Re-exported from `timeZone.ts` rather than defined here, and the consolidation fixed a real
+ * defect rather than tidying two copies. This module's own version asked only whether ICU accepted
+ * the string - and **ICU accepts `+05:30`**. A schedule stored with an offset instead of a zone
+ * fires at the right minute today and an hour out after the next daylight-saving transition, which
+ * for a medicine reminder means somebody being told to take a tablet an hour early twice a year.
+ *
+ * `04` Phase 4.1's whole reason for storing `times_local` plus a zone is to avoid exactly that, so
+ * a validator that admitted an offset undid the decision it was there to enforce.
  */
-export function isKnownTimeZone(value: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-GB', { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
-}
+export { isKnownTimeZone };
 
 // ---------------------------------------------------------------------------
 // What somebody submitted

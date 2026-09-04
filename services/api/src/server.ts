@@ -22,6 +22,7 @@ import Fastify, {
 import { z } from 'zod';
 import {
   attentionReasons,
+  asTimeZone,
   domainError,
   isErr,
   isItemLifecycleState,
@@ -292,6 +293,17 @@ const shelfQuerySchema = cursorQuerySchema.extend({
 });
 
 const itemParamsSchema = z.object({ itemId: uuidSchema });
+
+/**
+ * A device reporting where it is.
+ *
+ * `null` is accepted and is not the same as omitting the field: a device that cannot determine
+ * its zone says so, and the stored value returns to unknown. Bounded at 64 because every field
+ * length is bounded (`14`) and no IANA name approaches it.
+ */
+const timeZoneBodySchema = z.object({
+  timeZone: z.string().max(64).nullable(),
+});
 
 /**
  * A consent decision (`04` Phase 1.4).
@@ -1675,6 +1687,76 @@ export function createServer(options: ServerOptions): FastifyInstance {
           optional: standing.enforcement !== 'REQUIRED',
           stale: standing.stale,
         })),
+        serverTime: ctx.now,
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // PUT /v1/me/time-zone  (`04` Phase 7.5, DEC-119, `DEV-030`)
+    // -------------------------------------------------------------------------
+    // Where the caller is, so quiet hours can be read in their own night rather than in a
+    // server's. Reported by the device, because the device is the only thing that knows - and
+    // reported as an IANA zone rather than an offset, because an offset is a number that is wrong
+    // twice a year and what it decides is whether somebody is woken at three in the morning.
+    //
+    // WHY IT IS `me` AND TAKES NO USER ID
+    // `13`: a request never carries proof of whose it is. The row updated is the caller's, decided
+    // by `app_user_self_update`'s USING clause rather than by anything in the body - so there is
+    // no identifier to validate and none to get wrong.
+    //
+    // WHY NO STEP-UP
+    // It is not a high-impact action under `14`: it changes when a notification arrives and
+    // nothing about what is in it, and the worst a wrong value does is deliver at an inconvenient
+    // hour or fail to hold. Requiring re-authentication for it would be friction on the one thing
+    // a device should be able to keep current by itself.
+
+    app.put('/v1/me/time-zone', async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      const body = timeZoneBodySchema.safeParse(request.body ?? {});
+      if (!body.success) return badRequest(reply, ctx, 'body_schema');
+
+      // `null` is a real answer: a device that cannot determine its zone says so, and the stored
+      // value goes back to unknown rather than staying at whatever was true last month. Silence
+      // there would be a stale zone deciding somebody's night from a different continent.
+      const zone = body.data.timeZone === null ? null : asTimeZone(body.data.timeZone);
+      if (body.data.timeZone !== null && zone === null) {
+        return fail(
+          reply,
+          domainError('VALIDATION_FAILED', 'Not a time zone this system knows.', {
+            reason_code: 'time_zone',
+            field: 'timeZone',
+          }),
+          ctx.correlationId,
+        );
+      }
+
+      // Row-level security is the whole authorization: `app_user_self_update` admits the caller's
+      // own row and no other, so this statement cannot reach anybody else's whatever it says.
+      const written = await ctx.db((db) =>
+        db.query<{ time_zone: string | null }>(
+          `UPDATE app_user
+              SET time_zone = $1
+            WHERE id = kynviora.current_user_id() AND deleted_at IS NULL
+        RETURNING time_zone`,
+          [zone],
+        ),
+      );
+
+      if (written.rows.length === 0) {
+        return fail(reply, domainError('NOT_FOUND', 'No such account.'), ctx.correlationId);
+      }
+
+      return reply.status(200).send({
+        timeZone: written.rows[0]?.time_zone ?? null,
+        // What the value is for, and what an absent one means. `18` asks a screen to be able to
+        // say what a setting does; this is the sentence it says it with, and it is the server's
+        // rather than a client's because the behaviour is the server's.
+        quietHoursNote:
+          written.rows[0]?.time_zone === null || written.rows[0]?.time_zone === undefined
+            ? 'Kynviora does not know what time it is where you are, so nothing is held back overnight.'
+            : 'Quiet hours are read in this time zone.',
         serverTime: ctx.now,
       });
     });

@@ -52,6 +52,7 @@ import {
   type UserId,
   ACTION_URGENCIES,
   deliveryDecision,
+  recipientLocalMinute,
   isValidQuietHours,
   type ActionUrgency,
   type DeliveryTiming,
@@ -477,6 +478,45 @@ export async function dispatchAlert(
     // The deduplication flag is `false` here and the unique index below is what actually enforces
     // it: two dispatches racing would both read "not yet delivered", so the constraint decides and
     // the decision reports the ceiling.
+    //
+    // WHY THIS IS PER RECIPIENT SINCE DEC-119
+    // Quiet hours are read in the **recipient's** local time, and two recipients may be in two
+    // places: a caregiver in London looking after somebody in Kolkata must not be woken at four in
+    // the morning because the household's night is elsewhere. One decision for the whole dispatch
+    // was correct only while nobody knew what time it was anywhere, which is what `DEV-030` was.
+    //
+    // The zones are read in one statement rather than per recipient, because a dispatch to six
+    // people should not be six round trips - and read through the service role, which is the only
+    // role that may see somebody else's zone at all (`app_user_self_select` is self-only).
+    const zoneRows = await db.query<{ id: string; time_zone: string | null }>(
+      `SELECT id, time_zone FROM app_user WHERE id = ANY($1::uuid[])`,
+      [plan.recipients.map((recipient) => recipient.userId)],
+    );
+    const zoneOf = new Map(zoneRows.rows.map((row) => [row.id, row.time_zone]));
+
+    /**
+     * The decision for one recipient.
+     *
+     * `input.localMinuteOfDay` still wins where a caller supplied one, because a device reporting
+     * its own clock knows better than a zone recorded weeks ago - somebody on a plane is the case
+     * that distinguishes them. Where it is absent, the recipient's stored zone answers; where that
+     * is unknown too, `recipientLocalMinute` returns `null` and nothing is held.
+     */
+    const timingFor = (userId: UserId): DeliveryTiming =>
+      deliveryDecision({
+        urgency: input.urgency,
+        deliverable: input.eventKind !== 'SAFETY_ALERT' || alertState === 'PUBLISHED',
+        alreadyDelivered: false,
+        quietHours: policyQuietHours,
+        localMinuteOfDay:
+          input.localMinuteOfDay ??
+          recipientLocalMinute({ at: ctx.now, zone: zoneOf.get(userId) ?? null }),
+      });
+
+    // The dispatch-level answer, for the audit line and the returned summary. It is the decision
+    // for a recipient whose local time is unknown, which is the one that does not depend on who is
+    // being told - so it reports the channel the urgency permits rather than any one person's
+    // night.
     const timing = deliveryDecision({
       urgency: input.urgency,
       deliverable: input.eventKind !== 'SAFETY_ALERT' || alertState === 'PUBLISHED',
@@ -522,7 +562,9 @@ export async function dispatchAlert(
       // Exit criterion 1 arrives here: an INFORMATIONAL event - which is what a foreign
       // regulatory difference defaults to (`09`) - takes this branch and the transport is never
       // called, so there is no push and no digest line to mistake for a personal alert.
-      if (timing.channel !== 'INTERRUPT' || timing.held) {
+      // This recipient's own decision, in this recipient's own night (DEC-119).
+      const recipientTiming = timingFor(recipient.userId);
+      if (recipientTiming.channel !== 'INTERRUPT' || recipientTiming.held) {
         withheldFromDevice.push(recipient.userId);
         continue;
       }
