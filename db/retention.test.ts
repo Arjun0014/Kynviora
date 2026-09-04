@@ -130,7 +130,13 @@ describe('the retention role', () => {
     expect(res.rows[0]).toEqual({ app: false, service: false });
   });
 
-  it('holds a grant on exactly the two retained tables and nothing else', async () => {
+  it('holds a grant on exactly the tables it purges, and INSERT on none of them', async () => {
+    // `0022` gave this role two tables. `0023` gave it the tables an item purge has to empty, so
+    // the boundary is no longer "which tables" - it is "which rows", and that moved from the
+    // grants to the policies. `db/purge.test.ts` is where the second half is measured.
+    //
+    // What has not moved is that it may only read and remove. A role that could INSERT could
+    // manufacture the history it is trusted to remove.
     const res = await t.asOwner((db) =>
       db.query<{ table_name: string; privilege_type: string }>(
         `SELECT table_name, privilege_type
@@ -143,18 +149,52 @@ describe('the retention role', () => {
     for (const row of res.rows) {
       byTable.set(row.table_name, [...(byTable.get(row.table_name) ?? []), row.privilege_type]);
     }
-    expect([...byTable.keys()].sort()).toEqual(['audit_event', 'consent_receipt']);
-    expect(byTable.get('audit_event')?.sort()).toEqual(['DELETE', 'SELECT']);
-    expect(byTable.get('consent_receipt')?.sort()).toEqual(['DELETE', 'SELECT']);
+
+    expect([...byTable.keys()].sort()).toEqual([
+      'audit_event',
+      'caregiver_invitation',
+      'consent_receipt',
+      'dose_event',
+      'evidence_asset',
+      'extraction_run',
+      'medicine_schedule',
+      'owned_item',
+      'product_usage_evidence',
+      'profile_assessment',
+      'refill_estimate',
+      'review_task',
+      'visit_pack',
+    ]);
+
+    for (const [table, privileges] of byTable) {
+      expect(privileges).not.toContain('INSERT');
+      // `visit_pack` is the one table it updates rather than deletes: the pack's content is
+      // purged and the row survives, so that a pack having existed stays answerable.
+      const expected = table === 'visit_pack' ? ['SELECT', 'UPDATE'] : ['DELETE', 'SELECT'];
+      expect(privileges.sort()).toEqual(expected);
+    }
   });
 
-  it('cannot read a medicine', async () => {
-    // The specific thing a purge role must never be able to do. A missing GRANT raises rather
-    // than filtering, so this is an error rather than an empty result.
-    const message = await expectDenied(() =>
-      t.asRetention((db) => db.query(`SELECT display_name FROM owned_item`)),
+  it('reads a medicine only where its owner deleted it thirty days ago', async () => {
+    // The grant exists since `0023`; the protection is the policy. Both items here are live, so
+    // the role sees neither - and `MEDICINE` is one it will still not see after the caregiver
+    // tests below have failed to delete it.
+    const res = await t.asRetention((db) =>
+      db.query<{ display_name: string }>(`SELECT display_name FROM owned_item`),
     );
-    expect(message).toMatch(/permission denied/i);
+    expect(res.rows).toEqual([]);
+  });
+
+  it('cannot read a profile or an allergy at all', async () => {
+    // The tables an item purge does not touch. A missing GRANT raises rather than filtering, so
+    // these are errors rather than empty results - which is the stronger answer, because it
+    // cannot be turned into a read by a policy somebody adds later.
+    for (const table of ['profile', 'allergy_record', 'caregiver_grant', 'app_user']) {
+      const message = await expectDenied(() =>
+        t.asRetention((db) => db.query(`SELECT * FROM ${table}`)),
+      );
+      expect(message).toMatch(/permission denied/i);
+    }
   });
 
   it('cannot write an audit event', async () => {

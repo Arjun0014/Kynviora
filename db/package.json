@@ -5,7 +5,8 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "migrate": "tsx src/cli.ts"
+    "migrate": "tsx src/cli.ts",
+    "purge": "tsx src/purgeCli.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8"

@@ -168,6 +168,21 @@ operating brief: a deviation is not inherently a failure; an undocumented deviat
   needs no migration and no sweep.
 - **Required future work**: the retention matrix `16` requires, and a decision on whether a pack
   should be retained (revoked but readable) or removed at expiry.
+- **Resolved 2026-09-05** (DEC-117). The matrix is `docs/RETENTION.md` and it **approves the values
+  already implemented**: 72 hours by default, 14 days maximum, never permanent. Nothing in the code
+  changed, which is the outcome worth noting - the engineering default was the right one, and the
+  deviation was about it being unapproved rather than about it being wrong.
+
+  The open question is answered too, and the answer is neither of the two this entry offered: **the
+  content goes and the row stays.** The manifest and the notes are purged within 24 hours of
+  expiry, so nothing readable survives; the row survives to the profile's own boundary, so "a pack
+  was created and has expired" is still answerable. Retaining a revoked-but-readable pack would
+  leave a shareable view of somebody's medicines alive past its deadline; removing the row entirely
+  would make an export somebody took unaccountable.
+
+  Implemented in `0023`, swept by `runPurgeSweep`, measured by `db/purge.test.ts`.
+
+- **Status**: **RESOLVED 2026-09-05**.
 
 ## DEV-010 - Recent-item-changes section is time-windowed by an unapproved threshold
 
@@ -2140,4 +2155,64 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Verified**: `db/retention.test.ts` - the direct path refused for owner and caregiver alike, the
   function admitting only the owner, and the restrictive policy refusing a caregiver by name once
   the SELECT filter is relaxed.
+- **Status**: **RESOLVED 2026-09-05**.
+
+---
+
+## DEV-058 - A deleted item could not be purged, because its children refuse to be deleted
+
+- **Affected specification**: `16` (retention deadlines), DEC-013 (append-only), DEC-117,
+  `docs/RETENTION.md` section 3.1.
+- **Expected behaviour**: an item somebody deleted thirty days ago, and everything recorded
+  against it, stops existing.
+- **Implemented behaviour**: the `DELETE` raises `Table dose_event is append-only` - from a table
+  the statement never mentioned.
+
+  `dose_event` and `product_usage_evidence` are append-only by trigger and cascade from
+  `owned_item`. A hard delete of a purgeable item therefore fires a cascade into two tables whose
+  trigger refuses every `DELETE` by every role, and the whole statement rolls back. The
+  thirty-day deadline `docs/RETENTION.md` commits to was **unmeetable by construction**, and
+  nothing said so: no test deleted anything, because until DEC-117 there was nothing to delete.
+
+  `profile_assessment` is the third and would have surfaced next.
+
+- **How it was found**: by writing the sweep the matrix requires. It is the same shape as
+  `DEV-056` (1) one layer down - an append-only invariant and a retention deadline, each correct,
+  meeting at a foreign key nobody had walked.
+- **Reason**: the cascades were written when `deleted_at` was a column nothing wrote, so no
+  statement had ever reached them. `ON DELETE CASCADE` from `owned_item` is right - a dose without
+  its medicine is not a record of anything - and the append-only trigger is right, because a
+  correction to a dose history must be a further event. Neither is wrong; together they made a
+  deletion impossible to finish.
+- **Risk**: the deadline, silently missed. A person told their data would be gone in thirty days,
+  with the deletion visible and total from their side and the bytes still present indefinitely.
+  Nothing was exposed - revocation is complete and synchronous - so the failure is a broken
+  promise rather than a leak.
+- **Fix**: migration `0023` gives `forbid_mutation` a third door, as narrow as the other two: a
+  `DELETE`, by `kynviora_retention`, of a row whose **parent** carries a revocation stamp at or
+  before the purge floor. The child's own age is deliberately not consulted - a dose recorded this
+  morning against a medicine deleted five weeks ago is due, because what is being removed is the
+  medicine and everything about it.
+
+  The sweep does **not** use the cascades. A referential action runs as the owner of the
+  referencing table rather than as the session's role, so `current_user` inside a cascaded child's
+  trigger is not the role that issued the statement - which makes any role check there measure the
+  wrong thing, and measure it differently depending on how the database was provisioned
+  (`BLK-001`). `runPurgeSweep` deletes children explicitly, deepest first, so every statement is
+  issued by the role whose policies are being relied on.
+
+  Two further things fell out of building it, both worth keeping:
+
+  - **`DEV-057` recurred.** The Visit Pack content purge is an `UPDATE`, and its first SELECT
+    policy carried `content_purged_at IS NULL` - so Postgres applied that predicate to the new row
+    and refused the statement that sets it. Any policy pair where the SELECT predicate mentions the
+    column the UPDATE writes has this defect.
+  - **A dispatch keyed on argument count silently un-purged a table.** `0023` rewrote the trigger
+    and matched door one on `TG_NARGS = 1`; `consent_receipt` carries three arguments for door
+    two's sake, so it fell through to the blanket refusal and stopped being purgeable. Caught by
+    `db/purge.test.ts`, which is the only place anything deletes from it. The dispatch is keyed on
+    the first argument now.
+
+- **Verified**: `db/purge.test.ts` - 12 checks, including the widest statement the retention role
+  can express issued with no predicate at all, and a live shelf surviving it.
 - **Status**: **RESOLVED 2026-09-05**.

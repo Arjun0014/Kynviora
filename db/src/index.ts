@@ -7,5 +7,6 @@
  */
 
 export * from './migrations.js';
+export * from './retention.js';
 export * from './runtime.js';
 export * from './seed.js';

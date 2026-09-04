@@ -39,7 +39,8 @@
     "verify:device:safety": "tsx scripts/device/verifySafetyScreen.ts",
     "verify:device:doseaccess": "tsx scripts/device/verifyDoseAccess.ts",
     "verify:device:privacy": "tsx scripts/device/verifyPrivacyLeakage.ts",
-    "verify:device:lowstorage": "tsx scripts/device/verifyLowStorage.ts"
+    "verify:device:lowstorage": "tsx scripts/device/verifyLowStorage.ts",
+    "purge": "npm --prefix db run purge"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
