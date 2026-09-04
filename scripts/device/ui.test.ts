@@ -7,7 +7,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { centreOf, describeMatch, nameMatches, nodeNamed } from './ui.js';
+import {
+  centreOf,
+  describeMatch,
+  nameMatches,
+  nodeNamed,
+  nodeNamedBelow,
+  selectedStateOf,
+} from './ui.js';
 import { parseUiHierarchy, type UiNode } from './accessibility.js';
 
 const PACKAGE = 'com.kynviora.app';
@@ -21,6 +28,7 @@ function node(overrides: Partial<UiNode> = {}): UiNode {
     clickable: false,
     enabled: true,
     scrollable: false,
+    selected: false,
     bounds: { left: 0, top: 0, right: 100, bottom: 100 },
     ...overrides,
   };
@@ -116,6 +124,58 @@ describe('nameMatches', () => {
   it('reads as something a report can print', () => {
     expect(describeMatch('Done')).toBe('Done');
     expect(describeMatch({ startsWith: 'Name.' })).toBe('Name....');
+  });
+});
+
+describe('nodeNamedBelow', () => {
+  // Two shelf rows, each with an identically named control. Only the heading tells them apart.
+  const firstHeading = node({ text: 'Synthetic Tablet A', bounds: rect(100, 200) });
+  const firstButton = node({ text: 'Open this item', clickable: true, bounds: rect(300, 400) });
+  const secondHeading = node({ text: 'Synthetic Lotion Q', bounds: rect(500, 600) });
+  const secondButton = node({ text: 'Open this item', clickable: true, bounds: rect(700, 800) });
+  const all = [firstHeading, firstButton, secondHeading, secondButton];
+
+  it('picks the control belonging to the row that was asked for', () => {
+    // A plain lookup opens whichever row is first in the hierarchy, so a run measures the wrong
+    // medicine while reporting the right name.
+    expect(nodeNamed(all, 'Open this item')).toBe(firstButton);
+    expect(nodeNamedBelow(all, 'Open this item', 'Synthetic Lotion Q')).toBe(secondButton);
+    expect(nodeNamedBelow(all, 'Open this item', 'Synthetic Tablet A')).toBe(firstButton);
+  });
+
+  it('finds nothing when the row heading is not on screen', () => {
+    expect(nodeNamedBelow(all, 'Open this item', 'Synthetic Capsule B')).toBeNull();
+  });
+
+  it('finds nothing when the row is on screen and its control is below the fold', () => {
+    // What a newly added item looks like: last on the shelf, its heading clipped to a few pixels
+    // at the bottom edge, its button not drawn at all.
+    const clipped = node({ text: 'Synthetic Lotion Q', bounds: rect(2135, 2145) });
+    expect(
+      nodeNamedBelow([firstHeading, firstButton, clipped], 'Open this item', {
+        startsWith: 'Synthetic Lotion',
+      }),
+    ).toBeNull();
+  });
+
+  function rect(top: number, bottom: number) {
+    return { left: 76, top, right: 1004, bottom };
+  }
+});
+
+describe('selectedStateOf', () => {
+  const skinCare = node({ contentDescription: 'Skin care', clickable: true, selected: true });
+  const sunscreen = node({ contentDescription: 'Sunscreen', clickable: true });
+
+  it('reports which option a radio group has chosen', () => {
+    expect(selectedStateOf([skinCare, sunscreen], 'Skin care')).toBe(true);
+    expect(selectedStateOf([skinCare, sunscreen], 'Sunscreen')).toBe(false);
+  });
+
+  it('separates "not on screen" from "on screen and not chosen"', () => {
+    // The two have different fixes - one is a harness that looked in the wrong place, the other is
+    // an app that ignored a tap - so a boolean here would misreport the first as the second.
+    expect(selectedStateOf([skinCare, sunscreen], 'Hair care')).toBeNull();
   });
 });
 

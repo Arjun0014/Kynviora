@@ -36,6 +36,16 @@ export interface UiNode {
   readonly clickable: boolean;
   readonly enabled: boolean;
   readonly scrollable: boolean;
+  /**
+   * Whether the node reports itself as chosen.
+   *
+   * `accessibilityState={{ selected }}` on a React Native `Pressable` arrives here as
+   * `selected="true"`, and it is the only read-back a radio has. The label of a chosen option is
+   * unchanged - the app puts the state in a `Text` child, which is not exposed separately once the
+   * `Pressable` has claimed the accessibility element - so a harness that tapped an option and
+   * then looked for a different name would find nothing and conclude the tap had failed.
+   */
+  readonly selected: boolean;
   /** Screen pixels, as `uiautomator` reports them - clipped to what is actually visible. */
   readonly bounds: Rect;
 }
@@ -67,6 +77,7 @@ export function parseUiHierarchy(xml: string): readonly UiNode[] {
       clickable: attributes.get('clickable') === 'true',
       enabled: attributes.get('enabled') !== 'false',
       scrollable: attributes.get('scrollable') === 'true',
+      selected: attributes.get('selected') === 'true',
       bounds: {
         left: Number(rawBounds[1]),
         top: Number(rawBounds[2]),

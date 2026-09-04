@@ -85,6 +85,22 @@ describe('reading a uiautomator dump', () => {
     expect(parsed?.bounds.right).toBe(565);
   });
 
+  it('reads whether a node reports itself as chosen', () => {
+    // The only read-back a radio has. The chosen option keeps its accessible name - the app puts
+    // "- chosen" in a `Text` child that the `Pressable` swallows - so a harness looking for a
+    // changed name would report a successful tap as one that did nothing.
+    const chosen = subject(
+      hierarchy(
+        node({ 'content-desc': 'Skin care', selected: 'true', bounds: boundsFor(200, 48) }),
+      ),
+    );
+    const notChosen = subject(
+      hierarchy(node({ 'content-desc': 'Sunscreen', bounds: boundsFor(200, 48) })),
+    );
+    expect(chosen?.selected).toBe(true);
+    expect(notChosen?.selected).toBe(false);
+  });
+
   it('ignores a node with no bounds rather than inventing them', () => {
     // A parser that defaulted a missing rectangle to zero would report every such node as a
     // control too small to press, which is a finding nobody can act on.

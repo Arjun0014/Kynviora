@@ -80,6 +80,36 @@ export function nodeNamed(nodes: readonly UiNode[], name: NameMatch): UiNode | n
   return matches.find((node) => node.clickable) ?? matches[0] ?? null;
 }
 
+/**
+ * The node with this name that belongs to the row headed by `anchor`.
+ *
+ * A list draws one identically-named control per row - every shelf row carries "Open this item" -
+ * so a plain lookup opens whichever row happens to be first in the hierarchy, and a run then
+ * measures the wrong medicine while reporting the right name. The row is identified by the only
+ * thing that distinguishes it, which is its heading, and the control is the nearest match below
+ * that heading.
+ *
+ * "Below" is by the top edge, not by containment: `uiautomator` reports a flat list of rectangles
+ * and a row is a visual grouping rather than a node anybody can ask about. Both have to be on
+ * screen at once for this to answer, which is why the callers scroll to the anchor first.
+ */
+export function nodeNamedBelow(
+  nodes: readonly UiNode[],
+  name: NameMatch,
+  anchor: NameMatch,
+): UiNode | null {
+  const mine = nodes.filter((node) => node.packageName === PACKAGE);
+  const anchorNode = mine.find((node) => nameMatches(accessibleNameOf(node), anchor));
+  if (anchorNode === undefined) return null;
+  const below = mine
+    .filter(
+      (node) =>
+        nameMatches(accessibleNameOf(node), name) && node.bounds.top >= anchorNode.bounds.top,
+    )
+    .sort((left, right) => left.bounds.top - right.bounds.top);
+  return below.find((node) => node.clickable) ?? below[0] ?? null;
+}
+
 /** Every node this app is currently drawing, or `null` where the screen could not be read. */
 export function currentNodes(attempts = 5): readonly UiNode[] | null {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -172,7 +202,8 @@ export function scrollTo(name: NameMatch, maxSwipes = 30): UiNode | null {
       const node = nodeNamed(nodes, name);
       if (node !== null) return node;
     }
-    const before = signatureOfScreen();
+    // The screen that was just read, rather than a second dump of the same screen.
+    const before = nodes === null ? null : signatureOf(nodes);
     scrollDown();
     // The bottom of the list. One more look has already happened above, so there is nothing left
     // to reveal and continuing would just repeat it.
@@ -192,19 +223,70 @@ export function scrollTo(name: NameMatch, maxSwipes = 30): UiNode | null {
 }
 
 /**
+ * Everything this app is saying, gathered by scrolling the whole screen.
+ *
+ * A viewport is not a screen. Three safety lines and a coverage statement do not fit on a Pixel 7,
+ * and a check that read only what was showing would report the sentence at the bottom as missing -
+ * which is the same answer it gives for a screen that genuinely dropped it, and the more alarming
+ * of the two. So this walks from the top to the end of the list and keeps the union.
+ *
+ * `null` only where not a single read succeeded. An empty array is a real answer: it means the app
+ * drew nothing with a name on it.
+ */
+export function collectScreenText(maxSwipes = 30): readonly string[] | null {
+  let previous = signatureOfScreen();
+  for (let up = 0; up < maxSwipes; up += 1) {
+    scrollUp();
+    const now = signatureOfScreen();
+    if (now !== null && now === previous) break;
+    previous = now;
+  }
+
+  const seen = new Set<string>();
+  let everRead = false;
+  for (let down = 0; down <= maxSwipes; down += 1) {
+    const nodes = currentNodes();
+    if (nodes !== null) {
+      everRead = true;
+      for (const node of nodes) {
+        if (node.packageName !== PACKAGE) continue;
+        const name = accessibleNameOf(node);
+        if (name !== '') seen.add(name);
+      }
+    }
+    const before = nodes === null ? null : signatureOf(nodes);
+    scrollDown();
+    const after = signatureOfScreen();
+    if (after !== null && after === before) break;
+  }
+  return everRead ? [...seen] : null;
+}
+
+/**
  * Enough of the screen to tell whether a swipe moved anything.
  *
  * Names and vertical positions, which is what scrolling changes. Used to find the end of a list
  * rather than assuming a swipe count, because the schedule editor's length depends on how many
  * schedules the seed happens to have accumulated.
  */
-function signatureOfScreen(): string | null {
-  const nodes = currentNodes(2);
-  if (nodes === null) return null;
+function signatureOf(nodes: readonly UiNode[]): string {
   return nodes
     .filter((node) => node.packageName === PACKAGE)
     .map((node) => `${accessibleNameOf(node)}@${String(node.bounds.top)}`)
     .join('|');
+}
+
+/**
+ * The signature of what is on screen now, or `null` where it could not be read.
+ *
+ * Every call is a `uiautomator dump`, which is by far the most expensive thing this file does -
+ * so the loops below reuse the nodes they have already read rather than asking twice for the same
+ * screen. A scroll of a long form was three dumps per swipe and is now two, which is the
+ * difference between a twenty-minute run and a ten-minute one.
+ */
+function signatureOfScreen(): string | null {
+  const nodes = currentNodes(2);
+  return nodes === null ? null : signatureOf(nodes);
 }
 
 /**
@@ -229,6 +311,50 @@ export function waitForNamed(name: NameMatch, timeoutMs = 45_000): UiNode | null
   }
 }
 
+/**
+ * Scroll to a row's heading and tap the named control belonging to that row.
+ *
+ * Two steps rather than one, because the heading is what identifies the row and the control is
+ * what responds.
+ *
+ * The loop is not defensive padding. `scrollTo` stops the moment the heading is anywhere on
+ * screen, and "anywhere" includes ten clipped pixels at the very bottom - which is exactly where a
+ * newly added item lands, since it is last on the shelf. The heading is then present, its control
+ * is not drawn at all, and a single reading reports the row as having no control. One step down
+ * brings the control into view and leaves the heading above it, which is the arrangement this
+ * needs.
+ *
+ * `false` where the heading never appeared, where the list stopped moving before the control was
+ * drawn, or where a scroll carried the heading off the top - the last because a control matched
+ * without its heading on screen might belong to any row.
+ */
+export function scrollToAndTapBelow(
+  name: NameMatch,
+  anchor: NameMatch,
+  timeoutMs = 45_000,
+  maxSteps = 6,
+): boolean {
+  if (waitForNamed(anchor, timeoutMs) === null) return false;
+
+  for (let step = 0; step < maxSteps; step += 1) {
+    const nodes = currentNodes();
+    if (nodes !== null) {
+      const node = nodeNamedBelow(nodes, name, anchor);
+      if (node !== null) {
+        tapAt(centreOf(node));
+        sleep(1_500);
+        return true;
+      }
+      if (nodeNamed(nodes, anchor) === null) return false;
+    }
+    const before = nodes === null ? null : signatureOf(nodes);
+    scrollDown();
+    const after = signatureOfScreen();
+    if (after !== null && after === before) return false;
+  }
+  return false;
+}
+
 /** Scroll a control into view - waiting for it to appear - and tap it. */
 export function scrollToAndTap(name: NameMatch, timeoutMs = 45_000): boolean {
   const node = waitForNamed(name, timeoutMs);
@@ -236,6 +362,35 @@ export function scrollToAndTap(name: NameMatch, timeoutMs = 45_000): boolean {
   tapAt(centreOf(node));
   sleep(1_500);
   return true;
+}
+
+/**
+ * Whether the control with this name reports itself as chosen, or `null` where it is not there.
+ *
+ * Separated from the device call so the rule is testable: given a hierarchy, this is a lookup.
+ * The three-valued answer matters - "not on screen" and "on screen and not chosen" are different
+ * failures, and a boolean would report the first as the second, which reads as an app that
+ * ignored a tap rather than a harness that looked in the wrong place.
+ */
+export function selectedStateOf(nodes: readonly UiNode[], name: NameMatch): boolean | null {
+  const node = nodeNamed(nodes, name);
+  return node === null ? null : node.selected;
+}
+
+/**
+ * Whether the option with this name is chosen, scrolling to find it first.
+ *
+ * The read-back for a radio. The chosen option keeps the same accessible name - the app renders
+ * its state into a `Text` child, which the `Pressable` swallows once it claims the accessibility
+ * element - so `selected` is the only thing that changes when a tap lands.
+ */
+export function isSelected(name: NameMatch): boolean | null {
+  const node = waitForNamed(name, 10_000);
+  if (node === null) return null;
+  // Re-read: `waitForNamed` scrolled, and the node it returned was parsed before the last scroll
+  // settled. What is wanted is the state now.
+  const nodes = currentNodes();
+  return nodes === null ? null : selectedStateOf(nodes, name);
 }
 
 /** What a text field currently holds, or `null` where no field carries that name. */
@@ -315,6 +470,54 @@ export function dismissKeyboard(): void {
  */
 export function suppressStylusHandwriting(): void {
   adb(['shell', 'settings', 'put', 'secure', 'stylus_handwriting_enabled', '0']);
+}
+
+/**
+ * Wake the screen and stop it going off again.
+ *
+ * An emulator left alone between runs turns its display off, and a display that is off has no view
+ * hierarchy: `uiautomator dump` answers "null root node" for every read. Nothing about that says
+ * "the screen is off" - it is the same answer a dump gives during a transition - so `scrollTo`
+ * treats it as "keep going", `waitForNamed` waits out its whole deadline, and a run spends twenty
+ * minutes concluding that a control is missing from a screen nobody was looking at. The first
+ * check to fail then reads as a finding about the app.
+ *
+ * `stayon true` is the emulator setting a harness wants and a phone's owner would not: it belongs
+ * with the seeded database and the development identity, on a device nobody is using.
+ */
+export function keepScreenAwake(): void {
+  adb(['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP']);
+  adb(['shell', 'svc', 'power', 'stayon', 'true']);
+  sleep(1_000);
+}
+
+/**
+ * Everything a run needs done to the device before it drives anything.
+ *
+ * One call, so a new harness cannot forget half of it. Both members are here because a run once
+ * failed without them and the failure looked like the app's fault in both cases.
+ */
+export function prepareDeviceForDriving(): void {
+  keepScreenAwake();
+  suppressStylusHandwriting();
+}
+
+/**
+ * Wait until the app is drawing its tab bar, and say whether it ever did.
+ *
+ * Replaces a fixed sleep. A cold start behind Metro takes anywhere between fifteen and fifty
+ * seconds depending on whether the bundle is cached, so a fixed wait is either a run that fails on
+ * a slow start or forty-five seconds added to every run that did not need them. Waiting on a
+ * control the app only draws once it is up is both faster and the thing actually being waited for.
+ */
+export function waitForAppReady(timeoutMs = 90_000): boolean {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const nodes = currentNodes(2);
+    if (nodes !== null && nodeNamed(nodes, 'Shelf') !== null) return true;
+    if (Date.now() >= deadline) return false;
+    sleep(2_000);
+  }
 }
 
 export function pressHome(): void {
