@@ -74,12 +74,24 @@ const PROFILE_ID = '00000000-0000-4000-8000-00000000d020';
 const CHOSEN_CAPABILITY = 'VIEW_MEDICINES';
 const CHOSEN_CHECKBOX = 'Medicines';
 
+/**
+ * A grant as `GET /v1/caregiver-grants` sends it.
+ *
+ * The field is `granteeUserId` and always has been. This interface said `caregiverUserId?`, and
+ * because it was optional TypeScript was content: every comparison evaluated `undefined !==
+ * CAREGIVER_ID`, so `activeGrantsFor` counted **zero** whatever the database held (`DEV-050`).
+ * `CAR-0` exists to refuse to run when a grant from an earlier run is still live, and it could
+ * never fire; `CAR-3` confirms revocation by counting what is left, and it was reading the same
+ * zero; and `clearPreviousRuns` skipped every row it was written to revoke.
+ *
+ * Required, not optional, so the next rename is a compile error rather than a check that quietly
+ * stops looking. `active` is dropped because the route does not send it either.
+ */
 interface Grant {
   readonly id: string;
   readonly profileId: string;
-  readonly caregiverUserId?: string;
-  readonly active?: boolean;
-  readonly revokedAt?: string | null;
+  readonly granteeUserId: string;
+  readonly revokedAt: string | null;
 }
 
 async function api(
@@ -122,7 +134,7 @@ async function activeGrantsFor(caregiver: string): Promise<number | null> {
   if (response === null || !response.ok) return null;
   const body = (await response.json()) as { readonly grants?: readonly Grant[] };
   return (body.grants ?? []).filter(
-    (grant) => grant.caregiverUserId === caregiver && (grant.revokedAt ?? null) === null,
+    (grant) => grant.granteeUserId === caregiver && grant.revokedAt === null,
   ).length;
 }
 
@@ -152,7 +164,7 @@ async function clearPreviousRuns(): Promise<void> {
   if (grants !== null && grants.ok) {
     const body = (await grants.json()) as { readonly grants?: readonly Grant[] };
     for (const grant of body.grants ?? []) {
-      if (grant.caregiverUserId !== CAREGIVER_ID || (grant.revokedAt ?? null) !== null) continue;
+      if (grant.granteeUserId !== CAREGIVER_ID || grant.revokedAt !== null) continue;
       await api(`/v1/caregiver-grants/${grant.id}/revoke`, {
         as: OWNER_ID,
         method: 'POST',
