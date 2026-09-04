@@ -20,7 +20,7 @@ Last updated: 2026-09-04
 
 ## Verification state
 
-- **4062 tests passing**, 0 failing, across 143 files.
+- **4082 tests passing**, 0 failing, across 144 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -45,8 +45,8 @@ npm run verify
 
 ### On a device
 
-Eleven harnesses need an attached Android device or emulator and are **not** part of `npm run
-verify`. Their judgements are, though: 330 of the tests above exercise the rules they apply, so a
+Twelve harnesses need an attached Android device or emulator and are **not** part of `npm run
+verify`. Their judgements are, though: 350 of the tests above exercise the rules they apply, so a
 rule cannot change without CI noticing even where no hardware exists.
 
 Every one of them wakes the screen first (`prepareDeviceForDriving`). An emulator left alone turns
@@ -230,6 +230,42 @@ It establishes its own `adb reverse` tunnels and refuses to run without them, wh
 housekeeping - a phone that cannot reach the API draws "No connection" on every screen, and a check
 looking for a control reads that as the control having been withheld (trap 197).
 
+```bash
+npm run verify:device:privacy
+```
+
+Five checks on two of the MASVS categories `04` Phase 9.2 lists as outstanding: privacy leakage
+and logging, and platform interaction with deep links.
+
+`PRIV-1` and `PRIV-2` are the reason it exists. `verify:device` proves the local database is
+encrypted, that its key is keystore-wrapped, and that four strings the app stored appear nowhere in
+its bytes - and a medicine name written to logcat walks around every one of those guarantees, since
+the log is readable by the platform and by anyone with a debug bridge and nothing in this
+repository governs it. The app's own source contains not one `console.*` call, which is easy to
+check and proves nothing: what reaches the log is written by React Native, by Expo's modules, and
+by whatever a library does with a response it could not parse.
+
+**The measurement is the first thing that lies here.** `uiautomator dump` writes the entire view
+hierarchy to logcat - every medicine name on screen - as `AccessibilityNodeInfoDumper`, at its own
+pid. A scan of the whole log after a driven run finds hundreds of such lines and reports the app
+leaking health data when it is the harness doing it; the first version of this measurement found
+204 of them and not one was the app's. So the app's own process is scanned separately, the
+system-wide scan names and excludes that instrumentation, and the report says how many lines it
+removed - "clean" over a log that was mostly filtered away is a different claim from "clean"
+(trap 199).
+
+`PRIV-0` is the control the other two need: an absence test over an empty capture passes trivially,
+and so does one over a run that never opened a screen holding health data. A dose note is minted
+per run and typed in, so the scan covers a string the app handled minutes ago rather than only ones
+that could have been compiled into a bundle.
+
+`PLAT-2` fires a `kynviora://` link from the shell - another app as far as Android is concerned -
+carrying a profile ID that is not this household's, and the shelf it lands on must show what an
+ordinary launch shows. What it does **not** judge is that the scheme exists at all: that is a
+product question entangled with an authentication provider nobody has chosen, recorded as
+`DEV-052`. Last run **5/5 PASS**: 241 lines from the app's own process and 26,825 elsewhere, all
+clean, after removing 4,045 written by the instrumentation.
+
 A check that could not be performed reports `INCONCLUSIVE` and fails the run. Two of the storage
 checks are absence tests, and an absence test over an empty input passes trivially (DEC-102).
 
@@ -299,7 +335,7 @@ the API will not distinguish them.
 | The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)           |
 | Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
 | Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
-| Device harnesses: eleven, storage to a capability split     | Complete, 330 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
+| Device harnesses: twelve, storage to what reaches a log     | Complete, 350 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
 | Recording a dose: `RECORD_DOSES`, its own capability        | Complete, 47 tests; 7/7 on a device (DEC-116)               |
 | Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                  |
 | CI pipeline                                                 | Written; not yet run on a real runner                       |
@@ -372,6 +408,13 @@ needs two grants in sequence and therefore needs the cleanup to actually work.
    fewest - and the invitation form has just gained a row, so the sheet is longer than it was.
 3. **The low-storage run**, which is the one remaining `19` scenario that is work rather than a
    decision. `verify:device` already knows how to drive the app and read `dumpsys`.
+
+Phase 9.2's other two MASVS categories are **not** on that list, and the reason is different for
+each. Network communication has no production endpoint to verify a certificate chain against
+(`BLK-001`); the transport rule is a client-side check today and testing it against loopback would
+measure the exception rather than the rule. Tampering and rooted-device behaviour is scoped "per
+the threat model" by `14`, and `15` does not name a posture for it - deciding one is a product
+decision about who this app is defending against.
 
 **Not next, and why.** Wiring the remaining offline writes. `owned_item` CREATE still waits on the
 phase it depends on, `allergy_record` CREATE waits on a route that takes an idempotency key - a
@@ -1435,3 +1478,17 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      the cleanup revoked nothing (`DEV-050`). TypeScript is content because an absent optional
      field is a legal value. Declare the fields a harness reads as **required**, so a rename is a
      compile error - and be suspicious of a guard that has never once fired.
+199. A harness that reads the system log is reading its own output as well as the app's.
+     `uiautomator dump` writes the whole view hierarchy to logcat under
+     `AccessibilityNodeInfoDumper` - including every medicine name on screen - at its own pid, so a
+     scan of all of logcat after a driven run reports the app leaking health data when the leak is
+     the act of looking. The first version of `verify:device:privacy` found 204 such lines and not
+     one belonged to the app. Scan the app's own pid separately, name and exclude the
+     instrumentation in the system-wide pass, and say in the report how many lines were removed:
+     "clean" over a log that was mostly filtered away is a different claim from "clean".
+200. Do not read a screen for a baseline without putting the app on that screen first. The privacy
+     harness took its "ordinary launch" shelf reading from wherever the previous step had left the
+     app - the dose-recording screen, whose heading names one medicine - and then compared seven
+     medicines against that one and reported a deep link as having changed which person's
+     medicines were rendered. A comparison needs both sides driven, and the baseline is the side
+     nobody thinks to drive.

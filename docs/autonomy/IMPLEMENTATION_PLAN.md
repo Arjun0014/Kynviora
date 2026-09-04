@@ -747,9 +747,31 @@ and the review screen typechecks but is not wired (`DEV-007`).
   rather than only written: `npm audit --audit-level=high` exits 0 over 13 moderate findings, all
   in the Expo prebuild toolchain and none in anything that ships. MASVS local-data-storage and
   key-management testing is covered by `verify:device`, and the install/update path by
-  `verify:device:update` (`DEV-040`). Penetration testing, the secret scan on a real runner, and
-  the other MASVS categories - network communication, platform interaction, deep links, tampering -
-  are outstanding.
+  `verify:device:update` (`DEV-040`).
+
+  **Privacy leakage, logging, platform interaction and deep links** are now covered too, by
+  `verify:device:privacy` - 5/5 on a Pixel 7 / Android 16 emulator. It is the category the other
+  storage work does not reach: `verify:device` proves the database is encrypted and its key
+  keystore-wrapped, and a medicine name on logcat walks around every one of those guarantees. The
+  app is cold-started, driven through the shelf, an item and a dose it records with a note minted
+  for the run, and the log is read twice - once for the app's own process (241 lines, clean) and
+  once for everything else (26,825 lines, clean). The system-wide pass names and excludes
+  `uiautomator dump`, which writes the whole screen to logcat and would otherwise report the
+  harness's own output as the app leaking (trap 199).
+
+  `PLAT-1` pins the components the package declares - one launcher activity this project wrote and
+  eight belonging to Expo, AndroidX and Firebase - so a new exported entry point is a failure
+  rather than a surprise. `PLAT-2` fires the app's `BROWSABLE` `kynviora://` scheme from another
+  app's context carrying a foreign profile ID, and the shelf shows what an ordinary launch shows,
+  because `shelf.tsx` takes the profile from its provider and never from route params. That the
+  scheme exists at all is `DEV-052`: nobody chose it, no feature uses it, and whether it should be
+  scoped or replaced by an App Link is entangled with the authentication provider Phase 1.1 has
+  not selected.
+
+  Still outstanding: penetration testing, the secret scan on a real runner, network communication
+  (the transport rule is a client-side check today and there is no production endpoint to verify a
+  certificate chain against - `BLK-001`), and tampering/rooted-device behaviour.
+
 - **9.3 / 9.4**: require qualified reviewers (`BLK-006`) and human usability participants.
 - **9.5**: requires legal and regulatory-classification review.
 

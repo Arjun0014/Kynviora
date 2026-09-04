@@ -1861,3 +1861,40 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Required future work**: none proposed. It would be closed by versioning the projection payload
   so a row from an older shape is discarded rather than partially trusted, which is a change worth
   making when a second field needs it rather than for this one.
+
+---
+
+## DEV-052 - The app registers a browsable deep-link scheme that no feature uses
+
+- **Affected specification**: `14` ("platform interaction", "deep links/notifications"), `15`
+  (threat model), `04` Phase 9.2, `04` Phase 1.1.
+- **Expected behaviour**: the surface a package exposes to other apps is the surface a feature
+  needs.
+- **Implemented behaviour**: the installed package declares `kynviora://` on `MainActivity` with
+  `android.intent.category.BROWSABLE`, so any web page or installed app can open Kynviora. Fired
+  from another app's context it lands on the shelf, showing the household's medicines. No code in
+  `apps/mobile/src` reads a deep-link parameter, and no product feature sends such a link.
+- **Reason**: Expo Router registers the scheme from `app.json` by default. Nobody chose it and
+  nobody chose against it.
+- **What is measured, and is not at risk**: `verify:device:privacy` `PLAT-2` fires the link from
+  the shell - another app as far as Android is concerned - carrying a profile ID that is not this
+  household's, and the shelf shows exactly what an ordinary launch shows. `shelf.tsx` takes the
+  profile from `ProfileProvider` and never from route params, so what the link carries decides
+  nothing. `PLAT-1` confirms the launcher activity is the only component this project declares.
+
+  Nor is it a bypass of anything today: there is no authentication to bypass, because Phase 1.1 has
+  not chosen a provider (`BLK-010`) and the app opens on the shelf when launched normally too.
+
+- **Why it is being documented rather than removed**: the decision is a product one and it is
+  entangled with the phase that is missing. An invitation already hands somebody a link - the
+  screen warns that anyone opening it can accept - and whether that link is `kynviora://`, an
+  HTTPS App Link, or something a chosen authentication provider supplies cannot be settled before
+  Phase 1.1 settles. Removing the scheme now would foreclose the first of those without anybody
+  having weighed the three, and keeping it is not free: an unused browsable entry point is surface
+  that grows a consequence the moment a screen starts reading a parameter from it.
+- **Risk**: low today and conditional on Phase 1.1. What makes it worth writing down is the
+  condition: the day a screen reads a route parameter, this stops being an unused declaration and
+  becomes an input from an untrusted caller, and `PLAT-2` is the check that would notice.
+- **Required future work**: decide it with Phase 1.1 - either scope the scheme to the routes a
+  feature needs and validate what it carries, or remove it and use an App Link. Whichever is
+  chosen, `PLAT-2` is where the reasoning goes.

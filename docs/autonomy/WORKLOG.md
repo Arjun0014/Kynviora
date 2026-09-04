@@ -3923,3 +3923,70 @@ the queue it protects.
 
 `BLK-011` is closed and `DEV-049` with it. `DEV-050` and `DEV-051` are new and both are recorded
 with what they cost.
+
+### Then: what leaves the app without going through any of its guarantees
+
+With `BLK-011` closed, the plan's three "immediate next work" items all need a decision or a
+credential - the retention matrix, a licensed substance vocabulary (`BLK-003`), and Phase 5.5's
+second observation (`BLK-007`) - so none of them is mine to take. Phase 9.2 is `IN_PROGRESS` and
+names four MASVS categories as outstanding, two of which need neither: privacy leakage with
+logging, and platform interaction with deep links.
+
+`verify:device:privacy` is those two, and the first one is worth the run on its own. `verify:device`
+proves the local database is encrypted, that its key is keystore-wrapped, and that four strings the
+app stored appear nowhere in its bytes. A medicine name written to logcat walks around every one of
+those: the log is readable by the platform and by anyone with a debug bridge, and nothing in this
+repository governs it. The app's own source contains not one `console.*` call, which took thirty
+seconds to check and proves nothing - what reaches the log is written by React Native, by Expo's
+modules, and by whatever a library does with a response body it could not parse.
+
+**The measurement lied before the app did.** The first scan found 204 lines carrying seeded medicine
+names and not one of them was the app's: `uiautomator dump` writes the entire view hierarchy to
+logcat as `AccessibilityNodeInfoDumper`, so every screen the harness read put its contents on the
+log. A naive version of this harness would have opened with a security finding about an app that is
+clean, which is a worse outcome than not having run it. The app's own pid is now scanned separately,
+the system-wide pass names and excludes that instrumentation, and the report says how many lines it
+removed - "clean" over a log that was mostly filtered away is a different claim from "clean" (trap
+199).
+
+The result is a genuine and useful negative: 241 lines from the app's own process and 26,825 from
+everything else, none carrying a medicine name, a profile name, or a dose note minted minutes
+earlier and typed in during the run. The note matters - the seeded names could conceivably sit in a
+bundle string, but a note written in this run can only have come from the app handling somebody's
+input.
+
+`PLAT-2` fires the app's `BROWSABLE` `kynviora://` scheme from the shell, which Android treats as
+another app, carrying a profile ID that is not this household's. It opens the app onto the shelf,
+and the shelf shows exactly what an ordinary launch shows, because `shelf.tsx` takes the profile
+from its provider and never from route params. That the scheme exists at all is `DEV-052`: Expo
+Router registers it by default, nobody chose it, no feature uses it, and whether it should be
+scoped or replaced by an App Link is entangled with the authentication provider Phase 1.1 has not
+selected. Recorded rather than removed - removing it now would foreclose one of three options
+nobody has weighed - and the condition worth remembering is that the day a screen reads a route
+parameter, this stops being an unused declaration and becomes an input from an untrusted caller.
+
+One more harness bug, and it is the same shape as the last one: the "ordinary launch" baseline was
+read from wherever the previous step had left the app, which was the dose-recording screen, whose
+heading names one medicine. Seven medicines compared against that one, and the run reported a deep
+link as having changed which person's medicines were rendered. A comparison needs both sides
+driven, and the baseline is the side nobody thinks to drive (trap 200).
+
+`verify:device:privacy` 5/5 PASS on a Pixel 7 / Android 16 emulator.
+
+### State, after both pieces
+
+4082 tests across 144 files, `npm run verify` exit 0. Twelve device harnesses, of which four were
+run this session against a Pixel 7 / Android 16 emulator: `verify:device:doseaccess` 7/7,
+`verify:device:caregiver` 5/5, `verify:device:offline` 8/8, `verify:device:privacy` 5/5. Their
+judgements are covered by 350 tests that need no hardware.
+
+Closed: `BLK-011`, `DEV-049`, `DEV-050`. Opened: `DEV-051` (the bounded cost of deny-by-default on
+a stale projection) and `DEV-052` (a browsable deep-link scheme nobody chose). New decisions:
+DEC-116. New traps: 197 through 200, three of which are about a harness measuring itself.
+
+What this session did not do, and why. The plan's three "immediate next work" items - the retention
+matrix, a licensed substance vocabulary, Phase 5.5's second observation - each need a decision or a
+credential, and inventing any of them is what the operating brief forbids. Phase 9.2's other two
+outstanding MASVS categories are left for the same kind of reason rather than for effort: network
+communication has no production endpoint to verify a certificate chain against (`BLK-001`), and
+`14` scopes tampering "per the threat model" while `15` names no posture for it.
