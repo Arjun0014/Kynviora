@@ -1928,3 +1928,28 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Fix**: `queueEdit` added to the dependency list, with the reasoning written beside it.
   `exhaustive-deps` is now an error over `apps/mobile/**`, so the next one fails the build.
 - **Status**: **RESOLVED 2026-09-04**.
+
+---
+
+## DEV-054 - A test file in the route directory stopped the app from starting
+
+- **Affected specification**: `12` (the mobile architecture), `19`, `04` Phase 0.1; the same gap
+  `DEV-043` names.
+- **Expected behaviour**: adding a test does not change what the app does.
+- **Implemented behaviour**: `ShelfRow.test.tsx` was written next to the component it tests, which
+  is `apps/mobile/src/app/(tabs)/`. Expo Router enumerates that directory with `require.context`,
+  so **every** file under it is a route and every file under it is bundled. The test imported the
+  render helpers, those import `react-test-renderer`, that is not a dependency of the app, and the
+  bundle failed. The phone showed Metro's red overlay and nothing ran.
+- **How it was found**: eighteen minutes into a device run, as **every** check reporting
+  `INCONCLUSIVE` - including the five destination checks that had reported 34/34 for weeks. The
+  report was right and the app was not there.
+- **Reason, and the part worth keeping**: no gate this project runs could see it. `npm run verify`
+  typechecks, lints and runs four thousand tests without ever bundling the app, so all of them were
+  green over a build that could not start. That is `DEV-043`'s shape exactly, arriving on the one
+  tree that had just been given tests - and it arrived _because_ it had been given tests.
+- **Risk**: total while it lasted, and invisible. The app does not start.
+- **Fix**: the test moved to `apps/mobile/src/features/shelf/ShelfRow.test.tsx` and imports the
+  screen module by path. `scripts/checks/routeDirectory.test.ts` reads the real route directory and
+  fails if anything in it is not a route, so the next attempt fails in CI rather than on a phone.
+- **Status**: **RESOLVED 2026-09-04**.

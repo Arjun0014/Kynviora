@@ -1492,3 +1492,20 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      medicines against that one and reported a deep link as having changed which person's
      medicines were rendered. A comparison needs both sides driven, and the baseline is the side
      nobody thinks to drive.
+201. `apps/mobile/src/app` is Expo Router's route directory and it is enumerated with
+     `require.context`, so **every** file under it is a route and every file under it is bundled -
+     a `.test.tsx` there included. It imports `react-test-renderer`, which is not a dependency of
+     the app, the bundle fails, and the phone shows Metro's red overlay with nothing running
+     (`DEV-054`). What makes it worth a trap rather than a note is that no gate could see it:
+     `npm run verify` typechecks, lints and runs four thousand tests without ever bundling the
+     app, so everything was green over a build that could not start, and the failure surfaced
+     eighteen minutes into a device run as every check reporting `INCONCLUSIVE` - including ones
+     that had passed for weeks. `scripts/checks/routeDirectory.test.ts` now reads the real
+     directory. Tests for something under `src/app` live outside it.
+202. A device harness that gets longer gets more chances to be wrong about why it failed. The
+     extended accessibility run is around eighteen minutes, and the first thing it reported was
+     "no control named Today was found" - which reads as the app having lost its tab bar and was
+     the bundle being broken. When a run reports **every** check as inconclusive, including ones
+     that have passed for weeks, suspect the app is not on screen at all before suspecting the
+     app: `uiautomator dump` and `dumpsys window | grep mCurrentFocus` answer that in two seconds,
+     and Metro's own log names the module it could not bundle.

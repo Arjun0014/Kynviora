@@ -15,12 +15,19 @@
  * `verify:device:doseaccess` `DOSE-6` measures the capability half on hardware and costs twelve
  * minutes. This asks the same question in milliseconds, and asks the combinations a device run
  * cannot reach without a second seeded household.
+ *
+ * WHY THIS FILE IS NOT NEXT TO THE COMPONENT IT TESTS
+ * Because `src/app` is Expo Router's route directory and it is enumerated with `require.context`,
+ * so **every** file under it is treated as a route and bundled. A `.test.tsx` there is bundled
+ * too, it imports `react-test-renderer`, that is not a dependency of the app, and the bundle
+ * fails - the phone shows Metro's red error overlay and nothing runs (`DEV-054`). The route
+ * directory holds routes; a test of something that lives there lives here.
  */
 
 import { describe, it, expect } from 'vitest';
 import { shelfItemView, type ShelfItem } from '@kynviora/contracts';
 import { hasName, press, renderScreen, screenNames } from '../../../test/render.js';
-import { ShelfRow } from './shelf';
+import { ShelfRow } from '@/app/(tabs)/shelf';
 
 const MEDICINE: ShelfItem = {
   id: 'item-1',
