@@ -792,6 +792,25 @@ route.
 - **Required future work**: the retention matrix, then a delete route that sets `deleted_at`, an
   audit row, and copy that says plainly what survives - the audit log does, and a person told
   "deleted" while a row about them remains has been misled. `04` Phase 1.4 is the natural home.
+- **Resolved 2026-09-05** (DEC-117). The retention matrix exists (`docs/RETENTION.md`) and each
+  question this deviation listed as unanswered now has an answer:
+
+  | Question                             | Answer                                                                           |
+  | ------------------------------------ | -------------------------------------------------------------------------------- |
+  | At once, or after a window?          | **Both.** Revocation is synchronous and total; purge follows within 30 days.     |
+  | Do the audit rows survive it?        | **Yes**, 24 months, and the screen says so rather than claiming everything went. |
+  | May a caregiver who can add, remove? | **No.** No capability authorises deletion, `MANAGE_MEDICINES` named explicitly.  |
+
+  `DELETE /v1/items/:itemId` sets `deleted_at` through `kynviora.delete_owned_item`, writes the
+  audit row on the same connection, and requires fresh step-up. The screen is `DeleteItem`, which
+  enumerates what goes, says what is kept and why, points at archiving for the case that is
+  actually archiving, and never claims anything before the server has answered.
+
+  What the implementation added to the matrix rather than following from it is `DEV-057`: the app
+  role cannot write `deleted_at` at all, so the stamp is a privileged operation for a reason that
+  has nothing to do with wanting a wider hand.
+
+- **Status**: **RESOLVED 2026-09-05**.
 
 ---
 

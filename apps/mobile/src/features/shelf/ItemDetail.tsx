@@ -29,6 +29,7 @@ import {
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
+  ITEM_DELETION_COPY,
   type ScreenState as ScreenStateKind,
 } from '@kynviora/presentation';
 import type { ItemDetailScreenView, ItemFieldResponse } from '@kynviora/contracts';
@@ -48,6 +49,15 @@ export interface ItemDetailProps {
    * no control, not a greyed-out one telling them what they are not trusted with.
    */
   readonly onEdit?: () => void;
+  /**
+   * Opens the deletion confirmation.
+   *
+   * Offered only where the server said this caller owns the profile - which is a different
+   * question from {@link ItemDetailProps.onEdit}, and deliberately so. No caregiver capability
+   * authorises deletion (docs/RETENTION.md section 2), so a caregiver holding every capability
+   * there is sees the edit control and not this one.
+   */
+  readonly onDelete?: () => void;
 }
 
 function FieldRow({ field }: { readonly field: ItemFieldResponse }) {
@@ -65,7 +75,7 @@ function FieldRow({ field }: { readonly field: ItemFieldResponse }) {
   );
 }
 
-export function ItemDetail({ view, state, onClose, onEdit }: ItemDetailProps) {
+export function ItemDetail({ view, state, onClose, onEdit, onDelete }: ItemDetailProps) {
   return (
     <View style={styles.container}>
       <ScreenState state={state} />
@@ -150,6 +160,18 @@ export function ItemDetail({ view, state, onClose, onEdit }: ItemDetailProps) {
           arrive - a control offered over nothing would open a form with no version to send. */}
       {view !== null && view.mayEdit && onEdit !== undefined ? (
         <PrimaryButton label="Change what is recorded" variant="secondary" onPress={onEdit} />
+      ) : null}
+
+      {/* Below the edit control, and last before Back. `18` puts the destructive action where it
+          is hardest to reach by accident on a screen somebody is scrolling. Withheld rather than
+          disabled where the caller does not own the profile (DEC-045), which for this control is
+          every caregiver however much else they may do. */}
+      {view !== null && view.mayDelete && onDelete !== undefined ? (
+        <PrimaryButton
+          label={ITEM_DELETION_COPY.openLabel}
+          variant="secondary"
+          onPress={onDelete}
+        />
       ) : null}
 
       <PrimaryButton label="Back to the shelf" variant="secondary" onPress={onClose} />

@@ -113,6 +113,14 @@ export const PRIVILEGED_REASONS = [
   // security to fall back on.
   'REVIEWER_CONSOLE',
   'ACCOUNT_DELETION',
+  // Deleting a record at somebody's request. Privileged not because the route wants a wider hand
+  // but because the app role cannot write a revocation stamp at all: Postgres applies the SELECT
+  // policies to the new row of an UPDATE that reads the table, and every read predicate filters
+  // `deleted_at IS NULL`, so the row a deletion produces is one the caller may not see
+  // (`DEV-057`). `13` names deletion orchestration among privileged operations for this reason.
+  // The privilege is kept the size of the act: the only thing reached through it is
+  // `kynviora.delete_owned_item`, which re-checks ownership in the statement that writes.
+  'DATA_DELETION',
   'PROVIDER_CREDENTIAL_USE',
   'NOTIFICATION_DISPATCH',
   'IDEMPOTENCY_BOOKKEEPING',

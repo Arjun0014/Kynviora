@@ -109,6 +109,9 @@ export function buildUrl(
 /** Injected so a test can drive the client without a network, and Expo can supply its own. */
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
+/** A success with nothing to describe. Named so the check below reads as a decision. */
+const NO_CONTENT = 204;
+
 export interface TransportOptions {
   readonly config: ApiConfig;
   readonly session: ClientSession;
@@ -186,6 +189,18 @@ export async function request<T>(
 
   if (!response.ok) {
     return classifyError(response.status, parseWireError(payload));
+  }
+
+  if (response.status === NO_CONTENT) {
+    // A `204` is a success that says there is nothing to describe, which is a different fact from
+    // a body that failed to parse. `DELETE /v1/items/:id` answers this way on purpose: a body
+    // naming what was removed would be the one place in the API that hands health content back
+    // after being asked to destroy it.
+    //
+    // Checked before the `undefined` branch below, because a `204` has no body by definition and
+    // would otherwise be reported as a contract violation - a deletion that worked, shown to the
+    // person as a failure, over the one action nobody wants to retry.
+    return { kind: 'OK', value: null as T, correlationId };
   }
 
   if (payload === undefined) {

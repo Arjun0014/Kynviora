@@ -147,6 +147,18 @@ export interface ItemDetailResponse {
    */
   readonly mayRecordDoses: boolean;
   /**
+   * Whether this caller may delete it.
+   *
+   * A third answer rather than one implied by the other two, because deletion is not a
+   * capability. docs/RETENTION.md section 2: no caregiver capability authorises it, so the server
+   * answers this with ownership - a caregiver holding every capability there is reads `false`
+   * here while both of the others are `true`.
+   *
+   * Optional on the wire so a client reading an older server does not fail its own contract
+   * validation; {@link itemDetailScreenView} defaults it to `false`.
+   */
+  readonly mayDelete?: boolean;
+  /**
    * The stored values, keyed as the manual-entry form keys them.
    *
    * Separate from `categoryFields` and `sharedFields`, which are presentation. An editor cannot
@@ -1306,6 +1318,24 @@ export interface KynvioraClient {
    * key would be a second answer to the same question.
    */
   updateItem(itemId: string, body: ItemUpdateBody): Promise<ApiOutcome<ItemUpdated>>;
+  /**
+   * Remove an item, at its owner's request (`16`, DEC-117).
+   *
+   * A different act from archiving, which `updateItem` does: archiving is "I am done with this
+   * and want to keep the record", deletion is "I want this gone". Answering the second with the
+   * first tells somebody their data was removed while it is still on every caregiver's shelf.
+   *
+   * Requires **fresh step-up**, so this is called with an elevated client - `14` names deletion
+   * alongside export and caregiver administration. It also needs no version and no idempotency
+   * key, and neither is an omission: deleting an item that is already deleted is refused as
+   * not-found rather than repeated, so a retry cannot produce a second deletion and a stale copy
+   * cannot delete the wrong thing - the identifier is the whole of what is being named.
+   *
+   * Resolves to `null` on success. The route answers `204` with no body, because a body naming
+   * what was removed would be the one place in this API that hands health content back after
+   * being asked to destroy it.
+   */
+  deleteItem(itemId: string): Promise<ApiOutcome<null>>;
   listAlerts(): Promise<ApiOutcome<AlertsResponse>>;
   /**
    * How supported jurisdictions treat one substance.
@@ -1619,6 +1649,12 @@ export function createClient(options: ClientOptions): KynvioraClient {
     // document PUT could not express "leave this alone".
     updateItem: (itemId, body) =>
       send<ItemUpdated>('PATCH', `/v1/items/${encodeURIComponent(itemId)}`, body),
+
+    deleteItem: (itemId) =>
+      request<null>(transport, {
+        method: 'DELETE',
+        path: `/v1/items/${encodeURIComponent(itemId)}`,
+      }),
 
     // No profile parameter: the route returns what row-level security admits, which is `13`'s
     // "never trust a profile ID in the request as proof of access" applied by construction.

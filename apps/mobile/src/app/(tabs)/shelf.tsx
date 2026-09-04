@@ -54,6 +54,7 @@ import {
 import {
   doseHistory,
   itemDetailScreenView,
+  messageForFailure,
   screenStateForFailure,
   shelfView,
   type DoseHistoryView,
@@ -72,6 +73,7 @@ import { StatusChip } from '@/components/StatusChip';
 import { RecordDose } from '@/features/doses/RecordDose';
 import { AddItem } from '@/features/shelf/AddItem';
 import { EditItem } from '@/features/shelf/EditItem';
+import { DeleteItem } from '@/features/shelf/DeleteItem';
 import { ItemDetail } from '@/features/shelf/ItemDetail';
 import { MedicineSchedules } from '@/features/schedules/MedicineSchedules';
 import { useReminders } from '@/reminders/ReminderProvider';
@@ -81,7 +83,7 @@ import { newIdempotencyKey } from '@/platform/ids';
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
 
 export default function ShelfScreen() {
-  const { client } = useApi();
+  const { client, elevate } = useApi();
   const { activeProfileId } = useProfiles();
   // Read rather than inferred: whether a reminder will actually arrive is the platform's answer,
   // and a screen that offered a schedule without saying notifications are off would promise
@@ -138,6 +140,18 @@ export default function ShelfScreen() {
    * verification chips say how much of it Kynviora actually knows.
    */
   const [editing, setEditing] = useState(false);
+
+  /**
+   * Whether the open item is being deleted.
+   *
+   * Reached from the detail rather than from the row, and for a sharper version of the reason
+   * editing is: a control on the list would put an irreversible action one tap from a scroll, on
+   * a screen where the rows look alike. The detail is where the item is named.
+   */
+  const [deleting, setDeleting] = useState(false);
+  const [deleteState, setDeleteState] = useState<ScreenStateKind | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
+  const [deleted, setDeleted] = useState(false);
 
   /**
    * The filter, as the two questions it actually is.
@@ -353,6 +367,67 @@ export default function ShelfScreen() {
     [client, reloadHistory, queueEdit],
   );
 
+  /**
+   * Delete the open item.
+   *
+   * Elevated for this one request and discarded, exactly as the caregiver removal is (`14`), so
+   * the privileged session never outlives the action. No idempotency key and no version: deleting
+   * an item that is already deleted is refused as not-found rather than repeated, so a retry
+   * cannot produce a second deletion.
+   *
+   * Nothing is applied locally. `12` forbids the client deciding what happened, and a row that
+   * vanished on a failed request would be a false statement about somebody's health record in the
+   * direction that reassures. The shelf is re-read instead.
+   */
+  const onConfirmDelete = useCallback(() => {
+    if (client === null || detailFor === null) return;
+
+    const elevated = elevate();
+    if (elevated === null) {
+      setDeleteState('STEP_UP_REQUIRED');
+      return;
+    }
+
+    const itemId = detailFor.id;
+    setDeleteState('LOADING');
+    setDeleteMessage(null);
+
+    void elevated.deleteItem(itemId).then(
+      (outcome) => {
+        if (outcome.kind === 'OK') {
+          setDeleteState(null);
+          setDeleted(true);
+          // The shelf, not the detail. The detail is about to be closed and re-reading it would
+          // be asking for a row the deletion just made unreadable - a 404 the screen would then
+          // have to explain away.
+          reload();
+          return;
+        }
+        setDeleteState(screenStateForFailure(outcome));
+        setDeleteMessage(messageForFailure(outcome));
+      },
+      () => {
+        setDeleteState('RECOVERABLE_ERROR');
+        setDeleteMessage(null);
+      },
+    );
+  }, [client, detailFor, elevate, reload]);
+
+  /** Leave the deletion screen, whichever way it ended. */
+  const onCloseDelete = useCallback(() => {
+    const wasDeleted = deleted;
+    setDeleting(false);
+    setDeleteState(null);
+    setDeleteMessage(null);
+    setDeleted(false);
+    // A deleted item has no detail left to return to, so the shelf is where "Back" goes. Leaving
+    // the detail open would show the 404 the deletion just created.
+    if (wasDeleted) {
+      setDetailFor(null);
+      setEditing(false);
+    }
+  }, [deleted]);
+
   const onCreateSchedule = useCallback(
     (body: ScheduleBody) => {
       if (client === null || scheduling === null) return;
@@ -483,6 +558,30 @@ export default function ShelfScreen() {
     );
   }
 
+  if (detailFor !== null && deleting) {
+    return (
+      <Screen title="Shelf" intro={detailFor.displayName}>
+        <DeleteItem
+          displayName={detailFor.displayName}
+          itemKind={detailFor.itemKind}
+          onConfirm={onConfirmDelete}
+          onCancel={onCloseDelete}
+          state={deleteState}
+          stateMessage={deleteMessage}
+          deleted={deleted}
+          {...(detailView?.mayEdit === true && !deleted
+            ? {
+                onArchiveInstead: () => {
+                  setDeleting(false);
+                  setEditing(true);
+                },
+              }
+            : {})}
+        />
+      </Screen>
+    );
+  }
+
   if (detailFor !== null && editing && detailView !== null) {
     return (
       <Screen title="Shelf" intro={detailView.displayName}>
@@ -511,6 +610,16 @@ export default function ShelfScreen() {
           onEdit={() => {
             setEditing(true);
           }}
+          {...(detailView?.mayDelete === true
+            ? {
+                onDelete: () => {
+                  setDeleted(false);
+                  setDeleteState(null);
+                  setDeleteMessage(null);
+                  setDeleting(true);
+                },
+              }
+            : {})}
           onClose={() => {
             setDetailFor(null);
             setEditing(false);

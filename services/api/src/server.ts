@@ -66,6 +66,7 @@ import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
 import { registerOperationsRoutes } from './operations.js';
 import { registerSafetyInboxRoutes } from './safetyInbox.js';
 import { registerScheduleRoutes } from './schedule.js';
+import { registerItemDeletionRoutes } from './itemDeletion.js';
 import { registerShadowModeRoutes } from './shadowMode.js';
 
 /**
@@ -1288,6 +1289,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
           version: number;
           may_edit: boolean;
           may_record_doses: boolean;
+          may_delete: boolean;
           identity_verification: string;
           formulation_verification: string;
           batch_verification: string;
@@ -1332,7 +1334,13 @@ export function createServer(options: ServerOptions): FastifyInstance {
                   -- The item kind is not in the predicate, for the same reason 0021's policy has
                   -- no branch - and the screen adds one anyway, because a dose is a medicine's
                   -- idea and buildDoseRecord refuses to build one for a shampoo.
-                  kynviora.has_capability(profile_id, 'RECORD_DOSES') AS may_record_doses
+                  kynviora.has_capability(profile_id, 'RECORD_DOSES') AS may_record_doses,
+                  -- And whether they may delete it, which is not a capability question at all.
+                  -- docs/RETENTION.md section 2: no caregiver capability authorises deletion, so
+                  -- this asks about ownership rather than about a grant. owns_profile consults no
+                  -- grant, which means there is no path through one - including a capability that
+                  -- does not exist yet.
+                  kynviora.owns_profile(profile_id) AS may_delete
              FROM owned_item
             WHERE id = $1 AND deleted_at IS NULL`,
           [params.data.itemId],
@@ -1388,6 +1396,11 @@ export function createServer(options: ServerOptions): FastifyInstance {
         // the grant means - `11` puts the decision here, and the screen asking the same predicate
         // the policy applies is what keeps them from disagreeing.
         mayRecordDoses: row.may_record_doses,
+        // And whether to offer the delete control. Withheld rather than disabled (DEC-045), and
+        // asked as ownership rather than as a capability because deletion is not one: a
+        // caregiver holding every capability there is still sees no control here, which is the
+        // screen agreeing with `kynviora.delete_owned_item` rather than with a guess at it.
+        mayDelete: row.may_delete,
         // The same values again, keyed as the manual-entry form keys them.
         //
         // Not duplication: `categoryFields` and `sharedFields` are presentation - labels, absent
@@ -2515,6 +2528,20 @@ export function createServer(options: ServerOptions): FastifyInstance {
     // their reminders.
 
     registerScheduleRoutes(app, { contextFor, fail });
+
+    // -------------------------------------------------------------------------
+    // DELETE /v1/items/:itemId  (`16` deletion, DEC-117)
+    // -------------------------------------------------------------------------
+    // The other half of Stage 2. `PATCH` could already archive an item and `DEV-032` recorded
+    // that this was being offered where deletion belonged - archiving is "I am done with this",
+    // deletion is "I want this gone", and answering the second with the first tells somebody
+    // their data was removed while it is still on every caregiver's shelf read.
+    //
+    // Kept in its own module because its authorization is unlike every other item route: the
+    // profile owner alone, with fresh step-up, through a privileged write the app role cannot
+    // make at all (`DEV-057`).
+
+    registerItemDeletionRoutes(app, { contextFor, fail });
   }
 
   function registerStaffSurface(): void {

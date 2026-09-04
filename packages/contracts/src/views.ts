@@ -922,6 +922,21 @@ export interface ItemDetailScreenView {
    * does.
    */
   readonly mayRecordDoses: boolean;
+  /**
+   * Whether to offer the delete control at all.
+   *
+   * Not a capability question, which is why it is a third field rather than implied by either of
+   * the other two. `docs/RETENTION.md` section 2: no caregiver capability authorises deletion, so
+   * the server answers this with ownership. A caregiver holding every capability there is reads
+   * `false` here while `mayEdit` and `mayRecordDoses` are both `true`.
+   *
+   * Defaults to `false` where the server did not say, and the cost of that default is the
+   * cheapest of the three: an owner on a projection written by an older build sees no delete
+   * control until their next successful detail read. The opposite default would draw a control
+   * every caregiver would then be refused by, over the one action nobody expects to be able to
+   * retry.
+   */
+  readonly mayDelete: boolean;
   /** Prefill for the edit form. Only string entries survive; anything else reads as absent. */
   readonly editableValues: Readonly<Record<string, string>>;
   readonly stoppedOn: string | null;
@@ -954,6 +969,7 @@ export function itemDetailScreenView(response: ItemDetailResponse): ItemDetailSc
     version: Number.isInteger(response.version) ? response.version : 0,
     mayEdit: response.mayEdit === true,
     mayRecordDoses: response.mayRecordDoses === true,
+    mayDelete: response.mayDelete === true,
     editableValues: editableValues(response.editableValues),
     stoppedOn: typeof response.stoppedOn === 'string' ? response.stoppedOn : null,
   };
