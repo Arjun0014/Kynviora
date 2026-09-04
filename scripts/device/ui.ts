@@ -147,34 +147,63 @@ export function tapNamed(name: NameMatch): boolean {
 const SCROLL_STEP_PX = 800;
 const SCROLL_ANCHOR_Y = 1_900;
 
-export function scrollDown(): void {
+/** The shortest swipe the platform reliably treats as a scroll rather than a tap. */
+const MIN_SCROLL_PX = 120;
+/** The longest, kept inside the screen so the gesture starts and ends on the list. */
+const MAX_SCROLL_PX = 1_500;
+/** Where a row's heading is put when a run needs the whole row below it in view. */
+const SCROLL_TOP_MARGIN_PX = 400;
+
+/**
+ * How long a scroll gesture takes, and why it is not shorter.
+ *
+ * A quick `input swipe` is a **fling**: Android adds momentum, and the list keeps going after the
+ * finger has lifted. Measured on this emulator, an eight-hundred-pixel swipe over 250ms moved the
+ * shelf by fourteen hundred - so the "deliberately shorter than the screen" step this file
+ * documents was in fact longer than the screen, and consecutive views did not overlap after all.
+ * That is how a row heading could vanish in the same movement that revealed its own controls, and
+ * how a control between two views could be missed entirely.
+ *
+ * Eight hundred milliseconds is slow enough that Android treats the gesture as a drag and the
+ * content follows the finger. Every scroll here now moves the distance it says it moves.
+ */
+const SCROLL_DURATION_MS = 800;
+
+function swipe(fromY: number, toY: number): void {
   adb([
     'shell',
     'input',
     'swipe',
     '540',
-    String(SCROLL_ANCHOR_Y),
+    String(fromY),
     '540',
-    String(SCROLL_ANCHOR_Y - SCROLL_STEP_PX),
-    '250',
+    String(toY),
+    String(SCROLL_DURATION_MS),
   ]);
-  // Long enough for the fling to settle. A dump taken while it is still moving comes back with no
+  // Long enough for the list to settle. A dump taken while it is still moving comes back with no
   // root, which is indistinguishable from a screen with nothing on it.
   sleep(1_500);
 }
 
+export function scrollDown(): void {
+  swipe(SCROLL_ANCHOR_Y, SCROLL_ANCHOR_Y - SCROLL_STEP_PX);
+}
+
+/**
+ * Scroll down by a chosen distance rather than by the standard step.
+ *
+ * Used where the distance is known from the layout - bringing a row's heading to the top of the
+ * list, say - because a fixed step is either too small to reveal what is wanted or large enough to
+ * carry away the thing that identified it. Only worth having because the gesture is a drag rather
+ * than a fling; under a fling the distance asked for and the distance moved are different numbers.
+ */
+export function scrollDownBy(pixels: number): void {
+  const distance = Math.max(MIN_SCROLL_PX, Math.min(pixels, MAX_SCROLL_PX));
+  swipe(SCROLL_ANCHOR_Y, SCROLL_ANCHOR_Y - distance);
+}
+
 export function scrollUp(): void {
-  adb([
-    'shell',
-    'input',
-    'swipe',
-    '540',
-    String(SCROLL_ANCHOR_Y - SCROLL_STEP_PX),
-    '540',
-    String(SCROLL_ANCHOR_Y),
-    '250',
-  ]);
-  sleep(1_500);
+  swipe(SCROLL_ANCHOR_Y - SCROLL_STEP_PX, SCROLL_ANCHOR_Y);
 }
 
 /**
@@ -338,19 +367,30 @@ export function scrollToAndTapBelow(
 
   for (let step = 0; step < maxSteps; step += 1) {
     const nodes = currentNodes();
-    if (nodes !== null) {
-      const node = nodeNamedBelow(nodes, name, anchor);
-      if (node !== null) {
-        tapAt(centreOf(node));
-        sleep(1_500);
-        return true;
-      }
-      if (nodeNamed(nodes, anchor) === null) return false;
+    if (nodes === null) {
+      sleep(1_500);
+      continue;
     }
-    const before = nodes === null ? null : signatureOf(nodes);
-    scrollDown();
-    const after = signatureOfScreen();
-    if (after !== null && after === before) return false;
+
+    const node = nodeNamedBelow(nodes, name, anchor);
+    if (node !== null) {
+      tapAt(centreOf(node));
+      sleep(1_500);
+      return true;
+    }
+
+    const anchorNode = nodeNamed(nodes, anchor);
+    if (anchorNode === null) return false;
+
+    // Bring the heading to the top of the list rather than scrolling a fixed step. A fixed step
+    // large enough to reveal a row's controls is also large enough to carry its heading off the
+    // top - and the heading is the only thing identifying which row the control belongs to, so
+    // losing it is losing the answer. That is not hypothetical: a shelf row is around fourteen
+    // hundred pixels tall, one standard step is eight hundred, and the first medicine's heading
+    // sits low enough that one step removed it and revealed its button in the same movement.
+    const distance = anchorNode.bounds.top - SCROLL_TOP_MARGIN_PX;
+    if (distance <= MIN_SCROLL_PX) return false;
+    scrollDownBy(distance);
   }
   return false;
 }
