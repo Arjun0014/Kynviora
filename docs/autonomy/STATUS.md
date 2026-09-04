@@ -13,14 +13,14 @@ Last updated: 2026-09-04
 | ------------------ | ------------------------------------------------------------------- |
 | **Current stage**  | Stage 4 - Medicine Care Workflows                                   |
 | **Current phase**  | Phase 4.1 and 4.2 complete; Stage 4 complete                        |
-| **Last completed** | A dose recorded with no signal, arriving once (`DEV-048`)           |
+| **Last completed** | Recording a dose is its own capability (DEC-116, `BLK-011` closed)  |
 | **Branch**         | `master`                                                            |
-| **Latest commit**  | `feat(sync): a dose taken with no signal, and the history it keeps` |
+| **Latest commit**  | `feat(access): the grant that said one thing and permitted another` |
 | **Baseline tag**   | `baseline-spec-only`                                                |
 
 ## Verification state
 
-- **4018 tests passing**, 0 failing, across 141 files.
+- **4062 tests passing**, 0 failing, across 143 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -35,13 +35,18 @@ npm run verify
 - `doseAuthorization.test.ts` asks the same question of the one table a phone can now write to
   while offline: a stranger, a revoked caregiver, and a revoked caregiver replaying an operation
   minted while their grant stood are all refused by the **route**, because `11` puts that decision
-  on the server rather than on a client's willingness to stop draining. It also pins the one answer
-  that is wrong and undecided (`DEV-049`, `BLK-011`).
+  on the server rather than on a client's willingness to stop draining. It used to pin one answer
+  that was wrong and undecided; since DEC-116 it measures the resolution instead - a view-only
+  caregiver refused, a caregiver granted `RECORD_DOSES` admitted, and `MANAGE_MEDICINES` refused
+  as well, because the capabilities are a set rather than a ladder.
+- `db/doseEvent.test.ts` asks it of the policy alone, as the non-superuser role, and adds the one
+  thing no behavioural test can show: that migration `0021` left every existing grant carrying
+  exactly the capabilities its owner chose.
 
 ### On a device
 
-Ten harnesses need an attached Android device or emulator and are **not** part of `npm run
-verify`. Their judgements are, though: 305 of the tests above exercise the rules they apply, so a
+Eleven harnesses need an attached Android device or emulator and are **not** part of `npm run
+verify`. Their judgements are, though: 330 of the tests above exercise the rules they apply, so a
 rule cannot change without CI noticing even where no hardware exists.
 
 Every one of them wakes the screen first (`prepareDeviceForDriving`). An emulator left alone turns
@@ -195,6 +200,36 @@ attention (`02`); and a filter matching nothing still says it is showing none of
 carries the coverage statement underneath - which is where somebody would most reasonably conclude
 their shelf had been cleared. Last run **7/7 PASS**.
 
+```bash
+npm run verify:device:doseaccess
+```
+
+Seven checks on the capability that was split out of `VIEW_MEDICINES` (DEC-116, `BLK-011`). The
+policy half is four lines of SQL; what needs a device is the half on a screen, because a refusal
+the screen does not know about is a person filling in a form for nothing - and `13` will not let
+the API say "you are not allowed", so the refusal arrives as the same 404 an unknown item gives.
+
+`DOSE-1` and `DOSE-2` are the ones only a phone can answer. The invitation form has to **offer**
+recording doses as its own choice - a correct policy with no checkbox leaves an owner able to
+express it only by also granting "Edit medicines", which is the over-granting the split exists to
+avoid - and the review step has to file it under what the caregiver may **change**. `DOSE-2` is
+measured by where the sentence falls relative to the heading rather than by the sentence alone,
+because both headings are on the same screen and a check for the words is answered by the wrong
+one.
+
+`DOSE-4` and `DOSE-5` are the same caregiver, the same request, either side of the grant: refused
+with 404 holding only "Medicines", admitted with 201 once "Record doses" is granted, on one session
+with no sign-out. One profile and one caregiver means one live grant at a time (trap 10), so the
+two states are reached in sequence rather than by two identities - which would be comparing two
+people rather than one permission.
+
+`DOSE-6` is the regression this change could most plausibly have caused: the owner's own control,
+on the owner's own row. Last run **7/7 PASS**, with the history moving from 7 events to 8.
+
+It establishes its own `adb reverse` tunnels and refuses to run without them, which is not
+housekeeping - a phone that cannot reach the API draws "No connection" on every screen, and a check
+looking for a control reads that as the control having been withheld (trap 197).
+
 A check that could not be performed reports `INCONCLUSIVE` and fails the run. Two of the storage
 checks are absence tests, and an absence test over an empty input passes trivially (DEC-102).
 
@@ -234,7 +269,7 @@ the API will not distinguish them.
 | Area                                                        | State                                                       |
 | ----------------------------------------------------------- | ----------------------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine  | Complete, 94 tests                                          |
-| Database schema, 19 migrations, full RLS                    | Complete, 311 tests incl. threats A1/A2/A3                  |
+| Database schema, 21 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                  |
 | Catalog engine, capture pipeline, Trust Passport            | Complete, 178 tests                                         |
 | Regulatory registry, Citation Gate, Lens                    | Complete, 72 tests                                          |
 | Safety rule engine with replay; schedule and refill         | Complete, 88 tests                                          |
@@ -264,7 +299,8 @@ the API will not distinguish them.
 | The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)           |
 | Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
 | Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
-| Device harnesses: ten, from storage to a safety screen      | Complete, 305 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
+| Device harnesses: eleven, storage to a capability split     | Complete, 330 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
+| Recording a dose: `RECORD_DOSES`, its own capability        | Complete, 47 tests; 7/7 on a device (DEC-116)               |
 | Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                  |
 | CI pipeline                                                 | Written; not yet run on a real runner                       |
 
@@ -284,7 +320,8 @@ None.
 See `BLOCKERS.md`. None of them stops further work; each has a port, a local adapter, and
 documented configuration requirements.
 
-`BLK-002` is **resolved** as of 2026-09-03 and no longer appears here.
+`BLK-002` is **resolved** as of 2026-09-03 and `BLK-011` as of 2026-09-04 (DEC-116); neither
+appears here.
 
 | ID      | Class                               | Blocks                                        |
 | ------- | ----------------------------------- | --------------------------------------------- |
@@ -300,49 +337,61 @@ documented configuration requirements.
 
 ## Immediate next task
 
-**Every scenario `19` names that does not need a feature this build lacks is now covered.** Eleven
-of fourteen, with eight harnesses, and the three that remain each name a blocker rather than an
-effort.
+**`BLK-011` is closed.** Recording a dose is `RECORD_DOSES`, its own capability, and no grant that
+already existed acquired it (DEC-116, migration `0021`). `19`'s device coverage is unchanged at 13
+of 14 - the fourteenth is sign-up/sign-in and waits on `BLK-010` - but there is an eleventh
+harness, because the half of that decision that lives on a screen is not visible from the API suite.
 
-What this session should be read for is not the count. Six defects were fixed and **five of them
-were invisible from the code**:
+Two things this session should be read for, neither of which is the count.
 
-- **No write the app makes had ever worked on a phone.** `crypto.randomUUID()` in eight call sites,
-  on an engine with no `crypto` (`DEV-043`). Every gate was green because `apps/**` is outside the
-  test run and the lint run, and the one gate it had was being told a phone is a browser.
-- **A queued edit was not sent on the launch it was waiting for**, and each such launch spent one of
-  its retry attempts (`DEV-044`).
-- **A medicine with no schedule could never be given one** (`DEV-045`), and the Care tab could not
-  be scrolled, so nobody could finish inviting a caregiver (`DEV-046`).
-- **A Visit Pack's idempotency key was minted per press**, so a retry made a second copy of somebody's
-  medicines (`DEV-047`).
+**A migration that keeps working software working can be the defect.** Backfilling `RECORD_DOSES`
+onto every grant holding `VIEW_MEDICINES` would have kept every existing caregiver recording doses
+and would have been `DEV-049` arriving by migration instead of by policy - a capability in
+somebody's grant that they never granted. It is also unsound in a way no later fix repairs, because
+the set of owners who would have chosen it is not derivable from a list that never offered it. The
+test asserts each grant's capabilities **whole** rather than counting who holds the new one, since
+a count would also pass if a migration had taken something away.
 
-The thing that found all of them was driving the app. The thing that will find the next one is the
-same, until `apps/**` has tests.
+**A guard that never fires is invisible to the run it is guarding.** `verifyCaregiverAccess.ts`
+read `caregiverUserId` where the route sends `granteeUserId`, and the field was _optional_, so
+TypeScript said nothing: `activeGrantsFor` counted zero whatever the database held, `CAR-0` could
+never refuse to run, `CAR-3` confirmed revocation against the same zero, and the cleanup revoked
+nothing (`DEV-050`). It took a second harness against the same route to find it, because that one
+needs two grants in sequence and therefore needs the cleanup to actually work.
 
 ## Next three planned tasks
 
-1. **The three `19` scenarios that are not waiting on a feature.** Camera and file permissions, and
-   a low-storage run, are work rather than a decision - `verify:device` already knows how to drive
-   the app and read `dumpsys`. The other three (`Sign-up/sign-in`, `scan`, `OCR`) unblock with
-   `BLK-010`, `04` Phase 2.2 and `BLK-007` respectively and cannot be brought forward.
+1. **Tests over `apps/**`, which still has none.** Every defect found by driving the app has been
+   in that tree, it is excluded from `vitest.config.ts` and ignored by `eslint.config.js`, and the
+   mobile typecheck plus one source-scanning check are the whole of its automated coverage
+   (`DEV-043`). The shelf now withholds a control on a server-sent flag, which is exactly the kind
+   of logic a component test would hold still and a device run costs twelve minutes to answer.
 2. **Open the sheets in `verify:device:a11y`.** It measures the five destinations at font scale 1
    and 2, and `DEV-046` was a sheet three taps in whose controls were drawn below the fold with no
    way to scroll to them. "Every control is reachable" is currently measured where the controls are
-   fewest. This is the gate that would have caught it.
-3. **Tests over `apps/**`, which has none.** Six defects were fixed this session and every one was
-   in that tree: it is excluded from `vitest.config.ts` and ignored by `eslint.config.js`, so the
-   mobile typecheck and one source-scanning check are the whole of its automated coverage
-   (`DEV-043`). Everything else about it is found by running it.
+   fewest - and the invitation form has just gained a row, so the sheet is longer than it was.
+3. **The low-storage run**, which is the one remaining `19` scenario that is work rather than a
+   decision. `verify:device` already knows how to drive the app and read `dumpsys`.
 
-**Not next, and why.** Wiring the remaining offline writes. `dose_event` and `owned_item` CREATE
-still wait on the phases they depend on, and `allergy_record` CREATE waits on a route that takes an
-idempotency key - a journal replays on its own, which is not the hand-retry that route's contract
-reasoned about (`DEV-038`). Queueing them anyway to make the queue look finished is the global
-last-write-wins the specification refuses, one entity at a time.
+**Not next, and why.** Wiring the remaining offline writes. `owned_item` CREATE still waits on the
+phase it depends on, `allergy_record` CREATE waits on a route that takes an idempotency key - a
+journal replays on its own, which is not the hand-retry that route's contract reasoned about
+(`DEV-038`) - and `profile` CREATE is refused with its reasoning written down (DEC-115). Queueing
+them anyway to make the queue look finished is the global last-write-wins the specification
+refuses, one entity at a time.
 
 ## Recent decisions worth knowing
 
+- **DEC-116** - recording a dose is `RECORD_DOSES`, and **no existing grant acquired it**.
+  `VIEW_MEDICINES` stays strictly read-only, `MANAGE_MEDICINES` is not a way in either - the
+  capabilities are a set, not a ladder - and migration `0021` widens the vocabulary while writing
+  to no row of `caregiver_grant`. The screen has to be told separately, because `13` will not let
+  the API say "you are not allowed" and a refusal the screen does not know about is a person
+  filling in a form for nothing: `mayRecordDoses` is answered with the predicate the policy
+  applies, per item on the detail and per page on the shelf. An absent value narrows to `false`,
+  which costs an offline owner the control until their first shelf read after an update
+  (`DEV-051`) and is still the safe direction - the opposite would queue a write the drain refuses
+  hours later.
 - **DEC-114** - an operation nothing can send has not been attempted. `drainPendingOperations` asks
   `canSend` before `send` and reports what it skipped, untouched: there is no `ApiOutcome` meaning
   "nothing was asked", and answering `OFFLINE` charged an attempt for the app having been opened.
@@ -1369,3 +1418,20 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      `INCONCLUSIVE`: "no reminders were pending before the update, so none had to come back". That
      is the check working, not failing, and reading it as a regression wastes a run. Give the
      update harness an active schedule first, or run it before the other two.
+197. `adb kill-server` takes every reverse tunnel with it, and a phone that cannot reach the API
+     draws "No connection" on every screen it has. A check looking for a control then reports the
+     control as **withheld**, which on a screen that legitimately withholds controls is
+     indistinguishable from a finding about the app - `verify:device:doseaccess` first reported the
+     dose control as missing from the owner's own shelf row over a device that had simply lost
+     `tcp:3000`. Restarting the adb server is also the fix for trap 184, so the two arrive
+     together: restart it after the emulator is up, then re-establish `tcp:3000` and `tcp:8081`.
+     A harness that drives the app should register them itself and refuse to run if it cannot,
+     rather than leaving it as a precondition somebody has to remember.
+198. An **optional** field on a response type is a check that has stopped looking, and nothing will
+     tell you. `verifyCaregiverAccess.ts` declared `readonly caregiverUserId?: string` where
+     `GET /v1/caregiver-grants` sends `granteeUserId`, so every comparison evaluated
+     `undefined !== CAREGIVER_ID`: the grant count was zero whatever the database held, the
+     precondition that refuses to run when an earlier run left a live grant could never fire, and
+     the cleanup revoked nothing (`DEV-050`). TypeScript is content because an absent optional
+     field is a legal value. Declare the fields a harness reads as **required**, so a rename is a
+     compile error - and be suspicious of a guard that has never once fired.

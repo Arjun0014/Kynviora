@@ -3838,3 +3838,83 @@ making for a case that begins with somebody adding a household member while out 
 
 **Sources.** `12` (optimistic application of low-risk user-owned changes); `13` (conflict policy;
 ordering); `07`; DEC-110; `DEV-048`.
+
+---
+
+## DEC-116 - Recording a dose is its own capability, and no existing grant acquired it
+
+**Context.** `BLK-011` / `DEV-049`. A caregiver granted only `VIEW_MEDICINES` could
+`POST /v1/dose-events` and write into the owner's dose history, while the invitation screen listed
+that capability under **viewing** and described it as allowing no changes. Two deliberate decisions
+that contradicted each other: `0004` scoped every child of `owned_item` by reachability and `0020`
+restated it for this table specifically ("`dose_event` is a record of something that happened and
+is reachability-scoped on purpose"), while `packages/presentation/src/caregiver.ts` groups
+capabilities into viewing and changing "because that is the distinction a person actually cares
+about when approving access".
+
+`DEV-048` made it urgent rather than theoretical: a dose became a thing a phone can queue offline,
+so an operation minted days earlier is replayed by a drain against whatever the grant says when it
+lands. `services/api/src/doseAuthorization.test.ts` measured the gap against the real database
+rather than inferring it.
+
+**Options.** (a) Tighten the policy onto `MANAGE_MEDICINES`. (b) Change the copy so
+`VIEW_MEDICINES` admits the write. (c) Add a `RECORD_DOSES` capability.
+
+**Decision.** (c), with four parts, all of them load-bearing:
+
+1. `VIEW_MEDICINES` stays strictly read-only. Its sentence now says so out loud.
+2. `RECORD_DOSES` is a new member of `CAREGIVER_CAPABILITIES`, ordered between `VIEW_MEDICINES`
+   and `MANAGE_MEDICINES` because that is where it sits in what it permits. Migration `0021`
+   replaces `dose_event_insert` to require it and widens both capability CHECK constraints.
+3. `MANAGE_MEDICINES` continues to govern medicines and schedules, and is **not** a way in: the
+   capabilities are a set, not a ladder.
+4. **No grant is backfilled.** `0021` writes to no row of `caregiver_grant`.
+
+**Rationale.** Option (a) makes the screen true and makes the most ordinary act of caring for
+somebody - noting that they took a tablet - require the grant that can also delete their medicines
+and deactivate their reminders, which is `08.2`'s separate scoping failing in the other direction.
+Option (b) leaves one grant meaning two things, which is what `18` asks the review screen to
+prevent. (c) is the largest change and the only one where each grant says one thing.
+
+The fourth part is the one that could most easily have been got wrong in the name of continuity.
+Backfilling `RECORD_DOSES` onto every grant that held `VIEW_MEDICINES` would keep every existing
+caregiver working and would be `DEV-049` arriving by migration instead of by policy: a capability
+in somebody's grant that they did not grant. It is also unsound in a way no later fix repairs -
+the set of owners who _would_ have chosen it is not derivable from a list that never offered it.
+So an existing view-only caregiver loses the dose write they had, which is the point, and an owner
+who wants them to keep it grants it and the screen then says so.
+
+`MANAGE_MEDICINES` not implying it is the same argument reflected. Nesting them would make the
+policy read a capability nobody ticked.
+
+**Consequences.** A caregiver granted only "Medicines" is refused a dose write by the route, as the
+same 404 an unknown item gives - `13` does not let the API be an oracle and there is deliberately
+no outcome meaning "you are not allowed" (trap 89). The screen therefore has to withhold the
+control rather than let somebody fill in a form for nothing, so `GET /v1/items/:id` and
+`GET /v1/items` both answer `mayRecordDoses`, asked with the predicate the policy applies. It is a
+page-level answer on the list, because a capability is granted per profile and the list is filtered
+to one.
+
+The client narrows an absent value to `false`. That is deny-by-default (`14`) and it has a bounded
+cost: a projection row written by the previous build carries no `mayRecordDoses`, so after an
+update an owner who is offline sees no dose control until the first successful shelf read. The
+opposite default would draw the control for every view-only caregiver reading a stale projection,
+and `DEV-048`'s whole point is that a dose somebody recorded must not vanish - a queued write the
+server later refuses is exactly that, discovered hours afterwards. The safe direction is the one
+that withholds.
+
+Correcting a dose is covered by covering creation, because `dose_event` is append-only: a
+correction is a further event, refused as a rewrite by `dose_event_append_only` for every role
+including the owner. The capability's sentence says so, because "correcting" sounds like the
+smaller permission and is in fact the same one.
+
+**Verified.** `db/doseEvent.test.ts` (10 checks, real RLS as the non-superuser role, including
+that no existing grant gained the capability), `services/api/src/doseAuthorization.test.ts`
+(rewritten from pinning the contradiction to measuring the resolution),
+`npm run verify:device:doseaccess` - **7/7 PASS** on a Pixel 7 / Android 16 emulator, covering both
+halves: the server refusing and admitting the same request either side of the grant, and the
+owner's own control still recording from the phone.
+
+**Sources.** `07` (the capability vocabulary); `08.2` (separate scoping); `11`, `12`
+(server-authoritative access control); `13` (no oracle); `18` (a person must understand what they
+are approving); `04` Phase 4.3; `BLK-011`; `DEV-049`; migrations `0004`, `0020`, `0021`.

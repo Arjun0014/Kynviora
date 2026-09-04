@@ -223,20 +223,31 @@ implemented, the exact configuration required is documented, and independent wor
 
 ## BLK-011 - Which caregiver capability may record a dose has not been decided
 
-- **Class**: `LEGAL_REVIEW` (product/consent scope, not law) - recorded here because it blocks a
-  code change rather than because it needs a lawyer.
-- **Status**: OPEN - documented, behaviour pinned
-- **Blocks**: closing `DEV-049`; any claim that a caregiver grant means exactly what the screen
-  says it means.
-- **Detail**: a caregiver granted only `VIEW_MEDICINES` can write into the owner's dose history.
-  `0004` and `0020` scope `dose_event` writes by reachability, deliberately and in writing; the
-  invitation screen groups `VIEW_MEDICINES` under "viewing" and describes it as allowing no
-  changes, equally deliberately. Both positions are defensible and they contradict each other. The
-  three ways out - tighten the policy, change the copy, or add a `RECORD_DOSES` capability - each
-  change what an existing grant means, which is a product decision rather than an engineering one.
-- **Workaround in place**: nothing is changed, and the behaviour is pinned by
-  `services/api/src/doseAuthorization.test.ts`, which runs against the real database with row-level
-  security in force. The same file measures what is **not** at risk: a stranger is refused, a
-  revoked caregiver is refused, and a revoked caregiver replaying an operation minted while their
-  grant stood is refused. So the exposure is bounded to somebody the owner chose to give access to.
-- **To resolve**: choose one of the three, then write the reasoning where the test fails.
+- **Class**: `LEGAL_REVIEW` (product/consent scope, not law) - recorded here because it blocked a
+  code change rather than because it needed a lawyer.
+- **Status**: **RESOLVED 2026-09-04** (DEC-116)
+- **Was blocking**: closing `DEV-049`; any claim that a caregiver grant means exactly what the
+  screen says it means.
+- **Detail (historical)**: a caregiver granted only `VIEW_MEDICINES` could write into the owner's
+  dose history. `0004` and `0020` scoped `dose_event` writes by reachability, deliberately and in
+  writing; the invitation screen grouped `VIEW_MEDICINES` under "viewing" and described it as
+  allowing no changes, equally deliberately. Both positions were defensible and they contradicted
+  each other. The three ways out - tighten the policy, change the copy, or add a `RECORD_DOSES`
+  capability - each changed what an existing grant means, which is a product decision rather than
+  an engineering one.
+- **How it resolved**: the third way, decided as a product question and recorded as DEC-116.
+  `VIEW_MEDICINES` stays strictly read-only, `MANAGE_MEDICINES` keeps managing medicines and
+  schedules and is not a way in, and writing into a dose history is `RECORD_DOSES` - a new
+  capability that **no existing grant acquired**, because migration `0021` widens the vocabulary
+  and backfills nothing. An owner grants it explicitly or the write is refused.
+
+  | Where            | What changed                                                                 |
+  | ---------------- | ---------------------------------------------------------------------------- |
+  | Vocabulary       | `RECORD_DOSES` between `VIEW_MEDICINES` and `MANAGE_MEDICINES`               |
+  | Migration `0021` | `dose_event_insert` requires it; both capability CHECKs widened; no backfill |
+  | API              | `mayRecordDoses` on the item detail and on the shelf page                    |
+  | Screen           | its own checkbox, filed under what the caregiver may **change**              |
+  | Device           | `npm run verify:device:doseaccess` - 7/7 PASS                                |
+
+  What was never at risk is unchanged and still measured: a stranger, a revoked caregiver, and a
+  revoked caregiver replaying an operation minted while their grant stood are all refused.

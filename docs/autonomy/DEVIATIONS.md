@@ -1784,12 +1784,80 @@ its own limit on pending local notifications, which is lower than Android's and 
   Whichever is chosen changes what an existing grant means, which is why it is not a change to make
   while passing through.
 
-- **Temporary or permanent**: temporary. It is a decision waiting to be made, not a limit of the
+- **Temporary or permanent**: temporary. It was a decision waiting to be made, not a limit of the
   environment.
-- **Risk**: moderate and bounded. It requires an accepted, unrevoked grant - a stranger is refused
-  and so is a revoked caregiver, both measured - so the exposure is to somebody the owner chose to
-  give access to, doing something the screen did not say they could. No safety rule and no
-  authorization decision depends on a dose event, and nothing about the medicine record changes.
-- **Required future work**: pick one of the three. `doseAuthorization.test.ts` pins today's
-  behaviour, so whichever is chosen will fail that file first - which is where the reasoning should
-  be written down.
+- **Risk (historical)**: moderate and bounded. It required an accepted, unrevoked grant - a stranger
+  was refused and so was a revoked caregiver, both measured - so the exposure was to somebody the
+  owner chose to give access to, doing something the screen did not say they could. No safety rule
+  and no authorization decision depends on a dose event, and nothing about the medicine record
+  changed.
+- **Status**: **RESOLVED 2026-09-04** by the third option (DEC-116, `BLK-011` closed).
+
+  `RECORD_DOSES` is its own capability, sitting between `VIEW_MEDICINES` and `MANAGE_MEDICINES` in
+  the vocabulary and in what it permits. Migration `0021` replaces `dose_event_insert` to require
+  it, widens both capability CHECK constraints, and **backfills nothing** - so an existing
+  view-only caregiver loses the write, which is the point, and no grant silently acquires a
+  capability nobody granted. `MANAGE_MEDICINES` is not a way in either: the capabilities are a set,
+  not a ladder.
+
+  The screen half moved with it. `VIEW_MEDICINES` now says it allows no changes, `RECORD_DOSES` is
+  its own checkbox filed under what the caregiver may **change**, and the invitation's opening line
+  says "see and do" rather than "see" - it was already imprecise while the list carried the editing
+  capabilities, and this is what made it wrong.
+
+  Measured three ways: `db/doseEvent.test.ts` against real RLS as the non-superuser role,
+  `doseAuthorization.test.ts` rewritten from pinning the contradiction to measuring the resolution,
+  and `npm run verify:device:doseaccess` at **7/7 PASS** on a Pixel 7 / Android 16 emulator -
+  including the same request answering 404 without the capability and 201 with it, on one session
+  with no sign-out.
+
+---
+
+## DEV-050 - A harness guard that counted grants was reading a field the API has never sent
+
+- **Affected specification**: `19` (device E2E coverage of caregiver invite/revoke), DEC-102 (a
+  check that could not look reports `INCONCLUSIVE`).
+- **Expected behaviour**: `CAR-0` refuses to run when a grant from an earlier run is still live,
+  and `CAR-3` confirms revocation by counting what is left.
+- **Implemented behaviour**: both read zero, always. `verifyCaregiverAccess.ts` declared
+  `readonly caregiverUserId?: string` on its `Grant` interface where `GET /v1/caregiver-grants`
+  sends `granteeUserId`, so every comparison evaluated `undefined !== CAREGIVER_ID`,
+  `activeGrantsFor` counted nothing whatever the database held, and `clearPreviousRuns` skipped
+  every row it was written to revoke.
+- **How it was found**: by writing a second harness against the same route. `verify:device:doseaccess`
+  needs two grants in sequence for one caregiver, so its cleanup has to work - and its second run
+  found a live `VIEW_MEDICINES` grant its first run had created and believed it had revoked.
+- **Reason**: the field was **optional**, so TypeScript had nothing to say about a name that had
+  never existed. A required field would have been a compile error the day it was written.
+- **Risk**: the two checks were vacuous, not wrong. `CAR-4` measures access loss by counting items
+  the caregiver can see and is a real measurement, and the revocation it measures is driven on the
+  device - so the harness was still testing revocation. What it was not doing was noticing a grant
+  left behind by a crashed run, which is the state that would make the whole scenario measure
+  nothing.
+- **Fix**: `granteeUserId`, required, in both harnesses, with the reasoning written where the
+  interface is. `verify:device:caregiver` re-runs **5/5 PASS** with `CAR-0` and `CAR-3` now reading
+  real counts.
+- **Status**: **RESOLVED 2026-09-04**.
+
+---
+
+## DEV-051 - A shelf read from a projection written by an older build offers no dose control
+
+- **Affected specification**: `12` (screens read local state immediately), `04` Phase 4.3, `14`
+  (deny by default), DEC-116.
+- **Expected behaviour**: an owner offline can record a dose, which is `DEV-048`'s whole point.
+- **Implemented behaviour**: after an update, and before the first successful `GET /v1/items`, an
+  owner reading the shelf from the encrypted projection sees no "Record what happened" control.
+  The stored body is the last thing the server said, and a body written by the previous build
+  carries no `mayRecordDoses` - which `shelfView` narrows to `false`.
+- **Reason**: deliberate, and the alternative is worse. Treating an absent flag as permission would
+  draw the control for every view-only caregiver reading a stale projection, and the write is then
+  queued and refused hours later by the drain - a dose somebody was told had been saved,
+  disappearing without their knowing, which is the exact failure `DEV-048` exists to prevent. Deny
+  by default costs a control for a bounded window; the opposite costs a record.
+- **Risk**: low and self-healing. The window closes at the first shelf read with signal, the app
+  fetches the shelf on open, and the owner's own recording path through the server is unaffected -
+  `verify:device:doseaccess` `DOSE-6` measures it at 7 events to 8.
+- **Required future work**: none proposed. It would be closed by versioning the projection payload
+  so a row from an older shape is discarded rather than partially trusted, which is a change worth
+  making when a second field needs it rather than for this one.

@@ -3814,3 +3814,112 @@ engineering. The remaining genuinely unblocked device work in that section is a 
 And the dose-write authorization conflict is documented rather than resolved (`DEV-049`,
 `BLK-011`): three answers are defensible, each changes what an existing grant means, and choosing
 one in passing is the thing the operating brief forbids.
+
+---
+
+## 2026-09-04 - The grant that said one thing and permitted another
+
+Resumed from a clean tree at `15d997d` with `npm run verify` green at 4018 tests across 141 files -
+the stated baseline, confirmed rather than assumed. No Kynviora process was running: no `tsx watch`
+API, no Metro, no adb server, no emulator (trap 175's count came back zero rather than four). One
+repo writer, one branch, nothing to reconcile. Booted the Pixel 7 emulator, and restarted the adb
+server **after** it was up, because a server started first registers reverse tunnels that forward
+nothing (trap 184).
+
+### The decision, and the part of it that was easy to get wrong
+
+`BLK-011` / `DEV-049`: a caregiver granted only `VIEW_MEDICINES` could write into somebody's dose
+history, while the invitation screen listed that grant under "viewing" and said it allowed no
+changes. Two decisions, both deliberate, both in writing, contradicting each other - `0004` and
+`0020` scoping `dose_event` by reachability on purpose, and `caregiver.ts` grouping capabilities by
+whether they change anything on purpose.
+
+The product decision resolves it the third way `DEV-049` set out, and it has four parts. Three are
+ordinary: `VIEW_MEDICINES` stays read-only, `RECORD_DOSES` becomes its own capability, and
+`MANAGE_MEDICINES` keeps managing medicines. The fourth is the one worth reading twice - **no
+existing grant acquires it**.
+
+That part is a non-event and it took the most care to get right, because every instinct about a
+migration says to keep working software working. Backfilling `RECORD_DOSES` onto every grant
+holding `VIEW_MEDICINES` would have kept every existing caregiver recording doses, and it would
+have been `DEV-049` all over again, arriving by migration instead of by policy: a capability in
+somebody's grant that they never granted. It is also unsound in a way no later fix repairs, because
+the set of owners who _would_ have ticked it is not derivable from a list that never offered it. So
+`0021` widens the vocabulary, replaces one policy, and writes to no row of `caregiver_grant` - and
+`db/doseEvent.test.ts` asserts each grant's capabilities whole rather than counting who holds the
+new one, because a count would also pass if a migration had taken something away.
+
+The mirror of that is `MANAGE_MEDICINES` not implying `RECORD_DOSES`, which looks wrong until you
+say it out loud: nesting them would make the policy read a capability nobody ticked. Capabilities
+are a set, not a ladder, and both tests say so.
+
+### Where the change actually had to reach
+
+The policy is four lines. What took the session is that a refusal the screen does not know about is
+a person filling in a form for nothing - and `13` will not let the API say "you are not allowed",
+so the refusal arrives as the same 404 an unknown item gives (trap 89). The screen therefore has to
+be told separately, with the predicate the policy applies rather than a guess: `mayRecordDoses` on
+`GET /v1/items/:id`, and on `GET /v1/items` as **one boolean for the page**, because a capability
+is granted per profile and the list is filtered to one. A per-item answer would be the same value
+repeated and would invite a screen to believe two medicines belonging to one person could differ.
+
+The client narrows an absent value to `false`, and that has a real cost worth naming: a projection
+row written by the previous build carries no `mayRecordDoses`, so an owner who updates and then
+goes offline sees no dose control until the first shelf read with signal (`DEV-051`). The opposite
+default would draw the control for every view-only caregiver reading a stale projection, queue the
+write, and have the drain refuse it hours later - a dose somebody was told had been saved,
+vanishing without their knowing, which is precisely what `DEV-048` exists to prevent. Deny by
+default costs a control for a bounded window. The other way costs a record.
+
+### What a device found that nothing else would have
+
+`verify:device:doseaccess` is a new harness, seven checks, and it drives the half that lives on a
+screen: the invitation form has to _offer_ the narrower choice, and the review step has to file it
+under what the caregiver may **change**. A correct policy with no checkbox is not a fix - it leaves
+an owner able to express "record doses" only by also granting "edit medicines", which is the
+over-granting the split exists to avoid. `DOSE-2` is measured positionally, by where the sentence
+falls relative to the heading, because both headings are on the same screen and a check for the
+words is answered by the wrong one.
+
+Its first run reported `DOSE-6` as **the dose control missing from the owner's own shelf row**,
+which is exactly the regression this change could most plausibly cause. It was not. The device had
+lost its `adb reverse` tunnel to the `adb kill-server` earlier in the session, every screen said
+"No connection", and a check looking for a control read that as the control having been withheld.
+The harness now establishes both tunnels itself and refuses to run if it cannot - a precondition
+nobody should have to remember, and one whose absence produces a finding about the app.
+
+Its second run found something real, and in shipped code. `verifyCaregiverAccess.ts` declares
+`readonly caregiverUserId?: string` on its grant type where the route sends `granteeUserId`, so
+every comparison evaluated `undefined !== CAREGIVER_ID`: `activeGrantsFor` counted **zero** whatever
+the database held, `CAR-0`'s guard against a grant left behind by a crashed run could never fire,
+`CAR-3` confirmed revocation by reading the same zero, and `clearPreviousRuns` revoked nothing
+(`DEV-050`). The field being _optional_ is why TypeScript never said anything. It is required in
+both harnesses now, so the next rename is a compile error rather than a check that quietly stops
+looking - and `verify:device:caregiver` re-runs 5/5 with `CAR-0` and `CAR-3` reading real counts
+for the first time.
+
+The way it surfaced is worth keeping: it took a second harness against the same route to find it,
+because this scenario needs two grants in sequence for one caregiver and therefore needs the
+cleanup to actually work. A guard that never fires is invisible to the run it is guarding.
+
+### State
+
+4062 tests across 143 files, `npm run verify` exit 0.
+
+`verify:device:doseaccess` **7/7 PASS** on a Pixel 7 / Android 16 emulator: the owner records
+(`DOSE-0`), a caregiver granted only "Medicines" reads six events and is refused with 404
+(`DOSE-4`), the form offers both choices separately (`DOSE-1`), the review screen files recording
+under "able to change" (`DOSE-2`), the invitation carries exactly what was ticked (`DOSE-3`), the
+same request answers 404 without the capability and 201 with it on one session with no sign-out
+(`DOSE-5`), and the owner's own control still moves the history from 7 events to 8 (`DOSE-6`).
+
+`verify:device:caregiver` 5/5 after the `DEV-050` fix, with `CAR-0` and `CAR-3` reading real grant
+counts for the first time.
+
+`verify:device:offline` **8/8 PASS**, which is the regression that mattered most: a dose recorded
+with no signal still goes out under the key it first used, the server answers `idempotent-replay`
+to two of three creates, and exactly one event exists. Tightening the insert policy did not disturb
+the queue it protects.
+
+`BLK-011` is closed and `DEV-049` with it. `DEV-050` and `DEV-051` are new and both are recorded
+with what they cost.
