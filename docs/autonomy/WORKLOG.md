@@ -3648,3 +3648,169 @@ covered at the start of this session to eleven.
 Six defects were fixed, and the common thread is worth stating once: every one of them was in
 `apps/**`, which is excluded from the test run and ignored by the lint config, and five of the six
 were invisible from reading the code. What found them was driving the app.
+
+---
+
+## 2026-09-04 - The two scenarios that were never waiting on hardware, and the dose nobody kept
+
+Resumed from a clean tree at `974d7d5` with `npm run verify` green at 3933/137. One API, one Metro,
+one adb server, no emulator - booted one, and killed an orphaned `node scratchpad/probe.mjs` left
+over from the previous session so the process count stayed honest (trap 175's discipline).
+
+### The device scenarios, and what "the remaining three" turned out to mean
+
+`DEV-040` listed eleven of `19`'s fourteen device scenarios as covered and the remaining three as
+blocked. Reading them one at a time, that was one scenario's worth of truth and two scenarios'
+worth of imprecision.
+
+**Personal care** was recorded as blocked on `BLK-007`, and the scan and OCR halves genuinely are.
+The manual half is Phase 2.3, is built, and had never been driven on a phone. `PC-4` is the check
+worth having: the barcode, the batch code and the expiry are left blank and the ingredient
+declaration is filled in, so three limits have to be stated afterwards and the fourth must not be.
+A screen printing the same four sentences whatever somebody typed passes every other reading of
+"the limits are stated", while telling a person their ingredient list is missing when it is on
+file. `PC-5` is `19`'s "confirm" step as this build can have it, and it inverts: with no extraction
+there is nothing to confirm, so what has to be true is that a typed record is never presented as
+confirmed. Measured on the item's own screen against a record the server holds as `UNVERIFIED`.
+6/6 PASS.
+
+**Safety alert open/resolution** was recorded as blocked on `BLK-006`, and half of it is. Opening a
+published alert needs a publication, and seeding one to make a device test go green is the exact
+failure the governance chapter exists to prevent - so `verify:device:safety` does not, and says so
+in its own report. What it drives instead is `23` D-014, which is a safety requirement in its own
+right and the one a person is exposed to today: Kynviora has nothing to say about this shelf and
+has to say so without that reading as an all-clear. Seven checks, including the two that were
+wrong first - a state chip looked for by its bare label is answered by the filter of the same name,
+and a "no counting" rule that rejected any digit fails the screen for its own legitimate "Showing 0
+of 5 items on this shelf." 7/7 PASS.
+
+`19` now reads thirteen of fourteen with something measured, and `DEV-040` says at length what that
+number is not: five of the thirteen are partial, each with the missing half named, and the
+fourteenth has nothing at all because Phase 1.1 has not chosen an auth provider.
+
+### The offline mutation audit, taken one table at a time
+
+The instruction was to wire only what `13`'s conflict policy allows, and the useful finding was how
+little that leaves. Of twelve sync entity types: four are `SERVER_WINS` and `PendingSyncProvider`
+refuses them before writing a row; three have no client feature to queue from; two are wired for
+the mutation that is safe and deliberately not for the one that is not; one needed a decision
+rather than a rule. That left `dose_event`. The whole table and its reasoning is `DEV-048`.
+
+**`profile` was the one that needed deciding** (DEC-115). Its policy is `ASK_USER`, so the journal
+would have accepted it, and there is a feature. But a conflict policy answers who wins when two
+versions disagree; it does not answer whether the client can show the result, and for a create
+those are different questions. A queued profile exists under an identifier this phone invented, and
+every read in the app is the server's answer - so the person would appear in the switcher, be
+selectable, and have every screen behind them permanently empty. That is worse than the refusal it
+would replace.
+
+**`dose_event` was simply missing, and it is the one with a person on the other end.** `13` resolves
+it `MERGE_BY_ID` and the table's own comment says why. `04` Phase 4.3 makes it an exit criterion:
+an event created offline may be uploaded more than once, and a duplicate sync must not create a
+duplicate event. The route had held up its end since it was written. The client had not - `onRecord`
+treated `OFFLINE` as an answer, so somebody in a kitchen with no signal recorded a dose, was told
+Kynviora could not reach the server, and the record was gone. The sentence for the case had been
+written and never used: `DOSE_COPY.offlineNote` sat unreferenced in the presentation package.
+
+Run C of `verify:device:offline` swallows the answer rather than cutting the network, and the check
+says why: with no journal at all the swallowed request still commits, so a run that merely counted
+rows afterwards would pass an app that kept nothing. Measured: three dose creates under one key,
+`idempotent-replay` on two, exactly one event. The harness is now 8/8.
+
+`scripts/checks/queueableSenders.test.ts` is the gate that keeps the audit true. `queue` already
+refuses a `SERVER_WINS` type, which is exactly why a sender registered for `caregiver_grant` would
+fail nothing today - it would sit there looking correct until somebody relaxed the refusal for an
+unrelated reason. The check reads `PendingSenders.tsx`, which `npm run verify` otherwise never
+looks at.
+
+### A grant that says "viewing" and permits a write
+
+Wiring `dose_event` to the offline queue changed who can reach that table and when: a queued
+operation is replayed by a drain days later, against whatever the grant says at the moment it
+lands. `11` puts that decision on the server, so the question was whether the **route** refuses -
+and `services/api/src/doseAuthorization.test.ts` now measures it against the real database with
+row-level security in force.
+
+Three of the four answers are the right ones. A stranger is refused, a revoked caregiver is
+refused, and a revoked caregiver replaying an operation whose key was minted while their grant
+still stood is refused - which is the exact shape an offline journal produces.
+
+The fourth is not. A caregiver granted only `VIEW_MEDICINES` can write into the owner's dose
+history, and the invitation screen puts that capability under **viewing** with **changing** empty,
+because its description carries `allowsChanges: false`. Two deliberate decisions, made in different
+places, that contradict each other: `0004` scoped every child of `owned_item` by reachability and
+`0020` restated it for this table in as many words - "`dose_event` is a record of something that
+happened and is reachability-scoped on purpose" - while the screen groups capabilities into viewing
+and changing "because that is the distinction a person actually cares about when approving access".
+
+Both positions are defensible and the resolution changes what an existing grant means, so it is
+`DEV-049` and `BLK-011` rather than a policy edited in passing. The three ways out are to tighten
+the policy, to change the copy, or to give the thing a caregiver most often does a capability of
+its own. The test pins today's behaviour, so whichever is chosen fails that file first - which is
+where the reasoning should be written.
+
+### Four harness defects, and two that had been wrong from the beginning
+
+**The emulator's screen goes off.** A display that is off has no view hierarchy, and
+`uiautomator dump` answers "null root node" to every read - byte for byte what it answers
+mid-transition. So `scrollTo` reads it as "keep going", `waitForNamed` waits out its deadline, and
+a run spends twenty minutes deciding a control is missing from a screen nobody was looking at. The
+first check to fail then reads as a finding about the app. `prepareDeviceForDriving` now wakes the
+screen and keeps it awake (trap 189).
+
+**A short `input swipe` is a fling.** This one had been wrong since `ui.ts` was written. The file
+says its step is "deliberately much shorter than the screen" so consecutive views overlap; measured,
+an 800px swipe over 250ms moved the shelf about 1400px, so the step was longer than the screen and
+the guarantee had never held. A control between two views is never seen, and - the failure that
+found it - a row's heading is carried off the top in the same movement that reveals its own
+controls. An 800ms swipe is a drag and moves the distance it says (trap 190).
+
+**Every shelf row draws an identically named control.** A plain lookup for "Record what happened"
+opens whichever row is first in the hierarchy, so a run records a dose against the wrong medicine
+while reporting the right name. `nodeNamedBelow` scopes a control to its row heading, and
+`scrollToAndTapBelow` brings that heading to the top before looking, because a shelf row is taller
+than any fixed step (trap 192).
+
+**A control that is only just on screen is not a control you can press**, and this one was hiding
+behind the fling. `scrollTo` stops the moment a name is anywhere in the hierarchy, and
+`uiautomator` reports visible bounds - so a Save button entering view from the bottom is a
+thirty-pixel strip whose centre is under the tab bar. The tap goes to whatever is drawn there, the
+form stays open, nothing errors, and the run reports **FAIL - the form accepted every value and the
+save produced nothing** about an app that saves perfectly well when the button is pressed. It only
+appeared once the scroll stopped overshooting, which is the uncomfortable part: the harness had been
+relying on a bug in its own scrolling to hit its targets. `scrollToAndTap` now checks
+`isFullyVisible` - the reading the accessibility harness already uses - and nudges the control clear
+of the edge it is cut off at (trap 194).
+
+`AddItem` gives its `TextInput` the same accessible name as the label above it, unlike
+`SetUpHousehold`, whose input announces "Name. <help>" against a label of "Name". It happens to work
+because `nodeNamed` prefers a clickable node and an Android `EditText` reports itself clickable, but
+it is luck rather than design (trap 191).
+
+And one repeat worth naming as such: a launch Metro dropped was reported as **a save that produced
+nothing**, by a check that only read the server afterwards. The previous session fixed the same
+shape in the offline harness. It is now a parameter rather than a habit - `coldStart` retries once
+and lives in `ui.ts`, and `personalCareCreatedCheck` takes a `submitted` flag so a run that never
+reached the form says so instead of describing what a screen did (trap 195).
+
+### State
+
+4018 tests across 141 files, `npm run verify` exit 0. All ten device harnesses re-run against a
+Pixel 7 / Android 16 emulator after the scroll change, and all ten green: `verify:device` 7/7,
+`verify:device:a11y` 34/34, `verify:device:reminders` 9/9, `verify:device:update` 6/6,
+`verify:device:offline` 8/8, `verify:device:profile` 4/4, `verify:device:caregiver` 5/5,
+`verify:device:visitpack` 5/5, `verify:device:personalcare` 6/6, `verify:device:safety` 7/7. Their
+judgements are covered by 305 tests that need no device.
+
+One thing that reads like a regression and is not, recorded as trap 196: `verify:device:update`
+run straight after `verify:device:offline` or `verify:device:reminders` reports `UPD-5` as
+inconclusive, because the first deactivates every schedule in its cleanup and the second ends with
+a `pm clear`. There are then no pending alarms for the update to preserve. Given an active schedule
+it is 6/6, which is what the numbers above are.
+
+What the session did not do, and why. `19`'s sign-up/sign-in/recovery stays at nothing measured,
+because Phase 1.1 has not chosen an authentication provider (`BLK-010`) and inventing one is not
+engineering. The remaining genuinely unblocked device work in that section is a low-storage run.
+And the dose-write authorization conflict is documented rather than resolved (`DEV-049`,
+`BLK-011`): three answers are defensible, each changes what an existing grant means, and choosing
+one in passing is the thing the operating brief forbids.

@@ -13,14 +13,14 @@ Last updated: 2026-09-04
 | ------------------ | ------------------------------------------------------------------- |
 | **Current stage**  | Stage 4 - Medicine Care Workflows                                   |
 | **Current phase**  | Phase 4.1 and 4.2 complete; Stage 4 complete                        |
-| **Last completed** | Offline writes, measured arriving on a device once and only once    |
+| **Last completed** | A dose recorded with no signal, arriving once (`DEV-048`)           |
 | **Branch**         | `master`                                                            |
-| **Latest commit**  | `feat(device): an edit made with no signal, and the proof it lands` |
+| **Latest commit**  | `feat(sync): a dose taken with no signal, and the history it keeps` |
 | **Baseline tag**   | `baseline-spec-only`                                                |
 
 ## Verification state
 
-- **3933 tests passing**, 0 failing, across 137 files.
+- **4018 tests passing**, 0 failing, across 141 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 
@@ -32,11 +32,16 @@ npm run verify
 - The mobile app typechecks against the real Expo SDK 57 / RN 0.86 / React 19.2 toolchain.
 - `main.test.ts` boots real API processes on real ports against a persisted database, so role
   switching, the request GUC and the RLS policies are exercised together rather than mocked.
+- `doseAuthorization.test.ts` asks the same question of the one table a phone can now write to
+  while offline: a stranger, a revoked caregiver, and a revoked caregiver replaying an operation
+  minted while their grant stood are all refused by the **route**, because `11` puts that decision
+  on the server rather than on a client's willingness to stop draining. It also pins the one answer
+  that is wrong and undecided (`DEV-049`, `BLK-011`).
 
 ### On a device
 
 Ten harnesses need an attached Android device or emulator and are **not** part of `npm run
-verify`. Their judgements are, though: 265 of the tests above exercise the rules they apply, so a
+verify`. Their judgements are, though: 305 of the tests above exercise the rules they apply, so a
 rule cannot change without CI noticing even where no hardware exists.
 
 Every one of them wakes the screen first (`prepareDeviceForDriving`). An emulator left alone turns
@@ -81,18 +86,29 @@ cover is a build whose local schema differs from the one on disk (`DEV-042`).
 npm run verify:device:offline
 ```
 
-Six checks on an edit made with no signal, and the sixth is the one that cannot be faked. The first
-five drive the ordinary chain: a schedule is saved with the API switched off, the app's process is
-killed - `am kill` after backgrounding, because Android will not kill a foreground process at all -
-the network comes back, and the app is launched **once**. The queued create has to go out on that
-launch, and nothing may be left in the journal afterwards.
+Eight checks on an edit made with no signal, across the two entity types the journal carries.
+
+The first five drive the ordinary chain: a schedule is saved with the API switched off, the app's
+process is killed - `am kill` after backgrounding, because Android will not kill a foreground
+process at all - the network comes back, and the app is launched **once**. The queued create has to
+go out on that launch, and nothing may be left in the journal afterwards.
 
 `OFF-4` then runs the same scenario with the request _forwarded_ and its answer destroyed. The
 server commits; the phone cannot tell that from being offline and queues; and the replay must carry
 the same idempotency key and leave exactly one live schedule. A client minting a fresh key passes
 every other check and leaves somebody being told twice, at the same minute, to take the same tablet
-(DEC-111). Last run **6/6 PASS**, with three creates under one key, `idempotent-replay` on two of
-them, and one schedule.
+(DEC-111).
+
+`OFF-6` and `OFF-7` do the same to a **recorded dose**, which is the second thing the queue carries
+and was wired this session (`DEV-048`). `OFF-6` reads the screen: it has to say the dose is on this
+phone and will be sent, and it must not say "Recorded." - the shorter sentence is the one that
+stops somebody recording it again. `OFF-7` counts. The answer is swallowed rather than the network
+cut, on purpose: with no journal at all the swallowed request still commits, so a run that merely
+counted rows afterwards would pass an app that kept nothing. Two creates under one key, with the
+server answering `idempotent-replay` to the second, is the shape only a replay produces.
+
+Last run **8/8 PASS**: three schedule creates under one key leaving one schedule, and three dose
+creates under one key leaving one event.
 
 The switch between the phone and the API is a separate process on purpose (`apiSwitchServer.ts`):
 `sleep` here is `Atomics.wait`, which blocks the event loop for most of a run, and a server sharing
@@ -248,7 +264,7 @@ the API will not distinguish them.
 | The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)           |
 | Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
 | Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
-| Device harnesses: ten, from storage to a safety screen      | Complete, 265 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
+| Device harnesses: ten, from storage to a safety screen      | Complete, 305 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
 | Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                  |
 | CI pipeline                                                 | Written; not yet run on a real runner                       |
 
@@ -1292,7 +1308,12 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      boots its own PGlite in a fresh `mkdtemp` directory, so it is not trap 175's contention. It
      passed alone and the next full run was green. Re-run before investigating - but re-run rather
      than assuming, because the failure is indistinguishable from a real one.
-188. An emulator left alone turns its screen off, and a screen that is off has no view hierarchy.
+188. Do not use Node's `fetch` between long synchronous `sleep`s without allowing for a dead
+     connection. The device harnesses block the event loop for forty-five seconds at a time, Fastify
+     closes the idle keep-alive connection well before that, and the next call reuses the corpse and
+     fails with `ECONNRESET` - which crashes a run for a reason that has nothing to do with the app.
+     Send `connection: close` and retry.
+189. An emulator left alone turns its screen off, and a screen that is off has no view hierarchy.
      `uiautomator dump` answers `ERROR: null root node returned by UiTestAutomationBridge` to every
      read, which is byte for byte what it answers mid-transition - so `scrollTo` reads it as "keep
      going", `waitForNamed` waits out its whole deadline, and a run spends twenty minutes deciding
@@ -1300,24 +1321,51 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      reads as a finding about the app. `prepareDeviceForDriving` sends `KEYCODE_WAKEUP` and
      `svc power stayon true` at the start of every run. `dumpsys window | grep mCurrentFocus`
      answering `null` while `pidof` returns a live process is the signature.
-189. Do not look for a form field by the label above it. `AddItem` gives the `TextInput` the same
+190. `adb shell input swipe` with a short duration is a **fling**, not a drag. Android adds
+     momentum after the finger lifts, and on this emulator an 800px swipe over 250ms moved the
+     shelf by about 1400px - so `ui.ts`'s "deliberately shorter than the screen" step was in fact
+     longer than the screen, and consecutive views did not overlap. Two failures come out of that
+     and both look like the app: a control sitting between two views is never seen, and a row's
+     heading is carried off the top in the same movement that reveals its own controls, so a
+     row-scoped lookup loses the only thing identifying the row. An 800ms swipe is treated as a
+     drag and moves the distance it says it moves. Measure this before trusting any distance-based
+     scrolling: compare a node's `bounds.top` before and after one swipe.
+191. Do not look for a form field by the label above it. `AddItem` gives the `TextInput` the same
      `accessibilityLabel` the label `Text` renders, so both nodes carry the same accessible name -
      unlike `SetUpHousehold`, whose input announces "Name. <help>" against a label of "Name" and is
      therefore distinguishable by prefix. `nodeNamed` prefers a clickable node and an Android
      `EditText` reports itself clickable, so this happens to work; a field that did not would be
      typed into by tapping its label, silently.
-190. A list draws one identically-named control per row. Every shelf row carries "Open this item",
+192. A list draws one identically-named control per row. Every shelf row carries "Open this item",
      so a plain lookup opens whichever row is first in the hierarchy and the run measures the wrong
      medicine while reporting the right name. `nodeNamedBelow` scopes the control to the row
-     heading - and has to scroll first, because `scrollTo` stops as soon as the heading is anywhere
-     on screen, including the ten clipped pixels at the bottom edge where a newly added item lands
-     with its button not drawn at all.
-191. Do not check for a state chip by its label alone on the Safety screen. The state filters carry
+     heading - and `scrollToAndTapBelow` brings that heading to the top of the list before looking,
+     because a shelf row is taller than one standard step and a fixed step loses the heading in the
+     same movement that reveals its controls.
+193. Do not check for a state chip by its label alone on the Safety screen. The state filters carry
      exactly the same strings as the chips - "Not enough information" is both a filter and a line's
      state - so a check for the label is answered by the filter over a screen whose lines show no
      state at all. Compare the whole announcement, which only a line carries.
-192. Do not use Node's `fetch` between long synchronous `sleep`s without allowing for a dead
-     connection. The device harnesses block the event loop for forty-five seconds at a time, Fastify
-     closes the idle keep-alive connection well before that, and the next call reuses the corpse and
-     fails with `ECONNRESET` - which crashes a run for a reason that has nothing to do with the app.
-     Send `connection: close` and retry.
+194. A control that is only just on screen is not a control you can press. `scrollTo` stops the
+     moment a name is anywhere in the hierarchy and `uiautomator` reports **visible** bounds, so a
+     Save button entering view from the bottom is a thirty-pixel strip whose centre is under the
+     tab bar - and the tap lands on whatever is drawn there. The form stays open, nothing errors,
+     and the run reports a save that produced nothing about an app that saves perfectly well. It
+     was invisible until trap 190 was fixed, because the fling's six-hundred-pixel overshoot had
+     been carrying every target well inside the viewport: the harness was relying on a bug in its
+     own scrolling to hit the things it aimed at. `scrollToAndTap` now checks `isFullyVisible`
+     before pressing and nudges the control clear of the edge it is cut off at.
+195. A launch that did not happen must never be described as something a screen did. Metro rebuilds
+     the bundle on a cold start and one hiccup leaves the app never started; a check that only reads
+     the server afterwards then reports "the form accepted every value and the save produced
+     nothing" about a run in which nothing was pressed. This is the second harness to have made
+     exactly that mistake, so it is a parameter now rather than a habit: `coldStart` retries once
+     and lives in `ui.ts`, and a check that depends on a run having been driven takes a flag saying
+     whether it was (`personalCareCreatedCheck`'s `submitted`).
+196. The device harnesses are not independent of each other, and the order they run in changes what
+     they can measure. `verify:device:offline` deactivates every schedule on the seeded medicine in
+     its `finally`, and `verify:device:reminders` ends with a `pm clear` (trap 177) - so
+     `verify:device:update` run after either of them finds no pending alarms and reports `UPD-5`
+     `INCONCLUSIVE`: "no reminders were pending before the update, so none had to come back". That
+     is the check working, not failing, and reading it as a regression wastes a run. Give the
+     update harness an active schedule first, or run it before the other two.

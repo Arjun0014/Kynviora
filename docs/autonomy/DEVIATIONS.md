@@ -1660,3 +1660,136 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Required future work**: none for this route. The general question - which creates mint per
   intent and which per press - is worth a sweep, and the two known-correct examples are `AddItem`
   and now this.
+
+---
+
+## DEV-048 - Which mutations may be made with no signal, taken one table at a time
+
+- **Affected specification**: `12` (a pending-operation journal; "only low-risk user-owned changes"
+  may be applied before the server has agreed), `13` (conflict policy per entity type), `03` group
+  J (what has to work with no network), `04` Phase 4.3.
+- **Expected behaviour**: every change a person can make offline is either queued and delivered
+  exactly once, or refused at the time with the reason said out loud. Nothing is kept that cannot
+  be sent, and nothing is dropped that could have been.
+- **Implemented behaviour**: four of the twelve sync entity types carry a sender. This entry is the
+  audit that decided the other eight, because "not wired" was doing the work of four different
+  reasons and only one of them was a gap.
+
+  | Entity type            | `13` policy        | Queued?           | Why                                                                                           |
+  | ---------------------- | ------------------ | ----------------- | --------------------------------------------------------------------------------------------- |
+  | `medicine_schedule`    | ASK_USER           | CREATE, UPDATE    | Driven end to end on a device (`verify:device:offline`, Runs A and B)                         |
+  | `owned_item`           | ASK_USER           | UPDATE only       | A queued CREATE reaches Phase 8.5 as a second copy of one medicine (`DEV-038`)                |
+  | `allergy_record`       | ASK_USER           | UPDATE only       | `addHealthFact` carries no idempotency key by design, so a replay makes a second row unbidden |
+  | `dose_event`           | MERGE_BY_ID        | **CREATE, now**   | The gap this audit found. There is no edit or delete route and none is wanted                 |
+  | `condition_record`     | ASK_USER           | No feature        | Conditions are not built (`DEV-035`)                                                          |
+  | `field_assertion`      | CREATE_NEW_VERSION | No feature        | Produced by extraction, which has no provider (`BLK-007`)                                     |
+  | `marketed_formulation` | CREATE_NEW_VERSION | No feature        | Catalog-side; no client write path exists                                                     |
+  | `profile`              | ASK_USER           | Refused (DEC-115) | A client-minted profile id is one every read route answers as absent                          |
+  | `review_task`          | SERVER_WINS        | Refused by policy | `queue` refuses it before writing anything (DEC-110)                                          |
+  | `caregiver_grant`      | SERVER_WINS        | Refused by policy | Authorization is the server's (`11`, `12`)                                                    |
+  | `profile_assessment`   | SERVER_WINS        | Refused by policy | Safety is the server's (DEC-010)                                                              |
+  | `alert_publication`    | SERVER_WINS        | Refused by policy | Nothing may be published from a phone (`BLK-006`)                                             |
+
+- **Reason**: the audit was asked for as "wire only the mutations the policy allows", and the useful
+  finding was how few that leaves. Four types are refused by `13` itself and `PendingSyncProvider`
+  already turns them away before writing a row. Three have no feature to queue from. Two are wired
+  for the mutation that is safe and deliberately not for the one that is not. That left `profile`,
+  which needed a decision rather than a rule (DEC-115), and `dose_event`, which was simply missing.
+
+  **`dose_event` was the gap, and it is the one with a person on the other end of it.** `13`
+  resolves it `MERGE_BY_ID` and the table's own comment says why: "offline-created events with
+  stable IDs. Merging by ID is what makes an offline retry safe." `04` Phase 4.3 goes further and
+  makes it an exit criterion - an event created offline may be uploaded more than once, and a
+  duplicate sync must not create a duplicate event. The route had held up its end since it was
+  written, answering a repeated operation ID with the row it already had.
+
+  The client had not. `onRecord` treated `OFFLINE` as an answer, so somebody in a kitchen with no
+  signal took a tablet, recorded it, was told Kynviora could not reach the server, and the record
+  was gone. The history a doctor reads was then missing a dose that was taken, with nothing
+  anywhere saying so - and the sentence for the case had been written and never used:
+  `DOSE_COPY.offlineNote`, "Recorded on this phone. It will reach Kynviora when you are back
+  online", sat unreferenced in the presentation package.
+
+  It is queued under the key the failed attempt used rather than a fresh one, for DEC-111's reason.
+  `OFFLINE` is inferred from a failed fetch, which is also what a request that arrived and lost its
+  answer looks like - and a second dose in a history somebody reads as a record of what they did is
+  a false record, not a duplicate row.
+
+  **What now stops a sender being registered for a table it must not be.** `PendingSyncProvider`
+  refuses a `SERVER_WINS` type at `queue`, which means a sender registered for `caregiver_grant`
+  would queue nothing today and fail nothing - it would sit there looking correct until somebody
+  relaxed the refusal for an unrelated reason. `scripts/checks/queueableSenders.test.ts` reads
+  `PendingSenders.tsx` and refuses a registration for any type whose policy is `SERVER_WINS`, for
+  a name that is not an entity type at all, and for the same type registered twice. It runs in
+  `npm run verify`, which `apps/**` otherwise does not.
+
+- **Temporary or permanent**: the table is permanent as a record of the reasoning; three of its
+  rows move when the features they name are built.
+- **Risk**: low. The four wired types are the four `12` describes as low-risk and user-owned, and
+  three of the four are now measured on a device.
+- **Required future work**: `condition_record` when Phase 3 builds conditions (`DEV-035`);
+  `field_assertion` when an extraction provider exists (`BLK-007`); `profile` if and when the app
+  can render a person the server has not seen (DEC-115). `owned_item` CREATE stays refused until
+  Phase 8.5's reconciliation can tell a queued create from a duplicate medicine.
+
+---
+
+## DEV-049 - A grant the screen lists under "viewing" lets somebody write into a dose history
+
+- **Affected specification**: `07` (the caregiver capability vocabulary and what each grant means),
+  `11` and `12` (access control is server-authoritative; a grant is a specific set of
+  capabilities), `18` (a person must be able to understand what they are approving), `04` Phase 4.3.
+- **Expected behaviour**: what the invitation screen tells somebody they are granting is what the
+  database permits.
+- **Implemented behaviour**: a caregiver granted only `VIEW_MEDICINES` can `POST /v1/dose-events`
+  and write into the owner's dose history. The invitation review screen puts that capability under
+  **viewing** and leaves **changing** empty, because `CAPABILITY_DESCRIPTIONS.VIEW_MEDICINES`
+  carries `allowsChanges: false` and its sentence is "They can see the medicines recorded for this
+  person."
+
+  Measured, not inferred: `services/api/src/doseAuthorization.test.ts` runs against the real
+  database with row-level security in force and records both halves - the read a view-only
+  caregiver is supposed to have, and the write they are not supposed to.
+
+- **Reason**: two deliberate decisions made in different places and never put side by side.
+
+  `0004` scoped every child of `owned_item` by reachability - "child records inherit reachability
+  from their owned item, so there is exactly one place where shelf access is decided" - and `0020`
+  restated it for this table specifically while tightening the one next to it: "`dose_event` is a
+  record of something that happened and is reachability-scoped on purpose, but `review_task` writes
+  need MANAGE_CARE and `allergy` writes need MANAGE_MEDICINES."
+
+  That is a coherent position. A person looking after somebody, who can see their medicines,
+  recording that a tablet was taken is the ordinary case of caregiving, and requiring an "edit
+  medicines" grant for it would make the common thing need the dangerous permission.
+
+  The screen takes the opposite position, equally deliberately: it groups capabilities into viewing
+  and changing "because that is the distinction a person actually cares about when approving
+  access". Under that grouping, `VIEW_MEDICINES` promises no writes.
+
+  Both cannot be right, and the gap is not academic - a dose history is what somebody hands a
+  doctor, and an entry nobody made is a false record of what a person did.
+
+- **Why it is being documented rather than fixed**: the resolution is a product decision with three
+  defensible answers, and inventing one in passing is exactly what the operating brief forbids.
+
+  1. **Tighten the policy** so a dose write needs a capability marked `allowsChanges: true`. The
+     screen becomes true and the common caregiving case needs "edit medicines".
+  2. **Change the copy** so `VIEW_MEDICINES` says it also permits recording a dose. The policy is
+     untouched and the grant stops claiming to be read-only.
+  3. **Add a capability** - `RECORD_DOSES` - so the thing a caregiver most often does has a name of
+     its own. Cleanest, and the largest change: a new member of `CAREGIVER_CAPABILITIES`, the
+     `CHECK` constraint in `0002`, a migration, and copy.
+
+  Whichever is chosen changes what an existing grant means, which is why it is not a change to make
+  while passing through.
+
+- **Temporary or permanent**: temporary. It is a decision waiting to be made, not a limit of the
+  environment.
+- **Risk**: moderate and bounded. It requires an accepted, unrevoked grant - a stranger is refused
+  and so is a revoked caregiver, both measured - so the exposure is to somebody the owner chose to
+  give access to, doing something the screen did not say they could. No safety rule and no
+  authorization decision depends on a dose event, and nothing about the medicine record changes.
+- **Required future work**: pick one of the three. `doseAuthorization.test.ts` pins today's
+  behaviour, so whichever is chosen will fail that file first - which is where the reasoning should
+  be written down.

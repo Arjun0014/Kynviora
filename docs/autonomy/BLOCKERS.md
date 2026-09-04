@@ -220,3 +220,23 @@ implemented, the exact configuration required is documented, and independent wor
 - **To resolve**: complete Phase 1.1, add a `PASSKEY` (or equivalent) member to
   `AuthenticationStrength`, implement the challenge, and remove the development member from the
   console's accepted strengths.
+
+## BLK-011 - Which caregiver capability may record a dose has not been decided
+
+- **Class**: `LEGAL_REVIEW` (product/consent scope, not law) - recorded here because it blocks a
+  code change rather than because it needs a lawyer.
+- **Status**: OPEN - documented, behaviour pinned
+- **Blocks**: closing `DEV-049`; any claim that a caregiver grant means exactly what the screen
+  says it means.
+- **Detail**: a caregiver granted only `VIEW_MEDICINES` can write into the owner's dose history.
+  `0004` and `0020` scope `dose_event` writes by reachability, deliberately and in writing; the
+  invitation screen groups `VIEW_MEDICINES` under "viewing" and describes it as allowing no
+  changes, equally deliberately. Both positions are defensible and they contradict each other. The
+  three ways out - tighten the policy, change the copy, or add a `RECORD_DOSES` capability - each
+  change what an existing grant means, which is a product decision rather than an engineering one.
+- **Workaround in place**: nothing is changed, and the behaviour is pinned by
+  `services/api/src/doseAuthorization.test.ts`, which runs against the real database with row-level
+  security in force. The same file measures what is **not** at risk: a stranger is refused, a
+  revoked caregiver is refused, and a revoked caregiver replaying an operation minted while their
+  grant stood is refused. So the exposure is bounded to somebody the owner chose to give access to.
+- **To resolve**: choose one of the three, then write the reasoning where the test fails.

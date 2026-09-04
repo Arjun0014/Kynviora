@@ -3797,3 +3797,44 @@ something created offline being meaningless before the create lands - is within 
 and `canSend` refuses whole types rather than individual operations.
 
 **Sources.** `12`; `13` (bounded retry); DEC-109; `DEV-044`.
+
+---
+
+## DEC-115 - A person cannot be added to a household with no signal, and a conflict policy is not why
+
+**Context.** `13` resolves `profile` to `ASK_USER`, so `isOptimisticallyApplicable` returns true
+for it and `PendingSyncProvider.queue` would accept a queued create. Every other type the policy
+permits either is wired, has no feature behind it, or is refused for a reason written next to it
+(`DEV-048`). This one had a feature, a permitting policy, and no sender, which is the shape of an
+oversight.
+
+**Decision.** Adding a person stays online-only. `SetUpHousehold` reports `OFFLINE` as a failure
+the person can retry rather than queueing it, and no sender is registered for `profile`.
+
+**Rationale.** A conflict policy answers "who wins when two versions disagree". It does not answer
+"can this client show the result", and for a create those are different questions. A queued profile
+would exist under an identifier this phone invented, and every read in the app is the server's
+answer: the switcher lists what `/v1/profiles` returned, the shelf, the safety inbox and the care
+screen all narrow by a profile id the server has to recognise. So the person would be added, appear
+in the switcher, be selectable - and every screen behind them would be empty, permanently, until a
+drain nobody can see happened to run. Selecting them would not fail loudly; it would look like a
+household member with nothing in their life.
+
+That is worse than the refusal it replaces. `12` allows optimistic application of low-risk
+user-owned changes, and the risk being weighed there is losing an edit, not showing a person a
+version of their household that no other screen agrees with. A queued edit to something that
+already exists has none of this problem, which is why the two updates that are wired are wired.
+
+The second reason is narrower and would matter later. `uploadOrder` guarantees ordering within one
+entity type. Nothing today can be created offline against a profile, but an item or a schedule
+created against a locally-minted profile id would be refused by a foreign key for as long as the
+journal held it, and no ordering rule in this codebase would prevent that arrangement - the journal
+would simply have two independent queues and no way to say which had to land first.
+
+**What would change it.** Either a client-generated profile id the server accepts on create - which
+`07`'s non-guessable-identifier rule permits and the schema would have to allow - or a read layer
+that can render a profile the server has not seen. Neither is a small change and neither is worth
+making for a case that begins with somebody adding a household member while out of signal.
+
+**Sources.** `12` (optimistic application of low-risk user-owned changes); `13` (conflict policy;
+ordering); `07`; DEC-110; `DEV-048`.
