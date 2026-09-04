@@ -532,12 +532,37 @@ export const AGE_BANDS = [
 export type AgeBand = Member<typeof AGE_BANDS>;
 export const isAgeBand = makeGuard(AGE_BANDS);
 
-/** Caregiver capability grants (`07` CaregiverGrant). */
+/**
+ * Caregiver capability grants (`07` CaregiverGrant).
+ *
+ * The order is the order every screen lists them in, and it runs from the least power to the most
+ * within each subject. `RECORD_DOSES` therefore sits between seeing a medicine and managing one,
+ * which is exactly where it sits in what it permits.
+ *
+ * WHY `RECORD_DOSES` EXISTS SEPARATELY FROM BOTH OF ITS NEIGHBOURS
+ * Until migration `0021`, `dose_event` writes were scoped by whether the caller could *reach* the
+ * item, so a caregiver granted only `VIEW_MEDICINES` could write into somebody's dose history -
+ * while the invitation screen listed that grant under "viewing" and said it allowed no changes
+ * (`DEV-049`, `BLK-011`). Two deliberate decisions, made in different places, that contradicted
+ * each other.
+ *
+ * Neither neighbour could absorb it. Folding the write into `VIEW_MEDICINES` makes a capability
+ * described as read-only carry a write into the record a doctor reads. Folding it into
+ * `MANAGE_MEDICINES` makes the most ordinary act of caring for somebody - noting that they took a
+ * tablet - require the grant that can also delete their medicines and silence their reminders,
+ * which is `08.2`'s separate scoping failing in the other direction.
+ *
+ * So it is its own capability, and the important consequence is a **non**-event: no grant that
+ * already existed acquires it. `0021` widens the vocabulary and backfills nothing, because a
+ * capability that appeared in somebody's grant without them granting it is the same failure
+ * `DEV-049` was, arriving by migration instead of by policy.
+ */
 export const CAREGIVER_CAPABILITIES = [
   'VIEW_SAFETY',
   'VIEW_SHELF',
   'MANAGE_SHELF',
   'VIEW_MEDICINES',
+  'RECORD_DOSES',
   'MANAGE_MEDICINES',
   'VIEW_CARE',
   'MANAGE_CARE',

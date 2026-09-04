@@ -1057,9 +1057,27 @@ export function createServer(options: ServerOptions): FastifyInstance {
         );
       }
 
+      // Whether this caller may record a dose on this profile (migration `0021`).
+      //
+      // ON THE PAGE, NOT ON EACH ROW. A capability is granted per profile and this list is
+      // filtered to one, so a per-item answer would be the same boolean repeated and would invite
+      // a screen to believe it could differ between two medicines belonging to one person.
+      //
+      // Asked separately rather than folded into the item query, because it is a fact about the
+      // caller and the profile, not about a row - and a shelf with no items still has to answer
+      // it. It confirms nothing an unreachable profile did not already reveal: a profile the
+      // caller cannot see returns an empty page, and `has_capability` answers `false` for it.
+      const permission = await ctx.db((db) =>
+        db.query<{ may_record_doses: boolean }>(
+          `SELECT kynviora.has_capability($1, 'RECORD_DOSES') AS may_record_doses`,
+          [profileId],
+        ),
+      );
+
       return reply.send({
         items: validated.data,
         nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
+        mayRecordDoses: permission.rows[0]?.may_record_doses === true,
         serverTime: ctx.now,
       });
     });
@@ -1269,6 +1287,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
           lifecycle_state: string;
           version: number;
           may_edit: boolean;
+          may_record_doses: boolean;
           identity_verification: string;
           formulation_verification: string;
           batch_verification: string;
@@ -1303,7 +1322,17 @@ export function createServer(options: ServerOptions): FastifyInstance {
                   kynviora.has_capability(
                     profile_id,
                     CASE WHEN item_kind = 'MEDICINE' THEN 'MANAGE_MEDICINES' ELSE 'MANAGE_SHELF' END
-                  ) AS may_edit
+                  ) AS may_edit,
+                  -- Whether this caller may record a dose against it, asked exactly as the
+                  -- dose_event_insert policy asks it (migration 0021). A separate question from
+                  -- may_edit and it has to be: the two capabilities are separate precisely so that
+                  -- looking after somebody does not require the grant that can delete their
+                  -- prescription (DEV-049).
+                  --
+                  -- The item kind is not in the predicate, for the same reason 0021's policy has
+                  -- no branch - and the screen adds one anyway, because a dose is a medicine's
+                  -- idea and buildDoseRecord refuses to build one for a shampoo.
+                  kynviora.has_capability(profile_id, 'RECORD_DOSES') AS may_record_doses
              FROM owned_item
             WHERE id = $1 AND deleted_at IS NULL`,
           [params.data.itemId],
@@ -1354,6 +1383,11 @@ export function createServer(options: ServerOptions): FastifyInstance {
         // What an edit has to send back, and whether to offer one at all.
         version: row.version,
         mayEdit: row.may_edit,
+        // And whether to offer the four dose controls at all. Withheld rather than disabled
+        // (DEC-045), and withheld on the server's answer rather than the client's guess at what
+        // the grant means - `11` puts the decision here, and the screen asking the same predicate
+        // the policy applies is what keeps them from disagreeing.
+        mayRecordDoses: row.may_record_doses,
         // The same values again, keyed as the manual-entry form keys them.
         //
         // Not duplication: `categoryFields` and `sharedFields` are presentation - labels, absent

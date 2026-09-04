@@ -137,6 +137,16 @@ export interface ItemDetailResponse {
    */
   readonly mayEdit: boolean;
   /**
+   * Whether this caller may record a dose against it.
+   *
+   * A separate answer from {@link ItemDetailResponse.mayEdit} and separately asked, because
+   * migration `0021` made them separate capabilities: `RECORD_DOSES` writes into the dose history,
+   * `MANAGE_MEDICINES` changes the medicine itself, and a caregiver may well hold the first and
+   * not the second (`DEV-049`). A screen that reused `mayEdit` here would withhold the dose
+   * controls from exactly the people the capability was added for.
+   */
+  readonly mayRecordDoses: boolean;
+  /**
    * The stored values, keyed as the manual-entry form keys them.
    *
    * Separate from `categoryFields` and `sharedFields`, which are presentation. An editor cannot
@@ -151,6 +161,19 @@ export interface ItemDetailResponse {
 export interface ItemsResponse {
   readonly items: readonly ShelfItem[];
   readonly nextCursor: string | null;
+  /**
+   * Whether this caller may record a dose on the profile this page was read for.
+   *
+   * One boolean for the page rather than one per row: a capability is granted per profile and this
+   * list is filtered to one, so a per-item answer would be the same value repeated and would
+   * invite a screen to believe two medicines belonging to one person could differ.
+   *
+   * Optional on the wire so a client reading an older server does not fail its own contract
+   * validation. {@link shelfView} defaults it to `false`, because deny-by-default applies to a
+   * control as much as to a read (`14`) - a withheld control costs a tap, and one the write
+   * refuses costs somebody a record they believed they had made.
+   */
+  readonly mayRecordDoses?: boolean;
   readonly serverTime: string;
 }
 

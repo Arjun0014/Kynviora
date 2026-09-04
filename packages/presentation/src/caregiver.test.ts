@@ -56,7 +56,26 @@ describe('capability descriptions', () => {
       'MANAGE_CAREGIVERS',
       'MANAGE_MEDICINES',
       'MANAGE_SHELF',
+      'RECORD_DOSES',
     ]);
+  });
+
+  it('groups recording a dose with changing, and viewing medicines with viewing', () => {
+    // The pair `DEV-049` was about, asserted as a pair. `RECORD_DOSES` writes into the record a
+    // doctor reads, so a review screen that listed it under "viewing" would be making exactly the
+    // claim migration `0021` stopped being true - and `VIEW_MEDICINES` has to stay on the other
+    // side of that line for the split to mean anything at all.
+    expect(describeCapability('RECORD_DOSES').allowsChanges).toBe(true);
+    expect(describeCapability('VIEW_MEDICINES').allowsChanges).toBe(false);
+  });
+
+  it('says a recorded dose cannot be removed, on the capability that records one', () => {
+    // `dose_event` is append-only, so granting this hands over adding to a history and never
+    // tidying one. "Correcting" sounds like the smaller permission and is in fact the same one,
+    // which is a thing somebody approving access has to be told rather than left to infer.
+    expect(describeCapability('RECORD_DOSES').meaning).toMatch(
+      /nothing already recorded can be removed/i,
+    );
   });
 
   it('marks only MANAGE_CAREGIVERS as delegating administration', () => {

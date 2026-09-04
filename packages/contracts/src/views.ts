@@ -172,12 +172,28 @@ export interface ShelfView {
   readonly personalCareCount: number;
   /** `true` when the server said there is another page. */
   readonly hasMore: boolean;
+  /**
+   * Whether to offer the "Record a dose" control on these rows at all.
+   *
+   * The server's answer, narrowed to `false` where it did not give one. Migration `0021` requires
+   * `RECORD_DOSES` to write a dose event, and DEC-045 withholds a control rather than drawing one
+   * that refuses - a greyed-out button on somebody else's medicine tells a caregiver what they are
+   * not trusted with, which is not a fact they needed.
+   */
+  readonly mayRecordDoses: boolean;
 }
 
-export function shelfView(items: readonly ShelfItem[], nextCursor: string | null): ShelfView {
+export function shelfView(
+  items: readonly ShelfItem[],
+  nextCursor: string | null,
+  mayRecordDoses?: boolean,
+): ShelfView {
   const views = items.map(shelfItemView);
   return {
     items: views,
+    // `=== true` rather than a truthiness check: an older server sends nothing here, and every
+    // other shape this could arrive in means the same thing as absent (`14`, deny by default).
+    mayRecordDoses: mayRecordDoses === true,
     // Counts of what is on the shelf, by category. Not a score, not a rating, and deliberately
     // not a count of anything "needing attention" - `02` forbids the aggregate and Phase 8.3
     // forbids the badge. Phase 2.1 added a per-item reason list and did not add a total.
@@ -897,6 +913,15 @@ export interface ItemDetailScreenView {
    * the write refuses costs them a form they filled in for nothing.
    */
   readonly mayEdit: boolean;
+  /**
+   * Whether to offer the dose controls at all.
+   *
+   * Separate from {@link ItemDetailScreenView.mayEdit} because migration `0021` made the
+   * capabilities separate: a caregiver may record a dose without being able to change the medicine
+   * (`DEV-049`). Defaults to `false` where the server did not say, for the same reason `mayEdit`
+   * does.
+   */
+  readonly mayRecordDoses: boolean;
   /** Prefill for the edit form. Only string entries survive; anything else reads as absent. */
   readonly editableValues: Readonly<Record<string, string>>;
   readonly stoppedOn: string | null;
@@ -928,6 +953,7 @@ export function itemDetailScreenView(response: ItemDetailResponse): ItemDetailSc
     lifecycleState: isItemLifecycleState(response.lifecycleState) ? response.lifecycleState : null,
     version: Number.isInteger(response.version) ? response.version : 0,
     mayEdit: response.mayEdit === true,
+    mayRecordDoses: response.mayRecordDoses === true,
     editableValues: editableValues(response.editableValues),
     stoppedOn: typeof response.stoppedOn === 'string' ? response.stoppedOn : null,
   };

@@ -75,8 +75,29 @@ export const CAPABILITY_DESCRIPTIONS: Readonly<Record<CaregiverCapability, Capab
     },
     VIEW_MEDICINES: {
       label: 'Medicines',
-      meaning: 'They can see the medicines recorded for this person.',
+      meaning:
+        'They can see the medicines recorded for this person, and when each one was taken. ' +
+        'They cannot change anything.',
       allowsChanges: false,
+      delegatesAdministration: false,
+    },
+    // Named separately from both of its neighbours, because it belongs to neither. Recording a
+    // dose is a write, so this sentence cannot live under `VIEW_MEDICINES` - that was `DEV-049`,
+    // where the screen said "viewing" over a grant that carried a write into somebody's dose
+    // history. And it is not editing medicines: the person doing it most often is the person
+    // sitting with somebody at breakfast, who has no business deleting a prescription.
+    //
+    // The second sentence is the one worth having. `04` Phase 4.3 keeps a record of what happened
+    // and `dose_event` is append-only, so a correction is a further entry rather than a rewrite -
+    // which means granting this hands over the ability to add to a history and never to tidy one.
+    // Somebody approving access needs that in the sentence, because "correcting" sounds like the
+    // smaller permission and is in fact the same one.
+    RECORD_DOSES: {
+      label: 'Record doses',
+      meaning:
+        'They can record that a medicine was taken, skipped or missed, and add a correction if ' +
+        'they get one wrong. Nothing already recorded can be removed.',
+      allowsChanges: true,
       delegatesAdministration: false,
     },
     MANAGE_MEDICINES: {
@@ -257,8 +278,13 @@ export function presentCaregiverAccess(state: CaregiverAccessState): StatusPrese
  * out a bearer credential needs to know it is one.
  */
 export const CAREGIVER_COPY = Object.freeze({
+  // "and do", because some of what is on this list is not looking. It was already imprecise while
+  // the list carried the editing capabilities, and `RECORD_DOSES` is what made it wrong: the whole
+  // point of splitting that capability out is that choosing from this list is choosing what
+  // somebody may write as much as what they may read (`DEV-049`). A screen that opens by calling
+  // all of it "see" has understated the grant before the person has read a single row.
   inviteIntro:
-    'Choose what this person can see. They will use their own account, not your sign-in.',
+    'Choose what this person can see and do. They will use their own account, not your sign-in.',
   reviewHeading: 'Check what you are sharing',
   linkWarning:
     'Anyone who opens this link can accept the invitation. Send it only to the person you mean.',

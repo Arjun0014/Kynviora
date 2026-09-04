@@ -173,7 +173,9 @@ export default function ShelfScreen() {
 
   const view = useMemo(
     () =>
-      resource.value === null ? null : shelfView(resource.value.items, resource.value.nextCursor),
+      resource.value === null
+        ? null
+        : shelfView(resource.value.items, resource.value.nextCursor, resource.value.mayRecordDoses),
     [resource.value],
   );
 
@@ -635,6 +637,7 @@ export default function ShelfScreen() {
             <ShelfRow
               key={item.id}
               item={item}
+              mayRecordDoses={view.mayRecordDoses}
               onOpen={() => {
                 setDetailFor(item);
               }}
@@ -658,11 +661,19 @@ export default function ShelfScreen() {
 
 function ShelfRow({
   item,
+  mayRecordDoses,
   onOpen,
   onRecord,
   onSchedule,
 }: {
   readonly item: ShelfItemView;
+  /**
+   * Whether this person may write into the dose history at all (migration `0021`).
+   *
+   * The server's answer for the profile, not a guess made here. `11` puts the decision on the
+   * server and this is only what stops the screen offering a control the write would refuse.
+   */
+  readonly mayRecordDoses: boolean;
   readonly onOpen: () => void;
   readonly onRecord: () => void;
   readonly onSchedule: () => void;
@@ -701,7 +712,15 @@ function ShelfRow({
           control here would say a dose of shampoo is a thing Kynviora expects you to record. */}
       {item.itemKind === 'MEDICINE' ? (
         <>
-          <PrimaryButton label="Record what happened" variant="secondary" onPress={onRecord} />
+          {/* And absent again for a caregiver who was not granted `RECORD_DOSES`, which is a
+              different absence for a different reason: the first says a dose of shampoo is not a
+              thing, this one says the write would be refused (migration 0021). Both are withheld
+              rather than drawn and disabled (DEC-045) - a greyed-out control on somebody else's
+              medicine tells a caregiver what they are not trusted with, which is a fact about the
+              permission model they did not need. */}
+          {mayRecordDoses ? (
+            <PrimaryButton label="Record what happened" variant="secondary" onPress={onRecord} />
+          ) : null}
           {/* `04` Phase 4.1. Medicines only, for the same reason and one more: migration 0020
               refuses a schedule on a personal-care item outright. */}
           <PrimaryButton label="When do you take this?" variant="secondary" onPress={onSchedule} />

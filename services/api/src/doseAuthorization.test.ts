@@ -17,17 +17,23 @@
  * non-superuser `kynviora_app` role, which is the only way to test a policy rather than a mock of
  * one.
  *
- * WHAT IS DELIBERATELY NOT ASSERTED HERE
- * That a dose write needs a capability marked as allowing changes. `0004` gives `dose_event` a
- * policy inheriting reachability from the item, and `0020` says that is deliberate - "`dose_event`
- * is a record of something that happened and is reachability-scoped on purpose". The grant screen
- * disagrees: `VIEW_MEDICINES` is described as `allowsChanges: false` and listed under "viewing"
- * when somebody approves access. Both decisions were made, in different places, and never
- * reconciled (`DEV-049`); which of them moves is a product question, not a change to make in
- * passing to a shipped policy.
+ * WHAT THIS FILE MEASURED BEFORE, AND WHAT IT MEASURES NOW
+ * It used to pin a contradiction. `0004` gave `dose_event` a policy inheriting reachability from
+ * the item and `0020` called that deliberate - "`dose_event` is a record of something that
+ * happened and is reachability-scoped on purpose" - while the grant screen described
+ * `VIEW_MEDICINES` as `allowsChanges: false` and listed it under "viewing". Both decisions were
+ * made, in different places, and never reconciled (`DEV-049`, `BLK-011`), so the test recorded the
+ * behaviour as it stood and said the day it changes, this file fails.
  *
- * So what these tests pin is the behaviour as it stands. The day it changes, this file fails -
- * which is the moment the reasoning gets written down.
+ * It changed. DEC-116 resolves it the third way `DEV-049` set out: `VIEW_MEDICINES` stays strictly
+ * read-only, `MANAGE_MEDICINES` keeps managing medicines and schedules, and writing into a dose
+ * history is `RECORD_DOSES` - its own capability, which no existing grant acquired, because
+ * migration `0021` widens the vocabulary and backfills nothing.
+ *
+ * So the file now measures three things that used to be one: that a view-only caregiver is
+ * refused, that a caregiver granted the new capability is not, and that holding the *larger*
+ * medicine capability is not a way in either - the capabilities are separate rather than nested,
+ * and a grant carries exactly what its owner ticked.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -45,6 +51,10 @@ const VIEWER = testUuid(2);
 /** Granted `VIEW_MEDICINES` and then revoked. */
 const REVOKED = testUuid(3);
 const STRANGER = testUuid(4);
+/** Granted `VIEW_MEDICINES` + `RECORD_DOSES`: the case the capability exists for (DEC-116). */
+const RECORDER = testUuid(5);
+/** Granted `VIEW_MEDICINES` + `MANAGE_MEDICINES`, and deliberately not `RECORD_DOSES`. */
+const MANAGER = testUuid(6);
 
 const HOUSEHOLD = testUuid(10);
 const PROFILE = testUuid(20);
@@ -89,6 +99,8 @@ beforeAll(async () => {
       [VIEWER, 'viewer@example.test'],
       [REVOKED, 'revoked@example.test'],
       [STRANGER, 'stranger@example.test'],
+      [RECORDER, 'recorder@example.test'],
+      [MANAGER, 'manager@example.test'],
     ] as const) {
       await db.query(
         `INSERT INTO app_user (id, external_auth_id, email_normalized, email_verified_at)
@@ -117,6 +129,18 @@ beforeAll(async () => {
          (profile_id, grantee_user_id, granted_by_user_id, capabilities, status, accepted_at)
        VALUES ($1, $2, $3, ARRAY['VIEW_MEDICINES'], 'ACTIVE', now())`,
       [PROFILE, VIEWER, OWNER],
+    );
+    await db.query(
+      `INSERT INTO caregiver_grant
+         (profile_id, grantee_user_id, granted_by_user_id, capabilities, status, accepted_at)
+       VALUES ($1, $2, $3, ARRAY['VIEW_MEDICINES', 'RECORD_DOSES'], 'ACTIVE', now())`,
+      [PROFILE, RECORDER, OWNER],
+    );
+    await db.query(
+      `INSERT INTO caregiver_grant
+         (profile_id, grantee_user_id, granted_by_user_id, capabilities, status, accepted_at)
+       VALUES ($1, $2, $3, ARRAY['VIEW_MEDICINES', 'MANAGE_MEDICINES'], 'ACTIVE', now())`,
+      [PROFILE, MANAGER, OWNER],
     );
     await db.query(
       `INSERT INTO caregiver_grant
@@ -192,7 +216,7 @@ describe('recording a dose against somebody else’s medicine', () => {
   });
 });
 
-describe('what a view-only caregiver can currently do', () => {
+describe('what a view-only caregiver can do', () => {
   it('can read the dose history, which is what VIEW_MEDICINES is for', async () => {
     const response = await request(principalFor(VIEWER), {
       method: 'GET',
@@ -203,18 +227,81 @@ describe('what a view-only caregiver can currently do', () => {
     expect(body.events.length).toBeGreaterThan(0);
   });
 
-  it('can also write one, because the policy inherits reachability from the item', async () => {
-    // Pinned, not endorsed. `0004` decided a dose event is reachable exactly when its item is and
-    // `0020` restated that as deliberate, so a grant the screen lists under "viewing" carries a
-    // write into somebody's dose history with it - the record a doctor reads. Which of the two
-    // statements moves is `DEV-049`, and this test is what makes moving it deliberate.
+  it('cannot write one', async () => {
+    // `DEV-049` closed. This used to answer 201 while the invitation screen called the same grant
+    // read-only; migration `0021` makes the screen true. Refused as the same not-found every other
+    // refusal gives, because there is deliberately no outcome in this API meaning "you are not
+    // allowed" (trap 89) - the screen withholds the control instead, on `mayRecordDoses`.
     const response = await recordDose(VIEWER, 104, 'written by a view-only caregiver');
-    expect(response.statusCode).toBe(201);
+    expect(response.statusCode).toBe(404);
   });
 
   it('cannot reach a profile they were never granted', async () => {
     const response = await request(principalFor(VIEWER), { method: 'GET', url: '/v1/profiles' });
     const body = response.json<{ profiles: readonly { id: string }[] }>();
     expect(body.profiles.map((p) => p.id)).toEqual([PROFILE]);
+  });
+});
+
+describe('what RECORD_DOSES is for (DEC-116)', () => {
+  it('lets a caregiver granted it record a dose', async () => {
+    // The whole reason the capability is a third one rather than a tightening onto
+    // `MANAGE_MEDICINES`: the most ordinary act of caring for somebody must not require the grant
+    // that can also delete their medicines and silence their reminders.
+    const response = await recordDose(RECORDER, 105, 'recorded by a caregiver granted it');
+    expect(response.statusCode).toBe(201);
+  });
+
+  it('does not let MANAGE_MEDICINES stand in for it', async () => {
+    // The direction it would be easy to get wrong. `MANAGE_MEDICINES` is the larger permission in
+    // every ordinary sense, and nesting it here would make the policy read a capability nobody
+    // ticked - the same failure as `DEV-049` with the roles reversed. Capabilities are a set, not
+    // a ladder.
+    const response = await recordDose(MANAGER, 106, 'written by a medicine manager');
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('tells the screen which of the two it has, separately', async () => {
+    // What stops a person filling in a form for nothing. The detail answers both questions with
+    // the predicates the two policies apply, so this caller is offered the dose controls and not
+    // the editing ones - and the screen cannot derive either from the other (DEC-045).
+    const response = await request(principalFor(RECORDER), {
+      method: 'GET',
+      url: `/v1/items/${MEDICINE}`,
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ mayEdit: boolean; mayRecordDoses: boolean }>();
+    expect(body.mayRecordDoses).toBe(true);
+    expect(body.mayEdit).toBe(false);
+  });
+
+  it('tells the shelf the same thing, for the row the control is drawn on', async () => {
+    // The dose control lives on the shelf row rather than the detail, so the list has to carry the
+    // answer too - or the screen would offer it to everybody who can see a medicine, which is the
+    // state this whole change is undoing.
+    const viewer = await request(principalFor(VIEWER), {
+      method: 'GET',
+      url: `/v1/items?profileId=${PROFILE}`,
+    });
+    expect(viewer.json<{ mayRecordDoses: boolean }>().mayRecordDoses).toBe(false);
+
+    const recorder = await request(principalFor(RECORDER), {
+      method: 'GET',
+      url: `/v1/items?profileId=${PROFILE}`,
+    });
+    expect(recorder.json<{ mayRecordDoses: boolean }>().mayRecordDoses).toBe(true);
+  });
+
+  it('leaves the owner able to record on their own medicine', async () => {
+    // `has_capability` short-circuits on ownership, so the person whose medicines these are never
+    // needed a grant and still does not. Asserted through the detail as well as the write, because
+    // a screen that stopped offering the control would be the same outage as a policy that
+    // refused it.
+    const detail = await request(principalFor(OWNER), {
+      method: 'GET',
+      url: `/v1/items/${MEDICINE}`,
+    });
+    expect(detail.json<{ mayRecordDoses: boolean }>().mayRecordDoses).toBe(true);
+    expect((await recordDose(OWNER, 107)).statusCode).toBe(201);
   });
 });

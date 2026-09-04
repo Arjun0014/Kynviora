@@ -49,6 +49,7 @@ function detail(overrides: Partial<ItemDetailResponse> = {}): ItemDetailResponse
     attentionReasonCodes: [],
     version: 1,
     mayEdit: true,
+    mayRecordDoses: true,
     editableValues: { displayName: 'Synthetic Tablet', strengthText: '500 mg' },
     stoppedOn: null,
     serverTime: '2026-09-02T12:00:00.000Z',
@@ -174,6 +175,27 @@ describe('what an editor is handed', () => {
       mayEdit: 'yes',
     } as unknown as ItemDetailResponse);
     expect(view.mayEdit).toBe(false);
+  });
+
+  it('keeps recording a dose separate from editing the medicine', () => {
+    // Migration `0021` made them separate capabilities, and this is the combination the capability
+    // was added for: somebody who sits with a person at breakfast and notes that they took a
+    // tablet, who has no business deleting the prescription (`DEV-049`). A view that derived one
+    // from the other would withhold the dose controls from exactly them.
+    const view = itemDetailScreenView(detail({ mayEdit: false, mayRecordDoses: true }));
+    expect(view.mayEdit).toBe(false);
+    expect(view.mayRecordDoses).toBe(true);
+  });
+
+  it('withholds the dose controls where the server did not say', () => {
+    const missing = { ...detail() } as Record<string, unknown>;
+    delete missing['mayRecordDoses'];
+
+    const view = itemDetailScreenView(missing as unknown as ItemDetailResponse);
+    // Deny by default again, and it matters more here than it does for an edit: an older server
+    // sends nothing, and inferring "yes" from silence would draw a control whose write the policy
+    // refuses - which is a person told a dose was recorded when nothing was.
+    expect(view.mayRecordDoses).toBe(false);
   });
 
   it('falls back to a version no write can succeed against', () => {
