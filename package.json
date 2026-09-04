@@ -36,7 +36,8 @@
     "verify:device:caregiver": "tsx scripts/device/verifyCaregiverAccess.ts",
     "verify:device:visitpack": "tsx scripts/device/verifyVisitPackExport.ts",
     "verify:device:personalcare": "tsx scripts/device/verifyPersonalCare.ts",
-    "verify:device:safety": "tsx scripts/device/verifySafetyScreen.ts"
+    "verify:device:safety": "tsx scripts/device/verifySafetyScreen.ts",
+    "verify:device:doseaccess": "tsx scripts/device/verifyDoseAccess.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
