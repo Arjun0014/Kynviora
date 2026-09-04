@@ -46,6 +46,18 @@ export function resolveDataDir(configured: string | undefined): string {
 export const APP_ROLE = 'kynviora_app';
 export const SERVICE_ROLE = 'kynviora_service';
 
+/**
+ * The retention role (`0022_retention.sql`, DEC-117).
+ *
+ * Its entire privilege is deleting rows past the 24-month age gate from `audit_event` and
+ * `consent_receipt`. It is a member of neither other role and holds no grant on any other table,
+ * so a process running as it cannot read a medicine or write an audit event. Kept separate from
+ * `kynviora_service` on purpose: widening the service role would give ingestion, publication and
+ * the seed the standing ability to delete audit history, which is the one privilege an attacker
+ * who reached that role would use to cover their tracks.
+ */
+export const RETENTION_ROLE = 'kynviora_retention';
+
 export interface Migration {
   readonly version: string;
   readonly sql: string;

@@ -3918,3 +3918,109 @@ owner's own control still recording from the phone.
 **Sources.** `07` (the capability vocabulary); `08.2` (separate scoping); `11`, `12`
 (server-authoritative access control); `13` (no oracle); `18` (a person must understand what they
 are approving); `04` Phase 4.3; `BLK-011`; `DEV-049`; migrations `0004`, `0020`, `0021`.
+
+---
+
+## DEC-117 - Deletion is revocation then purge, and two tables outlive both
+
+**Context.** `DEV-036` recorded that there is no export or deletion control and that the screen
+says so instead of showing one, because "delete my data" cannot be answered without a statement of
+what is kept regardless. Five deviations converged on the same missing document: `DEV-009` (Visit
+Pack retention), `DEV-032` (an item can be archived and not deleted), `DEV-034` (emergency
+information), `DEV-035` (conditions) and `DEV-036` itself. The retention and disclosure decision has
+now been taken as a product decision and is recorded in `docs/RETENTION.md`.
+
+Three things in the schema had to be resolved before any of it could be implemented, and the
+inventory found all three rather than assuming them:
+
+1. `consent_receipt` carries `user_id -> app_user ON DELETE CASCADE` and
+   `profile_id -> profile ON DELETE CASCADE`. The approved policy keeps consent receipts for 24
+   months **after** deletion. As written, the receipt dies with the account at purge.
+2. `shadow_run_sample.owned_item_id` is a bare `uuid` with no foreign key, so a household item's
+   identifier survives that item's purge inside a staff-readable table.
+3. `assessment_correction` references `profile_assessment` with `ON DELETE RESTRICT`, so a
+   correction blocks the purge of the assessment it corrects.
+
+**Options for the shape of deletion.** (a) Hard-delete rows in the request. (b) Soft-delete and
+purge later. (c) Soft-delete with no purge at all.
+
+**Decision.** (b), stated as two named events with different guarantees:
+
+- **Revocation** is synchronous and total. In the request that accepts the deletion, the record
+  becomes inaccessible and **all processing stops** - reads, reminders, alerts, caregiver access,
+  sync and exports. This is the promise made to the person.
+- **Purge** is asynchronous with a deadline. 30 days for personal data; shorter for the time-boxed
+  artifacts; 24 months for the two tables that survive.
+
+**Rationale.** (a) cannot be done: `dose_event`, `audit_event` and `consent_receipt` are
+append-only by trigger, several children are `ON DELETE RESTRICT`, and a request that tried to
+unwind the whole graph synchronously would either fail halfway or hold a transaction open across a
+household. (c) is what the product does today under the name "archive" and it is why `DEV-032`
+exists - a state that hides a row is not a deletion, and calling it one is the lie this decision
+exists to prevent.
+
+(b) makes the guarantee that matters cheap and immediate. Every soft-deletable table's `SELECT`
+policy already carries `deleted_at IS NULL`; a deletion is therefore _already_ invisible everywhere
+the moment it is stamped, with no job to wait for and no window in which a revoked caregiver still
+reads. The purge deadline is then an operational commitment about bytes rather than a promise about
+behaviour, which is the honest division.
+
+**Decision on the three schema conflicts.**
+
+1. `consent_receipt`'s cascades are **dropped** and replaced with `ON DELETE SET NULL` on
+   `profile_id` and a nullable, un-cascaded `user_id`. A receipt that outlives its subject is the
+   point; a receipt that names a purged subject is not, so the linkage is de-linked at purge and
+   the receipt itself keeps its purpose, decision and policy version. This is the same de-link the
+   catalog gets, applied to the one table where the retention basis is the reason for keeping it.
+2. `shadow_run_sample.owned_item_id` becomes nullable and is de-linked on purge.
+3. `assessment_correction`'s references become `ON DELETE SET NULL`, and purge order de-links the
+   correction before the assessment goes.
+
+**Decision on who may delete.** The **profile owner only**, with **fresh step-up**. No caregiver
+capability authorizes deletion - not `MANAGE_MEDICINES`, not `MANAGE_SHELF`, not
+`MANAGE_CAREGIVERS`. Deletion is not a member of the capability set at all rather than a member
+nobody grants, because a capability that exists is a capability a future screen can offer.
+
+`14` names deletion alongside export and caregiver administration as a high-impact action for which
+a valid session is explicitly insufficient, so `hasFreshStepUp` gates it exactly as it gates a Visit
+Pack.
+
+**Decision on the append-only tables.** `audit_event` and `consent_receipt` are retained 24 months
+and then purged through a **dedicated age-gated retention path**, never by widening the existing
+grants. A third role, `kynviora_retention`, is `NOLOGIN`, is a member of neither other role, holds
+no grant on any other table, and may `DELETE` from these two only where the row is older than the
+gate. Two independent enforcement points, both in the database:
+
+| Gate    | What it does                                                                                                                        |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| RLS     | `FOR DELETE TO kynviora_retention USING (<ts> < now() - interval '24 months')`                                                      |
+| Trigger | `forbid_mutation` still raises on every `UPDATE`, every other role's `DELETE`, and an in-window `DELETE` even by the retention role |
+
+The trigger is the backstop for anything that bypasses RLS, including the table owner and a
+superuser - which is precisely the case the RLS gate cannot cover and the one DEC-005 already
+established the harness must guard against. Neither gate alone is the rule; a migration that
+dropped one would still be stopped by the other, and dropping both is a deliberate act that reads
+as one in review.
+
+`UPDATE` remains forbidden to everybody on both tables. Retention deletes whole rows past an age;
+it does not edit history. Corrections supersede, as they always have.
+
+**Consequences.** `owned_item.deleted_at` stops being a column nothing writes. The archive
+lifecycle state stays and now means what it says - an item somebody is done with but wants to keep -
+which is a different thing from one they want gone, and `DEV-032` was the absence of the second.
+
+A person is told what is kept, why, and for how long, rather than being told everything was erased.
+That is a worse-sounding sentence and the only true one available while the two retained tables
+stand.
+
+The 30-day purge deadline is a commitment this build can only partly discharge: there is no backup
+system to state a restore lifecycle for, and `16` forbids claiming immediate universal erasure while
+one exists. `docs/RETENTION.md` says so in place of a claim.
+
+This decision is a **product and engineering default, not a legal-compliance claim**. The privacy
+review `16` requires before production is not performed, `BLK-005` is open, and nothing here closes
+either.
+
+**Sources.** `16` (retention matrix, deletion enumeration, export); `14` (least privilege,
+high-impact actions, append-only audit); `13`; `20` (audit is not a copy of health content); `07`;
+DEC-005; DEC-013; `DEV-009`, `DEV-032`, `DEV-034`, `DEV-035`, `DEV-036`; `docs/RETENTION.md`.

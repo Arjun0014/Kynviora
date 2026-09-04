@@ -479,10 +479,20 @@ describe('append-only enforcement (DEC-013)', () => {
     );
     expect(updateMessage).toMatch(/append-only/i);
 
+    // Since `0022` the refusal names the more specific reason. The trigger carries a retention
+    // door, and its condition is `pg_has_role(current_user, 'kynviora_retention', 'MEMBER')` -
+    // which is true for a superuser, because a superuser is a member of every role. So this
+    // session reaches the door and is turned back by the **age** gate instead of the blanket one:
+    // the receipt was inserted moments ago and the floor is 24 months.
+    //
+    // The refusal is what this test is for and it is unchanged. What the message now says is that
+    // the trigger's guarantee is about age rather than role (DEC-117): nothing younger than the
+    // floor is deleted, whoever asks. The role is RLS's decision and no role but
+    // `kynviora_retention` has a DELETE policy here at all.
     const deleteMessage = await expectDenied(() =>
       t.asOwner((db) => db.query('DELETE FROM consent_receipt WHERE id = $1', [id])),
     );
-    expect(deleteMessage).toMatch(/append-only/i);
+    expect(deleteMessage).toMatch(/within the retention period/i);
   });
 
   it('records withdrawal as a new superseding receipt', async () => {

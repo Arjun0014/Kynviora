@@ -26,12 +26,19 @@ import { PGlite } from '@electric-sql/pglite';
 export {
   APP_ROLE,
   MIGRATIONS_DIR,
+  RETENTION_ROLE,
   SERVICE_ROLE,
   loadMigrations,
   type Migration,
 } from '../src/migrations.js';
 
-import { APP_ROLE, MIGRATIONS_DIR, SERVICE_ROLE, loadMigrations } from '../src/migrations.js';
+import {
+  APP_ROLE,
+  MIGRATIONS_DIR,
+  RETENTION_ROLE,
+  SERVICE_ROLE,
+  loadMigrations,
+} from '../src/migrations.js';
 
 export interface TestDb {
   readonly db: PGlite;
@@ -39,6 +46,15 @@ export interface TestDb {
   asUser<T>(userId: string | null, fn: (db: PGlite) => Promise<T>): Promise<T>;
   /** Run a callback as the privileged service role. */
   asService<T>(fn: (db: PGlite) => Promise<T>): Promise<T>;
+  /**
+   * Run a callback as the retention role (`0022`, DEC-117).
+   *
+   * Its whole privilege is deleting rows past the 24-month age gate from `audit_event` and
+   * `consent_receipt`. Anything else it attempts is a missing grant, which is what makes
+   * asserting through it worth doing rather than asserting through the service role and trusting
+   * a comment.
+   */
+  asRetention<T>(fn: (db: PGlite) => Promise<T>): Promise<T>;
   /** Run a callback with full owner privileges, for fixture setup only. */
   asOwner<T>(fn: (db: PGlite) => Promise<T>): Promise<T>;
   close(): Promise<void>;
@@ -124,6 +140,7 @@ export async function createTestDb(dir: string = MIGRATIONS_DIR): Promise<TestDb
     db,
     asUser: (userId, fn) => runAs(APP_ROLE, userId, fn),
     asService: (fn) => runAs(SERVICE_ROLE, null, fn),
+    asRetention: (fn) => runAs(RETENTION_ROLE, null, fn),
     asOwner: async (fn) => fn(db),
     close: () => db.close(),
   };

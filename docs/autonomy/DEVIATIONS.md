@@ -1993,3 +1993,108 @@ its own limit on pending local notifications, which is lower than Android's and 
   the check that would have found this without a person reading a log.
 - **Verified**: `npm run verify:device:lowstorage` **5/5 PASS** on a Pixel 7 / Android 16 emulator.
 - **Status**: **RESOLVED 2026-09-04**.
+
+---
+
+## DEV-056 - Three schema paths contradict the retention policy, and one of them survives a purge
+
+- **Affected specification**: `16` (retention matrix, deletion enumeration), `14` (least
+  privilege), DEC-117.
+- **Expected behaviour**: after a household's data is purged, nothing personal to that household
+  remains outside the two tables retained on an approved basis, and those two are not themselves
+  destroyed by the purge they are meant to outlive.
+- **Implemented behaviour**: three contradictions, found by inventorying the schema against the
+  approved policy rather than by assuming the schema already matched it.
+
+  1. **`consent_receipt` dies with its subject.** `user_id -> app_user ON DELETE CASCADE` and
+     `profile_id -> profile ON DELETE CASCADE`. The policy keeps consent receipts for 24 months
+     **after** deletion; the foreign keys delete them at the moment of purge. The receipt that
+     proves somebody withdrew consent is destroyed by the deletion that withdrawing it led to.
+  2. **`shadow_run_sample.owned_item_id` outlives the item.** It is a bare `uuid` with no foreign
+     key, in a staff-readable table. A purged household item's identifier stays behind in a shadow
+     run indefinitely. Nothing dereferences it once the item is gone, which is why it is a linkage
+     rather than a leak of content - and a linkage is what section 3.4 of `docs/RETENTION.md` says
+     must be purged.
+  3. **`assessment_correction` blocks the purge it should yield to.** Both references are
+     `ON DELETE RESTRICT`, so a corrected assessment cannot be purged at all while the correction
+     stands, and the correction is staff-operational data with no reason to hold personal data
+     hostage.
+
+- **How it was found**: by the table-by-table inventory DEC-117 required. None of the three is
+  reachable by any existing test, because no test deletes anything - `DEV-032` is the reason there
+  was nothing to delete.
+- **Reason**: each foreign key was written before there was a retention policy, and each is locally
+  correct. `ON DELETE CASCADE` from `app_user` to `consent_receipt` is the obvious choice for a
+  child row when nobody has yet said the child outlives the parent. `shadow_run_sample` deliberately
+  has no foreign key so that a shadow run over a dataset does not pin the dataset; the cost of that
+  is the linkage, and the linkage was not priced.
+- **Risk**: (1) is the highest - it destroys evidence of consent at the one moment it is most
+  likely to be asked for, and the destruction is silent. (2) is low and durable: a UUID with no
+  dereferenceable target, retained forever, in a table household users cannot read. (3) is an
+  availability rather than a privacy failure: the purge does not complete, which is discovered
+  when the deadline is missed.
+- **Fix**: migration `0022`. (1) `profile_id` becomes `ON DELETE SET NULL` and `user_id` becomes
+  nullable and un-cascaded, so the receipt keeps its purpose, decision and policy version while its
+  subject is de-linked. (2) `owned_item_id` becomes nullable and is de-linked by the purge path.
+  (3) both references become `ON DELETE SET NULL`.
+- **Verified**: `db/retention.test.ts`.
+- **Status**: **RESOLVED 2026-09-05**.
+
+---
+
+## DEV-057 - A soft delete cannot be written by the role that owns the data, and nothing said so
+
+- **Affected specification**: `14` (deny by default, row-level security as the authorization
+  layer), `13` (server-authoritative authorization, privileged operations), DEC-117.
+- **Expected behaviour**: an owner deleting their own item writes `owned_item.deleted_at` under
+  row-level security, the same way they write every other column of that row.
+- **Implemented behaviour**: the write is refused, for the owner as much as for a stranger, with
+  `new row violates row-level security policy for table "owned_item"`.
+
+  The cause is a Postgres rule rather than a policy anybody wrote. An `UPDATE` whose `WHERE`
+  clause reads a column of the table requires `SELECT` rights on it, and the `SELECT` policies are
+  then applied **to the new row as well as the old**. `owned_item_select` filters
+  `deleted_at IS NULL`. So the row a soft delete produces is one the caller may not see, and the
+  statement fails - **because the deletion worked**, not because it was unauthorized.
+
+  Every soft-deletable table in this schema has that shape: `profile`, `household`, `app_user`,
+  `allergy_record`, `condition_record`, `evidence_asset`, `owned_item`. `deleted_at` has existed
+  on all of them since `0002` and `0004`, filtered by every read, and unwritable by the app role
+  the entire time.
+
+- **How it was found**: by writing the deletion policy DEC-117 requires and watching the owner be
+  refused by it. The first reading was that the new restrictive policy was too strict; dropping it
+  changed nothing, which is what turned the question from "is my policy wrong" into "what else is
+  refusing". Isolated by removing only the `deleted_at` filter from `owned_item_select`, leaving
+  everything else in place: the same statement then succeeded.
+- **Reason**: the two halves are each correct and were written years apart in project time.
+  `deleted_at IS NULL` in the SELECT policy is what makes revocation immediate and total - it is
+  the mechanism the whole of `docs/RETENTION.md` section 1 rests on. Postgres applying SELECT
+  policies to the new row is what stops an UPDATE being used to make a row invisible to its owner
+  and visible to somebody else. Neither is wrong; together they mean a soft delete cannot be an
+  app-role UPDATE.
+- **Risk**: none realised, because nothing wrote the column. The risk it would have carried is the
+  one worth naming: the obvious fix is to relax the SELECT policy so the new row is visible, which
+  makes deleted rows readable and turns revocation into a filter the application is trusted to
+  apply. That is the failure this deviation exists to make expensive.
+- **Fix**: the stamp goes through the service role, which `13` already names for "deletion
+  orchestration" and whose `owned_item_service` policy admits the new row. The rule stays in the
+  database as `kynviora.delete_owned_item(item, actor)`, granted to the service role alone, which
+  re-evaluates ownership in the same statement that writes - so the privileged write cannot be
+  wider than the check that authorised it, and there is no window between them. Ownership is
+  `kynviora.profile_owned_by`, which is `owns_profile`'s body with the user supplied rather than
+  read from the request GUC; `owns_profile` now calls it, so there is one definition and the rule
+  cannot drift between the policy and the purge.
+
+  `owned_item_delete_is_owner_only` stays as well, restrictive, saying the rule out loud. Today it
+  cannot fire, because the SELECT policy refuses first - which is precisely why it is worth having
+  and why it is tested under the condition that would make it load-bearing: a "recently deleted"
+  list or an undo needs an owner to see a row after deleting it, and the moment `owned_item_select`
+  relaxes for that, `MANAGE_MEDICINES` becomes a delete capability again. `db/retention.test.ts`
+  builds that future explicitly and asks the question again there, because a guard tested only
+  where something else already refuses is a guard nobody has seen fire.
+
+- **Verified**: `db/retention.test.ts` - the direct path refused for owner and caregiver alike, the
+  function admitting only the owner, and the restrictive policy refusing a caregiver by name once
+  the SELECT filter is relaxed.
+- **Status**: **RESOLVED 2026-09-05**.
