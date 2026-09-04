@@ -191,6 +191,11 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
         mutation: request.mutation,
         payload: request.payload,
         baseVersion: request.baseVersion,
+        // When this phone queued it, which is inherently the phone's own clock: the request is
+        // being written precisely because no server could be reached, so there is no server time
+        // to prefer. Nothing downstream treats it as an assessment input - it orders the queue and
+        // is shown to the person as when they made the change.
+        // eslint-disable-next-line no-restricted-syntax -- no server was reachable to ask
         createdAt: instantFrom(new Date().toISOString()),
         state: 'PENDING',
         attemptCount: 0,

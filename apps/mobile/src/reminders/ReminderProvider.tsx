@@ -226,6 +226,7 @@ export function ReminderProvider({ children }: { readonly children: ReactNode })
         // The device's own clock. There is no server involved in when a local reminder fires -
         // that is the whole point of `04` Phase 4.2 - and a stored `serverTime` would be from
         // whenever the copy was written, which offline is the wrong answer by days.
+        // eslint-disable-next-line no-restricted-syntax -- device-local by design, see above
         now: instantFrom(new Date().toISOString()),
         detailLevel,
       });

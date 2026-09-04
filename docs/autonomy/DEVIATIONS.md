@@ -1898,3 +1898,33 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Required future work**: decide it with Phase 1.1 - either scope the scheme to the routes a
   feature needs and validate what it carries, or remove it and use an App Link. Whichever is
   chosen, `PLAT-2` is where the reasoning goes.
+
+---
+
+## DEV-053 - A save held the version of `queue` that existed before the store opened
+
+- **Affected specification**: `12` (a pending-operation journal; a queued change must survive),
+  `13` (the operation ID is the idempotency key), `04` Phase 2.5, `DEV-044`'s family.
+- **Expected behaviour**: an edit made with no signal is queued and sent later.
+- **Implemented behaviour**: `EditItem`'s `onSave` was a `useCallback` over
+  `[client, view.id, onChanged]` and called `queueEdit`, which is not in that list. `queueEdit` is
+  itself a `useCallback` over `[pending, sessionId, drain]`, and both of the first two move at
+  runtime - `pending` is `null` until the encrypted store finishes opening, and `sessionId` changes
+  when the session does, which `ProjectionProvider` handles explicitly rather than hypothetically.
+
+  A save holding the first version calls a `queue` that returns `false` before writing anything,
+  so the screen reports the edit as failed and drops it. Holding a stale `sessionId` is worse: the
+  operation is written into the previous session's queue, where this session's drain never looks.
+
+- **How it was found**: `eslint-plugin-react-hooks` `exhaustive-deps`, on the first run of ESLint
+  over `apps/**` ever. It was one of 22 findings and the only one that was a defect rather than a
+  style or a declaration issue.
+- **Reason**: `apps/**` was in ESLint's ignore list, so no rule had ever looked at this tree. That
+  is the other half of `DEV-043`'s explanation - the mobile typecheck was closed by DEC-112, and
+  the lint half stayed open.
+- **Risk**: real but narrow, and it is the narrowness that kept it hidden. `EditItem` is several
+  taps in, so by the time it mounts the store is normally open and `queueEdit` is already the
+  working version. The reachable path is a session change while the screen is mounted.
+- **Fix**: `queueEdit` added to the dependency list, with the reasoning written beside it.
+  `exhaustive-deps` is now an error over `apps/mobile/**`, so the next one fails the build.
+- **Status**: **RESOLVED 2026-09-04**.

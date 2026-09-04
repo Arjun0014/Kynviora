@@ -136,7 +136,7 @@ export function MedicineSchedules({
             description={option.description}
             selected={values.scheduleKind === option.kind}
             onPress={() => {
-              setValues((current) => withKindChanged(current, option.kind as ScheduleKind));
+              setValues((current) => withKindChanged(current, option.kind));
             }}
           />
         ))}
@@ -149,8 +149,9 @@ export function MedicineSchedules({
             <Text style={styles.help}>{SCHEDULE_COPY.timesHelp}</Text>
             {values.timesLocal.map((time, index) => (
               // The index is the identity: two lines can hold the same text while somebody is
-              // typing, and a key on the value would make them the same row.
-              // eslint-disable-next-line react/no-array-index-key
+              // typing, and a key on the value would make them the same row. (There is no
+              // `react/no-array-index-key` to silence: the plugin declaring it is not installed,
+              // and a disable comment for a rule nothing runs is a decision nobody is enforcing.)
               <View key={`time-${String(index)}`} style={styles.timeRow}>
                 <TextInput
                   accessibilityLabel={`${SCHEDULE_COPY.timesLabel} ${String(index + 1)}`}
@@ -199,7 +200,7 @@ export function MedicineSchedules({
                     accessibilityLabel={day.accessibilityLabel}
                     style={[styles.day, selected ? styles.daySelected : null]}
                     onPress={() => {
-                      setValues((current) => withDayToggled(current, day.day as IsoWeekday));
+                      setValues((current) => withDayToggled(current, day.day));
                     }}
                   >
                     {/* The tick is a character, not a colour. `18`: meaning is never carried by

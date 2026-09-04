@@ -44,9 +44,17 @@ export interface ProfileContextValue {
   /** `null` until the server has offered at least one. Never invented locally. */
   readonly activeProfileId: string | null;
   readonly activeProfile: ProfileSummary | null;
-  select(profileId: string): void;
-  reload(): void;
+  // Declared as properties carrying a function type, not as method shorthand. A method signature
+  // tells TypeScript that `this` is meaningful, so every screen that destructures one off the
+  // context is an `unbound-method` error - and the rule is right that a method pulled off its
+  // object is a hazard. These never were methods; they are callbacks a provider hands out, and
+  // saying so is both stricter (function-type properties are checked contravariantly) and true.
+  readonly select: (profileId: string) => void;
+  readonly reload: () => void;
 }
+
+/** The one empty list, so "no profiles" has a stable identity across renders. */
+const NO_PROFILES: readonly ProfileSummary[] = Object.freeze([]);
 
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 
@@ -63,7 +71,13 @@ export function ProfileProvider({ children }: { readonly children: ReactNode }) 
     projectionKey: 'profiles',
   });
 
-  const profiles = resource.value?.profiles ?? [];
+  // A shared empty array, never a fresh one. `resource.value?.profiles ?? []` allocates on every
+  // render while the value is null - which is every render during loading, every error state and
+  // every empty one - and that identity feeds both the effect below and the context value. The
+  // effect then re-runs on every render, and the context object changes identity on every render,
+  // so every screen consuming `useProfiles()` re-renders with it. Once the resource has a value
+  // the array is the resource's own and is already stable; it is only the absent case that churns.
+  const profiles = resource.value?.profiles ?? NO_PROFILES;
 
   // Default to the first profile the server offered, and drop a selection the server no longer
   // offers - a caregiver grant can be revoked between launches, and the selection must follow

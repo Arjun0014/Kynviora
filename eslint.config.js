@@ -1,6 +1,7 @@
 // @ts-check
 import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import reactHooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
   {
@@ -8,10 +9,18 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/dist/**',
       'coverage/**',
-      'apps/**',
+      // `apps/mobile/src` is linted - see the block at the bottom of this file. What stays ignored
+      // is the generated and native scaffolding: `.expo/` is written by the router, `android/` and
+      // `ios/` by `expo prebuild`, and neither is source anybody edits.
+      'apps/**/.expo/**',
+      'apps/**/android/**',
+      'apps/**/ios/**',
+      'apps/**/*.js',
+      'apps/**/expo-env.d.ts',
       'KYNVIORA_PROJECT_SPEC/**',
       'eslint.config.js',
       'vitest.config.ts',
+      'vitest.mobile.config.ts',
     ],
   },
   eslint.configs.recommended,
@@ -47,7 +56,18 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.test.ts', 'packages/fixtures/**', 'db/harness/**', 'scripts/**'],
+    // `apps/mobile/test/**` joins this list for the reason `db/harness/**` is on it: a harness
+    // walks a structure the type system cannot describe - there, a database row; here, a rendered
+    // tree - and typing every step of that walk would be describing `react-test-renderer`'s
+    // internals rather than testing the app.
+    files: [
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      'packages/fixtures/**',
+      'db/harness/**',
+      'scripts/**',
+      'apps/mobile/test/**',
+    ],
     rules: {
       'no-restricted-syntax': 'off',
       'no-console': 'off',
@@ -55,6 +75,49 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-argument': 'off',
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // The mobile app
+  // ---------------------------------------------------------------------------
+  // `apps/**` was ignored entirely until now, and that is half of `DEV-043`'s explanation: eight
+  // call sites reached for `crypto.randomUUID()` on an engine with no `crypto`, and every gate the
+  // project runs was green because the one tree that could not run them was also the one tree
+  // nobody checked. The mobile typecheck closed the other half (DEC-112); this closes this one.
+  //
+  // The two rules that earn their place here are the hooks ones, and they are not style. Trap 174
+  // is a `ReminderProvider` effect that guarded itself with "already running, do nothing" and
+  // therefore dropped the only pass that had the client, the profile and the projection together -
+  // three cold launches, zero alarms, on a build whose reminder engine was correct. `DEV-044` and
+  // `DEV-045` are the same family: an effect or a memo whose inputs moved and whose result did
+  // not. `exhaustive-deps` is the only automated thing that looks at that at all.
+  //
+  // Type-aware, through `apps/mobile/tsconfig.json` rather than the root one: that config is what
+  // tells the compiler a phone has no DOM and no Node globals, and linting these files under the
+  // root project would hand them back the very `lib` DEC-112 took away.
+  {
+    files: ['apps/mobile/**/*.{ts,tsx}'],
+    plugins: { 'react-hooks': reactHooks },
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'error',
+
+      // `x != null` stays allowed here and nowhere else. Every other tree passes strict `eqeqeq`
+      // and keeps it, because there the two forms mean the same thing. Here they do not: a React
+      // prop declared `state?: ScreenStateKind | null` is absent as `undefined` *and* as `null`,
+      // and the widely-used `!= null` excludes both while `!== null` lets `undefined` through to a
+      // component that would then render a state nobody set. Rewriting the six sites as
+      // `!== null && !== undefined` would be longer, harder to read, and no safer - TypeScript
+      // narrows `!= null` exactly. What the rule is actually for - `0 == ''`, `'1' == 1` - is
+      // still an error, because `null: 'ignore'` exempts only comparisons against `null`.
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
     },
   },
 );

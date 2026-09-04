@@ -28,6 +28,17 @@
       "@kynviora/catalog": ["../../packages/catalog/src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "*.ts", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  // `test/**` is included so the harness is typechecked too. It is not app code and Metro never
+  // sees it, but it is the thing every component test depends on being right - an untyped tree
+  // walker that silently returns nothing is a suite that passes over an empty screen.
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    "test/**/*.tsx",
+    "*.ts",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ],
   "exclude": ["node_modules"]
 }

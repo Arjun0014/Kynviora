@@ -61,6 +61,9 @@ const digest: DigestFn = (canonical) =>
 
 type Step = 'CHOOSE' | 'REVIEW' | 'DONE';
 
+/** The one empty list, so "nothing to include yet" has a stable identity across renders. */
+const NO_CANDIDATES: readonly VisitPackCandidate[] = Object.freeze([]);
+
 export function VisitPackFlow({ onClose }: { readonly onClose: () => void }) {
   const { client, elevate } = useApi();
   const { activeProfileId } = useProfiles();
@@ -104,7 +107,10 @@ export function VisitPackFlow({ onClose }: { readonly onClose: () => void }) {
     isEmpty: (value) => value.candidates.length === 0,
   });
 
-  const candidates = resource.value?.candidates ?? [];
+  // A shared empty array rather than a fresh one per render, so `selectedEntries` is not
+  // recomputed on every render while the candidate list is still absent (ProfileProvider's
+  // `NO_PROFILES`, same reason).
+  const candidates = resource.value?.candidates ?? NO_CANDIDATES;
 
   const selectedEntries = useMemo<readonly ReviewEntry[]>(
     () =>

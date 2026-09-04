@@ -164,7 +164,15 @@ export function EditItem({ view, onChanged, onClose }: EditItemProps) {
         },
       );
     },
-    [client, view.id, onChanged],
+    // `queueEdit` belongs here and its absence was a real defect (`DEV-053`). It is a
+    // `useCallback` over `[pending, sessionId, drain]`, and both of the first two move at runtime:
+    // `pending` is `null` until the encrypted store finishes opening, and `sessionId` changes when
+    // the session does - which `ProjectionProvider` handles explicitly, so it is an expected event
+    // rather than a hypothetical one. A save holding the first version calls a `queue` that
+    // returns `false` before writing anything, and the screen then reports the edit as failed and
+    // drops it. Holding a stale `sessionId` is worse: the operation is written to the previous
+    // session's queue, where this session's drain will never look for it.
+    [client, view.id, onChanged, queueEdit],
   );
 
   const onSaveFields = useCallback(() => {

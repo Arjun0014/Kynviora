@@ -50,7 +50,11 @@ export interface ApiContextValue {
    * privileged session never outlives the action. When Phase 1.1 lands, this function performs
    * the real prompt and nothing else changes.
    */
-  elevate(): KynvioraClient | null;
+  // A property carrying a function type rather than method shorthand, for the reason
+  // `ProfileContextValue` gives: a method signature makes `this` meaningful, and every screen
+  // that destructures this off the context is then an `unbound-method` error over something that
+  // was never a method.
+  readonly elevate: () => KynvioraClient | null;
 }
 
 const ApiContext = createContext<ApiContextValue | null>(null);

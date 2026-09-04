@@ -1,27 +1,93 @@
 import { defineConfig } from 'vitest/config';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * Two projects, because the two trees are two runtimes.
+ *
+ * `server` is everything that runs on Node or in Postgres. `mobile` is `apps/mobile`, which runs
+ * on Hermes and has to be told so: React Native's source is Flow-annotated JavaScript that esbuild
+ * cannot parse and expects a native bridge Node does not have, so `react-native` resolves to
+ * `apps/mobile/test/reactNativeStub.tsx` here. What that substitutes and what it therefore cannot
+ * measure is written at the top of the stub.
+ *
+ * Splitting them rather than widening `include` is what keeps the alias off the server tree. A
+ * global `react-native` alias would apply to `packages/presentation` as well, which imports
+ * nothing from React Native and must go on not importing anything from it (DEC-010).
+ */
+const mobileRoot = fileURLToPath(new URL('./apps/mobile', import.meta.url));
 
 export default defineConfig({
-  // Native tsconfig `paths` resolution (Vite 7+), replacing the vite-tsconfig-paths plugin.
-  resolve: { tsconfigPaths: true },
   test: {
-    globals: false,
-    environment: 'node',
-    // `scripts/**` carries the device-verification harness. Only its analysis has tests here;
-    // the runner needs an attached device and is invoked by hand (`npm run verify:device`), so
-    // the judgements it makes are covered by CI and the evidence is not.
-    include: [
-      'packages/**/*.test.ts',
-      'services/**/*.test.ts',
-      'db/**/*.test.ts',
-      'scripts/**/*.test.ts',
-    ],
-    exclude: ['**/node_modules/**', '**/dist/**', 'apps/**'],
-    testTimeout: 30_000,
-    hookTimeout: 60_000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
-      include: ['packages/*/src/**', 'services/*/src/**'],
+      include: ['packages/*/src/**', 'services/*/src/**', 'apps/mobile/src/**'],
     },
+    projects: [
+      {
+        // Native tsconfig `paths` resolution (Vite 7+), replacing the vite-tsconfig-paths plugin.
+        resolve: { tsconfigPaths: true },
+        test: {
+          name: 'server',
+          globals: false,
+          environment: 'node',
+          // `scripts/**` carries the device-verification harness. Only its analysis has tests here;
+          // the runner needs an attached device and is invoked by hand (`npm run verify:device`),
+          // so the judgements it makes are covered by CI and the evidence is not.
+          include: [
+            'packages/**/*.test.ts',
+            'services/**/*.test.ts',
+            'db/**/*.test.ts',
+            'scripts/**/*.test.ts',
+          ],
+          exclude: ['**/node_modules/**', '**/dist/**', 'apps/**'],
+          testTimeout: 30_000,
+          hookTimeout: 60_000,
+        },
+      },
+      {
+        resolve: {
+          alias: [
+            { find: /^react-native$/, replacement: `${mobileRoot}/test/reactNativeStub.tsx` },
+            { find: /^@\/(.*)$/, replacement: `${mobileRoot}/src/$1` },
+            // `expo-crypto` is a binding onto the platform's secure random source, and importing
+            // it in Node fails at module scope: `expo-modules-core` reads `__DEV__` and then reads
+            // an `expo` global the native runtime installs. The stub says what it does and does
+            // not claim.
+            { find: /^expo-crypto$/, replacement: `${mobileRoot}/test/expoCryptoStub.ts` },
+            // The rest of the platform. A screen imports its providers, a provider imports the
+            // keystore or the database, and `expo-modules-core` reads a global the native runtime
+            // installs at module scope - so importing a screen in Node throws before a test has
+            // rendered anything. These make the import succeed and throw if anything actually
+            // calls them, because a component test that reached the keystore would be claiming
+            // coverage of what only `verify:device` can measure.
+            {
+              find: /^expo-secure-store$/,
+              replacement: `${mobileRoot}/test/stubs/expo-secure-store.ts`,
+            },
+            { find: /^expo-sqlite$/, replacement: `${mobileRoot}/test/stubs/expo-sqlite.ts` },
+            {
+              find: /^expo-notifications$/,
+              replacement: `${mobileRoot}/test/stubs/expo-notifications.ts`,
+            },
+            { find: /^expo-router$/, replacement: `${mobileRoot}/test/stubs/expo-router.tsx` },
+            {
+              find: /^react-native-safe-area-context$/,
+              replacement: `${mobileRoot}/test/stubs/react-native-safe-area-context.tsx`,
+            },
+          ],
+        },
+        test: {
+          name: 'mobile',
+          setupFiles: ['./apps/mobile/test/setup.ts'],
+          globals: false,
+          environment: 'node',
+          include: ['apps/mobile/**/*.test.ts', 'apps/mobile/**/*.test.tsx'],
+          exclude: ['**/node_modules/**', '**/dist/**', '**/.expo/**'],
+          testTimeout: 30_000,
+          hookTimeout: 60_000,
+        },
+      },
+    ],
   },
 });

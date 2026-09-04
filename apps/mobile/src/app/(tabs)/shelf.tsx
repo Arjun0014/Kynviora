@@ -659,7 +659,16 @@ export default function ShelfScreen() {
   );
 }
 
-function ShelfRow({
+/**
+ * One row of the shelf.
+ *
+ * Exported so it can be rendered on its own. It decides which controls a person is offered for one
+ * item - which is a product decision with two capability rules in it (DEC-116, and medicines-only
+ * for a dose) - and reaching it through the whole screen would mean standing up four providers and
+ * a network client to ask a question about a ternary. The screen is not exported and does not need
+ * to be; this is.
+ */
+export function ShelfRow({
   item,
   mayRecordDoses,
   onOpen,

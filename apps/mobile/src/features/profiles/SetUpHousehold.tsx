@@ -48,7 +48,7 @@ import {
   ageBandOptions,
   type ScreenState as ScreenStateKind,
 } from '@kynviora/presentation';
-import { bandMatchesBirthYear, isAgeBand, type AgeBand } from '@kynviora/domain';
+import { bandMatchesBirthYear, isAgeBand } from '@kynviora/domain';
 import {
   emptyProfileForm,
   messageForFailure,
@@ -178,8 +178,15 @@ export function SetUpHousehold({
    * would throw away everything else they typed.
    */
   const mismatch = useMemo(() => {
-    const band = isAgeBand(values.ageBand) ? (values.ageBand as AgeBand) : null;
+    const band = isAgeBand(values.ageBand) ? values.ageBand : null;
     const year = /^\d{4}$/.test(values.birthYear.trim()) ? Number(values.birthYear.trim()) : null;
+    // The device's own year, and the rule about injected clocks does not reach here. It exists
+    // so an assessment can be replayed exactly (DEC-003, `09`), and this is not an assessment:
+    // it is whether the band somebody picked agrees with the year they typed, rendered as a
+    // question rather than a refusal. The person is typing on this device now, so its year is the
+    // right one - and there is no server answer to prefer, because this runs before anything has
+    // been sent.
+    // eslint-disable-next-line no-restricted-syntax -- device-local presentation, not an assessment
     return !bandMatchesBirthYear(band, year, new Date().getFullYear());
   }, [values.ageBand, values.birthYear]);
 
