@@ -138,14 +138,25 @@ export function useResource<T>(
     if (projection === null || key === null || outcome === null) return;
     pendingWriteRef.current = null;
 
+    // `catch` on every one of these, and it is not defensive tidiness. The projection is a copy
+    // of the last thing the server said (DEC-100); if the store cannot take the write - a device
+    // with no room left, which is `19`'s low-storage scenario - the content on screen is still
+    // the server's own answer and is still correct. What must not happen is the failure becoming
+    // an **unhandled** rejection, which is what it was: a store made unwritable produced
+    // "Uncaught (in promise) ... attempt to write a readonly database" and a LogBox banner across
+    // the tab bar (`DEV-055`).
+    //
+    // Swallowed rather than surfaced, deliberately. There is nothing a person can do about it and
+    // nothing about what they are looking at is wrong - the next launch simply has an older copy,
+    // which is the same state as a first launch.
     if (outcome.kind === 'OK') {
-      void projection.write(key, outcome.value);
+      void projection.write(key, outcome.value).catch(() => undefined);
       return;
     }
     // Written where the server confirmed it, deleted where the server's answer was about access,
     // and left alone where the server said nothing at all (`12`, `15` A2).
     if (projectionActionFor(outcome) === 'FORGET') {
-      void projection.forget(key);
+      void projection.forget(key).catch(() => undefined);
     }
   }, [projection, key, storeGeneration]);
 

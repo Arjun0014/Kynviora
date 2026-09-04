@@ -188,6 +188,27 @@ describe('what may be queued at all', () => {
     expect(stored[0]?.operationId).toBe('key-from-the-first-attempt');
   });
 
+  it('reports an edit the store could not take as not queued', async () => {
+    // `DEV-055`, found by `19`'s low-storage scenario. A device with no room left is a device
+    // whose store will not take a write, and `pending.put` then rejects. Before this it escaped:
+    // the caller learned nothing, an uncaught-promise banner went over the app, and the person was
+    // looking at a screen that had told them their change was safe.
+    //
+    // `12` is explicit that a queued change is visible rather than assumed, so an edit nothing
+    // kept has to be reported as an edit nothing kept - which for this function means `false`.
+    const failing = fakeStore();
+    store = {
+      ...failing,
+      rows: failing.rows,
+      put: () => Promise.reject(new Error('attempt to write a readonly database')),
+    };
+
+    const { api } = harness({});
+    await flush();
+    await expect(api.current!.queue(operationBody())).resolves.toBe(false);
+    expect(store.rows.size).toBe(0);
+  });
+
   it('mints one where the screen had none', async () => {
     const { api } = harness({});
     await flush();

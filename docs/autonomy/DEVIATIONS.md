@@ -1953,3 +1953,43 @@ its own limit on pending local notifications, which is lower than Android's and 
   screen module by path. `scripts/checks/routeDirectory.test.ts` reads the real route directory and
   fails if anything in it is not a route, so the next attempt fails in CI rather than on a phone.
 - **Status**: **RESOLVED 2026-09-04**.
+
+---
+
+## DEV-055 - A store that cannot be written rejected into the void, and a screen said the dose was kept
+
+- **Affected specification**: `12` (a queued change is **visible** rather than assumed; the
+  pending-operation journal), `18` (a person must be able to tell what happened), `19` (low
+  storage), `04` Phase 4.3, DEC-100.
+- **Expected behaviour**: a device with no room left produces a comprehensible refusal, and a dose
+  nothing could keep is never described as kept.
+- **Implemented behaviour**: two failures, one loud and one quiet.
+
+  The loud one: four store calls were started and not awaited - `projection.write`,
+  `projection.forget`, and two `clear()`s on a session change - because their result is a cache
+  rather than somebody's data. With the store unwritable every one of them rejects, and with no
+  `catch` each became an unhandled rejection. On the device that drew React Native's error banner
+  **across the tab bar**, so the app could not be navigated at all.
+
+  The quiet one, and the one `12` is actually about: `PendingSyncProvider.queue` did
+  `await pending.put(...)` and let the rejection escape. Every caller renders "Recorded on this
+  phone. It will reach Kynviora when you are back online." on `true` and a failure on `false`, and
+  a rejection is neither - so the caller learned nothing about an edit that had not been kept.
+
+- **How it was found**: by implementing `19`'s low-storage scenario. `LOW-2` is the check that
+  names it: a dose the journal refused must not be described as kept, because the person then stops
+  thinking about a record that does not exist and there is no later moment at which they learn.
+- **Reason**: `void somePromise()` reads as "this does not matter enough to wait for", and for a
+  cache write that is true. It is not the same as "this cannot fail".
+- **Risk**: on the queue, high and silent - somebody's dose, told to them as saved. On the
+  projection, low in itself and disruptive in effect: in a development build the banner blocks the
+  UI, and in a release build the handler is whatever the platform's default is. Neither is a
+  decision this app made.
+- **Fix**: every fire-and-forget store call carries a `catch` that swallows, with the reason beside
+  it - the content on screen is the server's own answer and is still correct, and the next launch
+  simply has an older copy. `queue` returns `false` when the write is refused, so the screen says
+  what happened. `PendingSyncProvider.test.tsx` pins the second half in CI, and
+  `verify:device:lowstorage` `LOW-3` now fails a run on any uncaught rejection at all - which is
+  the check that would have found this without a person reading a log.
+- **Verified**: `npm run verify:device:lowstorage` **5/5 PASS** on a Pixel 7 / Android 16 emulator.
+- **Status**: **RESOLVED 2026-09-04**.

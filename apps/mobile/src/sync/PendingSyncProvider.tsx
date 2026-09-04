@@ -201,7 +201,19 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
         attemptCount: 0,
         lastError: null,
       };
-      await pending.put(sessionId, operation);
+      // A store that cannot take the write means the edit is **not** queued, and saying so is the
+      // whole contract of this function: every caller renders "kept on this phone, it will be sent"
+      // on `true` and a failure on `false`. Letting the rejection escape instead told the caller
+      // nothing, put an uncaught-promise banner over the app, and left a person looking at a screen
+      // that had said their change was safe (`DEV-055`, `19`'s low-storage scenario).
+      //
+      // `12` is explicit that a queued change is visible rather than assumed. An edit nothing kept
+      // must be reported as an edit nothing kept.
+      try {
+        await pending.put(sessionId, operation);
+      } catch {
+        return false;
+      }
       drain();
       return true;
     },

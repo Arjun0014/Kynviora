@@ -101,12 +101,15 @@ export function ProjectionProvider({ children }: { readonly children: ReactNode 
     previousSessionId.current = sessionId;
     // Only on an actual change of identity. The first render is not a sign-out.
     if (previous === null || previous === sessionId || opened.projection === null) return;
-    void opened.projection.clear();
+    void opened.projection.clear().catch(() => undefined);
     // The queue goes with it. `12` requires an identity change to invalidate local access, and an
     // unsent write is local access with a delayed effect - draining the previous person's edit
     // under the new person's session is the same leak as showing them the previous shelf. The
     // previous identity's rows are the ones removed, not the new one's.
-    if (opened.pending !== null) void opened.pending.clear(previous);
+    // Caught for `DEV-055`'s reason. A purge that cannot run leaves rows belonging to a session
+    // that has ended, which matters - but an unhandled rejection does not fix it and does put a
+    // crash banner over the app.
+    if (opened.pending !== null) void opened.pending.clear(previous).catch(() => undefined);
   }, [sessionId, opened.projection, opened.pending]);
 
   const contextValue = useMemo<ProjectionContextValue>(
