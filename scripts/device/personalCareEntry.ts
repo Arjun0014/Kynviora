@@ -241,6 +241,15 @@ export interface PersonalCareCreatedEvidence {
   readonly intended: IntendedEntry;
   /** The profile the run added to, so an item on another profile's shelf is not counted. */
   readonly profileId: string;
+  /**
+   * Whether the form was actually filled in and saved.
+   *
+   * Without this the check reads an empty shelf as a save that produced nothing, and reports
+   * **FAIL - the form accepted every value and the save produced nothing** about a run in which
+   * the app never started. That happened, on a launch Metro dropped, and it is exactly the failure
+   * DEC-102 exists to prevent: a harness that could not look must not describe what it saw.
+   */
+  readonly submitted: boolean;
 }
 
 /**
@@ -254,6 +263,14 @@ export interface PersonalCareCreatedEvidence {
  */
 export function personalCareCreatedCheck(evidence: PersonalCareCreatedEvidence): Check {
   const title = 'The product exists on the server, once, as a personal-care item';
+  if (!evidence.submitted) {
+    return {
+      id: 'PC-2',
+      title,
+      status: 'INCONCLUSIVE',
+      detail: 'No save was ever driven, so the shelf says nothing about what a save would do.',
+    };
+  }
   if (evidence.after === null || evidence.before === null) {
     return {
       id: 'PC-2',

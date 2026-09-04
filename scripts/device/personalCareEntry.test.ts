@@ -114,6 +114,7 @@ describe('PC-2, what reached the server', () => {
       after: [...before, item()],
       intended: INTENDED,
       profileId: PROFILE,
+      submitted: true,
     });
     expect(check.status).toBe('PASS');
   });
@@ -124,6 +125,7 @@ describe('PC-2, what reached the server', () => {
       after: [...before, item({ id: 'a' }), item({ id: 'b' })],
       intended: INTENDED,
       profileId: PROFILE,
+      submitted: true,
     });
     expect(check.status).toBe('FAIL');
     expect(check.detail).toContain('idempotency key');
@@ -137,6 +139,7 @@ describe('PC-2, what reached the server', () => {
       after: [...before, item({ itemKind: 'MEDICINE' })],
       intended: INTENDED,
       profileId: PROFILE,
+      submitted: true,
     });
     expect(check.status).toBe('FAIL');
     expect(check.detail).toContain('PERSONAL_CARE');
@@ -148,8 +151,24 @@ describe('PC-2, what reached the server', () => {
       after: [...before, item({ profileId: 'someone-else' })],
       intended: INTENDED,
       profileId: PROFILE,
+      submitted: true,
     });
     expect(check.status).toBe('FAIL');
+  });
+
+  it('is inconclusive rather than failing when the app never started', () => {
+    // The failure this flag exists for, and it happened: a launch Metro dropped produced
+    // "FAIL - the form accepted every value and the save produced nothing" about a run in which
+    // nothing had been pressed. A harness that could not look must not describe what it saw.
+    const check = personalCareCreatedCheck({
+      before,
+      after: before,
+      intended: INTENDED,
+      profileId: PROFILE,
+      submitted: false,
+    });
+    expect(check.status).toBe('INCONCLUSIVE');
+    expect(check.detail).toContain('No save was ever driven');
   });
 });
 

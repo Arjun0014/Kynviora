@@ -15,7 +15,7 @@ import {
   nodeNamedBelow,
   selectedStateOf,
 } from './ui.js';
-import { parseUiHierarchy, type UiNode } from './accessibility.js';
+import { clipRectsOf, isFullyVisible, parseUiHierarchy, type UiNode } from './accessibility.js';
 
 const PACKAGE = 'com.kynviora.app';
 
@@ -156,6 +156,33 @@ describe('nodeNamedBelow', () => {
         startsWith: 'Synthetic Lotion',
       }),
     ).toBeNull();
+  });
+
+  function rect(top: number, bottom: number) {
+    return { left: 76, top, right: 1004, bottom };
+  }
+});
+
+describe('a control that is only just on screen', () => {
+  // The failure this rule exists for, and it cost a run. `scrollTo` stops as soon as a control is
+  // anywhere on screen, and `uiautomator` reports visible bounds - so a Save button just entering
+  // view is a thirty-pixel strip whose centre is under the tab bar. The tap lands on whatever is
+  // drawn there, the form stays open, nothing errors, and the run reports a save that produced
+  // nothing. It only surfaced when the scroll stopped flinging (trap 190): the overshoot had been
+  // carrying every target well inside the viewport.
+  const scroller = node({
+    scrollable: true,
+    bounds: { left: 0, top: 250, right: 1080, bottom: 2209 },
+  });
+
+  it('is recognised as cut off at the edge it touches', () => {
+    const clipped = node({ text: 'Save', clickable: true, bounds: rect(2180, 2209) });
+    expect(isFullyVisible(clipped, clipRectsOf([scroller, clipped]))).toBe(false);
+  });
+
+  it('is whole once it sits clear of both edges', () => {
+    const whole = node({ text: 'Save', clickable: true, bounds: rect(1780, 1908) });
+    expect(isFullyVisible(whole, clipRectsOf([scroller, whole]))).toBe(true);
   });
 
   function rect(top: number, bottom: number) {

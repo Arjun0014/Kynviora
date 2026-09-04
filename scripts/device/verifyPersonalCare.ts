@@ -34,7 +34,7 @@
  * because "could not look" must never be recorded as "looked and it was fine" (DEC-102).
  */
 
-import { PACKAGE, adb, isInstalled, sleep } from './adb.js';
+import { PACKAGE, isInstalled, sleep } from './adb.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
 import {
   LIMITS_OF_BLANK_FIELDS,
@@ -51,15 +51,14 @@ import {
 } from './personalCareEntry.js';
 import {
   captureFailure,
+  coldStart,
   collectScreenText,
   isSelected,
-  launch,
   prepareDeviceForDriving,
   scrollToAndTap,
   scrollToAndTapBelow,
   tapNamed,
   typeInto,
-  waitForAppReady,
 } from './ui.js';
 
 const API_PORT = 3000;
@@ -134,9 +133,7 @@ async function main(): Promise<void> {
   checks.push(shelfPreconditionCheck({ before, intended: INTENDED }));
 
   prepareDeviceForDriving();
-  adb(['shell', 'am', 'force-stop', PACKAGE]);
-  launch();
-  const ready = waitForAppReady();
+  const ready = coldStart('personalcare');
 
   process.stdout.write(`Adding ${INTENDED.displayName}...\n`);
   const steps: (readonly [string, boolean])[] = [['launch the app', ready]];
@@ -186,7 +183,15 @@ async function main(): Promise<void> {
 
   const after = await shelfItems();
   checks.push(
-    personalCareCreatedCheck({ before, after, intended: INTENDED, profileId: PROFILE_ID }),
+    personalCareCreatedCheck({
+      before,
+      after,
+      intended: INTENDED,
+      profileId: PROFILE_ID,
+      // Every step, including the launch. A run that never reached the form has nothing to say
+      // about what a save does.
+      submitted: steps.every(([, happened]) => happened),
+    }),
   );
 
   const created = (after ?? []).find((item) => item.displayName === INTENDED.displayName) ?? null;

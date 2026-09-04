@@ -29,7 +29,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PACKAGE, adb, adbBytes, dumpUiHierarchy, sleep } from './adb.js';
-import { accessibleNameOf, parseUiHierarchy, type UiNode } from './accessibility.js';
+import {
+  accessibleNameOf,
+  clipRectsOf,
+  parseUiHierarchy,
+  type Rect,
+  type UiNode,
+} from './accessibility.js';
 
 /** A point on the screen, in device pixels. */
 export interface Point {
@@ -153,6 +159,8 @@ const MIN_SCROLL_PX = 120;
 const MAX_SCROLL_PX = 1_500;
 /** Where a row's heading is put when a run needs the whole row below it in view. */
 const SCROLL_TOP_MARGIN_PX = 400;
+/** Enough to bring a control clear of an edge it was cut off at, and no more. */
+const NUDGE_PX = 400;
 
 /**
  * How long a scroll gesture takes, and why it is not shorter.
@@ -204,6 +212,12 @@ export function scrollDownBy(pixels: number): void {
 
 export function scrollUp(): void {
   swipe(SCROLL_ANCHOR_Y - SCROLL_STEP_PX, SCROLL_ANCHOR_Y);
+}
+
+/** Scroll up by a chosen distance. The mirror of {@link scrollDownBy}. */
+export function scrollUpBy(pixels: number): void {
+  const distance = Math.max(MIN_SCROLL_PX, Math.min(pixels, MAX_SCROLL_PX));
+  swipe(SCROLL_ANCHOR_Y - distance, SCROLL_ANCHOR_Y);
 }
 
 /**
@@ -395,13 +409,54 @@ export function scrollToAndTapBelow(
   return false;
 }
 
-/** Scroll a control into view - waiting for it to appear - and tap it. */
-export function scrollToAndTap(name: NameMatch, timeoutMs = 45_000): boolean {
-  const node = waitForNamed(name, timeoutMs);
-  if (node === null) return false;
-  tapAt(centreOf(node));
-  sleep(1_500);
-  return true;
+/**
+ * Which edge a node is cut off at, or `null` where it is whole.
+ *
+ * Only the horizontal edges are asked about. `isFullyVisible` also treats a left or right edge
+ * coinciding with a container's as unmeasured, which is right for measuring a target and wrong
+ * here: a full-width button legitimately reaches both sides, and scrolling would never fix it.
+ */
+function verticalClipOf(node: UiNode, clips: readonly Rect[]): 'TOP' | 'BOTTOM' | null {
+  if (clips.some((clip) => node.bounds.bottom === clip.bottom)) return 'BOTTOM';
+  if (clips.some((clip) => node.bounds.top === clip.top)) return 'TOP';
+  return null;
+}
+
+/**
+ * Scroll a control fully into view - waiting for it to appear - and tap it.
+ *
+ * The "fully" is the part that was missing, and its absence cost a run. `scrollTo` stops the
+ * moment a control is anywhere on screen, and "anywhere" includes a sliver at the bottom edge:
+ * `uiautomator` reports visible bounds, so a Save button just entering view is reported as a
+ * thirty-pixel strip whose centre is under the tab bar. The tap then lands on whatever is drawn
+ * there, the form stays open, nothing errors, and the run reports a save that produced nothing.
+ *
+ * It surfaced only when the scroll became a drag rather than a fling (trap 190): the fling used to
+ * overshoot by six hundred pixels and carry the control well inside the viewport, so the harness
+ * had been relying on a bug in its own scrolling to hit its targets.
+ */
+export function scrollToAndTap(name: NameMatch, timeoutMs = 45_000, maxSteps = 4): boolean {
+  if (waitForNamed(name, timeoutMs) === null) return false;
+
+  for (let step = 0; step < maxSteps; step += 1) {
+    const nodes = currentNodes();
+    if (nodes === null) {
+      sleep(1_500);
+      continue;
+    }
+    const node = nodeNamed(nodes, name);
+    if (node === null) return false;
+
+    const clipped = verticalClipOf(node, clipRectsOf(nodes));
+    if (clipped === null) {
+      tapAt(centreOf(node));
+      sleep(1_500);
+      return true;
+    }
+    if (clipped === 'BOTTOM') scrollDownBy(NUDGE_PX);
+    else scrollUpBy(NUDGE_PX);
+  }
+  return false;
 }
 
 /**
@@ -558,6 +613,27 @@ export function waitForAppReady(timeoutMs = 90_000): boolean {
     if (Date.now() >= deadline) return false;
     sleep(2_000);
   }
+}
+
+/**
+ * Start the app from dead and wait for it to be usable, retrying one launch that did not happen.
+ *
+ * The retry is not defensive padding. Metro rebuilds the bundle on a cold start and one hiccup
+ * leaves the app never started - and a harness that treats that as a reading reports the first
+ * check it can no longer perform as a finding about the app, which is what DEC-102 exists to
+ * prevent. `false` here means the app did not start twice running, and a caller must say so rather
+ * than describe what a screen did.
+ *
+ * Declared after {@link launch} on purpose: this is the only launch a run should make at its start.
+ */
+export function coldStart(label = 'coldstart', attempts = 2): boolean {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    adb(['shell', 'am', 'force-stop', PACKAGE]);
+    launch();
+    if (waitForAppReady()) return true;
+    captureFailure(`${label}-launch`);
+  }
+  return false;
 }
 
 export function pressHome(): void {

@@ -33,7 +33,7 @@
  * because "could not look" must never be recorded as "looked and it was fine" (DEC-102).
  */
 
-import { PACKAGE, adb, isInstalled, sleep } from './adb.js';
+import { PACKAGE, isInstalled, sleep } from './adb.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
 import {
   coverageStatedCheck,
@@ -47,12 +47,11 @@ import {
 } from './safetyInbox.js';
 import {
   captureFailure,
+  coldStart,
   collectScreenText,
-  launch,
   prepareDeviceForDriving,
   scrollToAndTap,
   tapNamed,
-  waitForAppReady,
 } from './ui.js';
 
 const API_PORT = 3000;
@@ -116,9 +115,7 @@ async function main(): Promise<void> {
   const checks: Check[] = [inboxPreconditionCheck({ inbox })];
 
   prepareDeviceForDriving();
-  adb(['shell', 'am', 'force-stop', PACKAGE]);
-  launch();
-  const ready = waitForAppReady();
+  const ready = coldStart('safety');
 
   let screenText: readonly string[] | null = null;
   if (ready && tapNamed('Safety')) {

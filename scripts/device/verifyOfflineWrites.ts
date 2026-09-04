@@ -58,6 +58,7 @@ import {
 } from './offlineWrites.js';
 import {
   captureFailure,
+  coldStart as startApp,
   collectScreenText,
   dismissKeyboard,
   killApp,
@@ -69,7 +70,6 @@ import {
   scrollToAndTapBelow,
   tapNamed,
   typeInto,
-  waitForAppReady,
 } from './ui.js';
 
 const API_PORT = 3000;
@@ -218,16 +218,7 @@ async function deactivateAll(): Promise<void> {
  * once before anything is judged.
  */
 function coldStart(): boolean {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    adb(['shell', 'am', 'force-stop', PACKAGE]);
-    launch();
-    // Waited for rather than slept through. A cold start behind Metro takes anywhere between
-    // fifteen and fifty seconds depending on whether the bundle is cached, so a fixed wait is
-    // either a run that fails on a slow start or a minute added to every run that did not need it.
-    if (waitForAppReady()) return true;
-    captureFailure('offline-launch');
-  }
-  return false;
+  return startApp('offline');
 }
 
 /**
