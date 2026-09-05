@@ -13,9 +13,9 @@ Last updated: 2026-09-05
 | ------------------ | ------------------------------------------------------------------ |
 | **Current stage**  | Stage 4 complete; Stage 1 privacy work reopened and largely closed |
 | **Current phase**  | Phase 1.4 (export, deletion), Phase 1.1 (auth), Phase 2.2 (scan)   |
-| **Last completed** | The digest, assembled in the recipient's own morning               |
+| **Last completed** | The digest, then a guard so two closed vocabularies cannot drift   |
 | **Branch**         | `master`                                                           |
-| **Latest commit**  | `feat(notifications): the digest, gathered in the recipient's...`  |
+| **Latest commit**  | `test(schema): four closed vocabularies that existed twice...`     |
 | **Baseline tag**   | `baseline-spec-only`                                               |
 
 The retention decision unblocked six deviations at once and the previous session spent itself on
@@ -48,6 +48,14 @@ npm run verify
 ```
 
 - Database tests execute against real PostgreSQL 18.3 via PGlite as a non-superuser role.
+- **The retention worker has been run as a real process, twice, not only in tests.** Standalone
+  (`npm run worker`) against a scratch database at a five-second interval: eight sweeps in
+  forty-six seconds, each `SUCCEEDED` with a real duration and nothing in the log but counts and
+  codes. And **in-process with the API** (`KYNVIORA_RETENTION=worker`) against a medicine deleted
+  thirty-one days earlier: the first run purged it (`rows_purged: 1`, eight categories attempted,
+  none failed), the run five seconds later purged nothing, the item was gone, and the loop stopped
+  cleanly. That second one is the arrangement that actually sweeps today - PGlite is a single
+  writer (DEC-037), so a separate worker process cannot open the API's data directory.
 - The mobile app typechecks against the real Expo SDK 57 / RN 0.86 / React 19.2 toolchain.
 - `main.test.ts` boots real API processes on real ports against a persisted database, so role
   switching, the request GUC and the RLS policies are exercised together rather than mocked.
