@@ -170,15 +170,17 @@ export interface PurgeCategoryPlan {
  * The order is the dependency order and it is not an implementation detail; see the file
  * docstring for why `PROFILE` follows `ITEM`.
  */
-export type PurgeCategory =
-  | 'ITEM'
-  | 'PROFILE'
-  | 'VISIT_PACK_CONTENT'
-  | 'CAREGIVER_INVITATION'
-  | 'CAPTURE_ARTIFACT'
-  | 'DIGEST'
-  | 'AUDIT_EVENT'
-  | 'CONSENT_RECEIPT';
+export const PURGE_CATEGORY_NAMES = [
+  'ITEM',
+  'PROFILE',
+  'VISIT_PACK_CONTENT',
+  'CAREGIVER_INVITATION',
+  'CAPTURE_ARTIFACT',
+  'DIGEST',
+  'AUDIT_EVENT',
+  'CONSENT_RECEIPT',
+] as const;
+export type PurgeCategory = (typeof PURGE_CATEGORY_NAMES)[number];
 
 const PLAN = [
   // -------------------------------------------------------------------------

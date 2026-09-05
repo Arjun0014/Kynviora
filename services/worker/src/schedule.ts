@@ -22,8 +22,15 @@
 import { compareInstants, type Instant } from '@kynviora/domain';
 import type { RetentionWorkerConfig } from './config.js';
 
-/** The four states a recorded run can end in. `PARTIAL` is deliberately not `SUCCEEDED`. */
-export type RetentionRunOutcome = 'SUCCEEDED' | 'PARTIAL' | 'FAILED' | 'ABANDONED';
+/**
+ * The four states a recorded run can end in. `PARTIAL` is deliberately not `SUCCEEDED`.
+ *
+ * An array rather than a bare union, so the vocabulary exists at runtime and can be compared with
+ * the CHECK constraint that enforces the same set in the schema (`db/schemaVocabulary.test.ts`).
+ * A union alone is invisible to a test, which is how two closed vocabularies drift apart.
+ */
+export const RETENTION_RUN_OUTCOMES = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'ABANDONED'] as const;
+export type RetentionRunOutcome = (typeof RETENTION_RUN_OUTCOMES)[number];
 
 /** The most recent run, as the schedule needs to see it. */
 export interface LastRetentionRun {

@@ -4503,3 +4503,40 @@ widened the index back fails in `db/shelf.test.ts` rather than in a route six mo
 
 `npm run verify` exit 0. 4567 tests across 172 files. `DEV-031` resolved - the two idempotency
 guarantees in this codebase now have the same shape, which was the reason it was on the list at all.
+
+---
+
+## 2026-09-05 - Four closed vocabularies that existed twice with nothing checking they agreed
+
+Housekeeping on the three migrations this session added, and it is not cosmetic.
+
+`retention_run_category.category`, `retention_run.outcome`, `alert_delivery.channel`,
+`alert_delivery.channel_reason` and `notification_digest_entry.outcome` are each declared **twice**:
+a `const` array in TypeScript and a `CHECK` constraint in SQL. The duplication is deliberate - the
+constraint is what makes the set true of the data rather than true of the code that happens to
+write it - and it has exactly one failure mode, which is that the two stop agreeing.
+
+The direction that hurts is silent in a specific way. Adding a member to the TypeScript array
+without adding it to the constraint compiles, typechecks, and raises `23514` at run time - in a
+background job, on the one category or outcome nothing happened to exercise. Adding one to the
+constraint without adding it to the array is quieter still: nothing fails at all, and a value the
+database accepts is one no reader knows about.
+
+`db/schemaVocabulary.test.ts` reads `pg_get_constraintdef` and compares the literals in it with the
+array. Reading the constraint rather than attempting an insert per value is what catches the quiet
+direction too: an insert-based check can only find members the constraint refuses, never members
+nobody declared. `packages/domain/src/observability.test.ts` already does this for metric units,
+one file over; this is the same guard where the second declaration is in SQL.
+
+Two vocabularies had to become runtime arrays to be checkable at all. `RetentionRunOutcome` and
+`PurgeCategory` were bare unions - invisible to a test, which is how two closed vocabularies drift
+apart in the first place. Both are now `as const` arrays with the type derived from them, which is
+the pattern every other vocabulary in this codebase already used.
+
+**Verified by drifting it.** A category was added to the TypeScript array without touching the
+migration, and both checks fired - the vocabulary comparison and the separate one asserting that
+every declared category has steps behind it. Then it was removed and they passed.
+
+### Result
+
+`npm run verify` exit 0. 4573 tests across 173 files.

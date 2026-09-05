@@ -30,7 +30,7 @@ by up to one interval and no finite interval makes that zero.
 
 ## Verification state
 
-- **4567 tests passing**, 0 failing, across 172 files.
+- **4573 tests passing**, 0 failing, across 173 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -481,6 +481,7 @@ the API will not distinguish them.
 | Retention: the matrix, the roles, the doors, the sweep      | Complete, 67 tests; deadlines measured to the microsecond     |
 | The retention worker: schedule, lease, run history          | Complete, 81 tests; **runs**, in-process or its own (DEC-121) |
 | Retention health on the operations snapshot                 | Complete, 14 tests; five aggregates, no read on a run row     |
+| Closed vocabularies checked against their CHECK constraints | Complete, 6 tests; TypeScript and SQL cannot drift silently   |
 | The digest: cadence, revalidation, and what it dropped      | Complete, 52 tests; assembled, **not sent** (`DEV-064`)       |
 | Deleting an item and a profile, end to end                  | Complete, 48 tests; account deletion open (`DEV-062`)         |
 | Portable export: fourteen sections, sources referenced      | Complete, 26 tests; no artifact and no link, by choice        |
