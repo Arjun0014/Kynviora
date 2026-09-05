@@ -6,6 +6,7 @@
  * code from the same directory.
  */
 
+export * from './managed.js';
 export * from './migrations.js';
 export * from './retention.js';
 export * from './runtime.js';

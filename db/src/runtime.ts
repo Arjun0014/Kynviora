@@ -79,6 +79,33 @@ export interface MigrationResult {
 }
 
 /**
+ * The little that applying a migration needs from a database.
+ *
+ * Two methods, so the same runner drives PGlite and a managed Postgres. It exists because the
+ * alternative - a second migration runner for the managed path - would be two implementations of
+ * "which migrations have run", and the failure mode of those disagreeing is a schema half
+ * applied on one engine and fully applied on the other, discovered by a policy that is not there.
+ */
+export interface MigrationTarget {
+  /** Run a script that may contain several statements. */
+  exec(sql: string): Promise<void>;
+  query<TRow = Record<string, unknown>>(
+    sql: string,
+    params?: readonly unknown[],
+  ): Promise<{ readonly rows: TRow[] }>;
+}
+
+/** Adapt PGlite, whose `exec` returns results this runner does not want. */
+export function pgliteTarget(db: PGlite): MigrationTarget {
+  return {
+    exec: async (sql) => {
+      await db.exec(sql);
+    },
+    query: (sql, params) => db.query(sql, params as unknown[] | undefined),
+  };
+}
+
+/**
  * Apply every migration that has not run yet.
  *
  * Idempotent by version, and it re-checks the checksum of migrations that already ran: a migration
@@ -86,7 +113,7 @@ export interface MigrationResult {
  * rather than serve requests against a schema nobody has.
  */
 export async function applyMigrations(
-  db: PGlite,
+  db: MigrationTarget,
   migrations: readonly Migration[] = loadMigrations(),
 ): Promise<MigrationResult> {
   await db.exec(`
@@ -146,7 +173,7 @@ export async function createRuntimeDb(options: RuntimeDbOptions = {}): Promise<R
   const db =
     options.dataDir === undefined ? await PGlite.create() : await PGlite.create(options.dataDir);
 
-  await applyMigrations(db);
+  await applyMigrations(pgliteTarget(db));
 
   async function assertNotSuperuser(expectedRole: string): Promise<void> {
     const res = await db.query<{ current_role_name: string; is_superuser: boolean }>(

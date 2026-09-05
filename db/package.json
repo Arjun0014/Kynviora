@@ -9,10 +9,12 @@
     "purge": "tsx src/purgeCli.ts"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.5.8"
+    "@electric-sql/pglite": "^0.5.8",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@kynviora/domain": "*",
-    "@kynviora/worker": "*"
+    "@kynviora/worker": "*",
+    "@types/pg": "^8.23.1"
   }
 }

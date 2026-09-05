@@ -4540,3 +4540,132 @@ every declared category has steps behind it. Then it was removed and they passed
 ### Result
 
 `npm run verify` exit 0. 4573 tests across 173 files.
+
+---
+
+## 2026-09-05 - The database stopped being a workaround
+
+`BLK-001` has been open since Stage 0 and said the same thing throughout: migrations and policies
+run against PGlite, which is genuine PostgreSQL 18.3 in WASM, and that validates schema,
+constraints, triggers and policy logic but **not** managed-platform behaviour, pooling or
+extensions. A Supabase project now exists - `kynviora-dev`, under Luna Luce, Postgres 17.6 in
+ap-south-1 - so this is the first session where that sentence could be tested rather than
+repeated.
+
+**All thirty migrations applied on the first attempt, unmodified.** That is the one part of this
+that was not work: the portability claim in `BLK-001`'s workaround ("written as portable SQL with
+no Supabase-only syntax") held exactly as written, across a two-major-version gap in the other
+direction from the one anybody plans for - 18.3 in the tests, 17.6 on the platform.
+
+Everything else was work, and three of the four findings are things a single-connection engine
+cannot have.
+
+### The migration credential is not the platform's, and that is a security property
+
+Supabase ships default privileges keyed to the **creating role**: every table `postgres` creates
+in `public` grants `arwdDxtm` - all of them - to `anon`, `authenticated` and `service_role`. The
+first of those is the role behind the project's publishable key, and PostgREST serves `public`.
+
+So the obvious way to do this - apply the migrations with the platform's own credential, which is
+what the management connector uses and what every quickstart shows - would have **published
+fifty-seven health tables to the anonymous API key**. Deny-by-default RLS would have refused the
+rows, and `schema_migration` has no RLS to refuse with. A defence in depth doing all the depth on
+its own is not one.
+
+Default privileges are per-creator, so a table created by `kynviora_migrate` inherits none of
+them. `db/managedParity.test.ts` asserts the outcome rather than the intent, in two halves: every
+table in `public` is owned by a Kynviora role, and no PostgREST role holds `SELECT`, `INSERT`,
+`UPDATE` or `DELETE` on any of them. Measured: **0 of 58 tables reachable**.
+
+### Two credentials, and no fallback between them
+
+`KYNVIORA_DATABASE_URL` is a `NOINHERIT` login role that holds nothing of its own and is a member
+of `kynviora_app`, `kynviora_service` and `kynviora_retention`, so every statement must `SET ROLE`
+into one of them first. `KYNVIORA_MIGRATE_DATABASE_URL` is a separate role that owns every object
+and is used by one command. There is deliberately no fallback from either to the other, because a
+fallback collapses them into one credential holding both powers.
+
+`NOINHERIT` is the half worth arguing for. With `INHERIT` the login role would carry the union of
+all three on every connection, and a statement that forgot to switch would run with all three
+while looking perfectly ordinary.
+
+**The runtime adapter does not apply migrations.** `createRuntimeDb` does, because PGlite is one
+process opening one directory. A shared database migrated by whichever replica booted first is a
+schema change racing N processes, and the runtime credential could not do it anyway.
+
+### The pool is the part that could go wrong quietly
+
+Identity here is a session GUC and privilege is a session role. Both belong to a **connection**,
+and a pool hands connections to other people.
+
+- A connection is reset in a `finally` - `ROLLBACK`, then `RESET ROLE`, then the GUC - and
+  **destroyed rather than returned if the reset itself failed**. Whether the callback failed is
+  deliberately not consulted: a failed callback on a resettable connection is ordinary, and a
+  failed reset never is.
+- The `ROLLBACK` is unconditional and is not tidiness. The callbacks in this codebase open their
+  own transactions (`caregiver.ts`, `visitPack.ts`, `retentionRun.ts`, `digestRun.ts`), so the
+  adapter must **not** wrap them in one - a nested `BEGIN` is a warning and the inner `COMMIT`
+  would commit the outer scope. A callback that threw mid-transaction would otherwise hand back a
+  connection holding an open transaction, whose work the next request could commit.
+- `statement_timeout` and `idle_in_transaction_session_timeout` are set per physical connection,
+  so a connection that escapes the checkout path is still bounded.
+
+### Transaction pooling was configured, and the adapter refused rather than served
+
+The first parity run pointed at Supavisor's **transaction** mode (port 6543) and the adapter
+raised `Expected role kynviora_app but the session is kynviora_runtime` - which is exactly right,
+and is the finding worth recording.
+
+Under transaction pooling a different server connection may serve each statement, so `SET ROLE`
+is gone by the next one. Every policy would then evaluate against the login role, which is a
+member of nothing it has switched into - so every read returns **nothing**, which on a screen is
+indistinguishable from an empty household. That is the failure this had to not have.
+
+Two defences, and only one of them is deterministic. `assertSessionScoped` runs at startup, sets a
+role in one round trip and reads it back in another - but with one connection and no contention
+Supavisor may keep the same backend, so it passed. **The per-request check is the guarantee**:
+`SET ROLE`, then a second round trip that sets the identity and reads back `current_user`,
+`rolsuper` and `rolbypassrls` together. It cannot be fooled by luck, and it fails closed.
+
+`rolbypassrls` is new here and is a managed-platform concern specifically. It is one statement
+away, it is invisible in every policy, and it makes every negative authorization test in this
+repository pass while asserting nothing. Supabase grants it to `postgres` by default.
+
+### TLS is pinned rather than turned off
+
+Supabase's pooler presents a chain rooted at _Supabase Root 2021 CA_, a private root, so
+`rejectUnauthorized: true` fails against the public trust store and the widespread answer is
+`rejectUnauthorized: false` - encryption without authentication, which makes an interception
+undetectable. The root was fetched over a publicly-trusted channel and its SHA-256 compared with
+the chain the pooler actually presents; they match
+(`8070:25AD:50D4:...:07D0:7B72:E6CA:FA`). It is committed as
+`db/certs/supabase-prod-ca-2021.crt` and verification stays on.
+
+### Two things the parity suite got wrong before it got them right
+
+**The retention role can read `owned_item`, and that is correct.** The first version asserted a
+permission error and got a result set. `DELETE ... WHERE deleted_at < purge_floor()` reads the
+column it filters on, so the grant has to be there. What bounds the role is the **policy**, and
+the test now asserts the thing that is actually true and actually protective: a live item is
+invisible to the retention role, and a `DELETE` naming it by primary key removes **0 rows**. The
+grant is asserted separately, so the two are not confused again.
+
+**There is no privileged teardown, on purpose.** Nothing reachable from the runtime credential can
+delete the suite's fixtures: `kynviora_service` holds no `DELETE` on any of them (DEC-117 -
+removal is revocation then purge), and the retention policies admit only rows past a thirty-day
+deadline. Every available cleanup - a `BYPASSRLS` role for tests, a temporary `NO FORCE`, the
+platform's own credential - would weaken the exact boundary the suite exists to prove. The fixture
+is **idempotent** instead: fixed IDs in a UUID namespace nothing else uses, inserted with
+`ON CONFLICT DO NOTHING`, so a second run reuses the first run's household rather than adding one.
+
+### Result
+
+`npm run verify` exit 0: 4,573 passed, **32 skipped** - the parity suite, which skips as a whole
+file without `KYNVIORA_DATABASE_URL` so there is no half-run. Against `kynviora-dev`:
+**32 passed**, covering schema and checksum parity for all thirty migrations, RLS enabled **and
+forced** on all 57 application tables, at least one policy on each, 188 policies in total, the
+three roles' privilege boundaries, seven RLS negative cases, and six properties that only exist
+once connections are pooled.
+
+`BLK-001` is not closed. What it now says is much narrower: the API and the worker have not yet
+been run against this database, and no extension, backup or load behaviour has been touched.
