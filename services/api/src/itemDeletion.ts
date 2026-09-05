@@ -58,6 +58,7 @@ export interface ItemDeletionRouteDeps {
 }
 
 const itemParamsSchema = z.object({ itemId: z.string().uuid() });
+const profileParamsSchema = z.object({ profileId: z.string().uuid() });
 
 /**
  * Append the audit event for a deletion.
@@ -171,4 +172,106 @@ export function registerItemDeletionRoutes(
     // to destroy it.
     return reply.status(204).send();
   });
+}
+
+/**
+ * Deleting a person from a household (`16`, DEC-120, `DEV-036`).
+ *
+ *   DELETE /v1/profiles/:profileId
+ *
+ * The second of `docs/RETENTION.md`'s three deletion triggers, and the same shape as the first for
+ * the same reasons: owner only, fresh step-up, a revocation stamp written through a service-role
+ * function that re-checks ownership in the statement that writes.
+ *
+ * WHAT IT TAKES WITH IT
+ * Everything reachable from the profile, and the shelf explicitly - `kynviora.delete_profile`
+ * stamps every live item at the same instant. That is not tidiness: every child of an item reaches
+ * its purge door through the item's own stamp, so a profile-only deletion would leave a dose event
+ * that the sweep can see and cannot remove.
+ *
+ * WHAT IT DOES NOT DO
+ * Delete an account. `DELETE /v1/me` is not here and cannot honestly be: removing `app_user` while
+ * Supabase still holds the identity produces somebody who can sign in to nothing, and there are no
+ * credentials to remove the other half with (`BLK-010`). The consent screen says so.
+ *
+ * A HOUSEHOLD CAN BE EMPTIED, AND THAT IS ALLOWED
+ * Deleting the last profile leaves an account with none, which the profile switcher already draws
+ * as the setup state a new account sees. Refusing it would mean a person could remove every profile
+ * but one and be told the last one is special, which is a rule nobody agreed to and would make
+ * "have my data removed" conditional on keeping some of it.
+ */
+export function registerProfileDeletionRoutes(
+  app: FastifyInstance,
+  deps: ItemDeletionRouteDeps,
+): void {
+  const { contextFor, fail } = deps;
+
+  app.delete<{ Params: { profileId: string } }>(
+    '/v1/profiles/:profileId',
+    async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      const noSuchProfile = domainError('NOT_FOUND', 'No such profile.');
+
+      if (!hasFreshStepUp(ctx)) {
+        return fail(
+          reply,
+          domainError('STEP_UP_REQUIRED', 'Confirm your identity before deleting this profile.'),
+          ctx.correlationId,
+        );
+      }
+
+      const params = profileParamsSchema.safeParse(request.params);
+      if (!params.success) return fail(reply, noSuchProfile, ctx.correlationId);
+      const profileId = params.data.profileId;
+
+      // Authority established under row-level security first, so a caller who cannot see the
+      // profile never reaches the service role. `profile_select` admits a caregiver, so this does
+      // not establish ownership and is not asked to - the database decides that in the write.
+      const visible = await ctx.db((db) =>
+        db.query<{ id: string }>(`SELECT id FROM profile WHERE id = $1 AND deleted_at IS NULL`, [
+          profileId,
+        ]),
+      );
+      if (visible.rows[0] === undefined) return fail(reply, noSuchProfile, ctx.correlationId);
+
+      const deleted = await ctx.privileged('DATA_DELETION', async (db) => {
+        // How many items go with it, read before the stamp because afterwards they are invisible.
+        // A count rather than a list: `20` keeps health content out of the audit log, and how many
+        // medicines a household held is the kind of number an investigation needs and a name is
+        // not.
+        const items = await db.query<{ count: string }>(
+          `SELECT count(*)::text AS count FROM owned_item
+            WHERE profile_id = $1 AND deleted_at IS NULL`,
+          [profileId],
+        );
+
+        const res = await db.query<{ deleted: boolean }>(
+          `SELECT kynviora.delete_profile($1, $2) AS deleted`,
+          [profileId, ctx.principal.userId],
+        );
+        const stamped = res.rows[0]?.deleted ?? false;
+
+        if (stamped) {
+          await db.query(
+            `INSERT INTO audit_event
+               (actor_user_id, actor_role, action, target_kind, target_id, correlation_id, detail)
+             VALUES ($1, 'kynviora_service', 'profile.deleted', 'profile', $2, $3, $4::jsonb)`,
+            [
+              ctx.principal.userId,
+              profileId,
+              ctx.correlationId,
+              JSON.stringify({ item_count: Number(items.rows[0]?.count ?? '0') }),
+            ],
+          );
+        }
+        return stamped;
+      });
+
+      if (!deleted) return fail(reply, noSuchProfile, ctx.correlationId);
+
+      return reply.status(204).send();
+    },
+  );
 }

@@ -390,3 +390,94 @@ describe('the append-only children of a purged item', () => {
     expect(await countOf('dose_event', `owned_item_id = '${LIVE_ITEM}'`)).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A purged profile
+// ---------------------------------------------------------------------------
+
+describe('a profile thirty days deleted', () => {
+  const DUE_PROFILE = testUuid(70);
+  const DUE_PROFILE_ITEM = testUuid(71);
+  const LIVE_PROFILE = testUuid(72);
+  const LIVE_PROFILE_ITEM = testUuid(73);
+
+  beforeAll(async () => {
+    await t.asOwner(async (db) => {
+      await db.query(
+        `INSERT INTO profile (id, household_id, owner_user_id, display_name, deleted_at)
+         VALUES ($1, $2, $3, 'Gone', now() - interval '31 days'),
+                ($4, $2, $3, 'Still Here', NULL)`,
+        [DUE_PROFILE, HOUSEHOLD, OWNER, LIVE_PROFILE],
+      );
+
+      // `delete_profile` stamps the items with the profile, so a purgeable profile's items carry
+      // their own stamp. Reproduced here rather than assumed, because the sweep's correctness
+      // depends on it and a fixture that skipped it would test a state the route cannot produce.
+      await db.query(
+        `INSERT INTO owned_item (id, profile_id, item_kind, display_name, deleted_at)
+         VALUES ($1, $2, 'MEDICINE', 'Gone Tablet', now() - interval '31 days'),
+                ($3, $4, 'MEDICINE', 'Still Here Tablet', NULL)`,
+        [DUE_PROFILE_ITEM, DUE_PROFILE, LIVE_PROFILE_ITEM, LIVE_PROFILE],
+      );
+      await db.query(
+        `INSERT INTO dose_event (owned_item_id, event_kind, recorded_at, client_operation_id)
+         VALUES ($1, 'TAKEN', now(), gen_random_uuid()),
+                ($2, 'TAKEN', now(), gen_random_uuid())`,
+        [DUE_PROFILE_ITEM, LIVE_PROFILE_ITEM],
+      );
+
+      for (const profile of [DUE_PROFILE, LIVE_PROFILE]) {
+        await db.query(
+          `INSERT INTO allergy_record (profile_id, record_kind, display_term, provenance, certainty)
+           VALUES ($1, 'ALLERGY', 'penicillin', 'USER_REPORTED', 'SUSPECTED')`,
+          [profile],
+        );
+        await db.query(
+          `INSERT INTO caregiver_grant
+             (profile_id, grantee_user_id, granted_by_user_id, capabilities, status, accepted_at)
+           VALUES ($1, $2, $3, ARRAY['VIEW_SHELF'], 'ACTIVE', now())`,
+          [profile, CAREGIVER, OWNER],
+        );
+        await db.query(
+          `INSERT INTO review_task (profile_id, task_kind, state, subject_kind, subject_id)
+           VALUES ($1, 'CAREGIVER_GRANT_EXPIRING', 'OPEN', 'caregiver_grant', $1)`,
+          [profile],
+        );
+      }
+    });
+  });
+
+  it('cannot be seen by the retention role while it is live', async () => {
+    const rows = await t.asRetention((db) => db.query<{ id: string }>(`SELECT id FROM profile`));
+    expect(rows.rows.map((r) => r.id)).toEqual([DUE_PROFILE]);
+  });
+
+  it('is purged with everything about it, and nothing about the other one', async () => {
+    const report = await sweep();
+
+    expect(report.profiles).toBe(1);
+    expect(report.allergies).toBe(1);
+    expect(report.caregiverGrants).toBe(1);
+    // The task that names a grant rather than an item - the half the item purge cannot reach.
+    expect(report.reviewTasksByProfile).toBe(1);
+    // The item and its dose went through the item path, because `delete_profile` stamped them.
+    expect(report.items).toBe(1);
+    expect(report.doseEvents).toBe(1);
+
+    expect(await countOf('profile', `id = '${DUE_PROFILE}'`)).toBe(0);
+    expect(await countOf('owned_item', `profile_id = '${DUE_PROFILE}'`)).toBe(0);
+    expect(await countOf('allergy_record', `profile_id = '${DUE_PROFILE}'`)).toBe(0);
+
+    // The other profile is untouched, all of it.
+    expect(await countOf('profile', `id = '${LIVE_PROFILE}'`)).toBe(1);
+    expect(await countOf('owned_item', `profile_id = '${LIVE_PROFILE}'`)).toBe(1);
+    expect(await countOf('allergy_record', `profile_id = '${LIVE_PROFILE}'`)).toBe(1);
+    expect(await countOf('dose_event', `owned_item_id = '${LIVE_PROFILE_ITEM}'`)).toBe(1);
+  });
+
+  it('leaves nothing for a second sweep', async () => {
+    const again = await sweep();
+    expect(again.profiles).toBe(0);
+    expect(again.allergies).toBe(0);
+  });
+});

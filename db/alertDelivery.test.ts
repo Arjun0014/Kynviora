@@ -323,10 +323,19 @@ describe('a delivery cannot be un-happened', () => {
 
   it('refuses a delete even from a role that holds the privilege', async () => {
     await deliver(OWNER);
+    // Since `0025` the refusal names the more specific reason. This table carries a purge door
+    // keyed on `profile_id` (DEC-120), and its condition is
+    // `pg_has_role(current_user, 'kynviora_retention', 'MEMBER')` - true for a superuser, because
+    // a superuser is a member of every role. So this session reaches the door and is turned back
+    // by the **profile** gate rather than by the blanket one: no profile here is thirty days
+    // deleted.
+    //
+    // The refusal is what this test is for and it is unchanged. What the message now says is that
+    // a delivery goes when the person it was about goes, and not before.
     const message = await expectDenied(() =>
       t.asOwner((db) => db.query('DELETE FROM alert_delivery')),
     );
-    expect(message).toMatch(/append|immutable|not allowed|forbid/i);
+    expect(message).toMatch(/not due for purge/i);
   });
 });
 

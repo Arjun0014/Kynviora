@@ -55,6 +55,17 @@ export interface PurgeReport {
   readonly reviewTasks: number;
   readonly assessments: number;
   readonly items: number;
+  readonly reviewTasksByProfile: number;
+  readonly allergies: number;
+  readonly conditions: number;
+  readonly alertDeliveries: number;
+  readonly alertPublications: number;
+  readonly safetyReceipts: number;
+  readonly caregiverGrants: number;
+  readonly reconciliations: number;
+  readonly notificationPolicies: number;
+  readonly notificationPreferences: number;
+  readonly profiles: number;
   readonly visitPackContents: number;
   readonly invitations: number;
   readonly extractionRuns: number;
@@ -71,6 +82,17 @@ export const EMPTY_PURGE_REPORT: PurgeReport = Object.freeze({
   reviewTasks: 0,
   assessments: 0,
   items: 0,
+  reviewTasksByProfile: 0,
+  allergies: 0,
+  conditions: 0,
+  alertDeliveries: 0,
+  alertPublications: 0,
+  safetyReceipts: 0,
+  caregiverGrants: 0,
+  reconciliations: 0,
+  notificationPolicies: 0,
+  notificationPreferences: 0,
+  profiles: 0,
   visitPackContents: 0,
   invitations: 0,
   extractionRuns: 0,
@@ -110,7 +132,7 @@ export async function runPurgeSweep(db: PurgeConnection): Promise<PurgeReport> {
   const usageEvidence = await count(db, `DELETE FROM product_usage_evidence WHERE ${dueItem}`);
   const assessments = await count(db, `DELETE FROM profile_assessment WHERE ${dueItem}`);
   // `owned_item_id` is nullable here: a task can be about a profile rather than an item, and one
-  // with no item belongs to the profile purge, which does not exist yet.
+  // with no item belongs to the profile block below.
   const reviewTasks = await count(
     db,
     `DELETE FROM review_task WHERE owned_item_id IS NOT NULL AND ${dueItem}`,
@@ -119,6 +141,57 @@ export async function runPurgeSweep(db: PurgeConnection): Promise<PurgeReport> {
   const items = await count(
     db,
     `DELETE FROM owned_item
+      WHERE deleted_at IS NOT NULL AND deleted_at <= kynviora.purge_floor()`,
+  );
+
+  // ---------------------------------------------------------------------
+  // Profiles, children first, after their items.
+  // ---------------------------------------------------------------------
+  // Ordered after the item block deliberately. `delete_profile` stamps every item at the same
+  // instant as the profile, so by the time this runs the shelf and everything under it is already
+  // gone - and `profile`'s own foreign keys are then only the ones listed here.
+  //
+  // The one that would bite if this ran first is `dose_event`: it reaches its purge door through
+  // `owned_item.deleted_at`, so removing a profile before its items would leave rows the sweep can
+  // see and cannot delete.
+  const dueProfile = `profile_id IN (
+    SELECT id FROM profile
+     WHERE deleted_at IS NOT NULL AND deleted_at <= kynviora.purge_floor()
+  )`;
+
+  // A task about a profile rather than an item. Its item-scoped siblings went with the shelf.
+  const reviewTasksByProfile = await count(
+    db,
+    `DELETE FROM review_task WHERE owned_item_id IS NULL AND ${dueProfile}`,
+  );
+
+  const alertDeliveries = await count(db, `DELETE FROM alert_delivery WHERE ${dueProfile}`);
+  const safetyReceipts = await count(db, `DELETE FROM safety_receipt WHERE ${dueProfile}`);
+  // After the deliveries and receipts that reference it.
+  const alertPublications = await count(db, `DELETE FROM alert_publication WHERE ${dueProfile}`);
+
+  const allergies = await count(db, `DELETE FROM allergy_record WHERE ${dueProfile}`);
+  const conditions = await count(db, `DELETE FROM condition_record WHERE ${dueProfile}`);
+  const reconciliations = await count(db, `DELETE FROM reconciliation WHERE ${dueProfile}`);
+  const notificationPolicies = await count(
+    db,
+    `DELETE FROM profile_notification_policy WHERE ${dueProfile}`,
+  );
+  const notificationPreferences = await count(
+    db,
+    `DELETE FROM notification_preference WHERE ${dueProfile}`,
+  );
+  const caregiverGrants = await count(db, `DELETE FROM caregiver_grant WHERE ${dueProfile}`);
+  // An invitation to a profile that is gone goes with it, whether or not it has expired - which is
+  // a second reason on top of the expiry sweep above rather than a replacement for it.
+  const profileInvitations = await count(
+    db,
+    `DELETE FROM caregiver_invitation WHERE ${dueProfile}`,
+  );
+
+  const profiles = await count(
+    db,
+    `DELETE FROM profile
       WHERE deleted_at IS NOT NULL AND deleted_at <= kynviora.purge_floor()`,
   );
 
@@ -185,8 +258,19 @@ export async function runPurgeSweep(db: PurgeConnection): Promise<PurgeReport> {
     reviewTasks,
     assessments,
     items,
+    reviewTasksByProfile,
+    allergies,
+    conditions,
+    alertDeliveries,
+    alertPublications,
+    safetyReceipts,
+    caregiverGrants,
+    reconciliations,
+    notificationPolicies,
+    notificationPreferences,
+    profiles,
     visitPackContents,
-    invitations,
+    invitations: invitations + profileInvitations,
     extractionRuns,
     evidenceAssets,
     auditEvents,

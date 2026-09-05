@@ -151,26 +151,42 @@ describe('the retention role', () => {
     }
 
     expect([...byTable.keys()].sort()).toEqual([
+      'alert_delivery',
+      'alert_publication',
+      'allergy_record',
       'audit_event',
+      'caregiver_grant',
       'caregiver_invitation',
+      'condition_record',
       'consent_receipt',
       'dose_event',
       'evidence_asset',
       'extraction_run',
       'medicine_schedule',
+      'notification_preference',
       'owned_item',
       'product_usage_evidence',
+      'profile',
       'profile_assessment',
+      'profile_notification_policy',
+      'reconciliation',
       'refill_estimate',
       'review_task',
+      'safety_receipt',
       'visit_pack',
     ]);
 
     for (const [table, privileges] of byTable) {
+      // The invariant that has not moved through three migrations, and the one that matters most:
+      // a role that could INSERT could manufacture the history it is trusted to remove.
       expect(privileges).not.toContain('INSERT');
-      // `visit_pack` is the one table it updates rather than deletes: the pack's content is
-      // purged and the row survives, so that a pack having existed stays answerable.
-      const expected = table === 'visit_pack' ? ['SELECT', 'UPDATE'] : ['DELETE', 'SELECT'];
+
+      // `visit_pack` is the one table with all three, because it is purged twice on two clocks
+      // (DEC-117, DEC-120): its **content** goes 24 hours after expiry, which is an UPDATE that
+      // leaves the row so "a pack was created and has expired" stays answerable - and the row
+      // itself goes with the profile it belonged to, which is a DELETE.
+      const expected =
+        table === 'visit_pack' ? ['DELETE', 'SELECT', 'UPDATE'] : ['DELETE', 'SELECT'];
       expect(privileges.sort()).toEqual(expected);
     }
   });
@@ -185,11 +201,15 @@ describe('the retention role', () => {
     expect(res.rows).toEqual([]);
   });
 
-  it('cannot read a profile or an allergy at all', async () => {
-    // The tables an item purge does not touch. A missing GRANT raises rather than filtering, so
-    // these are errors rather than empty results - which is the stronger answer, because it
-    // cannot be turned into a read by a policy somebody adds later.
-    for (const table of ['profile', 'allergy_record', 'caregiver_grant', 'app_user']) {
+  it('cannot read an account, a household or the catalog at all', async () => {
+    // The tables no purge touches. A missing GRANT raises rather than filtering, so these are
+    // errors rather than empty results - the stronger answer, because it cannot be turned into a
+    // read by a policy somebody adds later.
+    //
+    // `app_user` is the one worth naming. A profile purge removes the person and everything about
+    // them; the **account** is a different deletion trigger and is not built (`BLK-010`), so this
+    // role has no reason to see one and no grant to.
+    for (const table of ['app_user', 'household', 'product_identity', 'reviewer']) {
       const message = await expectDenied(() =>
         t.asRetention((db) => db.query(`SELECT * FROM ${table}`)),
       );

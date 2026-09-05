@@ -4164,3 +4164,63 @@ be held, and the transport still records rather than delivers.
 
 **Sources.** `04` Phase 7.5; `04` Phase 4.1 (time-zone handling); `16` (minimisation); `13`; `14`;
 `18`; `DEV-030`; `DEV-061`; migration `0014`'s own note; DEC-078; DEC-086.
+
+---
+
+## DEC-120 - A profile may be deleted; an account may not, and the reason is honest
+
+**Context.** `docs/RETENTION.md` section 2 names three deletion triggers: an item, a profile, an
+account. DEC-117 built the first. This is the second, and the third is where this build stops.
+
+**Decision on the profile.** `DELETE /v1/profiles/:profileId`, the same shape as the item deletion
+for the same reasons - profile owner only, fresh step-up, a revocation stamp written by a
+service-role function that re-checks ownership in the statement that writes.
+
+Three things are specific to a profile:
+
+**1. The shelf is stamped at the same instant.** `kynviora.delete_profile` writes `deleted_at` on
+the profile and on every live item under it, in one call. Not tidiness. Every child of an item
+reaches its purge door through `owned_item.deleted_at` (`0023`), so a profile-only stamp would
+leave `dose_event` rows _admitted_ by a profile-keyed policy and _refused_ by an item-keyed
+trigger: visible to the sweep and undeletable, which is a purge that never completes and reports
+nothing.
+
+**2. `owns_profile` is deliberately not used.** It would answer the same question and it also
+short-circuits every capability check in the system, so calling it from the one function that
+removes a profile would tie the deletion path to the access path - and a future change to one would
+silently change the other. The comparison is three columns and is the whole rule.
+
+**3. Deleting the last profile is allowed.** Refusing would make "have my data removed" conditional
+on keeping some of it, and would tell somebody the last person on their list is special for a
+reason nobody agreed to. An account with no profiles renders as the setup state a new account
+already sees.
+
+**Decision on the account: not built, and not approximated.** Deleting `app_user` while Supabase
+still holds the identity produces somebody who can sign in to nothing - a session that
+authenticates successfully against a row that is gone. Removing the other half needs the Supabase
+admin API and credentials that do not exist (`BLK-010`, DEC-118).
+
+The available half-measures are all worse than the gap:
+
+| Half-measure                                      | Why not                                                                                                                                    |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stamp `app_user.deleted_at` and stop there        | The person can still sign in, to an app that says their account is gone.                                                                   |
+| Delete every profile and call it account deletion | It is not. The account, the consent receipts and the audit trail remain, and the screen would be claiming otherwise.                       |
+| Collect a request and act on it manually          | `DEV-036`'s original argument: a form recording an intention nothing acts on is a product telling somebody their data has been dealt with. |
+
+So the consent screen says a person may delete any single medicine or product from its own screen,
+and that removing a whole account is not built yet - which is now true in both directions rather
+than understating what exists.
+
+**Consequences.** The purge sweep gains a profile block, ordered _after_ the item block for the
+reason above. `alert_delivery` gains a `purge_with` door keyed on `profile_id`; the record that a
+person was told something goes with the person, while the record that the **deletion** happened
+lives in `audit_event` and outlives it by 24 months.
+
+The retention role's grants widen again, from the eight tables an item purge needs to the
+twenty-four a profile purge needs. The boundary is unchanged and is not the grant list: no policy
+admits a row that is not due, so the widest statement this role can express still removes only what
+somebody deleted more than thirty days ago.
+
+**Sources.** `16` (deletion; the workflow enumerates what goes); `14`; `13`; `docs/RETENTION.md`;
+DEC-117; DEC-118; `DEV-036`; `DEV-057`; `BLK-010`.

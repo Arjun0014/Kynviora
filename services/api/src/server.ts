@@ -67,7 +67,7 @@ import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
 import { registerOperationsRoutes } from './operations.js';
 import { registerSafetyInboxRoutes } from './safetyInbox.js';
 import { registerScheduleRoutes } from './schedule.js';
-import { registerItemDeletionRoutes } from './itemDeletion.js';
+import { registerItemDeletionRoutes, registerProfileDeletionRoutes } from './itemDeletion.js';
 import { registerPersonalExportRoutes } from './personalExport.js';
 import { registerShadowModeRoutes } from './shadowMode.js';
 
@@ -2625,6 +2625,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
     // make at all (`DEV-057`).
 
     registerItemDeletionRoutes(app, { contextFor, fail });
+    registerProfileDeletionRoutes(app, { contextFor, fail });
 
     // -------------------------------------------------------------------------
     // GET /v1/export  (`04` Phase 1.4, `16` export)

@@ -2359,3 +2359,36 @@ its own limit on pending local notifications, which is lower than Android's and 
   through both `isKnownTimeZone` and `asTimeZone`; `scheduleEntry.test.ts` passes unchanged, which
   is the point - the narrowing rejects nothing a real client sends.
 - **Status**: **RESOLVED 2026-09-05**.
+
+---
+
+## DEV-062 - There is no account deletion, and there cannot honestly be one yet
+
+- **Affected specification**: `16` (a person can have their data removed; the deletion workflow
+  enumerates device local data, primary records, object storage, derived projections, queued jobs,
+  cached exports, notification tokens and backups), `04` Phase 1.4, DEC-120.
+- **Expected behaviour**: a person can remove their account and everything in it.
+- **Implemented behaviour**: they can remove any item and any profile, which between them is
+  every health record the system holds about them. What they cannot remove is the account itself -
+  the `app_user` row, the consent receipts, and the identity at the auth provider.
+- **Reason**: the identity is not Kynviora's to delete. Removing `app_user` while Supabase still
+  holds the account produces somebody who can sign in successfully to a row that is gone, which is
+  a worse state than not having deleted anything - and removing the other half needs the Supabase
+  admin API and credentials that do not exist (`BLK-010`).
+- **Temporary or permanent**: temporary, and blocked on a credential rather than on work. The
+  server side of it is three statements; what is missing is the account to delete them alongside.
+- **Risk**: low and bounded, and the boundary is where a person would want it. Everything about
+  their health - profiles, medicines, doses, allergies, assessments, alerts, caregiver access -
+  is removable today, immediately and completely. What remains is an email address, a consent
+  history retained on an approved basis for 24 months (DEC-117), and an audit trail that says the
+  deletions happened.
+
+  The screen says so and says which is which, rather than "not built yet" over both halves - which
+  would now understate what exists and send somebody looking for a control they have walked past.
+
+- **Required future work**: a Supabase project and service-role credentials. Then
+  `DELETE /v1/me`: stamp `app_user`, delete the auth user through the admin API, invalidate every
+  session, and let the purge take the rest. The order matters and is the reason this cannot be
+  half-built - the auth user must go first, so a failure part-way leaves an account that still
+  works rather than one that cannot be reached and cannot be removed.
+- **Status**: OPEN, blocked on `BLK-010`.
