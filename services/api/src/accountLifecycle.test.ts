@@ -57,6 +57,7 @@ const provider = {
   signOutOk: true,
   signedOut: [] as string[],
   removed: [] as string[],
+  removedWith: [] as string[],
 };
 
 const stubProvider: AuthProvider = {
@@ -71,8 +72,11 @@ const stubProvider: AuthProvider = {
       provider.signedOut.push(token);
       return Promise.resolve(provider.signOutOk);
     },
-    removeIdentity: (subject: string) => {
-      provider.removed.push(subject);
+    removeIdentity: (identity: { subject: string; bearerToken: string }) => {
+      provider.removed.push(identity.subject);
+      // Recorded so a test can assert the removal was driven by the caller's own token, which is
+      // what stops `close-identity` from being able to remove anybody else.
+      provider.removedWith.push(identity.bearerToken);
       return Promise.resolve(provider.removal);
     },
   },
@@ -142,6 +146,7 @@ beforeEach(async () => {
   provider.signOutOk = true;
   provider.signedOut = [];
   provider.removed = [];
+  provider.removedWith = [];
   currentToken = 'synthetic-bearer-token';
   currentPrincipal = principalFor(OWNER);
 
@@ -396,12 +401,23 @@ describe('deleting the account (DEV-062)', () => {
   });
 
   it('is idempotent and finishes a deletion that got part-way', async () => {
-    // The recoverable partial failure: the data is stamped, the sessions are gone, and the
-    // identity removal did not complete. The person keeps a token that still verifies, so they
-    // can ask again - which is the whole reason this route is exempt from the account check.
+    // The recoverable partial failure: the data is stamped and the identity removal did not
+    // complete. The person keeps a token that still verifies, so they can ask again - which is
+    // the whole reason this route is exempt from the account check.
     provider.removal = 'FAILED';
     const partial = await call('DELETE', '/v1/me');
-    expect(partial.status).toBe(503);
+    // Its own code, and its own status. `PROVIDER_UNAVAILABLE` (503) is what the two refusals
+    // that change **nothing** answer; this one means the opposite, and `13` has clients branch
+    // on the code rather than on the sentence - a screen reading "nothing has been changed" over
+    // this state would tell somebody their medicines were still there when they were not.
+    expect(partial.status).toBe(500);
+    expect((partial.body.error as { code: string }).code).toBe('ACCOUNT_DELETION_INCOMPLETE');
+
+    // And the session was deliberately **kept**. Signing out here would revoke the only
+    // credential the person has left to finish with, on a route whose entire design is that it
+    // can be called again - and `close-identity` authenticates as the caller, so a revoked token
+    // cannot drive the retry either.
+    expect(provider.signedOut).toEqual([]);
 
     const pending = await t.asOwner((db) =>
       db.query<{ action: string }>(
@@ -430,6 +446,18 @@ describe('deleting the account (DEV-062)', () => {
     currentPrincipal = principalFor(OTHER);
     expect((await call('GET', '/v1/me')).status).toBe(200);
     expect(provider.removed).toEqual([OWNER]);
+  });
+
+  it('drives the removal with the caller’s own token, and only then ends the sessions', async () => {
+    // Both halves of the order that changed. `close-identity` reads the subject from the token it
+    // is given, so a removal driven by anything else could not name the right person - and a
+    // global sign-out invalidates that token at the provider immediately, which is why signing
+    // out first left the removal unable to authenticate at all.
+    await call('DELETE', '/v1/me');
+    expect(provider.removedWith).toEqual(['synthetic-bearer-token']);
+    // Sessions ended after, not before. The identity is already gone by then; this is what
+    // catches the `ALREADY_ABSENT` path, where a session could have outlived it.
+    expect(provider.signedOut).toEqual(['synthetic-bearer-token']);
   });
 });
 

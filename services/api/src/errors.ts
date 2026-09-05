@@ -80,6 +80,9 @@ const STATUS_BY_CODE: Readonly<Record<DomainErrorCode, number>> = Object.freeze(
   PERMISSION_DENIED: 404,
   EMAIL_NOT_VERIFIED: 403,
   ACCOUNT_CLOSED: 409,
+  // 500 rather than 503: the data really was removed and the caller's retry is what finishes the
+  // job, so this is a partial success to be completed rather than a dependency to wait on.
+  ACCOUNT_DELETION_INCOMPLETE: 500,
   STEP_UP_REQUIRED: 403,
 
   // Caregiver invitation. 410 for an expired invitation because the resource genuinely existed

@@ -98,6 +98,10 @@ export interface MainConfig {
      * than performing the half it can (DEC-125).
      */
     readonly serviceKey: string | null;
+    /** The `close-identity` Edge Function, where this deployment has one deployed. */
+    readonly deletionFunctionUrl: string | null;
+    /** The secret that function requires, where one is set on both sides. */
+    readonly deletionSecret: string | null;
   } | null;
   /**
    * What this deployment has said about retention (DEC-121).
@@ -178,6 +182,8 @@ function readSupabase(): MainConfig['supabase'] {
     audience: process.env.KYNVIORA_SUPABASE_AUDIENCE?.trim() ?? 'authenticated',
     anonKey: nonEmpty(process.env.KYNVIORA_SUPABASE_ANON_KEY),
     serviceKey: nonEmpty(process.env.KYNVIORA_SUPABASE_SERVICE_KEY),
+    deletionFunctionUrl: nonEmpty(process.env.KYNVIORA_SUPABASE_DELETION_FUNCTION_URL),
+    deletionSecret: nonEmpty(process.env.KYNVIORA_SUPABASE_DELETION_SECRET),
   };
 }
 
@@ -395,6 +401,8 @@ export async function start(
           issuer: config.supabase.issuer,
           anonKey: config.supabase.anonKey,
           serviceKey: config.supabase.serviceKey ?? undefined,
+          deletionFunctionUrl: config.supabase.deletionFunctionUrl ?? undefined,
+          deletionSecret: config.supabase.deletionSecret ?? undefined,
         });
 
   if (config.supabase !== null) {

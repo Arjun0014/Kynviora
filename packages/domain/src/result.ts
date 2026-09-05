@@ -132,6 +132,14 @@ export const DOMAIN_ERROR_CODES = [
   // and a closed account offers nothing at all.
   'EMAIL_NOT_VERIFIED',
   'ACCOUNT_CLOSED',
+  // A deletion that got through the local half and not the identity behind it (`DEV-062`).
+  //
+  // Its own code rather than the `PROVIDER_UNAVAILABLE` it used to share, because `13` has
+  // clients branch on codes and this one means the **opposite** of the other two things that
+  // code carried: "nothing was changed, ask somebody" against "your data is gone, press it
+  // again". A screen that read the first sentence over the second state would tell somebody
+  // their medicines were safe when they were not.
+  'ACCOUNT_DELETION_INCOMPLETE',
 
   // Caregiver invitation (spec 04 Phase 8.1). Distinct codes rather than a shared 404 because
   // 12 requires the client to distinguish these outcomes: an expired invitation offers to ask

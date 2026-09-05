@@ -51,6 +51,7 @@ import { DeliveryPolicy } from '@/features/notifications/DeliveryPolicy';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
 import { ConsentSettings } from '@/features/consent/ConsentSettings';
 import { SignOutControl } from '@/features/auth/SignOutControl';
+import { DeleteAccount } from '@/features/auth/DeleteAccount';
 import { HealthContext } from '@/features/profiles/HealthContext';
 import { ProfileSwitcher } from '@/features/profiles/ProfileSwitcher';
 import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
@@ -411,6 +412,10 @@ export default function YouScreen() {
           whatever else failed to load - a person whose profile list would not arrive is one of
           the people most likely to want it. */}
       <SignOutControl />
+      {/* Below signing out, and last on the page. `16` requires the control to exist; `18`
+          decides where - the irreversible thing goes after the reversible one, so nobody reaches
+          for it while looking for the other. */}
+      <DeleteAccount />
     </Screen>
   );
 }

@@ -36,6 +36,21 @@
  * that cannot be recovered from - identity gone, data not stamped, and the person with no way to
  * ask again. So the order is now local first, and the capability to finish is checked **before**
  * anything is written, which is what stops a half-deletion from being possible at all.
+ *
+ * THE THIRD ORDERING, AND THE THING THAT FORCED IT
+ * Local, then the **identity**, then the sessions - not local, sessions, identity, which is what
+ * this did until the removal stopped needing a service-role key.
+ *
+ * `close-identity` is driven by the caller's own token: it reads the subject from claims Supabase
+ * has already verified, so it cannot be pointed at anybody else, which is the whole reason it is
+ * preferred. The cost is that it needs that token to still work - and a global sign-out
+ * invalidates it at the provider **immediately** (the finding behind DEC-124, measured in
+ * `supabaseLive.test.ts`). Signing out first therefore left the removal unable to authenticate at
+ * all, on a route whose entire design is that it can be called again.
+ *
+ * The same fact decides what happens when the removal fails: the session is deliberately **kept**.
+ * It is the only credential the person has left to finish with, and it grants nothing - the
+ * account check refuses this subject on every route but this one and `POST`.
  */
 
 import { z } from 'zod';
@@ -72,16 +87,27 @@ export type IdentityRemoval = 'REMOVED' | 'ALREADY_ABSENT' | 'FAILED';
  * Ending a session and ending an identity, which need different credentials and so are different
  * methods.
  *
- * `signOutEverywhere` uses the **caller's own** token and needs nothing privileged, which is why
- * it is the half that can be exercised against a real project today. `removeIdentity` needs a
- * service-role credential (`BLK-010`), and {@link canRemoveIdentity} says whether this deployment
- * has one - checked before anything is written, so a deployment without it refuses the whole
- * request rather than performing the half it can.
+ * `signOutEverywhere` uses the **caller's own** token and needs nothing privileged.
+ * `removeIdentity` needs a privilege no client may hold, and {@link canRemoveIdentity} says
+ * whether this deployment can perform it at all - checked before anything is written, so a
+ * deployment that cannot refuses the whole request rather than doing the half it can.
+ *
+ * WHY IT TAKES THE TOKEN AS WELL AS THE SUBJECT
+ * Because the two ways of doing it need different things. A service-role key names the subject
+ * and deletes it. The `close-identity` Edge Function is driven by the **caller's own token** -
+ * it reads the subject from the claims Supabase's gateway has already verified, so there is no
+ * user id in the request and therefore no way for it to remove anybody but the caller. That is
+ * the safer shape, so it is the one preferred where both are configured.
  */
+export interface RemovableIdentity {
+  readonly subject: string;
+  readonly bearerToken: string;
+}
+
 export interface AuthIdentityAdmin {
   readonly canRemoveIdentity: boolean;
   signOutEverywhere(bearerToken: string): Promise<boolean>;
-  removeIdentity(subject: string): Promise<IdentityRemoval>;
+  removeIdentity(identity: RemovableIdentity): Promise<IdentityRemoval>;
 }
 
 export interface AuthProvider {
@@ -97,10 +123,30 @@ export interface SupabaseProviderOptions {
   /**
    * The service-role key, where a deployment has one.
    *
-   * A real secret and the only one in this file's configuration. `14` keeps it server-side; it is
-   * never logged, never returned and never sent anywhere but the provider.
+   * A real secret. `14` keeps it server-side; it is never logged, never returned and never sent
+   * anywhere but the provider. Optional, and on `kynviora-dev` absent - see below.
    */
   readonly serviceKey?: string | undefined;
+  /**
+   * The `close-identity` Edge Function, where a deployment has one.
+   *
+   * The way a removal happens **without this process ever holding a service-role key**. Supabase
+   * injects that key into an Edge Function's own environment, so the credential does its job
+   * without leaving the platform that issued it - which is what `14` wants and what a key pasted
+   * into an environment file is not. It is preferred over `serviceKey` where both are set,
+   * because the function derives the subject from the caller's verified token and so cannot
+   * remove anybody else.
+   */
+  readonly deletionFunctionUrl?: string | undefined;
+  /**
+   * A shared secret the function requires, where one is configured on both sides.
+   *
+   * Without it, any client holding its own token could call the function directly and remove its
+   * identity while Kynviora had stamped nothing - leaving rows nothing can reach. Optional
+   * because it is set on the function with `supabase secrets set`, and the function checks it
+   * only when it has one.
+   */
+  readonly deletionSecret?: string | undefined;
   fetchImpl?: typeof fetch;
 }
 
@@ -109,6 +155,8 @@ export function supabaseAuthProvider(options: SupabaseProviderOptions): AuthProv
   const base = options.issuer.replace(/\/$/, '');
   const doFetch = options.fetchImpl ?? fetch;
   const serviceKey = options.serviceKey ?? '';
+  const deletionFunctionUrl = options.deletionFunctionUrl ?? '';
+  const deletionSecret = options.deletionSecret ?? '';
 
   return {
     directory: {
@@ -131,7 +179,7 @@ export function supabaseAuthProvider(options: SupabaseProviderOptions): AuthProv
       },
     },
     admin: {
-      canRemoveIdentity: serviceKey !== '',
+      canRemoveIdentity: serviceKey !== '' || deletionFunctionUrl !== '',
       async signOutEverywhere(bearerToken: string): Promise<boolean> {
         // `scope=global` revokes every session this person has anywhere, not only the one that
         // asked. It is authenticated by their own token, so it needs no privilege at all - which
@@ -147,9 +195,28 @@ export function supabaseAuthProvider(options: SupabaseProviderOptions): AuthProv
         });
         return response.status === 204 || response.ok;
       },
-      async removeIdentity(subject: string): Promise<IdentityRemoval> {
+      async removeIdentity(identity: RemovableIdentity): Promise<IdentityRemoval> {
+        // The function first: it needs no secret in this process, and it cannot be asked to
+        // remove anybody but whoever the token belongs to.
+        if (deletionFunctionUrl !== '') {
+          const headers: Record<string, string> = {
+            apikey: options.anonKey,
+            authorization: `Bearer ${identity.bearerToken}`,
+            'content-type': 'application/json',
+          };
+          if (deletionSecret !== '') headers['x-kynviora-deletion'] = deletionSecret;
+          const answer = await doFetch(deletionFunctionUrl, {
+            method: 'POST',
+            headers,
+            body: '{}',
+          });
+          // The function answers 204 both when it removed the identity and when it found it
+          // already absent, because from here those are the same outcome: it is gone.
+          return answer.status === 204 || answer.ok ? 'REMOVED' : 'FAILED';
+        }
+
         if (serviceKey === '') return 'FAILED';
-        const response = await doFetch(`${base}/admin/users/${subject}`, {
+        const response = await doFetch(`${base}/admin/users/${identity.subject}`, {
           method: 'DELETE',
           headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}` },
         });
@@ -425,17 +492,24 @@ export function registerAccountRoutes(app: FastifyInstance, deps: AccountRouteDe
       return { first, profiles: profiles.rows.length };
     });
 
-    // 2. Every session, everywhere, at the provider. Uses the caller's own token, so it needs no
-    //    privilege - and it is what stops a token issued five minutes ago from being refreshed.
-    //    Best effort on purpose: the account check already refuses this subject on the next
-    //    request, so a failure here delays nothing that matters.
-    const signedOut = await provider.admin.signOutEverywhere(token);
-
-    // 3. The identity itself. Idempotent, because a retry must not fail on the step that already
-    //    succeeded.
-    const removal = await provider.admin.removeIdentity(ctx.principal.userId);
+    // 2. The identity itself, **before** the sessions and not after, which is a reversal.
+    //
+    //    The removal is driven by the caller's own token (`close-identity` derives the subject
+    //    from it, so it cannot be pointed at anybody else) - and a global sign-out invalidates
+    //    that token at the provider immediately. Signing out first therefore left the removal
+    //    unable to authenticate, on a route whose whole design is that it can be called again.
+    //
+    //    Idempotent either way: an identity already gone is a removal that succeeded.
+    const removal = await provider.admin.removeIdentity({
+      subject: ctx.principal.userId,
+      bearerToken: token,
+    });
 
     if (removal === 'FAILED') {
+      // Deliberately **not** signed out here. The data is stamped and unreachable - DEC-124
+      // refuses this subject on every route but this one and `POST`, so the live session grants
+      // nothing - and it is the only credential the person still has to finish the job with.
+      // Revoking it would make the documented recovery ("try again") impossible.
       // The data is stamped and unreachable and the sessions are gone; what remains is an identity
       // that can still authenticate to a subject with no account - which is a clean 401 rather
       // than a broken success. Recorded so an operator can find it, and the route can simply be
@@ -446,18 +520,28 @@ export function registerAccountRoutes(app: FastifyInstance, deps: AccountRouteDe
              (actor_user_id, actor_role, action, target_kind, target_id, correlation_id, detail)
            VALUES ($1, 'kynviora_service', 'account.identity_removal_pending', 'app_user', $1, $2,
                    $3::jsonb)`,
-          [ctx.principal.userId, ctx.correlationId, JSON.stringify({ signed_out: signedOut })],
+          [ctx.principal.userId, ctx.correlationId, JSON.stringify({ session_kept_for_retry: true })],
         ),
       );
       return fail(
         reply,
         domainError(
-          'PROVIDER_UNAVAILABLE',
+          // Its own code, not the `PROVIDER_UNAVAILABLE` the two refusals above use. Those mean
+          // nothing was changed; this means the opposite, and `13` has clients branch on the code
+          // rather than on the sentence - so a screen reading "nothing has been changed" over
+          // this state would tell somebody their medicines were still there when they were not.
+          'ACCOUNT_DELETION_INCOMPLETE',
           'Your data has been removed. Closing your sign-in account did not finish; try again.',
         ),
         ctx.correlationId,
       );
     }
+
+    // 3. Every remaining session, everywhere. Removing the identity already took them with it, so
+    //    this is belt and braces for the `ALREADY_ABSENT` path - where the identity was gone
+    //    before this call and a session could in principle have outlived it. Best effort: the
+    //    account check refuses this subject on the next request either way.
+    const signedOut = await provider.admin.signOutEverywhere(token);
 
     await ctx.privileged('ACCOUNT_DELETION', (db) =>
       db.query(
