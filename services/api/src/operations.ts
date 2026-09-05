@@ -123,6 +123,17 @@ export async function gatherOperationalCounts(ctx: RequestContext): Promise<Oper
       `SELECT publication_blocked FROM publication_control WHERE singleton`,
     );
 
+    // Retention (DEC-121, `0027`). Through a `SECURITY DEFINER` function rather than a table
+    // grant: the answer is five numbers and the tables it comes from are the run history of a
+    // role that exists to empty other tables. The service role learns the aggregates and gains no
+    // way to read a row.
+    const retention = await db.query<{
+      last_successful_run_at: Date | string | null;
+      categories_failing: number;
+      runs_unfinished: number;
+      rows_purged_last_run: number;
+    }>(`SELECT * FROM kynviora.retention_health()`);
+
     const sources = await db.query<{
       id: string;
       organization: string;
@@ -175,6 +186,12 @@ export async function gatherOperationalCounts(ctx: RequestContext): Promise<Oper
       reviewTasksOpen: toCount(tasks.rows[0]?.open_tasks),
       reviewTasksOldestOpenAt: toInstant(tasks.rows[0]?.oldest_open_at),
       publicationBlocked: control.rows[0]?.publication_blocked === true,
+      // `null` where no sweep has ever succeeded, which the projection turns into
+      // `retention_never_swept` rather than into an age of zero.
+      retentionLastSuccessfulRunAt: toInstant(retention.rows[0]?.last_successful_run_at),
+      retentionCategoriesFailing: toCount(retention.rows[0]?.categories_failing),
+      retentionRunsUnfinished: toCount(retention.rows[0]?.runs_unfinished),
+      retentionRowsPurgedLastRun: toCount(retention.rows[0]?.rows_purged_last_run),
       sources: sourceRows,
     };
   });

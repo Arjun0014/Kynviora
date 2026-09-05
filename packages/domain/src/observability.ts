@@ -83,6 +83,23 @@ export const OPERATIONAL_METRICS = [
   // a metric stream carries numbers and an operator alert on "publication has been stopped" is
   // exactly the kind `20` asks for.
   'publication_blocked',
+
+  // Retention (DEC-121). A background job's health, which `20` treats as operational rather than
+  // as audit - what was purged is a count, who deleted it is an audit question with its own route.
+  //
+  // `retention_never_swept` is a separate metric rather than an extreme value of the age beside
+  // it, because "never" and "just now" are the two ends of that number and an age of zero is what
+  // both would report. `sources_never_successfully_checked` exists for the same reason.
+  'retention_never_swept',
+  'retention_last_successful_run_age_ms',
+  // How many categories' most recent attempt failed. Self-clearing: non-zero exactly while some
+  // promise in `docs/RETENTION.md` is not being kept, back to zero when that category next
+  // succeeds. It is why a run outcome of PARTIAL needs no window to be alertable.
+  'retention_categories_failing',
+  // Runs opened and never closed. Normally zero, briefly one; persistently above zero is a worker
+  // dying mid-sweep.
+  'retention_runs_unfinished',
+  'retention_rows_purged_last_run',
 ] as const;
 export type MetricKey = (typeof OPERATIONAL_METRICS)[number];
 
@@ -119,6 +136,11 @@ export const METRIC_UNIT: Readonly<Record<MetricKey, MetricUnit>> = Object.freez
   review_tasks_open: 'COUNT',
   review_tasks_oldest_open_age_ms: 'MILLISECONDS',
   publication_blocked: 'BOOLEAN',
+  retention_never_swept: 'BOOLEAN',
+  retention_last_successful_run_age_ms: 'MILLISECONDS',
+  retention_categories_failing: 'COUNT',
+  retention_runs_unfinished: 'COUNT',
+  retention_rows_purged_last_run: 'COUNT',
 });
 
 /**
@@ -232,6 +254,21 @@ export interface OperationalCounts {
   readonly reviewTasksOpen: number;
   readonly reviewTasksOldestOpenAt: Instant | null;
   readonly publicationBlocked: boolean;
+  /**
+   * When a retention sweep last ended `SUCCEEDED`, or `null` if one never has (DEC-121).
+   *
+   * `null` is a fact rather than a missing value, and it is the reason `retention_never_swept`
+   * exists: {@link ageMs} answers zero for `null`, which is correct for "nothing is waiting in a
+   * queue" and exactly backwards for "no sweep has ever completed".
+   *
+   * `PARTIAL` deliberately does not count. A sweep that skipped a category did not keep that
+   * category's deadline, and an operator asking when retention last worked is asking about all
+   * of it - `retentionCategoriesFailing` is where the detail lives.
+   */
+  readonly retentionLastSuccessfulRunAt: Instant | null;
+  readonly retentionCategoriesFailing: number;
+  readonly retentionRunsUnfinished: number;
+  readonly retentionRowsPurgedLastRun: number;
   readonly sources: readonly SourceHealthInput[];
 }
 
@@ -280,6 +317,13 @@ export function projectOperationalSnapshot(
     review_tasks_open: counts.reviewTasksOpen,
     review_tasks_oldest_open_age_ms: ageMs(counts.reviewTasksOldestOpenAt, now),
     publication_blocked: counts.publicationBlocked ? 1 : 0,
+    // Derived here rather than gathered, so the boolean and the age cannot disagree about whether
+    // a sweep has ever happened.
+    retention_never_swept: counts.retentionLastSuccessfulRunAt === null ? 1 : 0,
+    retention_last_successful_run_age_ms: ageMs(counts.retentionLastSuccessfulRunAt, now),
+    retention_categories_failing: counts.retentionCategoriesFailing,
+    retention_runs_unfinished: counts.retentionRunsUnfinished,
+    retention_rows_purged_last_run: counts.retentionRowsPurgedLastRun,
   };
 
   return {

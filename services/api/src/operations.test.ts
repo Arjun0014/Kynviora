@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance, FastifyRequest, InjectOptions } from 'fastify';
 import { createServer } from './server.js';
 import type { DatabaseConnection, DatabasePool, Principal } from './context.js';
-import { createTestDb, testUuid, type TestDb } from '../../../db/harness/harness.js';
+import { createTestDb, expectDenied, testUuid, type TestDb } from '../../../db/harness/harness.js';
 import {
   OPERATIONAL_METRICS,
   instantFrom,
@@ -351,5 +351,136 @@ describe('what the projection reports', () => {
     expect(metric(snapshot, 'reviewer_queue_oldest_open_age_ms')).toBe(24 * 60 * 60 * 1000);
     // The inbox is unaffected: a publication request is not a household review task.
     expect(metric(snapshot, 'review_tasks_open')).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('retention health on the operations snapshot', () => {
+  // The top-level hook clears every reviewer row before each test, so the role is re-granted here
+  // rather than once - the same shape the projection block above uses.
+  beforeEach(async () => {
+    await grantRole(OPS, 'SOURCE_OPERATIONS_OWNER');
+  });
+
+  /** Open a run as the retention role, which is the only role that may. */
+  async function openRun(startedAt: string): Promise<string> {
+    const res = await t.asRetention((db) =>
+      db.query<{ id: string }>(
+        `INSERT INTO retention_run (holder, started_at) VALUES ('test', ${startedAt})
+         RETURNING id`,
+      ),
+    );
+    return res.rows[0]?.id ?? '';
+  }
+
+  async function closeRun(runId: string, outcome: string, rowsPurged = 0): Promise<void> {
+    await t.asRetention((db) =>
+      db.query(
+        `UPDATE retention_run
+            SET finished_at = now(), outcome = $2, duration_ms = 10, rows_purged = $3,
+                categories_attempted = 7, categories_failed = $4
+          WHERE id = $1`,
+        [runId, outcome, rowsPurged, outcome === 'SUCCEEDED' ? 0 : 1],
+      ),
+    );
+  }
+
+  async function recordCategory(
+    runId: string,
+    category: string,
+    outcome: 'SUCCEEDED' | 'FAILED',
+  ): Promise<void> {
+    await t.asRetention((db) =>
+      db.query(
+        `INSERT INTO retention_run_category
+           (run_id, category, outcome, rows_purged, duration_ms, failure_step, failure_sqlstate)
+         VALUES ($1, $2, $3, 0, 1, $4, $5)`,
+        [
+          runId,
+          category,
+          outcome,
+          outcome === 'FAILED' ? 'step' : null,
+          outcome === 'FAILED' ? '42501' : null,
+        ],
+      ),
+    );
+  }
+
+  it('says a sweep has never run rather than reporting an age of zero', async () => {
+    // The trap the metric exists for. An operator alerting on the age alone would read a system
+    // that has never purged anything as one that just did, because `null` and "just now" produce
+    // the same number.
+    const snapshot = await snapshotAs(OPS);
+    expect(metric(snapshot, 'retention_never_swept')).toBe(1);
+    expect(metric(snapshot, 'retention_last_successful_run_age_ms')).toBe(0);
+  });
+
+  it('reports how long ago a sweep last fully succeeded', async () => {
+    const run = await openRun(`'2026-08-29T09:00:00.000Z'`);
+    await closeRun(run, 'SUCCEEDED', 12);
+
+    const snapshot = await snapshotAs(OPS);
+    expect(metric(snapshot, 'retention_never_swept')).toBe(0);
+    // `NOW` is 12:00 and the run started at 09:00.
+    expect(metric(snapshot, 'retention_last_successful_run_age_ms')).toBe(3 * 60 * 60 * 1000);
+    expect(metric(snapshot, 'retention_rows_purged_last_run')).toBe(12);
+  });
+
+  it('does not let a PARTIAL run count as the last successful sweep', async () => {
+    // The assertion this whole surface is for. A sweep that skipped a category did not keep that
+    // category's deadline, and an operator asking when retention last worked is asking about all
+    // of it - so a later PARTIAL must not move the age back to zero and hide the earlier gap.
+    const run = await openRun(`'2026-08-29T11:00:00.000Z'`);
+    await recordCategory(run, 'CONSENT_RECEIPT', 'FAILED');
+    await recordCategory(run, 'ITEM', 'SUCCEEDED');
+    await closeRun(run, 'PARTIAL', 3);
+
+    const snapshot = await snapshotAs(OPS);
+    // Still three hours, from the 09:00 SUCCEEDED run - not one hour from this PARTIAL one.
+    expect(metric(snapshot, 'retention_last_successful_run_age_ms')).toBe(3 * 60 * 60 * 1000);
+    // And the detail is where an operator can act on it.
+    expect(metric(snapshot, 'retention_categories_failing')).toBe(1);
+    expect(metric(snapshot, 'retention_rows_purged_last_run')).toBe(3);
+  });
+
+  it('clears a failing category by itself when it next succeeds', async () => {
+    // Self-clearing is what lets this be alertable with no window and no threshold - `BLK-008`
+    // records that no threshold is approved, and this metric does not need one.
+    const run = await openRun('now()');
+    await recordCategory(run, 'CONSENT_RECEIPT', 'SUCCEEDED');
+    await closeRun(run, 'SUCCEEDED', 0);
+
+    expect(metric(await snapshotAs(OPS), 'retention_categories_failing')).toBe(0);
+  });
+
+  it('counts a run that was opened and never closed', async () => {
+    // Normally zero, briefly one. Persistently above zero is a worker dying mid-sweep, which no
+    // other metric here would show.
+    expect(metric(await snapshotAs(OPS), 'retention_runs_unfinished')).toBe(0);
+    const orphan = await openRun('now()');
+    expect(metric(await snapshotAs(OPS), 'retention_runs_unfinished')).toBe(1);
+
+    await closeRun(orphan, 'SUCCEEDED', 0);
+    expect(metric(await snapshotAs(OPS), 'retention_runs_unfinished')).toBe(0);
+  });
+
+  it('gives the reader the numbers without giving them the rows', async () => {
+    // `0027` answers through a SECURITY DEFINER function rather than a table grant, so the service
+    // role that gathers the snapshot learns five aggregates and gains no read on the run history.
+    // Without this the fix would have been a grant, and a grant with one consumer is still a grant.
+    for (const table of ['retention_run', 'retention_run_category', 'retention_lease']) {
+      expect(
+        await expectDenied(() => t.asService((db) => db.query(`SELECT * FROM ${table}`))),
+      ).toMatch(/permission denied/i);
+    }
+  });
+
+  it('carries no run id, holder or failure message out to the reader', async () => {
+    // A retention metric is a count. The failure step and SQLSTATE are diagnostic and stay in the
+    // database; a holder is an opaque process identity and has no business on a dashboard.
+    const snapshot = await snapshotAs(OPS);
+    const serialized = JSON.stringify(snapshot);
+    for (const forbidden of ['holder', 'run_id', 'runId', 'failure_step', 'sqlstate', '42501']) {
+      expect(serialized).not.toContain(forbidden);
+    }
   });
 });

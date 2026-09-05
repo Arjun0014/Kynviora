@@ -437,3 +437,43 @@ describe('the operations view', () => {
     expect(notes.some((note) => note.includes('refresh interval'))).toBe(false);
   });
 });
+
+describe('a retention age of zero on the operations page', () => {
+  it('is not rendered as an empty queue', () => {
+    // `nothing waiting` is queue wording and reads as all-clear. Zero here means either no sweep
+    // has ever completed or one started within this minute, and only one of those is fine.
+    const view = operationsView({
+      at: '2026-09-01T12:00:00.000Z',
+      serverTime: '2026-09-01T12:00:00.000Z',
+      metrics: [
+        { key: 'retention_last_successful_run_age_ms', value: 0, unit: 'MILLISECONDS' },
+        { key: 'retention_never_swept', value: 1, unit: 'BOOLEAN' },
+        { key: 'review_tasks_oldest_open_age_ms', value: 0, unit: 'MILLISECONDS' },
+      ],
+      sources: [],
+    });
+
+    const text = (key: string) => view.metrics.find((m) => m.key === key)?.value;
+    expect(text('retention_last_successful_run_age_ms')).toBe('never, or just now');
+    // The companion boolean is what resolves the ambiguity, in the same table.
+    expect(text('retention_never_swept')).toBe('yes');
+    // And a genuine queue age keeps the wording that is right for it.
+    expect(text('review_tasks_oldest_open_age_ms')).toBe('nothing waiting');
+  });
+
+  it('renders a real retention age the way it renders any other', () => {
+    const view = operationsView({
+      at: '2026-09-01T12:00:00.000Z',
+      serverTime: '2026-09-01T12:00:00.000Z',
+      metrics: [
+        {
+          key: 'retention_last_successful_run_age_ms',
+          value: 3 * 60 * 60 * 1000,
+          unit: 'MILLISECONDS',
+        },
+      ],
+      sources: [],
+    });
+    expect(view.metrics[0]?.value).toBe('3 hours');
+  });
+});

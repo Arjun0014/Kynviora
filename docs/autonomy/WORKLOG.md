@@ -4248,8 +4248,56 @@ floor do the medicine and its doses go. Inaccessible is not gone, the matrix pro
 different times, and conflating them is how a product tells somebody their data is deleted while it
 is on disk with no stated end date.
 
+### Then: observability nobody could observe
+
+`0026` granted the run history to `kynviora_retention` alone. That role is `NOLOGIN` and is used
+by exactly one process, so a sweep that had not run for a week, or a category failing every night,
+was recorded perfectly and visible to nobody. It was observability in the sense that a black box
+nobody recovers is a flight recorder, and it was worth fixing in the same session rather than
+noting as future work - the previous unit's own claim to be observable depended on it.
+
+**A function rather than a grant.** The obvious fix is `GRANT SELECT ON retention_run TO
+kynviora_service` and it is wider than the question: the operations surface needs five numbers,
+and a table grant would let every service operation in the system read every run row forever,
+because a grant with one consumer is still a grant. `kynviora.retention_health()` is
+`SECURITY DEFINER` and returns five aggregates, which is the same reasoning `0023` gives for
+`evidence_is_unattached` and applies for the same reason - the answer is small and the table it
+comes from is not.
+
+**Two of the five metrics are the whole point.**
+
+`retention_never_swept` is a separate metric rather than an extreme value of the age beside it,
+and it exists because of a trap the projection already had: `ageMs` answers **zero** for `null`,
+which is right for "the queue is empty" and exactly backwards for "no sweep has ever completed".
+An operator alerting on `retention_last_successful_run_age_ms > threshold` would read a system
+that has never purged anything as one that just did. `sources_never_successfully_checked` exists
+for the same reason and this follows it.
+
+`retention_categories_failing` counts categories whose **most recent** attempt failed. It is
+self-clearing - non-zero exactly while some promise in `docs/RETENTION.md` is not being kept, back
+to zero by itself when that category next succeeds - which is what makes a `PARTIAL` run alertable
+with no window and no threshold. That matters here specifically: `BLK-008` records that no
+threshold is approved, so a metric needing one would have been a metric nobody could act on.
+
+And `retention_last_successful_run_age_ms` counts only `SUCCEEDED` runs. A later `PARTIAL` sweep
+must not reset the age and hide the gap, because a sweep that skipped a category did not keep that
+category's deadline - which gets its own test, with a `SUCCEEDED` run at 09:00 and a `PARTIAL` one
+at 11:00, asserting the age is still three hours rather than one.
+
+### A third defect, in the console
+
+The staff console renders metrics generically by key, so the new ones appear with no console
+change - which is how the defect arrived. `metricValueText` renders a millisecond metric of zero
+as **"nothing waiting"**, queue wording that is right for the two queue ages and reads as all-clear
+beside a retention age, where zero means either "no sweep has ever completed" or "one started
+within this minute".
+
+Zero is now a property of the metric rather than of its unit:
+`retention_last_successful_run_age_ms` renders as "never, or just now", and the
+`retention_never_swept` reading in the same table resolves which. Worth catching, because the page
+would have been reassuring and wrong at exactly the moment it mattered most.
+
 ### Result
 
-`npm run verify` exit 0. 4496 tests across 170 files, up from 4403 across 165. Migration `0026`
-adds three tables that hold no personal data, and the app and service roles hold no grant on any of
-them.
+`npm run verify` exit 0. 4510 tests across 170 files. Migration `0027` adds one function and no
+tables, and the service role that reads it still cannot select a row from any of `0026`'s three.

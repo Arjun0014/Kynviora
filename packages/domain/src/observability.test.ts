@@ -56,6 +56,10 @@ const counts = (over: Partial<OperationalCounts> = {}): OperationalCounts => ({
   reviewTasksOpen: 0,
   reviewTasksOldestOpenAt: null,
   publicationBlocked: false,
+  retentionLastSuccessfulRunAt: null,
+  retentionCategoriesFailing: 0,
+  retentionRunsUnfinished: 0,
+  retentionRowsPurgedLastRun: 0,
   sources: [],
   ...over,
 });
@@ -220,7 +224,14 @@ describe('the snapshot as a whole', () => {
     // observability path as an incident of its own.
     const snapshot = projectOperationalSnapshot(counts(), NOW);
     expect(snapshot.metrics.map((m) => m.key)).toEqual([...OPERATIONAL_METRICS]);
-    for (const reading of snapshot.metrics) expect(reading.value).toBe(0);
+
+    // `retention_never_swept` is the one metric a system with nothing in it reports as **1**, and
+    // that is the metric working rather than an exception to this rule: a system where nothing has
+    // happened is precisely a system where no sweep has ever completed. Every other metric here
+    // counts something that has happened, so zero is the empty answer for all of them.
+    for (const reading of snapshot.metrics) {
+      expect(reading.value).toBe(reading.key === 'retention_never_swept' ? 1 : 0);
+    }
   });
 
   it('states a unit for every metric', () => {
@@ -251,5 +262,64 @@ describe('the snapshot as a whole', () => {
     const record = metricsAsRecord(snapshot);
     expect(Object.keys(record).sort()).toEqual([...OPERATIONAL_METRICS].sort());
     expect(record.alerts_published).toBe(4);
+  });
+});
+
+describe('retention health', () => {
+  it('reports never-swept rather than an age of zero when nothing has ever run', () => {
+    // The trap this metric exists for. `ageMs` answers zero for `null`, which is right for "the
+    // queue is empty" and exactly backwards here: a dashboard alerting on
+    // `retention_last_successful_run_age_ms > threshold` would read a system that has never
+    // purged anything as one that just did.
+    const record = metricsAsRecord(
+      projectOperationalSnapshot(counts({ retentionLastSuccessfulRunAt: null }), NOW),
+    );
+    expect(record.retention_never_swept).toBe(1);
+    expect(record.retention_last_successful_run_age_ms).toBe(0);
+  });
+
+  it('reports the age once a sweep has succeeded, and stops saying never', () => {
+    const record = metricsAsRecord(
+      projectOperationalSnapshot(
+        counts({ retentionLastSuccessfulRunAt: at('2026-09-01T09:00:00.000Z') }),
+        NOW,
+      ),
+    );
+    expect(record.retention_never_swept).toBe(0);
+    expect(record.retention_last_successful_run_age_ms).toBe(3 * 60 * 60 * 1000);
+  });
+
+  it('reports a failing category as a count that can clear itself', () => {
+    // Non-zero exactly while some promise in docs/RETENTION.md is not being kept. It needs no
+    // window and no threshold, which is why a PARTIAL run does not need either.
+    expect(
+      metricsAsRecord(projectOperationalSnapshot(counts({ retentionCategoriesFailing: 2 }), NOW))
+        .retention_categories_failing,
+    ).toBe(2);
+    expect(
+      metricsAsRecord(projectOperationalSnapshot(counts({ retentionCategoriesFailing: 0 }), NOW))
+        .retention_categories_failing,
+    ).toBe(0);
+  });
+
+  it('reports unfinished runs and the last run’s volume', () => {
+    const record = metricsAsRecord(
+      projectOperationalSnapshot(
+        counts({ retentionRunsUnfinished: 1, retentionRowsPurgedLastRun: 42 }),
+        NOW,
+      ),
+    );
+    expect(record.retention_runs_unfinished).toBe(1);
+    expect(record.retention_rows_purged_last_run).toBe(42);
+  });
+
+  it('carries no status, severity or subject for any of them', () => {
+    // The rule this whole module is built around: report what is true and stop. A retention
+    // metric naming a profile would be the first place operator output carried a person.
+    const snapshot = projectOperationalSnapshot(counts(), NOW);
+    for (const reading of snapshot.metrics.filter((m) => m.key.startsWith('retention_'))) {
+      expect(Object.keys(reading).sort()).toEqual(['key', 'unit', 'value']);
+      expect(typeof reading.value).toBe('number');
+    }
   });
 });

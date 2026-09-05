@@ -4297,6 +4297,21 @@ grants both INSERT and DELETE", and it is now stated that way and still holds ev
 `DEV-063` records what this does not close: every eligibility floor sits exactly on its deadline,
 so a discrete sweep overshoots by up to one interval and no finite interval fixes that.
 
+**Addendum, same session: the history is readable.** `0026` granted the run history to
+`kynviora_retention` alone, which is `NOLOGIN` and used by one process - so it was recorded
+perfectly and visible to nobody. `0027` puts five aggregates on the reviewer operations snapshot
+through a `SECURITY DEFINER` function rather than a table grant, for the reason `0023` gives for
+`evidence_is_unattached`: the answer is five numbers and the tables are the run history of a role
+that exists to empty other tables, so the caller learns the numbers and gains no read on a row.
+
+Two of the five are worth naming. `retention_never_swept` is its own metric rather than an extreme
+value of the age beside it, because `null` and "just now" both produce an age of zero and only one
+of them is fine - the same reason `sources_never_successfully_checked` exists. And
+`retention_categories_failing` counts categories whose **most recent** attempt failed, which is
+self-clearing: non-zero exactly while some promise in the matrix is not being kept, back to zero
+when that category next succeeds. It is why an outcome of `PARTIAL` needs no window and no
+threshold to be alertable, which matters because `BLK-008` records that no threshold is approved.
+
 **Sources.** `16` (retention deadlines; the deletion workflow); `14` (least privilege, deny by
 default); `20` (a job reports start, end, outcome, duration and counts, with correlation and
 without content); `21` (environments); DEC-005; DEC-013; DEC-037; DEC-117; DEC-120;

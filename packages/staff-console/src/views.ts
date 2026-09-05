@@ -517,11 +517,24 @@ export interface OperationsView {
   readonly noVerdictNote: string;
 }
 
+/**
+ * What a millisecond metric of **zero** means, where it does not mean an empty queue.
+ *
+ * `nothing waiting` is queue wording and it is right for the two queue ages. It is wrong beside a
+ * retention age, where zero means either "no sweep has ever completed" or "one started within this
+ * minute" - two states that share a number and share nothing else, and the first of which would
+ * read as all-clear. The `retention_never_swept` reading in the same table resolves which; this
+ * only has to stop claiming the reassuring one.
+ */
+const MILLISECOND_ZERO_TEXT: Readonly<Record<string, string>> = Object.freeze({
+  retention_last_successful_run_age_ms: 'never, or just now',
+});
+
 function metricValueText(reading: MetricReadingResponse): string {
   if (reading.unit === 'BOOLEAN') return reading.value === 0 ? 'no' : 'yes';
   if (reading.unit === 'MILLISECONDS') {
     const minutes = Math.floor(reading.value / 60_000);
-    if (reading.value === 0) return 'nothing waiting';
+    if (reading.value === 0) return MILLISECOND_ZERO_TEXT[reading.key] ?? 'nothing waiting';
     if (minutes < 60) return minutes <= 1 ? '1 minute' : `${String(minutes)} minutes`;
     const hours = Math.floor(minutes / 60);
     if (hours < 24) return hours === 1 ? '1 hour' : `${String(hours)} hours`;

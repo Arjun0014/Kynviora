@@ -30,7 +30,7 @@ by up to one interval and no finite interval makes that zero.
 
 ## Verification state
 
-- **4496 tests passing**, 0 failing, across 170 files.
+- **4510 tests passing**, 0 failing, across 170 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -444,7 +444,7 @@ the API will not distinguish them.
 | Area                                                        | State                                                         |
 | ----------------------------------------------------------- | ------------------------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine  | Complete, 94 tests                                            |
-| Database schema, 26 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                    |
+| Database schema, 27 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                    |
 | Catalog engine, capture pipeline, Trust Passport            | Complete, 178 tests                                           |
 | Regulatory registry, Citation Gate, Lens                    | Complete, 72 tests                                            |
 | Safety rule engine with replay; schedule and refill         | Complete, 88 tests                                            |
@@ -480,6 +480,7 @@ the API will not distinguish them.
 | Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                    |
 | Retention: the matrix, the roles, the doors, the sweep      | Complete, 67 tests; deadlines measured to the microsecond     |
 | The retention worker: schedule, lease, run history          | Complete, 81 tests; **runs**, in-process or its own (DEC-121) |
+| Retention health on the operations snapshot                 | Complete, 14 tests; five aggregates, no read on a run row     |
 | Deleting an item and a profile, end to end                  | Complete, 48 tests; account deletion open (`DEV-062`)         |
 | Portable export: fourteen sections, sources referenced      | Complete, 26 tests; no artifact and no link, by choice        |
 | Scanning a barcode: permission, check digit, confirmation   | Complete, 45 tests; **5/5 on a device**; no OCR (BLK-007)     |
