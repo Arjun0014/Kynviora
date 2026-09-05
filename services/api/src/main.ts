@@ -19,7 +19,13 @@
 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRuntimeDb, resolveDataDir, seedDevelopmentData, type RuntimeDb } from '@kynviora/db';
+import {
+  openRuntimeDb,
+  readManagedDatabaseUrl,
+  resolveDataDir,
+  seedDevelopmentData,
+  type RuntimeDb,
+} from '@kynviora/db';
 import {
   cryptoIdGenerator,
   systemClock,
@@ -61,6 +67,13 @@ export interface MainConfig {
   readonly staffPort: number | null;
   readonly host: string;
   readonly dataDir: string | undefined;
+  /**
+   * The managed database this process attaches to, or `null` for the local PGlite directory.
+   *
+   * A connection string, so it is the one configuration value here that **is** a secret. It is
+   * never logged; `openRuntimeDb` reports the host and database instead.
+   */
+  readonly databaseUrl: string | null;
   readonly devAuth: boolean;
   readonly seed: boolean;
   readonly allowAnonymousStart: boolean;
@@ -158,6 +171,7 @@ export function readConfig(): MainConfig {
     // separate databases - and because PGlite is a single writer, the second one is an empty
     // database that reads as data loss rather than as a second copy.
     dataDir: resolveDataDir(process.env.KYNVIORA_LOCAL_DB_DIR),
+    databaseUrl: readManagedDatabaseUrl(),
     devAuth: process.env.KYNVIORA_DEV_AUTH === '1',
     seed: process.env.KYNVIORA_DEV_SEED === '1',
     allowAnonymousStart: process.env.KYNVIORA_ALLOW_ANONYMOUS_START === '1',
@@ -314,7 +328,17 @@ export async function start(
     );
   }
 
-  const db = await createRuntimeDb(config.dataDir === undefined ? {} : { dataDir: config.dataDir });
+  const opened = await openRuntimeDb({
+    dataDir: config.dataDir,
+    connectionString: config.databaseUrl,
+    managed: { applicationName: 'kynviora-api' },
+  });
+  const db: RuntimeDb = opened.db;
+
+  // Which store this process attached to, once, before anything is served. An API that quietly
+  // opened an empty local database when it was meant to reach a managed one looks exactly like a
+  // database with no data in it, which is the slowest possible way to find out (spec 21).
+  logger.info('api.database.opened', { kind: opened.kind, target: opened.describedAs });
 
   // Seeded here rather than by a separate command, on the connection this process already holds.
   // PGlite is a single writer: a standalone seed against the same directory as a running server
@@ -358,7 +382,7 @@ export async function start(
   logger.info('api.started', {
     port: boundPort,
     dev_auth: config.devAuth,
-    persisted: config.dataDir !== undefined,
+    persisted: opened.kind === 'MANAGED_POSTGRES' || config.dataDir !== undefined,
   });
 
   // -------------------------------------------------------------------------

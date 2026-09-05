@@ -8,6 +8,7 @@
 
 export * from './managed.js';
 export * from './migrations.js';
+export * from './open.js';
 export * from './retention.js';
 export * from './runtime.js';
 export * from './seed.js';

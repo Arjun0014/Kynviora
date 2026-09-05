@@ -4669,3 +4669,109 @@ once connections are pooled.
 
 `BLK-001` is not closed. What it now says is much narrower: the API and the worker have not yet
 been run against this database, and no extension, backup or load behaviour has been touched.
+
+---
+
+## 2026-09-05 - Two processes on one database, which is what the lease was written for
+
+`retention_lease` has existed since `0026` and has never had two workers. PGlite is a single
+writer (DEC-037), so the only arrangement that could sweep the development database was the loop
+running **inside** the API process - and a lease protecting one process from itself has not been
+contended. `docs/RETENTION.md` 8.2 said as much in a table: "its own process ... when `BLK-001`
+clears".
+
+It has cleared. This is the deployment shape running for real.
+
+### One place decides which database a process opens
+
+`openRuntimeDb` - `KYNVIORA_DATABASE_URL` set means managed, absent means the local directory.
+The switch is the connection string rather than the data directory, because the data directory has
+a default and so can never mean "no local database".
+
+Both entry points log which they chose, before serving anything:
+
+```
+{"code":"api.database.opened","kind":"MANAGED_POSTGRES","target":"aws-0-…pooler.supabase.com:5432/postgres"}
+{"code":"worker.database.opened","kind":"MANAGED_POSTGRES","target":"aws-0-…pooler.supabase.com:5432/postgres"}
+```
+
+The credential never appears; the host and database do. A process that quietly opened an empty
+local database when it was meant to reach a managed one looks exactly like a database with no data
+in it, which is the slowest possible way to find out.
+
+**The worker's single-writer refusal is now scoped to the case it is about.** It used to fire on
+"this process has a data directory configured", which is always true. It fires on "this process
+has a _local_ data directory and nothing said it may", which is the actual hazard.
+
+**`MainConfig.databaseUrl` is required rather than optional**, so all three test configs had to say
+`databaseUrl: null` out loud. That is deliberate: a test that reached the real project would write
+synthetic households into it and read another run's rows back.
+
+### What was run, not simulated
+
+`npm run dev` and two `npm run worker` processes, all three against `kynviora-dev` at once.
+
+- The API seeded its synthetic household into Supabase, served `/v1/profiles` and `/v1/items` for
+  the owner, returned **`{"items":[]}`** to a stranger asking about the same profile, and **401**
+  with no header at all.
+- Worker one swept every five seconds: eight categories per run, `SUCCEEDED`, real durations
+  between 3.1 and 4.9 seconds - which is what eight transactions to Mumbai and back cost.
+- Worker two, started forty seconds later, wrote `retention.run.skipped` /
+  `reason: LEASE_HELD` on the passes it lost and swept on the ones it won. Two holders,
+  interleaved, in the run history.
+
+**Zero overlapping runs across the entire history.** Asked of every executed run in the database
+rather than of the pair a test started:
+
+```sql
+SELECT count(*) FROM retention_run a JOIN retention_run b
+  ON a.id < b.id AND a.started_at < b.finished_at AND b.started_at < a.finished_at
+ WHERE a.outcome IN ('SUCCEEDED','PARTIAL','FAILED') AND b.outcome IN (...);
+```
+
+`ABANDONED` runs are excluded, and the exclusion is not a convenience: a reaped run's
+`finished_at` is when somebody **noticed** it was dead, not when it stopped, so its recorded span
+deliberately overstates. A test asserting the invariant over those would be asserting something
+false about a column that is doing its job. The suite also asserts more than one distinct holder,
+because "no two runs overlapped" is trivially true of a history written by one worker - which is
+every history this project had until today.
+
+### The run history cannot be rewritten, and that cost a test two attempts
+
+The overdue-sweep test wanted "the last sweep was three hours ago" and tried to backdate the run
+rows. `0026` refuses: `retention_run_close` admits only `USING (finished_at IS NULL)`, so a
+finished run cannot be re-dated, re-outcomed or quietly recounted, and there is no DELETE policy at
+all. That is the schema working - a worker may not write history for a sweep it did not perform
+when it claims to have performed it, which is exactly what makes the schedule trustworthy.
+
+So the interval moves instead of the clock. "Overdue" is `elapsed > interval`, and both directions
+are reached from the same real history by asking for a different one: with a one-second interval
+the loop sweeps having slept **nothing at all**, and with an hour it sleeps ~59.9 minutes and
+writes no run. A worker scheduling from its own uptime would sleep the interval before its first
+sweep in both cases, so the empty list is what separates them.
+
+**Sleeping is injected so a wait is recorded rather than taken.** The first version of this test
+did not do that and hung for the full three-minute timeout rather than failing - twice - because a
+loop that decided to wait an hour is indistinguishable from one still working.
+
+### The lease under real contention
+
+Twelve concurrent acquisitions, one winner: the conditional `UPDATE` is atomic, which was true by
+inspection and is now true by measurement on a real server. An expired lease is claimable and the
+expiry is what makes a killed worker recoverable without anybody unblocking it by hand - and
+setting up that test has to move `acquired_at` too, because
+`retention_lease_expiry_after_acquisition` will not accept a lease that expired before it was
+taken.
+
+### A purge that removed something
+
+An item stamped deleted forty days ago - past `purge_floor()` - is visible to the retention role,
+invisible to it the day it was deleted, and `rows_purged: 1` on the sweep that removed it. The very
+next sweep purges nothing, which is what makes the first count a deletion rather than a match. It
+is also this suite's only cleanup, and the honest kind: the fixture leaves by the mechanism the
+product uses to remove it.
+
+### Result
+
+`npm run verify` exit 0: 4,573 passed, 45 skipped across two managed suites. Against
+`kynviora-dev`: **45 passed** (32 parity + 13 worker).

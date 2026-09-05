@@ -33,7 +33,7 @@
 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRuntimeDb, resolveDataDir } from '@kynviora/db';
+import { openRuntimeDb, readManagedDatabaseUrl, resolveDataDir } from '@kynviora/db';
 import {
   cryptoIdGenerator,
   systemClock,
@@ -48,6 +48,14 @@ import { startRetentionLoop, type RetentionLoop } from './loop.js';
 export interface WorkerConfig {
   readonly retention: RetentionWorkerConfig;
   readonly dataDir: string | undefined;
+  /**
+   * The managed database, or `null` for the local directory.
+   *
+   * This is the value that makes the deployment shape above reachable: a managed Postgres is not
+   * a single writer, so a worker process and an API process can hold it at once - which is what
+   * `retention_lease` was written for and what nothing could exercise until now.
+   */
+  readonly databaseUrl: string | null;
   /** `KYNVIORA_WORKER_ALLOW_LOCAL_DB=1`. See the single-writer note above. */
   readonly allowLocalDb: boolean;
 }
@@ -56,6 +64,7 @@ export function readWorkerConfig(): WorkerConfig {
   return {
     retention: readRetentionWorkerConfig(),
     dataDir: resolveDataDir(process.env.KYNVIORA_LOCAL_DB_DIR),
+    databaseUrl: readManagedDatabaseUrl(),
     allowLocalDb: process.env.KYNVIORA_WORKER_ALLOW_LOCAL_DB === '1',
   };
 }
@@ -96,19 +105,33 @@ export async function start(
   config: WorkerConfig = readWorkerConfig(),
   overrides: WorkerOverrides = {},
 ): Promise<StartedWorker> {
-  if (config.dataDir !== undefined && !config.allowLocalDb) {
+  // Only the local store is a single writer. A managed Postgres is the arrangement this refusal
+  // was waiting for, so the check is scoped to the case it is about rather than to "this process
+  // has a data directory configured" - which is always true, because that setting has a default.
+  const managed = config.databaseUrl !== null && config.databaseUrl !== '';
+  if (!managed && config.dataDir !== undefined && !config.allowLocalDb) {
     throw new Error(
       'Refusing to open the local PGlite data directory from a second process. PGlite is a ' +
         'single writer (DEC-037): if the API is running against this directory, both processes ' +
         'see stale copies and the last to exit overwrites the other. Run retention in-process ' +
-        'with KYNVIORA_RETENTION=worker instead, or set KYNVIORA_WORKER_ALLOW_LOCAL_DB=1 if you ' +
-        'are certain nothing else has this directory open.',
+        'with KYNVIORA_RETENTION=worker instead, set KYNVIORA_DATABASE_URL to a managed ' +
+        'Postgres, which more than one process may hold, or set ' +
+        'KYNVIORA_WORKER_ALLOW_LOCAL_DB=1 if you are certain nothing else has this directory ' +
+        'open.',
     );
   }
 
   const clock = systemClock();
   const logger = overrides.logger ?? consoleLogger(clock);
-  const db = await createRuntimeDb(config.dataDir === undefined ? {} : { dataDir: config.dataDir });
+  const opened = await openRuntimeDb({
+    dataDir: config.dataDir,
+    connectionString: config.databaseUrl,
+    // Small: a worker sweeps in one transaction per category and never fans out, so a wide pool
+    // would take connections from the API for no benefit.
+    managed: { applicationName: 'kynviora-worker', maxConnections: 3 },
+  });
+  const db = opened.db;
+  logger.info('worker.database.opened', { kind: opened.kind, target: opened.describedAs });
 
   const loop = startRetentionLoop({
     db,

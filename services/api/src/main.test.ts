@@ -62,6 +62,9 @@ async function startServer(overrides: Partial<MainConfig> = {}): Promise<Started
       staffPort: null,
       host: '127.0.0.1',
       dataDir,
+      // Never the managed database. A test that reached a real project would write synthetic
+      // households into it and read another test run's rows back.
+      databaseUrl: null,
       devAuth: true,
       seed: true,
       allowAnonymousStart: false,
@@ -270,6 +273,7 @@ describe('the development seed', () => {
         staffPort: null,
         host: '127.0.0.1',
         dataDir,
+        databaseUrl: null,
         devAuth: true,
         seed: true,
         allowAnonymousStart: false,
