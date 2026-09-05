@@ -4468,3 +4468,132 @@ it.
 
 **Sources.** `16`; `14`; `docs/RETENTION.md` 3.1, 3.2, 8.1, 8.3; DEC-117; DEC-121; `DEV-063`;
 migrations `0022`, `0023`, `0031`.
+
+---
+
+## DEC-124 - A verified subject is not yet an account, and that is what makes a deletion immediate
+
+**Context.** `supabaseLive.test.ts` signs in to `kynviora-dev`, signs out, and then asks the same
+question two ways. The provider's own `/user` answers `session_not_found` at once. This API's
+verifier answers `VERIFIED` - and goes on doing so until the token expires, up to an hour later.
+
+Nothing is wrong with the verifier. A Supabase access token is checked **locally**, against a
+published key set, which is the whole benefit of asymmetric signing (DEC-118 part 1) and has
+exactly one consequence: this process cannot know that a session ended.
+
+`16` requires that account deletion invalidates sessions immediately. It follows that the token
+cannot be what does it.
+
+**Decision.** Every request resolves the verified subject to a **live `app_user` row**, and a
+subject with no such row has no session.
+
+**1. One read, at the one choke point.** `contextFor` is the only path from a request to a
+database connection, so the check lives there and no route can forget it. It runs as the caller,
+under `app_user_self_select`, which admits exactly their own row - so it reads nothing it is not
+entitled to and needs no privileged connection.
+
+**2. Four states, one answer.** Absent, stamped deleted, suspended and active. The first three
+produce the same `UNAUTHENTICATED` as no token at all, byte for byte apart from the correlation
+ID. `13` does not let this API be an oracle, and a caller able to tell "no account" from "no
+token" learns whether a subject they hold a token for has an account here - which is precisely the
+fact a deletion is supposed to remove. The distinction reaches the log instead, where an operator
+can see `ACCOUNT_DELETED` and know retention is working.
+
+**3. `PENDING_DELETION` is deliberately not refused.** DEC-120's deletion is synchronous: the row
+is stamped in the request that accepts it, so somebody in that state has already stopped being
+able to reach anything through `deleted_at`. Refusing on the status as well would be two
+independent switches for one fact, and the one nobody remembered to set would be the one that
+mattered.
+
+**4. Exactly two routes are exempt, and both are about the account itself.** `POST /v1/me` creates
+it. `DELETE /v1/me` finishes removing it, so a deletion interrupted part-way can be completed by
+the person it belongs to rather than only by an operator. The exemption is a typed value
+(`UnprovisionedRoute`) with one member rather than a boolean, so adding a third is a change
+somebody has to write down.
+
+**What this changed that was already there.** A subject with no account used to get `200` and an
+empty list, and two suites asserted it as "a stranger sees an empty page, not a refusal" - which is
+`04` Phase 8.1's exit criterion and is still true. It is true of the case it was written for: a
+**person with an account** who has no access to this household. Both suites now use a seeded
+account with nothing in it, which is a sharper stranger than a bare user ID, and the criterion is
+measured where it applies.
+
+**Consequences.** A deleted account stops working on the caller's very next request, with no wait
+for a token to expire and no revocation list. A token from a subject who never registered reaches
+nothing. And the API gained a lifecycle it did not have: something has to create that row, which
+is DEC-125.
+
+**Sources.** `13`; `14`; `16`; `04` Phase 1.4 and Phase 8.1; DEC-118; DEC-120; `DEV-062`;
+`supabaseLive.test.ts` (measured 2026-09-05).
+
+---
+
+## DEC-125 - Registration reads the provider, and a deletion that cannot finish does not start
+
+**Context.** DEC-124 requires an `app_user` row before anything works, and nothing created one
+outside the development seed. `DEV-062` requires the other end: a person can remove their account,
+which DEC-120 designed and could not build without a Supabase project.
+
+**Decision on registration.** `POST /v1/me`, taking **no fields at all**.
+
+The subject is the identity, so the route is idempotent by nature rather than by an idempotency
+key: a second call finds the row the first one made. The body is `.strict()` and empty, because
+anything in it would be a caller describing themselves, which `13` forbids.
+
+**The email comes from the provider, server to server.** DEC-118 reads `sub` from a verified token
+and nothing else, and registration needs two things a token does not carry: an address
+(`app_user.email_normalized` is `NOT NULL UNIQUE`, and is what an emailed caregiver invitation
+binds to) and whether that address is **verified**. The access token has no such claim.
+
+So the route asks `GET /auth/v1/user` with the caller's own token. That is not a client-supplied
+field and not a snapshot from whenever the token was issued - it is what the provider says now.
+The cost is one call, once, on a route that runs once in a person's life. An unverified address is
+refused with `EMAIL_NOT_VERIFIED`, which is the check that makes DEC-118's "verified email and
+password" mean something rather than describe an intention.
+
+A **closed** account is not revived. The row is retained on an approved basis until the purge takes
+it (DEC-117), and reviving it would resurrect everything that hung off it; a person who wants to
+come back gets a new account, which is what the deletion promised them. `ACCOUNT_CLOSED`, 409.
+
+**Decision on deletion: the order is reversed from DEC-120, because DEC-124 removed its premise.**
+
+DEC-120 said the auth identity must go first, so a failure part-way leaves an account that still
+works rather than one that cannot be reached and cannot be removed. The premise was that stamping
+locally first would leave "somebody who can sign in successfully to a row that is gone". Since
+DEC-124 there is no such state: a stamped account produces **no session at all**.
+
+And the two orders have different worst cases. Local first, then identity: the data is gone, the
+sessions are gone, the identity lingers, and the person still holds a token that verifies - so
+**they can ask again**. Identity first, then local: the identity is gone, the data is not stamped,
+and the person has no way to ask for anything ever again. Only one of those is recoverable by the
+person it happened to.
+
+So: local first, and every step idempotent.
+
+| Step | What                                                        | On failure                                     |
+| ---- | ----------------------------------------------------------- | ---------------------------------------------- |
+| 0    | Fresh step-up (`14`), then **can this deployment finish?**  | Refuse, having changed nothing                 |
+| 1    | Stamp every profile, every item, the account, one audit row | Nothing is half-revoked; it is one transaction |
+| 2    | `logout?scope=global` with the caller's own token           | Best effort - DEC-124 already refuses them     |
+| 3    | Remove the identity through the admin API                   | Recorded as pending; the route can be re-run   |
+
+**Step 0 is the one that matters most.** Checking the capability **before** anything is written is
+what makes DEC-120's refused half-measure - "stamp `app_user` and stop there" - impossible rather
+than merely discouraged. A deployment with no service-role credential does not stamp the data and
+then discover it cannot close the account.
+
+**Step 2 needs no privilege at all**, which is why it is the part that can be exercised against a
+real project today: `scope=global` is authenticated by the caller's own token and revokes every
+session they hold anywhere.
+
+**Consequences.** `DEV-062` moves from "not built" to "built, and needs one credential". The
+credential is `KYNVIORA_SUPABASE_SERVICE_KEY`, and until a deployment has one `DELETE /v1/me`
+answers `PROVIDER_UNAVAILABLE` and changes nothing - which is the honest state and is enforced
+rather than documented. `BLK-010` narrows to that key and to the email round trip.
+
+Two error codes are new: `EMAIL_NOT_VERIFIED` (403) and `ACCOUNT_CLOSED` (409). Both are distinct
+from `PERMISSION_DENIED` because the client response differs - one offers to resend a confirmation
+and the other offers nothing at all.
+
+**Sources.** `16` (removal; the workflow enumerates what goes); `14`; `13`; `04` Phase 1.4;
+DEC-117; DEC-118; DEC-120; DEC-124; `DEV-062`; `BLK-010`.

@@ -50,6 +50,7 @@ import { createServer } from './server.js';
 import type { DatabasePool, Principal } from './context.js';
 import { DevAuthRefused, createDevAuthenticator } from './devAuth.js';
 import { createSupabaseAuthenticator, httpJwks } from './supabaseAuth.js';
+import { supabaseAuthProvider } from './accountLifecycle.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -84,7 +85,20 @@ export interface MainConfig {
    * a verifier needs when signatures are asymmetric, and it is why `14`'s rule about secrets in
    * configuration does not bite here - there is nothing to leak.
    */
-  readonly supabase: { readonly issuer: string; readonly audience: string } | null;
+  readonly supabase: {
+    readonly issuer: string;
+    readonly audience: string;
+    /** Publishable key. Not a secret; the account routes need it to read the provider. */
+    readonly anonKey: string | null;
+    /**
+     * Service-role key, where a deployment has one.
+     *
+     * The only secret in this configuration, and the whole of what stands between
+     * `DEV-062` being built and being usable. Absent means account deletion refuses, rather
+     * than performing the half it can (DEC-125).
+     */
+    readonly serviceKey: string | null;
+  } | null;
   /**
    * What this deployment has said about retention (DEC-121).
    *
@@ -116,6 +130,12 @@ function readOptionalPort(name: string): number | null {
   return readNumber(name, 0);
 }
 
+/** A trimmed environment value, or `null`. An empty string is not a configuration. */
+function nonEmpty(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  return value === undefined || value === '' ? null : value;
+}
+
 /**
  * The Supabase configuration, or `null` where none is set.
  *
@@ -123,7 +143,7 @@ function readOptionalPort(name: string): number | null {
  * to `authenticated`, which is what Supabase issues for a signed-in user - a deployment that
  * needed a different one can say so, and one that does not should not have to.
  */
-function readSupabase(): { readonly issuer: string; readonly audience: string } | null {
+function readSupabase(): MainConfig['supabase'] {
   const issuer = process.env.KYNVIORA_SUPABASE_ISSUER?.trim();
   if (issuer === undefined || issuer === '') return null;
 
@@ -156,6 +176,8 @@ function readSupabase(): { readonly issuer: string; readonly audience: string } 
     // the key set URL is built by appending - so a stray slash breaks both, in two different ways.
     issuer: issuer.replace(/\/$/, ''),
     audience: process.env.KYNVIORA_SUPABASE_AUDIENCE?.trim() ?? 'authenticated',
+    anonKey: nonEmpty(process.env.KYNVIORA_SUPABASE_ANON_KEY),
+    serviceKey: nonEmpty(process.env.KYNVIORA_SUPABASE_SERVICE_KEY),
   };
 }
 
@@ -362,8 +384,31 @@ export async function start(
     }
   }
 
+  // The identity provider, where there is one. Two keys and one of them is a secret, so it is
+  // built once here rather than reached for by a route - and it is `null` under the development
+  // authenticator, which is what makes registration refuse rather than invent an address nobody
+  // verified (DEC-125).
+  const authProvider =
+    config.supabase === null || config.supabase.anonKey === null
+      ? null
+      : supabaseAuthProvider({
+          issuer: config.supabase.issuer,
+          anonKey: config.supabase.anonKey,
+          serviceKey: config.supabase.serviceKey ?? undefined,
+        });
+
+  if (config.supabase !== null) {
+    // Which halves of the account lifecycle this deployment can perform. `14` keeps the key
+    // server-side and out of every log; what is logged is whether one is present.
+    logger.info('api.auth.provider', {
+      directory: authProvider !== null,
+      can_remove_identity: authProvider?.admin.canRemoveIdentity ?? false,
+    });
+  }
+
   const app = createServer({
     surface: 'HOUSEHOLD',
+    authProvider,
     pool: poolFor(db),
     logger,
     authenticate: authenticate ?? ((): Promise<Principal | null> => Promise.resolve(null)),

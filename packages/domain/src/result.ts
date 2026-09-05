@@ -127,6 +127,11 @@ export const DOMAIN_ERROR_CODES = [
   'AUTHORIZATION_LOST',
   'PERMISSION_DENIED',
   'STEP_UP_REQUIRED',
+  // Account lifecycle (spec 16 removal, DEC-124, DEC-125). Distinct from PERMISSION_DENIED
+  // because the client response differs: an unverified address offers to resend a confirmation,
+  // and a closed account offers nothing at all.
+  'EMAIL_NOT_VERIFIED',
+  'ACCOUNT_CLOSED',
 
   // Caregiver invitation (spec 04 Phase 8.1). Distinct codes rather than a shared 404 because
   // 12 requires the client to distinguish these outcomes: an expired invitation offers to ask

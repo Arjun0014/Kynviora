@@ -72,7 +72,10 @@ import { CONSENT_COPY, REVOCATION_COPY, SCREEN_STATE_PRESENTATION } from '@kynvi
  * same view models, the same `resourceFor`. What is asserted is what a person would see.
  */
 
-const STRANGER = '00000000-0000-4000-8000-0000000009ff';
+// A seeded account with nothing in it, rather than a bare user ID nobody has an account for.
+// Since DEC-124 the latter has no session at all, so it would measure the account check rather
+// than row-level security - and 'somebody else who uses Kynviora' is the sharper stranger anyway.
+const STRANGER = SEED.strangerUserId;
 
 /** Only used where the builder is expected to refuse before the value could matter. */
 const NOW_UNUSED = '2026-09-01T00:00:00.000Z';

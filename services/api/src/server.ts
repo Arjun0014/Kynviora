@@ -54,6 +54,8 @@ import { itemDetailView, manualEntryOutcomeView } from '@kynviora/presentation';
 import { projectLens, type SourceRegistryEntry } from '@kynviora/regulatory';
 import type { DatabasePool, Principal, RequestContext } from './context.js';
 import { createRequestContext } from './context.js';
+import { resolveAccountState, type UnprovisionedRoute } from './account.js';
+import { registerAccountRoutes, type AuthProvider } from './accountLifecycle.js';
 import { toErrorResponse, statusForCode } from './errors.js';
 import { nodeInviteTokenService, registerCaregiverRoutes } from './caregiver.js';
 import { registerVisitPackRoutes, sha256ContentDigest } from './visitPack.js';
@@ -258,6 +260,14 @@ export interface ServerOptions {
    * hashed-only storage property; production uses the Node crypto implementation.
    */
   readonly tokens?: InviteTokenService;
+  /**
+   * The identity provider, where this deployment has one.
+   *
+   * `null` under the development authenticator, and the account routes say so rather than
+   * inventing an unverified address: an `app_user` row whose email nobody confirmed is the one
+   * thing DEC-118 asked registration to refuse.
+   */
+  readonly authProvider?: AuthProvider | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -592,6 +602,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
   async function contextFor(
     request: FastifyRequest,
     reply: FastifyReply,
+    unprovisioned?: UnprovisionedRoute,
   ): Promise<RequestContext | null> {
     const correlationId = correlationIdOf(request);
     const principal = await options.authenticate(request);
@@ -599,6 +610,27 @@ export function createServer(options: ServerOptions): FastifyInstance {
     if (!principal) {
       fail(reply, domainError('UNAUTHENTICATED', 'No valid session.'), correlationId);
       return null;
+    }
+
+    // A verified subject is not yet an account (DEC-124). This is what makes a deletion take
+    // effect on the caller's very next request: a Supabase access token is verified locally
+    // against a published key set, so nothing here can know its session was signed out, and the
+    // token goes on verifying until `exp`. The server refusing a subject it no longer recognises
+    // is the only thing that is immediate.
+    //
+    // One route is exempt and only one, because it is the route that creates the account.
+    if (unprovisioned === undefined) {
+      const state = await options.pool.withUser(principal.userId, resolveAccountState);
+      if (state !== 'ACTIVE') {
+        // The reason reaches the log and never the caller. `13` does not let this API be an
+        // oracle, and "deleted" versus "never existed" is exactly the fact a deletion removes.
+        options.logger.warn('api.account.refused', {
+          reason: state,
+          correlation_id: correlationId,
+        });
+        fail(reply, domainError('UNAUTHENTICATED', 'No valid session.'), correlationId);
+        return null;
+      }
     }
 
     const rawOperationId = request.headers['idempotency-key'];
@@ -2633,6 +2665,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
     // Kept in its own module because its authorization is unlike every other item route: the
     // profile owner alone, with fresh step-up, through a privileged write the app role cannot
     // make at all (`DEV-057`).
+
+    // -------------------------------------------------------------------------
+    // The account itself (`04` Phase 1.4, `16`, DEC-124, DEC-125, `DEV-062`)
+    // -------------------------------------------------------------------------
+    // The two routes that may run without an account: one creates it, the other finishes
+    // removing it after an interruption. Everything else in this surface is refused for a
+    // subject the server does not recognise.
+
+    registerAccountRoutes(app, { contextFor, fail, provider: options.authProvider ?? null });
 
     registerItemDeletionRoutes(app, { contextFor, fail });
     registerProfileDeletionRoutes(app, { contextFor, fail });

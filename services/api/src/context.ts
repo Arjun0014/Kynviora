@@ -113,6 +113,10 @@ export const PRIVILEGED_REASONS = [
   // security to fall back on.
   'REVIEWER_CONSOLE',
   'ACCOUNT_DELETION',
+  // Turning a verified subject into an app_user row. The app role cannot insert one - nothing
+  // may create an identity for itself - and the row has to exist before row-level security can
+  // admit anything at all, which is the ordering that makes this privileged (DEC-124).
+  'ACCOUNT_REGISTRATION',
   // Deleting a record at somebody's request. Privileged not because the route wants a wider hand
   // but because the app role cannot write a revocation stamp at all: Postgres applies the SELECT
   // policies to the new row of an UPDATE that reads the table, and every read predicate filters

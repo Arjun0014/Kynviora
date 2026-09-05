@@ -22,7 +22,10 @@ import { DEV_USER_HEADER } from './devAuth.js';
  * other test in the repository.
  */
 
-const STRANGER = '00000000-0000-4000-8000-0000000009ff';
+// A seeded account with nothing in it, rather than a bare user ID nobody has an account for.
+// Since DEC-124 the latter has no session at all, so it would measure the account check rather
+// than row-level security - and 'somebody else who uses Kynviora' is the sharper stranger anyway.
+const STRANGER = SEED.strangerUserId;
 
 const started: StartedServer[] = [];
 const dataDirs: string[] = [];
@@ -194,6 +197,33 @@ describe('the authorization boundary, against a real engine', () => {
 
     const profiles = await get(shared, '/v1/profiles', STRANGER);
     expect(profiles.body.profiles).toEqual([]);
+  });
+
+  it('gives a verified subject with no account no session at all (DEC-124)', async () => {
+    // The distinction the test above turns on, and the one this project did not make until now.
+    // A person with an account and no access to this household sees an empty page (above). A
+    // **subject with no account** is not a person this system knows, and gets 401 - the same
+    // answer as no credential at all.
+    //
+    // It matters because a Supabase access token is verified locally against a published key set,
+    // so nothing here can know a session was signed out or an account deleted; the token keeps
+    // verifying until `exp`. The server refusing a subject it does not recognise is the only
+    // thing that is immediate, and it is what "invalidate sessions immediately" has to mean.
+    const unknown = '00000000-0000-4000-8000-0000000009ff';
+
+    expect((await get(shared, `/v1/items?profileId=${SEED.profileId}`, unknown)).status).toBe(401);
+    expect((await get(shared, '/v1/profiles', unknown)).status).toBe(401);
+    expect((await get(shared, '/v1/consents', unknown)).status).toBe(401);
+
+    // Identical to the unauthenticated answer, on purpose. A caller able to tell "no account" from
+    // "no token" learns whether a subject they hold a token for has an account here, and the
+    // difference between "deleted" and "never existed" is precisely the fact a deletion removes.
+    const anonymous = await get(shared, '/v1/profiles');
+    const unrecognised = await get(shared, '/v1/profiles', unknown);
+    expect(unrecognised.status).toBe(anonymous.status);
+    expect((unrecognised.body.error as { code: string }).code).toBe(
+      (anonymous.body.error as { code: string }).code,
+    );
   });
 
   it('serves no staff route on the household origin at all', async () => {

@@ -38,6 +38,15 @@ export interface SeedConnection {
 export const SEED = Object.freeze({
   userId: '00000000-0000-4000-8000-00000000d001',
   caregiverUserId: '00000000-0000-4000-8000-00000000d002',
+  /**
+   * A second account with nothing in it.
+   *
+   * Somebody who has a Kynviora account and no connection to this household - which is what a
+   * test means by 'a stranger' and is a sharper subject than a bare user ID with no account at
+   * all. Since DEC-124 the latter has no session, so a test using one would be measuring the
+   * account check rather than row-level security.
+   */
+  strangerUserId: '00000000-0000-4000-8000-00000000d003',
   householdId: '00000000-0000-4000-8000-00000000d010',
   profileId: '00000000-0000-4000-8000-00000000d020',
 });
@@ -117,6 +126,7 @@ export async function seedDevelopmentData(db: SeedConnection, now: string): Prom
   for (const [id, email] of [
     [SEED.userId, 'you@example.test'],
     [SEED.caregiverUserId, 'caregiver@example.test'],
+    [SEED.strangerUserId, 'stranger@example.test'],
   ] as const) {
     await db.query(
       `INSERT INTO app_user (id, external_auth_id, email_normalized, email_verified_at)

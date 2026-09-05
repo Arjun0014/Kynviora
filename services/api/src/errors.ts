@@ -78,6 +78,8 @@ const STATUS_BY_CODE: Readonly<Record<DomainErrorCode, number>> = Object.freeze(
   UNAUTHENTICATED: 401,
   AUTHORIZATION_LOST: 401,
   PERMISSION_DENIED: 404,
+  EMAIL_NOT_VERIFIED: 403,
+  ACCOUNT_CLOSED: 409,
   STEP_UP_REQUIRED: 403,
 
   // Caregiver invitation. 410 for an expired invitation because the resource genuinely existed

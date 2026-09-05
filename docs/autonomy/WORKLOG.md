@@ -4867,3 +4867,130 @@ under load is the kind of thing that gets rediscovered as a mystery.
 Migration `0031` applied to `kynviora-dev`; both managed suites re-run green there (46 passed).
 `DEV-063` resolved, `DEV-065` opened, DEC-123 recorded, `docs/RETENTION.md` 8.3 rewritten from "the
 gap that remains" into the schedule.
+
+---
+
+## 2026-09-05 - A real token, and the thing it cannot tell you
+
+`BLK-010` has said the same thing since Stage 7: the only identity in this repository is a
+development header. DEC-118 chose Supabase Auth and built everything that did not need a project -
+verification, the claim model, the AAL and step-up mapping, the transport - and said in writing
+what that established about a Supabase project: **nothing**. Every test signed its own tokens.
+Every claim shape came from a documentation page read the same day, and a reference is not a
+measurement.
+
+There is a project now. `supabaseLive.test.ts` signs in to it and verifies what it actually issues.
+
+### Four things could have been wrong and were not
+
+| Modelled from documentation                | Measured                                     |
+| ------------------------------------------ | -------------------------------------------- |
+| ES256 or RS256; HS256 refused before a key | `alg: ES256`, `kid` in the published key set |
+| `iss`, `aud`, `sub`, `aal`, `session_id`   | All present, `aud: "authenticated"`          |
+| `amr` is `[{ method, timestamp }]`         | Exactly that, `password` on sign-in          |
+| `aal` moves to `aal2` on a second factor   | It does, with `totp` added to `amr`          |
+
+The key set publishes public keys only, which is checked rather than assumed: a symmetric key
+there would mean every service that can check a token can mint one.
+
+The refusals are measured on the **same real token**, which is what makes them worth having. It is
+refused for another deployment's issuer, for the wrong audience, once expired on a clock this
+deployment supplies (DEC-003 - a real token, an injected clock, rather than an hour of waiting),
+with its payload edited to somebody else's `sub`, naming a `kid` the project does not publish, and
+carrying `alg: none` over a payload the provider really issued.
+
+### AAL2 is real, and nothing about the second factor is simulated
+
+A TOTP factor was genuinely enrolled through `/factors`, and the codes are computed from its
+secret by RFC 6238 - which is what an authenticator app does. `createReviewerAuthenticator`
+refuses the AAL1 token and admits the AAL2 one **for the same person, on one identity**, which is
+what makes it a test of the boundary rather than of two accounts.
+
+`amr` came back most-recent-first, so DEC-118's `max` was unnecessary - and taking it with `max`
+anyway cost nothing and does not depend on a serialisation detail nobody here controls.
+
+### What is still not proven, and it is not the part anybody would guess
+
+**The email round trip.** The project requires confirmation and its built-in sender answers
+`over_email_send_rate_limit` to every attempt, so the synthetic account was confirmed by an
+operator - which is exactly what the admin API's `email_confirm: true` does and is not evidence
+that anybody received a message or clicked a link. That sentence is in the test file, in
+`BLK-010`, and here.
+
+What **is** proven either side of it, against the real provider, is worth more than it sounds:
+a right password on an unconfirmed address is refused with `email_not_confirmed`, and a wrong
+password with `invalid_credentials` - in that order, which is how you know the bcrypt hash is
+genuinely being checked rather than short-circuited by the confirmation gate. An address nobody
+has gets the same `invalid_credentials`, which is correct: an endpoint that distinguished them
+would be an oracle for which addresses have accounts.
+
+### The finding: a signed-out token keeps verifying
+
+Sign out. The provider's own `/user` answers `session_not_found` immediately. The same token keeps
+verifying here until `exp`, up to an hour later.
+
+Nothing is wrong with the verifier - that is what stateless verification **means**, and it is the
+benefit of asymmetric signing rather than a cost of it. But `16` requires account deletion to
+invalidate sessions immediately, and it follows directly that the token cannot be what does it.
+
+So DEC-124: **a verified subject is not yet an account.** Every request resolves the subject to a
+live `app_user` row, at `contextFor`, which is the one path from a request to a connection. One
+indexed read, as the caller, under the self-select policy that admits exactly their own row.
+
+Absent, deleted and suspended all answer the same `UNAUTHENTICATED` as no token at all - byte for
+byte apart from the correlation ID, which a test asserts. `13` does not let this API be an oracle,
+and the difference between "deleted" and "never existed" is exactly the fact a deletion removes.
+The reason reaches the log instead.
+
+**It changed a behaviour two suites asserted**, and the change is the interesting part. "A stranger
+sees an empty page, not a refusal" is `04` Phase 8.1's exit criterion and is still true - of the
+case it was written for, which is a **person with an account** and no access to this household.
+The suites were using a bare user ID nobody had an account for, which since DEC-124 is a different
+question. Both now use a seeded account with nothing in it: a sharper stranger, and the criterion
+measured where it applies.
+
+### Registering, which the API has never had
+
+`POST /v1/me`, taking no fields at all. The subject is the identity, so it is idempotent by nature
+rather than by an idempotency key, and the body is `.strict()` and empty because anything in it
+would be a caller describing themselves.
+
+**The email is read from the provider**, server to server, with the caller's own token. DEC-118
+reads `sub` and nothing else, and registration needs two things a token does not carry: an address
+(`email_normalized` is `NOT NULL UNIQUE` and is what an emailed invitation binds to) and whether
+it is **verified**, which no claim says. An unverified address is refused - which is the check
+that makes DEC-118's "verified email and password" a rule rather than an intention.
+
+A closed account is not revived. `ACCOUNT_CLOSED`, 409: the row is retained until the purge takes
+it (DEC-117), and reviving it would resurrect everything that hung off it.
+
+### Deleting, and the order DEC-120 got right for a reason that no longer applies
+
+DEC-120 said the auth identity must go first, so a failure part-way leaves an account that still
+works rather than one that cannot be reached and cannot be removed. The premise was that stamping
+locally first leaves "somebody who can sign in successfully to a row that is gone". DEC-124
+removed that premise: a stamped account produces no session at all.
+
+And the two orders have different worst cases. **Local first**: data gone, sessions gone, identity
+lingering, and the person still holding a token that verifies - so they can ask again.
+**Identity first**: identity gone, data not stamped, and the person with no way to ask for
+anything ever again. Only one is recoverable by the person it happened to.
+
+So the order is reversed, every step is idempotent, and step zero is the one that matters:
+**can this deployment finish?** Checking the capability before anything is written is what makes
+DEC-120's refused half-measure impossible rather than merely discouraged. A deployment with no
+service-role credential does not stamp the data and then discover it cannot close the account - it
+answers `PROVIDER_UNAVAILABLE` having changed nothing, and a test asserts that both profiles are
+still there afterwards.
+
+The global sign-out is the half that needs no privilege - `logout?scope=global` is authenticated by
+the caller's own token - and is therefore the half that can be exercised against a real project.
+
+### Result
+
+`npm run verify` exit 0. **4,605 passed**, 66 skipped across three live suites. Against
+`kynviora-dev`: **66 passed** - 32 parity, 13 worker, 21 auth.
+
+`DEV-062` moves from "not built" to "built, and needs one credential":
+`KYNVIORA_SUPABASE_SERVICE_KEY`. `BLK-010` narrows to that key and to the email round trip, and
+neither is a decision.
