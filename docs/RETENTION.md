@@ -93,31 +93,33 @@ revocation. **Purge** is the outer deadline for the bytes.
 Every row here becomes inaccessible the moment the deletion is accepted, and stops all processing
 at the same moment.
 
-| Table                         | Owner           | Purpose                                             | Trigger                        | Effect on revocation                                           | Purge |
-| ----------------------------- | --------------- | --------------------------------------------------- | ------------------------------ | -------------------------------------------------------------- | ----- |
-| `app_user`                    | Account holder  | The account                                         | Account                        | Sign-in stops working; every session is invalid                | 30d   |
-| `household`                   | Household owner | Grouping for profiles                               | Account                        | Household and its profiles vanish from every surface           | 30d   |
-| `profile`                     | Profile owner   | The person care is recorded about                   | Profile, Account               | Disappears from the switcher; every child read returns nothing | 30d   |
-| `owned_item`                  | Profile owner   | A medicine or personal-care product on the shelf    | Item, Profile, Account         | Gone from the Shelf; no detail; no reminders                   | 30d   |
-| `medicine_schedule`           | Profile owner   | When a medicine is meant to be taken                | Item, Profile, Account         | Alarms cancelled on the device at next reconcile               | 30d   |
-| `dose_event`                  | Profile owner   | That a dose was taken or missed                     | Item, Profile, Account         | History empty; no longer available to a Visit Pack             | 30d   |
-| `refill_estimate`             | Profile owner   | Derived run-out projection                          | Item, Profile, Account         | No refill line                                                 | 30d   |
-| `product_usage_evidence`      | Profile owner   | Which pack this shelf entry actually was            | Item, Profile, Account         | Trust Passport loses the private linkage                       | 30d   |
-| `allergy_record`              | Profile owner   | A recorded allergy or sensitivity                   | Profile, Account               | Not shown; not used by any assessment                          | 30d   |
-| `condition_record`            | Profile owner   | A recorded condition (uncollected - `DEV-035`)      | Profile, Account               | Not shown                                                      | 30d   |
-| `profile_assessment`          | Profile owner   | The result of applying a rule to this person's item | Item, Profile, Account         | No assessment; no alert derived from it                        | 30d   |
-| `alert_publication`           | Profile owner   | An alert raised for this person                     | Item, Profile, Account         | Alert gone from Safety                                         | 30d   |
-| `safety_receipt`              | Profile owner   | That the person was shown an alert                  | Profile, Account               | Gone                                                           | 30d   |
-| `review_task`                 | Profile owner   | Something the household was asked to confirm        | Item, Profile, Account         | Task gone from the Review Inbox                                | 30d   |
-| `reconciliation`              | Profile owner   | A medicine-list comparison                          | Profile, Account               | Gone                                                           | 30d   |
-| `reconciliation_difference`   | Profile owner   | One difference within a reconciliation              | Profile, Account               | Gone                                                           | 30d   |
-| `caregiver_grant`             | Profile owner   | That somebody has access                            | Profile, Account               | **Caregiver's very next request returns nothing**              | 30d   |
-| `profile_notification_policy` | Profile owner   | Who is told what, and when                          | Profile, Account               | No delivery decision can select this profile                   | 30d   |
-| `notification_preference`     | Recipient       | A recipient's own quiet hours and channels          | Profile, Account               | No held or sent notification                                   | 30d   |
-| `alert_delivery`              | Profile owner   | That a notification was decided and recorded        | Profile, Account               | Gone                                                           | 30d   |
-| `notification_revalidation`   | Recipient       | That an opened notification was re-checked          | Profile, Account               | Gone                                                           | 30d   |
-| `evidence_asset`              | Uploading user  | A captured image or document                        | Item, Profile, Account, Expiry | Not readable; not extractable                                  | 30d   |
-| `extraction_run`              | Uploading user  | What an extractor made of that asset                | Item, Profile, Account         | Gone                                                           | 30d   |
+| Table                         | Owner           | Purpose                                                    | Trigger                        | Effect on revocation                                           | Purge |
+| ----------------------------- | --------------- | ---------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------- | ----- |
+| `app_user`                    | Account holder  | The account                                                | Account                        | Sign-in stops working; every session is invalid                | 30d   |
+| `household`                   | Household owner | Grouping for profiles                                      | Account                        | Household and its profiles vanish from every surface           | 30d   |
+| `profile`                     | Profile owner   | The person care is recorded about                          | Profile, Account               | Disappears from the switcher; every child read returns nothing | 30d   |
+| `owned_item`                  | Profile owner   | A medicine or personal-care product on the shelf           | Item, Profile, Account         | Gone from the Shelf; no detail; no reminders                   | 30d   |
+| `medicine_schedule`           | Profile owner   | When a medicine is meant to be taken                       | Item, Profile, Account         | Alarms cancelled on the device at next reconcile               | 30d   |
+| `dose_event`                  | Profile owner   | That a dose was taken or missed                            | Item, Profile, Account         | History empty; no longer available to a Visit Pack             | 30d   |
+| `refill_estimate`             | Profile owner   | Derived run-out projection                                 | Item, Profile, Account         | No refill line                                                 | 30d   |
+| `product_usage_evidence`      | Profile owner   | Which pack this shelf entry actually was                   | Item, Profile, Account         | Trust Passport loses the private linkage                       | 30d   |
+| `allergy_record`              | Profile owner   | A recorded allergy or sensitivity                          | Profile, Account               | Not shown; not used by any assessment                          | 30d   |
+| `condition_record`            | Profile owner   | A recorded condition (uncollected - `DEV-035`)             | Profile, Account               | Not shown                                                      | 30d   |
+| `profile_assessment`          | Profile owner   | The result of applying a rule to this person's item        | Item, Profile, Account         | No assessment; no alert derived from it                        | 30d   |
+| `alert_publication`           | Profile owner   | An alert raised for this person                            | Item, Profile, Account         | Alert gone from Safety                                         | 30d   |
+| `safety_receipt`              | Profile owner   | That the person was shown an alert                         | Profile, Account               | Gone                                                           | 30d   |
+| `review_task`                 | Profile owner   | Something the household was asked to confirm               | Item, Profile, Account         | Task gone from the Review Inbox                                | 30d   |
+| `reconciliation`              | Profile owner   | A medicine-list comparison                                 | Profile, Account               | Gone                                                           | 30d   |
+| `reconciliation_difference`   | Profile owner   | One difference within a reconciliation                     | Profile, Account               | Gone                                                           | 30d   |
+| `caregiver_grant`             | Profile owner   | That somebody has access                                   | Profile, Account               | **Caregiver's very next request returns nothing**              | 30d   |
+| `profile_notification_policy` | Profile owner   | Who is told what, and when                                 | Profile, Account               | No delivery decision can select this profile                   | 30d   |
+| `notification_preference`     | Recipient       | A recipient's own quiet hours and channels                 | Profile, Account               | No held or sent notification                                   | 30d   |
+| `alert_delivery`              | Profile owner   | That a notification was decided and recorded               | Profile, Account               | Gone                                                           | 30d   |
+| `notification_revalidation`   | Recipient       | That an opened notification was re-checked                 | Profile, Account               | Gone                                                           | 30d   |
+| `notification_digest`         | Recipient       | A day's low-urgency summary, assembled for them            | Profile, Account               | Gone once it summarises nothing                                | 30d   |
+| `notification_digest_entry`   | Recipient       | One delivery a digest considered, and what a re-read found | Profile, Account               | Gone with the delivery it references                           | 30d   |
+| `evidence_asset`              | Uploading user  | A captured image or document                               | Item, Profile, Account, Expiry | Not readable; not extractable                                  | 30d   |
+| `extraction_run`              | Uploading user  | What an extractor made of that asset                       | Item, Profile, Account         | Gone                                                           | 30d   |
 
 ### 3.2 Class T - Time-boxed artifacts. Their own deadline, shorter than 30 days.
 
@@ -287,6 +289,13 @@ Not retention, but decided with it and recorded here so the numbers have one hom
 | Recent changes window | 90 days                     |
 | Review Inbox windows  | 180d / 14d / 30d            |
 | Corroboration         | 3 independent source groups |
+
+**The digest inherits rather than acquires a deadline.** `notification_digest` and
+`notification_digest_entry` are a **derived projection of `alert_delivery`** and are purged from
+it rather than on a clock of their own: an entry goes with the delivery it references, and the
+digest goes once it has no entries left. That is deliberate - the alternative was inventing a
+retention period for a summary, which would have been a threshold nobody approved sitting beside
+a table of thresholds somebody did.
 
 **Corroboration is never safety or legal truth on its own.** Three independent groups saying the
 same thing is a reason to look; it is not a finding, and the Citation Gate remains fail-closed

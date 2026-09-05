@@ -102,7 +102,11 @@ beforeEach(async () => {
     await db.query('DELETE FROM caregiver_grant');
     await db.query('DELETE FROM notification_preference');
     await db.query('DELETE FROM profile_notification_policy');
-    await db.query('TRUNCATE alert_delivery');
+    // Both tables named, and not `CASCADE`. A `notification_digest_entry` references a delivery
+    // (`0029`), so truncating one without the other is refused - and naming them means a child
+    // table added later fails loudly here rather than being silently emptied by a cascade nobody
+    // reviewed, which is the same reasoning the purge sweep gives for not using its own.
+    await db.query('TRUNCATE alert_delivery, notification_digest_entry');
   });
 });
 

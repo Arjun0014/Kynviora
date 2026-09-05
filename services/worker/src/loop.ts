@@ -27,6 +27,7 @@ import type { PurgeConnection } from '@kynviora/db';
 import type { Clock, IdGenerator, Logger } from '@kynviora/domain';
 import type { RetentionWorkerConfig } from './config.js';
 import { msUntilDue } from './schedule.js';
+import { runDigestAssembly } from './digestRun.js';
 import {
   executeRetentionRun,
   readLastRetentionRun,
@@ -34,9 +35,19 @@ import {
   type RetentionRunResult,
 } from './retentionRun.js';
 
-/** The only thing the loop needs from a database: a connection as the retention role. */
+/**
+ * What the loop needs from a database.
+ *
+ * Three roles, because the two jobs need different ones and neither should be able to reach the
+ * other's. The purge runs as `kynviora_retention` and could not assemble a digest if it tried; the
+ * digest runs as `kynviora_service` to choose who is due and **as the recipient** to decide what
+ * each of them may still see, which is row-level security's question rather than a check this job
+ * should be making for itself.
+ */
 export interface RetentionDb {
   withRetention<T>(fn: (db: PurgeConnection) => Promise<T>): Promise<T>;
+  withService<T>(fn: (db: PurgeConnection) => Promise<T>): Promise<T>;
+  withUser<T>(userId: string | null, fn: (db: PurgeConnection) => Promise<T>): Promise<T>;
 }
 
 /** Interruptible sleep. Resolves early when the signal aborts. */
@@ -113,6 +124,27 @@ export function startRetentionLoop(deps: RetentionLoopDeps): RetentionLoop {
       deps.logger.error('retention.run.errored', { holder, sqlstate: sqlstateOf(error) });
       await sleep(deps.config.retryIntervalMs, controller.signal);
       return;
+    }
+
+    // -----------------------------------------------------------------------
+    // The digest, on the same pass
+    // -----------------------------------------------------------------------
+    // A second job, deliberately not folded into the sweep. It needs no lease - its idempotence is
+    // a unique index rather than a lock (`0029`) - and it decides for itself, per recipient, whose
+    // morning has come round, so it can run on any pass and usually does nothing. Sharing the
+    // pass rather than the lease is what keeps the two independent: the purge failing does not
+    // stop a digest being assembled, and neither can hold the other's resources.
+    //
+    // Its own try/catch for that reason. A digest that raised must not stop the loop or make the
+    // retention run look like it failed.
+    try {
+      await runDigestAssembly(deps.db, {
+        now: deps.clock.now(),
+        logger: deps.logger,
+        correlationId: deps.ids.next(),
+      });
+    } catch (error) {
+      deps.logger.error('digest.assembly.errored', { holder, sqlstate: sqlstateOf(error) });
     }
 
     // A skipped attempt changes nothing the schedule reads, so without this the next pass would

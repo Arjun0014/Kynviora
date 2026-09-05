@@ -4316,3 +4316,75 @@ threshold to be alertable, which matters because `BLK-008` records that no thres
 default); `20` (a job reports start, end, outcome, duration and counts, with correlation and
 without content); `21` (environments); DEC-005; DEC-013; DEC-037; DEC-117; DEC-120;
 `docs/RETENTION.md`; `DEV-057`; `BLK-001`.
+
+---
+
+## DEC-122 - The digest is assembled in the recipient's own morning, revalidated as the recipient, and records what it dropped
+
+**Context.** `MEDIUM` and `LOW` events have mapped to the digest channel since `0014` and nothing
+has ever gathered them (`DEV-033`). Two of the three things that deviation said were missing now
+exist - a scheduler (DEC-121) and a recipient's local time (DEC-119) - and `0028` added the third
+by recording the channel per delivery, so there is finally a candidate set to gather.
+
+**Decision 1: 09:00, recipient-local, and a recipient whose zone nobody knows gets no digest.**
+The hour is theirs rather than a server's, for the reason DEC-119 gives about quiet hours: a
+caregiver in London looking after somebody in Kolkata has their own morning.
+
+The unknown-zone rule points the **opposite way** to DEC-119's, and deliberately. For quiet hours,
+unknown means "do not hold" - erring toward delivering, because an alert waiting for a window that
+never ends is the worse failure. For a digest, unknown means "do not assemble" - because
+assembling at a guessed hour would mean telling somebody "here is your morning" at four in the
+morning, and because their events are already reachable in the app either way. In both cases the
+rule errs away from the harm that is specific to the mechanism, which is why they differ.
+
+**Decision 2: the re-read that decides is done as the recipient, not as the service role.**
+Choosing **who** is due spans every recipient and is privileged. Deciding **what** each of them may
+still see is row-level security's question, and answering it any other way would mean
+reimplementing the caregiver capability check inside a background job where nobody would look at it
+again.
+
+The consequence is that three quite different things - the alert was withdrawn, it was superseded,
+the reader's grant was revoked - all arrive as `NO_LONGER_VISIBLE`, because `alert_read` admits
+`state = 'PUBLISHED'` plus the capability and produces no row for any of them. That is accepted
+rather than worked around: a digest that said "this was withdrawn" about an alert the reader is no
+longer entitled to see would be answering from a position they do not occupy.
+
+**Decision 3: a row per candidate considered, not per item included.** Two reasons, and the second
+is the one that matters. "Why is this not in my digest" is a question a digest generates and is
+unanswerable from a list of what survived. And it is what stops a dropped item being reconsidered
+every morning for the rest of time - an alert withdrawn on Tuesday is still withdrawn on Wednesday,
+and a candidate query asking only "which deliveries are in no digest" would re-answer a settled
+question daily and grow without bound. `UNIQUE (alert_delivery_id)` makes considered-once a
+property of the schema rather than of the query.
+
+**Decision 4: no lease and no run history, unlike the purge.** This job's idempotence is a
+**unique index rather than a lock**: two workers assembling the same recipient's digest for the same
+local date produce one row and one loser, and a delivery is admitted to exactly one digest ever. A
+lease would protect nothing the schema does not already protect, and a run-history table would
+record the same fact the digest rows record - whether one exists for a given person and day. The
+contrast with DEC-121 is the point: the purge needed a lease because its idempotence came from
+policies rather than from constraints.
+
+**Decision 5: a digest is never a summary of nothing.** A recipient with nothing accumulated gets
+no row. A "nothing happened" summary that nothing sends is noise, and the purge below removes a
+digest once it has no entries left - so an empty one would be created and deleted on the same day
+for two entirely unrelated reasons. `notification_digest_not_empty` makes it a schema fact.
+
+**Decision 6: missed-dose deliveries are not assembled.** A `MISSED_DOSE` row has no publication, so
+there is no state to re-read and nothing for `revalidate` to compare; including one would mean
+inventing a revalidation, which is the one thing `04` Phase 7.5's second exit criterion forbids.
+`DEV-011` records that automatic missed-dose escalation is out of MVP, so none exists - and if it is
+built, this has to be revisited rather than inherited.
+
+**Decision 7: retention is inherited, not invented.** A digest is a derived projection of
+`alert_delivery` and is purged from it: an entry goes with the delivery it references, and the
+digest goes once it has none left. Giving it a period of its own would have meant a threshold
+nobody approved sitting beside a table of thresholds somebody did.
+
+**What is still not true.** Nothing sends it (`BLK-009`) and there is no screen that shows one
+(`DEV-064`). A digest that is assembled and recorded is the half `04` Phase 7.5 specifies; the
+other half is a credential and a surface.
+
+**Sources.** `04` Phase 7.5 (digest policy for lower urgency; revalidation before inclusion); `09`;
+`03` group H; `16`; `20`; `02`; DEC-119; DEC-121; `DEV-011`; `DEV-033`; `BLK-009`;
+`docs/RETENTION.md`.

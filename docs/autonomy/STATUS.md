@@ -13,9 +13,9 @@ Last updated: 2026-09-05
 | ------------------ | ------------------------------------------------------------------ |
 | **Current stage**  | Stage 4 complete; Stage 1 privacy work reopened and largely closed |
 | **Current phase**  | Phase 1.4 (export, deletion), Phase 1.1 (auth), Phase 2.2 (scan)   |
-| **Last completed** | The purge sweep on a schedule, with a lease and a run history      |
+| **Last completed** | The digest, assembled in the recipient's own morning               |
 | **Branch**         | `master`                                                           |
-| **Latest commit**  | `feat(retention): a sweep that runs itself, and the hour it...`    |
+| **Latest commit**  | `feat(notifications): the digest, gathered in the recipient's...`  |
 | **Baseline tag**   | `baseline-spec-only`                                               |
 
 The retention decision unblocked six deviations at once and the previous session spent itself on
@@ -30,7 +30,7 @@ by up to one interval and no finite interval makes that zero.
 
 ## Verification state
 
-- **4524 tests passing**, 0 failing, across 170 files.
+- **4561 tests passing**, 0 failing, across 172 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -444,7 +444,7 @@ the API will not distinguish them.
 | Area                                                        | State                                                         |
 | ----------------------------------------------------------- | ------------------------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine  | Complete, 94 tests                                            |
-| Database schema, 28 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                    |
+| Database schema, 29 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                    |
 | Catalog engine, capture pipeline, Trust Passport            | Complete, 178 tests                                           |
 | Regulatory registry, Citation Gate, Lens                    | Complete, 72 tests                                            |
 | Safety rule engine with replay; schedule and refill         | Complete, 88 tests                                            |
@@ -481,6 +481,7 @@ the API will not distinguish them.
 | Retention: the matrix, the roles, the doors, the sweep      | Complete, 67 tests; deadlines measured to the microsecond     |
 | The retention worker: schedule, lease, run history          | Complete, 81 tests; **runs**, in-process or its own (DEC-121) |
 | Retention health on the operations snapshot                 | Complete, 14 tests; five aggregates, no read on a run row     |
+| The digest: cadence, revalidation, and what it dropped      | Complete, 52 tests; assembled, **not sent** (`DEV-064`)       |
 | Deleting an item and a profile, end to end                  | Complete, 48 tests; account deletion open (`DEV-062`)         |
 | Portable export: fourteen sections, sources referenced      | Complete, 26 tests; no artifact and no link, by choice        |
 | Scanning a barcode: permission, check digit, confirmation   | Complete, 45 tests; **5/5 on a device**; no OCR (BLK-007)     |
@@ -521,26 +522,19 @@ appears here.
 
 ## Immediate next task
 
-**The digest** (`DEV-033`).
+**The Review Inbox's two uncompletable task kinds** (`DEV-024`).
 
-`MEDIUM` and `LOW` events are classified and never assembled. The approved cadence is 09:00
-recipient-local with revalidation before inclusion, and both of the things that were missing are
-now present: a recipient's local time (DEC-119) and a revalidation path
-(`notification_revalidation`). It still cannot be **delivered** (`BLK-009`), but a digest that is
-assembled and recorded is most of the feature and is the half `04` Phase 7.5 actually specifies.
-
-It is the highest-value remaining item because it is the largest piece of specified behaviour that
-is classified, decided, and simply not built - and because it now has a worker to be assembled by.
+Ordinary Stage 5/6 work with no external dependency: two task kinds a household can be shown and
+cannot act on, in the surface whose whole purpose is that a household can act. It is the largest
+remaining piece of specified behaviour that is neither blocked nor waiting on a decision.
 
 ## Next three planned tasks
 
-1. **The digest** (`DEV-033`), as above. **Waiting on:** nothing that is not built.
+1. **`DEV-024`**, as above. **Waiting on:** nothing.
 
-2. **The Review Inbox's two uncompletable task kinds** (`DEV-024`), and the substance-mapping
-   review queue (`DEV-037`). Both are ordinary Stage 5/6 work with no external dependency. The
-   second is less blocked than it reads: DEC-117 approved that a raw household term never goes to
-   staff by default, which is the decision `DEV-037` was waiting on for its _shape_ even though it
-   was recorded as waiting for a queue.
+2. **The substance-mapping review queue** (`DEV-037`). Less blocked than it reads: DEC-117 approved
+   that a raw household term never goes to staff by default, which is the decision this was waiting
+   on for its _shape_ even though it was recorded as waiting for a queue.
 
 3. **A decision on `DEV-063`**, the retention overshoot. Not work - a decision about a security
    boundary. Giving `purge_floor()` and the four inline intervals in `0023` a margin equal to the
@@ -548,16 +542,31 @@ is classified, decided, and simply not built - and because it now has a worker t
    than shortly after it, and it changes what the RLS policies admit, which is the thing `0023` is
    careful about. The arithmetic is in `docs/RETENTION.md` section 8.3.
 
+**Deliberately not next: a digest screen** (`DEV-064`). The digest is assembled and recorded; what
+a digest surface should be **instead of** the Safety Inbox, which already shows every one of these
+events, is a product question rather than an engineering one. Building a second list of the same
+rows before that is answered would be inventing a design nobody asked for.
+
 **What is still genuinely blocked, and by what.** Account deletion and the sign-up/sign-in device
 scenario on `BLK-010`; OCR and the possible-formula-change task on `BLK-007`; substance vocabulary
 depth on `BLK-003`; publishing anything on `BLK-004` and `BLK-006`; sending any server-originated
-notification on `BLK-009`; managed-Postgres parity on `BLK-001`. None of them is a decision any
-more - all six are a credential, a licence or a person.
+notification - now including the digest - on `BLK-009`; managed-Postgres parity on `BLK-001`. None
+of them is a decision any more: all six are a credential, a licence or a person.
 
 **The `19` device scenarios that remain.** One: sign-up, sign-in and recovery, which needs a
 Supabase project (`BLK-010`). Thirteen of fourteen are measured on hardware.
 
 ## Recent decisions worth knowing
+
+- **DEC-122** - the digest is assembled at **09:00 in the recipient's own morning**, and somebody
+  whose zone nobody knows gets **no digest at all** rather than one at a guessed hour. That points
+  the opposite way to DEC-119's quiet-hours rule ("unknown means do not hold") on purpose: each
+  errs away from the harm specific to its own mechanism. Every candidate is re-read **as the
+  recipient**, so row-level security decides what they may still see and a revoked caregiver's
+  items drop out by themselves. A row is recorded per candidate **considered**, not per item
+  included - which answers "why is this not in my digest" and stops a dropped item being
+  re-examined every morning for the rest of time. No lease, unlike the purge: its idempotence is a
+  unique index rather than a lock.
 
 - **DEC-121** - the purge runs on a schedule the **database** keeps, not a timer: "when is the next
   sweep due" is computed from `retention_run` on every pass, so a worker restarted every minute

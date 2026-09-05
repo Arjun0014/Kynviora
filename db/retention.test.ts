@@ -170,6 +170,10 @@ describe('the retention role', () => {
       'evidence_asset',
       'extraction_run',
       'medicine_schedule',
+      // A digest is a derived projection of `alert_delivery` and inherits its deadline (`0029`):
+      // an entry goes with the delivery it references, and the digest goes once it has none left.
+      'notification_digest',
+      'notification_digest_entry',
       'notification_preference',
       'owned_item',
       'product_usage_evidence',

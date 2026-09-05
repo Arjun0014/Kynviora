@@ -85,6 +85,8 @@ export interface PurgeReport {
   readonly notificationPolicies: number;
   readonly notificationPreferences: number;
   readonly profiles: number;
+  readonly digestEntries: number;
+  readonly digests: number;
   readonly visitPackContents: number;
   readonly invitations: number;
   readonly extractionRuns: number;
@@ -112,6 +114,8 @@ export const EMPTY_PURGE_REPORT: PurgeReport = Object.freeze({
   notificationPolicies: 0,
   notificationPreferences: 0,
   profiles: 0,
+  digestEntries: 0,
+  digests: 0,
   visitPackContents: 0,
   invitations: 0,
   extractionRuns: 0,
@@ -172,6 +176,7 @@ export type PurgeCategory =
   | 'VISIT_PACK_CONTENT'
   | 'CAREGIVER_INVITATION'
   | 'CAPTURE_ARTIFACT'
+  | 'DIGEST'
   | 'AUDIT_EVENT'
   | 'CONSENT_RECEIPT';
 
@@ -233,6 +238,18 @@ const PLAN = [
         step: 'review_task.by_profile',
         field: 'reviewTasksByProfile',
         sql: `DELETE FROM review_task WHERE owned_item_id IS NULL AND ${DUE_PROFILE}`,
+      },
+      // Before `alert_delivery`, which it references. The foreign key would cascade and that is
+      // exactly the problem: a referential action is issued by the referencing table's owner
+      // rather than by this role, so the role check inside any trigger on it would measure the
+      // wrong thing (`0023`).
+      {
+        step: 'notification_digest_entry',
+        field: 'digestEntries',
+        sql: `DELETE FROM notification_digest_entry
+               WHERE alert_delivery_id IN (
+                 SELECT id FROM alert_delivery WHERE ${DUE_PROFILE}
+               )`,
       },
       {
         step: 'alert_delivery',
@@ -351,6 +368,28 @@ const PLAN = [
         sql: `DELETE FROM evidence_asset
                WHERE created_at <= now() - interval '7 days'
                  AND kynviora.evidence_is_unattached(id)`,
+      },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
+  // Digests, once they summarise nothing.
+  // -------------------------------------------------------------------------
+  // A digest is a derived projection of `alert_delivery` and inherits that table's deadline rather
+  // than acquiring one of its own (`0029`). Its entries went with their deliveries in the profile
+  // category above; the row itself goes when it has none left, which is what the policy admits
+  // and what this statement therefore removes - a digest that still summarises retained events is
+  // invisible to this role and survives a `DELETE` with no predicate at all.
+  //
+  // Its own category rather than a step in `PROFILE`, because the two halves run either side of
+  // `alert_delivery` and a failure in one should say which one it was.
+  {
+    category: 'DIGEST',
+    steps: [
+      {
+        step: 'notification_digest',
+        field: 'digests',
+        sql: `DELETE FROM notification_digest WHERE kynviora.digest_is_empty(id)`,
       },
     ],
   },

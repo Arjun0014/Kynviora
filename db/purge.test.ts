@@ -481,3 +481,85 @@ describe('a profile thirty days deleted', () => {
     expect(again.allergies).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Digests, which inherit their deadline rather than having one
+// ---------------------------------------------------------------------------
+
+describe('a digest whose events were purged', () => {
+  const DIGEST_PROFILE = testUuid(80);
+  const LIVE_DIGEST_PROFILE = testUuid(81);
+  const DUE_DIGEST = testUuid(82);
+  const LIVE_DIGEST = testUuid(83);
+
+  beforeAll(async () => {
+    await t.asOwner(async (db) => {
+      await db.query(
+        `INSERT INTO profile (id, household_id, owner_user_id, display_name, deleted_at)
+         VALUES ($1, $2, $3, 'Gone Again', now() - interval '31 days'),
+                ($4, $2, $3, 'Still Here Too', NULL)`,
+        [DIGEST_PROFILE, HOUSEHOLD, OWNER, LIVE_DIGEST_PROFILE],
+      );
+
+      // One digest per recipient, so the two are distinguishable - a digest is keyed on the person
+      // it is addressed to, not on the profile its events came from.
+      for (const [digestId, profile, recipient, day] of [
+        [DUE_DIGEST, DIGEST_PROFILE, OWNER, '2026-09-01'],
+        [LIVE_DIGEST, LIVE_DIGEST_PROFILE, CAREGIVER, '2026-09-02'],
+      ] as const) {
+        await db.query(
+          `INSERT INTO notification_digest
+             (id, recipient_user_id, local_date, time_zone, included_count, dropped_count)
+           VALUES ($1, $2, $3::date, 'Asia/Kolkata', 1, 0)`,
+          [digestId, recipient, day],
+        );
+        const delivery = await db.query<{ id: string }>(
+          `INSERT INTO alert_delivery
+             (profile_id, recipient_user_id, event_kind, dose_occurrence_key, detail_level,
+              delivered_at, channel, channel_reason, held)
+           VALUES ($1, $2, 'MISSED_DOSE', $3, 'GENERIC', now(), 'DIGEST', 'URGENCY_CEILING', false)
+           RETURNING id`,
+          [profile, recipient, `digest-purge-${digestId}`],
+        );
+        await db.query(
+          `INSERT INTO notification_digest_entry
+             (digest_id, alert_delivery_id, outcome, included)
+           VALUES ($1, $2, 'STILL_CURRENT', true)`,
+          [digestId, delivery.rows[0]?.id],
+        );
+      }
+    });
+  });
+
+  it('is invisible to the retention role while it still summarises something', async () => {
+    // The policy, not the sweep's predicate. `digest_is_empty` is what admits a row, so the widest
+    // statement this role can issue removes only digests that summarise nothing.
+    const rows = await t.asRetention((db) =>
+      db.query<{ id: string }>(`SELECT id FROM notification_digest`),
+    );
+    expect(rows.rows).toEqual([]);
+  });
+
+  it('survives a DELETE with no predicate at all while its entries remain', async () => {
+    await t.asRetention((db) => db.query(`DELETE FROM notification_digest`));
+    expect(await countOf('notification_digest')).toBe(2);
+  });
+
+  it('loses its entries with the deliveries they reference, and then goes itself', async () => {
+    const report = await sweep();
+
+    expect(report.digestEntries).toBe(1);
+    expect(report.digests).toBe(1);
+
+    // The deleted profile's digest and its entry are gone; the live profile's are untouched.
+    expect(await countOf('notification_digest', `id = '${DUE_DIGEST}'`)).toBe(0);
+    expect(await countOf('notification_digest', `id = '${LIVE_DIGEST}'`)).toBe(1);
+    expect(await countOf('notification_digest_entry')).toBe(1);
+  });
+
+  it('leaves nothing for a second sweep', async () => {
+    const again = await sweep();
+    expect(again.digestEntries).toBe(0);
+    expect(again.digests).toBe(0);
+  });
+});

@@ -848,7 +848,7 @@ route.
 
 ---
 
-## DEV-033 - A digest is classified and never assembled
+## DEV-033 - A digest is classified and never assembled - CLOSED
 
 - **Affected specification**: `04` Phase 7.5 lists "digest policy for lower urgency" among the
   expected outputs.
@@ -885,12 +885,15 @@ route.
   `IN_APP_ONLY` and `DIGEST` both mean today. The failure it leaves is that a household must open
   Kynviora to see a `MEDIUM` finding rather than being told, and `02` treats not interrupting as
   the default rather than a degradation.
-- **Required future work**: the assembler. Every input it named is now present - a scheduler
-  (DEC-121), a recipient's local time (DEC-119), a revalidation path, and since `0028` a candidate
-  set it can actually query. What remains is a job that gathers a recipient's `DIGEST`-channel
-  deliveries, revalidates each at assembly time - `revalidate` already exists, and a summary that
-  reported a withdrawn alert as current would breach `04` Phase 7.5's own second exit criterion -
-  and records the result. Delivering it stays on `BLK-009`.
+- **Required future work**: none. The assembler exists (DEC-122): `services/worker` gathers each
+  recipient's `DIGEST`-channel deliveries at 09:00 in their own local morning, revalidates every
+  one of them **as that recipient** so row-level security decides what they may still see, keeps
+  only what is still current, and records what it dropped and why.
+- **Status**: **CLOSED**. The thing this deviation named - events classified for a digest and never
+  gathered into one - no longer happens.
+
+  Two things it did not cover, recorded separately rather than left inside a closed deviation:
+  **sending** a digest stays on `BLK-009`, and **showing** one is `DEV-064`.
 
 ---
 
@@ -2454,3 +2457,40 @@ its own limit on pending local notifications, which is lower than Android's and 
   `docs/RETENTION.md` section 8.3 so the choice is not made by whoever next edits a default.
 - **Status**: OPEN, not blocked. It is a decision about a security boundary, not a missing
   credential.
+
+---
+
+## DEV-064 - A digest is assembled and nobody can read one
+
+- **Affected specification**: `04` Phase 7.5 (digest policy for lower urgency), `02` (not
+  interrupting is the default rather than a degradation), DEC-122.
+- **Expected behaviour**: a household sees the low-urgency events that accumulated, together,
+  without a phone having lit up for each one.
+- **Implemented behaviour**: the digest is **assembled**, revalidated at assembly time and
+  recorded, once per recipient per recipient-local day at 09:00 (DEC-122). There is no route that
+  returns one and no screen that shows one, so the only way to read a digest today is to query the
+  database.
+- **Reason**: two halves, one of which is blocked and one of which is not.
+
+  **Blocked:** sending it. `BLK-009` - no push credentials, so nothing is delivered, and
+  `notification_digest.delivered_at` will stay NULL until they exist.
+
+  **Not blocked:** showing it. That is ordinary work, and it was left out of DEC-122 deliberately
+  rather than forgotten: a digest screen overlaps the Safety Inbox, which already shows every one
+  of these events, so what a digest surface should be **instead of** the inbox is a product
+  question rather than an engineering one. Building a second list of the same rows before that
+  question is answered would be inventing a design nobody asked for, in the surface where `02`
+  cares most about not adding noise.
+
+- **Temporary or permanent**: temporary.
+- **Risk**: low. Nothing is lost and nothing is claimed: every event in a digest is already
+  reachable in the app through the Safety Inbox and the Shelf, which is what `DIGEST` and
+  `IN_APP_ONLY` have both meant all along. No screen promises a digest, so no screen is wrong.
+  The failure it leaves is the one `DEV-033` named and did not close - a household must open
+  Kynviora to see a `MEDIUM` finding rather than being told - and `02` treats not interrupting as
+  the default rather than a degradation.
+- **Required future work**: a decision on what a digest surface is for given the Safety Inbox
+  exists, then `GET /v1/notifications/digest` returning the most recent digest and its included
+  entries under the same disclosure rules a live read uses, and a screen. Delivery stays on
+  `BLK-009` and is independent of both.
+- **Status**: OPEN, not blocked for the read surface; the delivery half is blocked on `BLK-009`.

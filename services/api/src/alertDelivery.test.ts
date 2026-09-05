@@ -216,10 +216,16 @@ beforeEach(async () => {
   });
 });
 
-/** alert_delivery has an append-only trigger; the service role drops the trigger's guard by
- *  truncating instead, which is permitted because TRUNCATE is not an UPDATE or DELETE. */
+/**
+ * alert_delivery has an append-only trigger; the service role drops the trigger's guard by
+ * truncating instead, which is permitted because TRUNCATE is not an UPDATE or DELETE.
+ *
+ * Both tables named, and not `CASCADE`. A `notification_digest_entry` references a delivery
+ * (`0029`), so truncating one without the other is refused - and naming them means a child table
+ * added later fails loudly here rather than being silently emptied by a cascade nobody reviewed.
+ */
 async function resetDeliveries() {
-  await t.asOwner((db) => db.query('TRUNCATE alert_delivery'));
+  await t.asOwner((db) => db.query('TRUNCATE alert_delivery, notification_digest_entry'));
 }
 
 async function request(as: Principal | null, options: InjectOptions) {

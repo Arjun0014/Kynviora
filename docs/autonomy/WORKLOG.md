@@ -4348,3 +4348,108 @@ profile-level audit detail could not have expressed that even in principle.
 of its two stated reasons - "there is no scheduler in this build" - is no longer true, and the
 other, `BLK-009`, still is. What remains of it is an assembler, and every input it needs now
 exists.
+
+---
+
+## 2026-09-05 - The digest, gathered in the recipient's own morning
+
+`DEV-033` has been open since Stage 7: `MEDIUM` and `LOW` events are classified onto the digest
+channel and nothing gathers them. It recorded two reasons and both were true when it was written -
+nothing runs on a cadence, and nobody knows what time it is where anybody is. Both stopped being
+true this session and the one before it, so the deviation closes.
+
+### Four decisions, and one of them points the opposite way to its own precedent
+
+**09:00, in the recipient's own morning.** The hour is theirs rather than a server's, for the
+reason DEC-119 gives about quiet hours: a caregiver in London looking after somebody in Kolkata has
+their own morning.
+
+**And somebody whose zone nobody knows gets no digest at all.** That is the opposite of DEC-119's
+rule for the same missing input. For quiet hours, unknown means "do not hold" - erring toward
+delivering, because an alert waiting for a window that never ends is the worse failure. For a
+digest, unknown means "do not assemble", because assembling at a guessed hour would mean telling
+somebody "here is your morning" at four in the morning, and because their events are already
+reachable in the app either way. Both rules err away from the harm specific to their own mechanism,
+which is why they differ - and it is worth saying out loud, because "be consistent with DEC-119"
+would have produced the wrong answer here.
+
+**The re-read that decides is done as the recipient.** Choosing who is due spans every recipient
+and is privileged. Deciding what each of them may still see is row-level security's question, and
+answering it any other way would have meant reimplementing the caregiver capability check inside a
+background job where nobody would look at it again. So the alert behind each candidate is re-read
+under `withUser(recipient)`, and `alert_read` - which admits `state = 'PUBLISHED'` plus
+`VIEW_SAFETY` - does the rest.
+
+The consequence is that a withdrawn alert, a superseded one and one whose reader's grant was
+revoked all arrive as `NO_LONGER_VISIBLE`. That is accepted rather than worked around: a digest
+that said "this was withdrawn" about an alert the reader is no longer entitled to see would be
+answering from a position they do not occupy. Both cases are tested by revoking the real thing -
+the publication, then the grant - rather than by handing the assembler a state, because a stub
+would have measured the stub.
+
+**A row per candidate considered, not per item included.** "Why is this not in my digest" is a
+question a digest generates and is unanswerable from a list of what survived. And it is what stops
+a dropped item being reconsidered every morning for the rest of time: an alert withdrawn on Tuesday
+is still withdrawn on Wednesday, and a candidate query asking only "which deliveries are in no
+digest" would re-answer a settled question daily and grow without bound. `UNIQUE
+(alert_delivery_id)` makes considered-once a property of the schema, and the test for it asserts
+that the recipient is not even **considered** on the second day.
+
+### No lease, and the contrast with the purge is the point
+
+The purge needed one (DEC-121) because its idempotence comes from policies rather than constraints:
+two sweeps racing would both issue the same statements. The digest's idempotence is a **unique
+index**. Two workers assembling the same recipient's digest for the same local date produce one row
+and one loser, and a delivery is admitted to exactly one digest ever - so a lease would protect
+nothing the schema does not already protect, and a conflict is counted as a conflict rather than
+treated as a failure.
+
+The two jobs therefore share a worker **pass** rather than a lease, each with its own try/catch. A
+purge that failed does not stop a digest being assembled, and neither can hold the other's
+resources.
+
+### Retention is inherited rather than invented
+
+A digest is a derived projection of `alert_delivery`, so it is purged from it: an entry goes with
+the delivery it references, and the digest goes once it has no entries left. Giving it a period of
+its own would have meant a threshold nobody approved sitting beside a table of thresholds somebody
+did.
+
+Two details fell out of that. The entry must be deleted **before** the delivery it references,
+because the foreign key would otherwise cascade and a cascade is issued by the referencing table's
+owner rather than by the retention role (`0023`). And `digest_is_empty` is `SECURITY DEFINER` for
+the reason `evidence_is_unattached` is: a subquery inside a policy runs as the caller and would be
+filtered by the entry table's own retention policy, so a digest whose entries all belong to live
+profiles would look empty and be deleted - wrong in the direction that loses data, and wrong
+silently.
+
+A digest with nothing in it is never created, and that is a schema constraint rather than a
+convention: the purge removes a digest once it has no entries, so an empty one would be created and
+deleted on the same day for two entirely unrelated reasons.
+
+### One defect, in two test files
+
+Adding a foreign key to an append-only table breaks the only reset those tests have.
+`alert_delivery` refuses every `DELETE`, so both suites clear it with `TRUNCATE` - which is
+permitted precisely because it is neither an `UPDATE` nor a `DELETE` - and a `notification_digest_entry` referencing it made that statement fail with "cannot truncate a table referenced in a
+foreign key constraint". Sixty-one tests, none of them about digests.
+
+Fixed by naming both tables rather than adding `CASCADE`, so a child table added later fails
+loudly in the same place instead of being silently emptied - which is the reasoning the purge sweep
+already gives for not using the cascades it has.
+
+### What is left, and where it is recorded
+
+`DEV-033` is **closed**: events classified for a digest and never gathered into one no longer
+happens. Two things it did not cover are recorded separately rather than hidden inside a closed
+deviation. Sending a digest stays on `BLK-009`. Showing one is `DEV-064`, and it is deliberately
+not next: the Safety Inbox already shows every one of these events, so what a digest surface should
+be **instead of** it is a product question, and building a second list of the same rows before that
+is answered would be inventing a design nobody asked for.
+
+### Result
+
+`npm run verify` exit 0. 4561 tests across 172 files, up from 4524 across 170. Migration `0029`
+adds two tables holding nothing renderable - a reference, a revalidation outcome and two counts -
+readable by the recipient and by nobody else, not even the profile owner whose household the events
+came from.

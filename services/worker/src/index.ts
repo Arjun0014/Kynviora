@@ -13,6 +13,7 @@
  */
 
 export * from './config.js';
+export * from './digestRun.js';
 export * from './loop.js';
 export * from './retentionRun.js';
 export * from './schedule.js';

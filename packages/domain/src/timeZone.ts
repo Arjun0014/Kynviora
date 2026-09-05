@@ -109,6 +109,57 @@ export function localMinuteOfDayIn(instant: string, zone: string): number | null
 }
 
 /**
+ * The recipient's local calendar date, `YYYY-MM-DD`, or `null` where it cannot be established.
+ *
+ * The date and the minute are two halves of one question and are read the same way, for the same
+ * reasons: `Intl` is the only thing here that knows about daylight saving, and a date derived by
+ * adding an offset to a UTC instant is wrong twice a year in the direction nobody notices.
+ *
+ * Built from parts rather than from a locale's formatted string. `en-CA` happens to render
+ * `YYYY-MM-DD` today and that is a fact about a locale database, not about this function - a
+ * digest keyed on a date that silently became `2026-09-05` in one Node build and `05/09/2026` in
+ * another would assemble twice on one day and never again.
+ */
+export function localCalendarDateIn(instant: string, zone: string): string | null {
+  const at = Date.parse(instant);
+  if (!Number.isFinite(at)) return null;
+  if (!isKnownTimeZone(zone)) return null;
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: zone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date(at));
+
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    if (year === undefined || month === undefined || day === undefined) return null;
+    if (!/^\d{4}$/.test(year) || !/^\d{2}$/.test(month) || !/^\d{2}$/.test(day)) return null;
+
+    return `${year}-${month}-${day}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The recipient's local date, or `null` where it cannot be established.
+ *
+ * The same shape as {@link recipientLocalMinute} and for the same reason: the "unknown zone"
+ * rule is applied in one place rather than by each caller remembering it.
+ */
+export function recipientLocalDate(input: {
+  readonly at: string;
+  readonly zone: unknown;
+}): string | null {
+  const zone = asTimeZone(input.zone);
+  return zone === null ? null : localCalendarDateIn(input.at, zone);
+}
+
+/**
  * The recipient's local minute, or `null` where it cannot be established.
  *
  * The one function a dispatcher calls, so the "unknown means do not hold" rule is applied in one

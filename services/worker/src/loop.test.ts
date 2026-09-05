@@ -55,6 +55,8 @@ function recordingLogger(): { logger: Logger; records: Recorded[] } {
 function dbFor(handle: TestDb): RetentionDb {
   return {
     withRetention: (fn) => handle.asRetention((db) => fn(db as unknown as PurgeConnection)),
+    withService: (fn) => handle.asService((db) => fn(db as unknown as PurgeConnection)),
+    withUser: (userId, fn) => handle.asUser(userId, (db) => fn(db as unknown as PurgeConnection)),
   };
 }
 
