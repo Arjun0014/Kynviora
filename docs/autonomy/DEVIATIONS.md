@@ -2429,7 +2429,7 @@ its own limit on pending local notifications, which is lower than Android's and 
 
 ---
 
-## DEV-063 - The sweep interval is the overshoot past every deadline, and no interval makes it zero
+## DEV-063 - The sweep interval was the overshoot past every deadline (resolved)
 
 - **Affected specification**: `16` (retention deadlines: personal data purged **within** 30 days,
   Visit Pack content **within** 24 hours of expiry, unattached capture artifacts **within** 7
@@ -2468,11 +2468,67 @@ its own limit on pending local notifications, which is lower than Android's and 
   above 24 hours, which is the shortest deadline in the matrix, because an interval longer than a
   deadline could more than double the life of the content it governs.
 
-- **Required future work**: a decision on (1), then `purge_floor()` and the four inline intervals
-  in `0023` gain the margin, and this closes. The arithmetic is written out in
-  `docs/RETENTION.md` section 8.3 so the choice is not made by whoever next edits a default.
-- **Status**: OPEN, not blocked. It is a decision about a security boundary, not a missing
-  credential.
+- **Required future work**: none. See below.
+- **Status**: **RESOLVED 2026-09-05** (DEC-123), and by neither of the two ways above.
+
+  The third way was to stop scheduling from an interval at all. `kynviora.next_purge_due()`
+  (migration `0031`) returns the earliest instant at which any row becomes purgeable, and the
+  worker sleeps until whichever comes first, that or the heartbeat. **No floor moved and no policy
+  changed** - which was the objection to (1) - and nothing is removed a second before it is due.
+  The matrix in `docs/RETENTION.md` 3.1 and 3.2 is unchanged to the microsecond, and
+  `purgeDeadline.test.ts` still measures it.
+
+  | Before                                            | After                                |
+  | ------------------------------------------------- | ------------------------------------ |
+  | `[deadline, deadline + interval]`, default 1 hour | `[deadline, deadline + one sweep]`   |
+  | The interval was the overshoot                    | The interval is a heartbeat          |
+  | Worst case 4% of the 24-hour Visit Pack deadline  | Worst case the duration of one sweep |
+
+  What the heartbeat still covers is recorded separately as `DEV-065`, because it is a different
+  thing: eligibility that arrives by a **state change** rather than by a clock, which no deadline
+  function can name in advance.
+
+  The test that matters is not that the function computes thirty days. It is that it agrees with
+  the **policy**: in one transaction, a row stamped at `purge_floor()` is visible to
+  `kynviora_retention`, one stamped a microsecond later is not, and `next_purge_due()` names that
+  microsecond (`db/nextPurgeDue.test.ts`).
+
+---
+
+## DEV-065 - Eligibility that arrives by a state change has no deadline to schedule against
+
+- **Affected specification**: `16` (unattached capture artifacts purged **within** 7 days),
+  `docs/RETENTION.md` sections 3.3 and 8.3, DEC-122, DEC-123, migration `0031`.
+- **Expected behaviour**: a row is physically gone by its deadline.
+- **Implemented behaviour**: for the two categories whose eligibility depends on something other
+  than a clock, a row is gone somewhere in `[eligible, eligible + heartbeat]` - up to one hour by
+  default, capped at 24.
+- **Reason**: `next_purge_due()` can only name an instant that is computable now. Two cases are
+  not:
+
+  1. **A capture artifact detached later.** An evidence asset becomes purgeable seven days after
+     creation **and while unattached**. One attached today and detached next month is already past
+     seven days at the moment it is detached, so its eligibility instant is the detachment - which
+     nothing schedules and nothing signals.
+  2. **A digest emptied by another category.** `notification_digest` is purgeable once it has no
+     entries left, and its entries go with the `alert_delivery` rows in the profile block of the
+     same sweep. It becomes eligible during a sweep rather than at a time.
+
+  Case 2 is almost always resolved within the same run, because `DIGEST` runs after `PROFILE` in
+  the plan. Case 1 is the real one.
+
+- **Temporary or permanent**: temporary in principle, and closing it needs a signal rather than a
+  schedule - the moment an asset is detached is a moment the application knows about, so a stamp
+  written then would make the deadline computable. That is a schema change to a table the capture
+  pipeline writes and it is not worth making before `BLK-007` decides what that pipeline is.
+- **Risk**: low, and smaller than what `DEV-063` carried. It is one hour by default on a
+  seven-day promise, and only for artifacts that were attached at their seventh day and detached
+  afterwards - which requires a correction, since nothing else detaches one. A row in that window
+  has been unreachable throughout: an unattached asset is referenced by nothing, so no screen, no
+  export and no assessment can reach it.
+- **Required future work**: a `detached_at` stamp written where an asset is detached, and one more
+  subquery in `next_purge_due()`. Or nothing, and the heartbeat continues to cover it.
+- **Status**: OPEN, not blocked.
 
 ---
 

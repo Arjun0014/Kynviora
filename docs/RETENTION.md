@@ -357,30 +357,41 @@ starts without retention on purpose, for the cases where that is genuinely right
 replica, a staging copy, a migration window - none of which should require pretending a sweep is
 happening somewhere.
 
-### 8.3 The gap that remains: the sweep interval is the overshoot
+### 8.3 The schedule is the deadline, not an interval
 
-Recorded as `DEV-063` rather than left implicit.
+`DEV-063` used to live here and said the interval **was** the overshoot. It no longer is.
 
 Every eligibility floor above sits **exactly on** its deadline: `purge_floor()` is `now() - 30
-days`, Visit Pack content becomes purgeable at `expires_at + 24 hours`, and so on. A discrete
-sweep therefore purges a row somewhere in `[deadline, deadline + interval]`, and **no finite
-interval makes the upper end of that equal the deadline.** Sweeping is discrete; the promise is
-not.
+days`, Visit Pack content becomes purgeable at `expires_at + 24 hours`, and so on. A purely
+periodic sweep therefore removed a row somewhere in `[deadline, deadline + interval]`, and no
+finite interval made the upper end of that equal the deadline. With the default that was up to an
+hour past a thirty-day promise - and up to an hour past the **twenty-four hour** one, which is
+four per cent of the whole deadline.
 
-So the interval is not a performance setting - it is the size of the gap between what this
-document promises and what the system does. It is bounded in the only two ways available without
-moving a security boundary:
+Two closures were considered and both were wrong. A margin in the floors - purging at
+`deadline - interval` - moves every deadline earlier and changes what the RLS policies admit,
+which is a security boundary and not a thing to move to make a schedule tidy. A continuous sweep
+does not exist and would be a much larger change for a worse result: a job that runs constantly to
+purge nothing.
 
-- the default is **one hour**, so the overshoot is one hour on a thirty-day promise;
-- the configured interval is **capped at 24 hours**, the shortest deadline in the matrix, because
-  an interval longer than that could more than double the life of the content it governs.
+**The third way asks the data.** `kynviora.next_purge_due()` (migration `0031`) returns the
+earliest instant at which any row becomes purgeable, and the worker sleeps until whichever comes
+first, that or the heartbeat. No floor moves, no policy changes, and nothing is removed a second
+before it is due. What the sweep now overshoots by is the time one sweep takes, not a configured
+number.
 
-Closing it properly means either a margin built into the floors themselves - purging at
-`deadline - interval` so the promise is kept at the deadline rather than shortly after it - or a
-continuous sweep. The first changes what the RLS policies admit, which is a change to the
-security boundary and wants deciding rather than doing; the second does not exist. Neither is
-attempted here, and the arithmetic is written down so that the choice is not made by whoever next
-edits a default.
+The function returns **one timestamp and nothing else**: not a count, not a table, not whose. It
+is `SECURITY DEFINER` because the retention role's policies admit only rows that are _already_
+due, which is exactly right and makes the question unanswerable from inside them - the role that
+sweeps cannot see its own queue. It is executable by `kynviora_retention` alone.
+
+**The interval survives as a heartbeat**, and it is still capped at 24 hours for the reason it
+always was. What it covers is what a deadline cannot be computed for: eligibility that arrives by
+a **state change** rather than by a clock. An evidence asset attached today may be detached next
+month, and is then already older than seven days and due at once; a digest becomes empty when its
+last entry is purged by another category. Neither has an instant anything can name in advance.
+That residue is `DEV-065`, and it is bounded by the heartbeat exactly as the whole matrix used to
+be.
 
 ---
 

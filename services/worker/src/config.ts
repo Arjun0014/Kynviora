@@ -4,16 +4,21 @@
  * Spec references: `16` (retention deadlines), `21` (environments), `14` (deny by default),
  * DEC-121, `DEV-063`, `docs/RETENTION.md`.
  *
- * THE INTERVAL IS THE OVERSHOOT, AND THAT IS NOT A FIGURE OF SPEECH
- * Every eligibility floor in `0023` sits exactly on its deadline: `purge_floor()` is `now() - 30
- * days`, Visit Pack content becomes purgeable at `expires_at + 24 hours`, and so on. A row is
- * therefore purged somewhere in `[deadline, deadline + interval]`, and no finite interval makes
- * the upper end of that equal to the deadline. Sweeping is discrete; the promise is not.
+ * THE INTERVAL IS A HEARTBEAT, NOT THE SCHEDULE (DEC-123)
+ * It used to be the schedule, and therefore the overshoot: every eligibility floor in `0022` and
+ * `0023` sits exactly on its deadline, so a periodic sweep removed a row somewhere in
+ * `[deadline, deadline + interval]` and no finite interval made the upper end equal the deadline.
+ * That was `DEV-063`.
  *
- * So the interval is not a performance knob. It is the size of the gap between what
- * `docs/RETENTION.md` promises and what the system does, it is recorded as `DEV-063` rather than
- * hidden in a default, and it is bounded here: the shortest deadline in the matrix is 24 hours,
- * and an interval longer than that could more than double the life of the thing it governs.
+ * The sweep is now scheduled from `kynviora.next_purge_due()` - when the earliest row actually
+ * becomes purgeable - and takes whichever of the two comes first. So the interval no longer
+ * governs when a deadline is met. What it still governs is the case a deadline cannot be computed
+ * for: eligibility that arrives by a **state change** rather than by a clock, such as an evidence
+ * asset detached long after it was created (`DEV-065`).
+ *
+ * The 24-hour cap stays, and for the same reason it was chosen: the shortest deadline in the
+ * matrix is 24 hours, and a heartbeat longer than that could more than double the life of the one
+ * thing it is the only cover for.
  *
  * WHAT "FAIL CLOSED" MEANS FOR A JOB NOBODY WATCHES
  * A missing authenticator is loud - every request fails. A missing sweep is silent, and stays
@@ -22,7 +27,7 @@
  * not been told refuses to start rather than serving a privacy promise nothing keeps.
  */
 
-/** One hour. Small enough that `DEV-063`'s overshoot is not something an operator has to think about. */
+/** One hour. The heartbeat, not the schedule: DEC-123 takes the next real deadline when there is one. */
 export const DEFAULT_RETENTION_INTERVAL_MS = 3_600_000;
 
 /** Five minutes. How soon a sweep that did not fully succeed is tried again. */
@@ -37,7 +42,7 @@ export const DEFAULT_RETENTION_RETRY_MS = 300_000;
  */
 export const DEFAULT_RETENTION_LEASE_MS = 900_000;
 
-/** The shortest deadline in `docs/RETENTION.md` is 24 hours, and the interval is the overshoot. */
+/** The shortest deadline in `docs/RETENTION.md` is 24 hours; the heartbeat may not exceed it. */
 export const MAX_RETENTION_INTERVAL_MS = 86_400_000;
 
 /** A sweep is not a sub-second operation, and a schedule that thinks it is spins. */
@@ -109,8 +114,9 @@ export function readRetentionWorkerConfig(env: Env = process.env): RetentionWork
   if (intervalMs > MAX_RETENTION_INTERVAL_MS) {
     throw new Error(
       `KYNVIORA_RETENTION_INTERVAL_MS must be at most ${String(MAX_RETENTION_INTERVAL_MS)} ` +
-        '(24 hours). The sweep interval is the maximum overshoot past every deadline in ' +
-        'docs/RETENTION.md, and the shortest of those is 24 hours (DEV-063).',
+        '(24 hours). It is the heartbeat rather than the schedule (DEC-123), and the heartbeat ' +
+        'is the only cover for eligibility no deadline can predict - so it may not exceed the ' +
+        'shortest deadline in docs/RETENTION.md, which is 24 hours.',
     );
   }
   if (retryIntervalMs > intervalMs) {

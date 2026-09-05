@@ -83,3 +83,42 @@ describe('milliseconds until the next sweep', () => {
     expect(msUntilDue(last, CONFIG, at('2026-01-01T00:00:05.000Z'))).toBe(5_000);
   });
 });
+
+describe('the next real deadline, when the data has one (DEC-123, DEV-063)', () => {
+  const last = run('2026-01-01T00:00:00.000Z', 'SUCCEEDED');
+  const now = at('2026-01-01T00:00:10.000Z');
+
+  it('is ignored when there is none, leaving the heartbeat as it was', () => {
+    // `null` is what `next_purge_due()` answers when nothing is pending, and what
+    // `readNextPurgeDue` answers when the read failed. Both must leave the old schedule intact:
+    // the fallback direction is the one that keeps the guarantee there already was.
+    expect(msUntilDue(last, CONFIG, now, null)).toBe(50_000);
+    expect(msUntilDue(last, CONFIG, now, undefined)).toBe(50_000);
+    expect(msUntilDue(last, CONFIG, now)).toBe(50_000);
+  });
+
+  it('wins when it comes before the heartbeat', () => {
+    // The whole point. A Visit Pack whose content is due in twelve seconds is swept in twelve
+    // seconds rather than in fifty, so the promise is kept at the deadline instead of after it.
+    expect(msUntilDue(last, CONFIG, now, at('2026-01-01T00:00:22.000Z'))).toBe(12_000);
+  });
+
+  it('loses when the heartbeat comes first', () => {
+    // A deadline a week away must not push the heartbeat out. It is the only cover for
+    // eligibility that arrives by a state change rather than by a clock (`DEV-065`).
+    expect(msUntilDue(last, CONFIG, now, at('2026-01-08T00:00:00.000Z'))).toBe(50_000);
+  });
+
+  it('is zero, not negative, for a deadline that has already passed', () => {
+    // Eligibility that arrived between two sweeps, or a category that failed. Either way the
+    // answer is "now", and a negative wait handed to a timer becomes an immediate one only by
+    // luck.
+    expect(msUntilDue(last, CONFIG, now, at('2025-12-25T00:00:00.000Z'))).toBe(0);
+  });
+
+  it('does not make a fresh deployment wait for a deadline it could sweep before', () => {
+    // No history at all is already "due now", and a deadline an hour out must not change that:
+    // everything the matrix governs is already as old as the data.
+    expect(msUntilDue(null, CONFIG, now, at('2026-01-01T01:00:00.000Z'))).toBe(0);
+  });
+});

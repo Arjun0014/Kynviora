@@ -4388,3 +4388,83 @@ other half is a credential and a surface.
 **Sources.** `04` Phase 7.5 (digest policy for lower urgency; revalidation before inclusion); `09`;
 `03` group H; `16`; `20`; `02`; DEC-119; DEC-121; `DEV-011`; `DEV-033`; `BLK-009`;
 `docs/RETENTION.md`.
+
+---
+
+## DEC-123 - The sweep is scheduled at the next deadline, and the interval becomes a heartbeat
+
+**Context.** `DEV-063`, open since DEC-121 built the worker. Every eligibility floor in `0022` and
+`0023` sits **exactly on** its deadline - `purge_floor()` is `now() - 30 days`, Visit Pack content
+becomes purgeable at `expires_at + 24 hours` - so a row became eligible at its deadline and was
+removed by the next periodic sweep after it. Gone somewhere in `[deadline, deadline + interval]`,
+and no finite interval made the upper end equal the deadline.
+
+With the default that was up to an hour past a thirty-day promise. It was also up to an hour past
+the **twenty-four hour** one, which is the case that actually matters: four per cent of the whole
+deadline, on the only content in this system that has left it.
+
+`DEV-063` named two ways to close it and recorded that both wanted deciding rather than doing.
+
+**Decision.** Neither of them. A third way: **ask the data when the next deadline is, and wake up
+then.**
+
+`kynviora.next_purge_due()` (migration `0031`) returns the earliest instant at which any row
+becomes purgeable. `msUntilDue` takes whichever comes first, that or the periodic heartbeat. Five
+parts worth stating.
+
+**1. No floor moves and no policy changes.** This was the objection to option (1) - purging at
+`deadline - interval` would have moved every deadline earlier and changed what the RLS policies
+admit, which is a security boundary. Nothing here is purged one second before it is due; the sweep
+merely arrives on time instead of late.
+
+**2. The function returns one timestamp and nothing else.** Not a count, not a table, not whose. A
+schedule needs no more than an instant, and the role that runs on it is one whose entire design is
+that it cannot see what it deletes. "Something becomes purgeable at 04:12" says nothing about
+anybody.
+
+**3. `SECURITY DEFINER`, because the question is unanswerable from inside the policies.** The
+retention role's policies admit only rows that are **already** due - correctly - so a row that
+becomes purgeable tomorrow is invisible today and the role that sweeps cannot see its own queue.
+Same reasoning as `evidence_is_unattached` and `digest_is_empty`. Executable by
+`kynviora_retention` alone: `kynviora_service` has no business knowing when somebody's deleted
+medicine stops existing, and PUBLIC least of all, because a definer function inherits the
+definer's rights and an over-broad grant on one is a way around a policy.
+
+**4. Every subquery looks only at the future**, and the second reason is the important one. It
+keeps each scan on the small end of an index - and it means an already-eligible row cannot pin the
+answer in the past and turn the worker into a busy loop, which is exactly what a plain
+`min(deleted_at) + 30 days` would do the moment one row failed to purge. The predicates are the
+floor functions rearranged (`deleted_at > purge_floor()` is `deleted_at + 30 days > now()`), so the
+**period** cannot drift from the policy that enforces it even though the expression is written
+twice.
+
+**5. A failed read answers `null`, which restores the old behaviour rather than losing it.**
+`readNextPurgeDue` catches and returns `null`; `msUntilDue` then falls back to the heartbeat, which
+is the schedule this worker had before today. The opposite failure - answering a wrong instant -
+would be a worker sleeping past a deadline, so the direction is chosen rather than defaulted.
+
+**What the interval is now.** A heartbeat, still capped at 24 hours and still for the same reason.
+What it covers is the case a deadline **cannot be computed for**: eligibility that arrives by a
+state change rather than by a clock. An evidence asset attached today may be detached next month
+and is then already older than seven days; a digest becomes empty when another category purges its
+last entry. Neither has an instant anything can name in advance, and that residue is `DEV-065` -
+bounded by the heartbeat exactly as the whole matrix used to be.
+
+**How it is tested, and what would have made the test worthless.** The sharp assertion is not that
+the function computes `deleted_at + 30 days`. It is that the function agrees with the **policy**:
+in one transaction, where `now()` is constant, a row stamped exactly at `purge_floor()` is visible
+to `kynviora_retention` and one stamped a microsecond later is not, and `next_purge_due()` names
+that microsecond. A test checking the arithmetic against a literal would pass over a schedule that
+had drifted from the deadline it schedules for, which is the entire hazard of declaring a period
+twice.
+
+**Consequences.** `DEV-063` closes. `DEV-065` opens for the residue, which is smaller and is
+described in terms of what causes it rather than in terms of a default. `docs/RETENTION.md` 8.3 is
+rewritten: it used to be titled "the gap that remains" and is now the schedule.
+
+Nothing about the deadlines themselves changed, and that was the constraint: the matrix in
+sections 3.1 and 3.2 is unchanged to the microsecond, and `purgeDeadline.test.ts` still measures
+it.
+
+**Sources.** `16`; `14`; `docs/RETENTION.md` 3.1, 3.2, 8.1, 8.3; DEC-117; DEC-121; `DEV-063`;
+migrations `0022`, `0023`, `0031`.

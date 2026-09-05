@@ -7,9 +7,15 @@
  * WHAT MAKES IT DURABLE
  * Nothing in this loop remembers anything. Each pass asks the database when the next sweep is due
  * (`readLastRetentionRun` + `msUntilDue`) and sleeps until then, so the schedule is a property of
- * the run history rather than of this process's uptime. A worker restarted every minute sweeps on
- * schedule; a worker that was down for a week sweeps the moment it comes back; two workers
- * pointed at one database sweep once between them, because the lease says so.
+ * the run history rather than of this process's uptime. A worker restarted every minute does not
+ * sweep every minute; a worker that was down for a week sweeps the moment it comes back; two
+ * workers pointed at one database sweep once between them, because the lease says so.
+ *
+ * AND IT ASKS THE DATA, NOT ONLY THE HISTORY (DEC-123, `DEV-063`)
+ * A second question on the same connection: `readNextPurgeDue` - when does the earliest **row**
+ * become purgeable. Where there is an answer the sweep is scheduled at it, so a row is removed at
+ * its deadline rather than up to an interval past it. That is what stops the interval from being
+ * the overshoot: it stays as a heartbeat, for eligibility no clock can predict.
  *
  * WHY IT DOES NOT SPIN
  * Three things can leave a sweep un-run with the clock still saying "due now": the lease is held,
@@ -31,6 +37,7 @@ import { runDigestAssembly } from './digestRun.js';
 import {
   executeRetentionRun,
   readLastRetentionRun,
+  readNextPurgeDue,
   sqlstateOf,
   type RetentionRunResult,
 } from './retentionRun.js';
@@ -87,8 +94,14 @@ export function startRetentionLoop(deps: RetentionLoopDeps): RetentionLoop {
   async function pass(): Promise<void> {
     let waitMs: number;
     try {
-      const last = await deps.db.withRetention((db) => readLastRetentionRun(db));
-      waitMs = msUntilDue(last, deps.config, deps.clock.now());
+      // Both on one connection, because they are one question: how long may this worker sleep
+      // without missing something. The run history gives the heartbeat and the data gives the
+      // next real deadline; `msUntilDue` takes whichever comes first (DEC-123).
+      const { last, nextDeadline } = await deps.db.withRetention(async (db) => ({
+        last: await readLastRetentionRun(db),
+        nextDeadline: await readNextPurgeDue(db),
+      }));
+      waitMs = msUntilDue(last, deps.config, deps.clock.now(), nextDeadline);
     } catch (error) {
       // The schedule is unreadable, which means the database is. Retry rather than sweep: a run
       // attempted against a database that cannot be read is a run that will fail in every

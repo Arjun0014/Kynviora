@@ -53,13 +53,35 @@ export function delayAfter(
  * No previous run means due now. That is the case a fresh deployment is in, and it is the one
  * where waiting an interval before the first sweep would be worst: everything the matrix governs
  * is already as old as the data.
+ *
+ * THE INTERVAL IS A CEILING, NOT THE SCHEDULE (DEC-123, `DEV-063`)
+ * `nextDeadline` is when the earliest **row** becomes purgeable, read from the data by
+ * `kynviora.next_purge_due()`. Where there is one, the sweep is scheduled at it rather than after
+ * an interval, so a row is removed at its deadline rather than up to an interval past it. The
+ * interval survives as a heartbeat, which is what covers eligibility no clock can predict - an
+ * evidence asset detached long after it was created, a digest emptied by another category's
+ * purge.
+ *
+ * The earlier of the two wins, which is the only combination that is safe in both directions: a
+ * heartbeat sooner than the next deadline is a sweep that purges nothing, and a deadline sooner
+ * than the heartbeat is the whole point.
  */
 export function msUntilDue(
   last: LastRetentionRun | null,
   config: Pick<RetentionWorkerConfig, 'intervalMs' | 'retryIntervalMs'>,
   now: Instant,
+  nextDeadline?: Instant | null,
 ): number {
-  if (last === null) return 0;
-  const elapsed = compareInstants(now, last.startedAt);
-  return Math.max(0, delayAfter(last, config) - elapsed);
+  const heartbeat =
+    last === null
+      ? 0
+      : Math.max(0, delayAfter(last, config) - compareInstants(now, last.startedAt));
+
+  if (nextDeadline === undefined || nextDeadline === null) return heartbeat;
+
+  // A deadline already past is a row that should have gone and did not - eligibility that arrived
+  // between two sweeps, or a category that failed. Either way it is due now, and clamping at zero
+  // rather than going negative is what makes that true rather than merely early.
+  const untilDeadline = Math.max(0, compareInstants(nextDeadline, now));
+  return Math.min(heartbeat, untilDeadline);
 }

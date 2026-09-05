@@ -203,10 +203,13 @@ runIfMigrator('the schema, read with the credential that owns it (BLK-001)', () 
     expect(applied.map((r) => r.checksum)).toEqual(repository.map((m) => m.checksum));
   });
 
-  it('has thirty of them', async () => {
-    // A count as well as a comparison, so a run that loaded no migrations at all from disk cannot
-    // compare two empty lists and pass.
-    expect((await appliedMigrations()).length).toBe(30);
+  it('has a great many of them, so the comparison above is not two empty lists', async () => {
+    // The control the comparison needs, and deliberately a floor rather than a count: a run that
+    // loaded nothing from disk would compare two empty lists and pass, and an exact number here
+    // would have to be edited by every migration, which is how a control becomes a chore and then
+    // a `.skip`.
+    expect(loadMigrations().length).toBeGreaterThan(25);
+    expect((await appliedMigrations()).length).toBeGreaterThan(25);
   });
 });
 
@@ -292,6 +295,52 @@ runIfManaged('what the platform can reach (spec 14)', () => {
       ),
     );
     expect(res.rows[0]?.rolinherit).toBe(false);
+  });
+
+  it('lets the SECURITY DEFINER helpers see past the policies they answer for', async () => {
+    // A managed-platform difference with real consequences, found by looking rather than by
+    // failing. Nine helpers in the `kynviora` schema are `SECURITY DEFINER` - `owns_profile`,
+    // `has_capability` and the purge-door predicates among them - and every RLS policy in the
+    // system calls one. On PGlite they are owned by `postgres`, a superuser, so RLS never applied
+    // inside them. Here they are owned by the migration role, which is not a superuser and does
+    // not bypass RLS, and `FORCE ROW LEVEL SECURITY` applies to a table's owner.
+    //
+    // They work because that role is a **member of `kynviora_service`**, so `is_service()` is
+    // true inside them and the service policies admit every row. That is load-bearing and was
+    // implicit: revoking the membership would leave every caregiver in the system silently
+    // unable to see anything, with no error anywhere.
+    const facts = await db.withService((conn) =>
+      conn.query<{ definers: number; owner: string; owner_is_service: boolean }>(
+        `SELECT count(*)::int                                              AS definers,
+                min(pg_get_userbyid(p.proowner))                           AS owner,
+                bool_and(pg_has_role(pg_get_userbyid(p.proowner),
+                                     'kynviora_service', 'MEMBER'))        AS owner_is_service
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'kynviora' AND p.prosecdef`,
+      ),
+    );
+    expect(facts.rows[0]?.definers).toBeGreaterThanOrEqual(9);
+    expect(facts.rows[0]?.owner_is_service).toBe(true);
+
+    // And the behaviour, not only the arrangement. A **stranger** asks a definer helper whether
+    // somebody else owns a profile the stranger cannot see, and gets `true` - because the helper
+    // is not filtered by the asker's policies. A filtered helper would answer `false`, which is
+    // exactly what every caregiver in the system losing access would look like from the inside:
+    // no error, no refusal, just nothing.
+    const answered = await db.withUser(STRANGER, (conn) =>
+      conn.query<{ owned: boolean }>('SELECT kynviora.profile_owned_by($1, $2) AS owned', [
+        PROFILE,
+        OWNER,
+      ]),
+    );
+    expect(answered.rows[0]?.owned).toBe(true);
+
+    // The control: the same stranger cannot read that row directly. Without this the assertion
+    // above would pass over a database with no row-level security at all.
+    const directly = await db.withUser(STRANGER, (conn) =>
+      conn.query('SELECT owner_user_id FROM profile WHERE id = $1', [PROFILE]),
+    );
+    expect(directly.rows).toHaveLength(0);
   });
 
   it('owns every table with a Kynviora role rather than the platform’s', async () => {

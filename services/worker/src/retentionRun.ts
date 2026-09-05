@@ -192,6 +192,32 @@ export async function readLastRetentionRun(db: PurgeConnection): Promise<LastRet
   return { startedAt, outcome: row.outcome as RetentionRunOutcome | null };
 }
 
+/**
+ * When the earliest row becomes purgeable, or `null` when nothing is pending (DEC-123).
+ *
+ * One timestamp, from `kynviora.next_purge_due()`. The role that sweeps cannot see its own queue -
+ * its policies admit only rows that are already due - so this is `SECURITY DEFINER` in the
+ * database and returns nothing but an instant: not a count, not a table, not whose.
+ *
+ * `null` on **any** failure, and that is a decision rather than laziness. The consequence of
+ * answering nothing is that {@link msUntilDue} falls back to the periodic interval, which is the
+ * behaviour this schedule had before it existed. The consequence of answering wrongly would be a
+ * worker that slept past a deadline, so the failure direction is the one that keeps the old
+ * guarantee rather than the one that quietly loses it.
+ */
+export async function readNextPurgeDue(db: PurgeConnection): Promise<Instant | null> {
+  try {
+    const result = await db.query<{ due: Date | string | null }>(
+      'SELECT kynviora.next_purge_due() AS due',
+    );
+    const due = result.rows[0]?.due ?? null;
+    if (due === null) return null;
+    return (due instanceof Date ? due.toISOString() : due) as Instant;
+  } catch {
+    return null;
+  }
+}
+
 async function openRun(db: PurgeConnection, holder: string): Promise<string> {
   const result = await db.query<{ id: string }>(
     `INSERT INTO retention_run (holder) VALUES ($1) RETURNING id`,

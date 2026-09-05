@@ -4775,3 +4775,95 @@ product uses to remove it.
 
 `npm run verify` exit 0: 4,573 passed, 45 skipped across two managed suites. Against
 `kynviora-dev`: **45 passed** (32 parity + 13 worker).
+
+---
+
+## 2026-09-05 - The sweep stopped being late, without moving a single deadline
+
+`DEV-063` has been on the list since DEC-121 built the worker, and it was recorded as a decision
+rather than as work: every eligibility floor sits **exactly on** its deadline, so a periodic sweep
+removed a row somewhere in `[deadline, deadline + interval]` and no finite interval closed that.
+
+The two ways out it named were both wrong, and the brief for this session ruled out the first
+explicitly. A margin in the floors - purging at `deadline - interval` - moves every deadline
+earlier and changes what the RLS policies admit, which is a security boundary and not something to
+move to make a schedule tidy. A continuous sweep does not exist and would be more work for a worse
+result.
+
+**The third way asks the data.** `kynviora.next_purge_due()` returns the earliest instant at which
+any row becomes purgeable, and the worker sleeps until whichever comes first, that or the
+heartbeat. No floor moved. No policy changed. Nothing is removed a second before it is due. What
+the sweep overshoots by is now the time one sweep takes rather than a configured number - and on
+the twenty-four hour Visit Pack deadline, which is the case that actually mattered, that is the
+difference between four per cent of the promise and a rounding error.
+
+### One timestamp, and the reason it is only one
+
+Not a count, not a table, not whose. A schedule needs an instant, and the role that runs on it is
+one whose entire design is that it cannot see what it deletes. "Something becomes purgeable at
+04:12" says nothing about anybody.
+
+`SECURITY DEFINER`, for a reason that is almost a paradox: the retention role's policies admit only
+rows that are **already** due, which is exactly right, and makes the question unanswerable from
+inside them. The role that sweeps cannot see its own queue. Executable by `kynviora_retention` and
+nothing else - a definer function inherits the definer's rights, so an over-broad grant on one is a
+way around a policy.
+
+### Every subquery looks only at the future, and the second reason is the important one
+
+It keeps each scan on the small end of an index. And it means an already-eligible row **cannot pin
+the answer in the past** and turn the worker into a busy loop, which is exactly what a plain
+`min(deleted_at) + 30 days` would do the first time one row failed to purge.
+
+The predicates are the floor functions rearranged - `deleted_at > purge_floor()` is
+`deleted_at + 30 days > now()` - so the period cannot drift from the policy that enforces it, even
+though the expression is now written twice.
+
+### The test that would have been worthless
+
+Not "the function computes thirty days". That passes over a schedule that has drifted from the
+deadline it schedules for, which is the entire hazard of declaring a period twice.
+
+The sharp one is that the function agrees with the **policy**. In one transaction, where `now()` is
+constant: a row stamped exactly at `purge_floor()` is visible to `kynviora_retention`, one stamped
+a microsecond later is not, and `next_purge_due()` names that microsecond - to nine decimal places
+of a second. Same technique `purgeDeadline.test.ts` uses for the boundaries themselves.
+
+The Visit Pack pair is the other one worth having. A pack expiring in an hour is due in twenty-five
+and beats two items twenty and twenty-nine days out; a pack whose content has already been emptied
+stops counting, because without that predicate it would name a deadline nothing would act on and
+the worker would wake for it forever.
+
+### A failed read answers null, and that is a direction rather than a default
+
+`readNextPurgeDue` catches and returns `null`, which makes `msUntilDue` fall back to the heartbeat
+
+- the schedule this worker had yesterday. Answering a **wrong** instant would be a worker sleeping
+  past a deadline. The two failures are not symmetric and the code picks the one that keeps the
+  guarantee there already was.
+
+### What is left, named for what causes it
+
+`DEV-065`. Two categories become eligible by a **state change** rather than by a clock, so no
+function can name their instant in advance: an evidence asset attached today and detached next
+month is already past seven days at the moment it is detached, and a digest becomes empty when
+another category purges its last entry. The heartbeat covers both, exactly as it used to cover
+everything. Closing it needs a `detached_at` stamp written where the detachment happens, which is a
+schema change to a table `BLK-007` has not settled the shape of.
+
+### One thing that was a flake and not a defect
+
+Three suites timed out in their `beforeAll` at exactly 60,000 ms on one `npm run verify` -
+`caregiver`, `reviewerConsole` and `reviewInbox`, all of them `createTestDb()`. Re-run in
+isolation: 101 passed in 20 seconds. Re-run as the whole suite: exit 0. It is `createTestDb`
+applying thirty-one migrations in each of several parallel workers on a machine that had just been
+running two Postgres-bound processes, and it is the same resource-contention shape `main.test.ts`
+already documents at its `PROCESS_BOOT_TIMEOUT_MS`. Recorded because a timeout that only happens
+under load is the kind of thing that gets rediscovered as a mystery.
+
+### Result
+
+`npm run verify` exit 0. **4,585 passed**, 46 skipped, across 174 files plus the two managed suites.
+Migration `0031` applied to `kynviora-dev`; both managed suites re-run green there (46 passed).
+`DEV-063` resolved, `DEV-065` opened, DEC-123 recorded, `docs/RETENTION.md` 8.3 rewritten from "the
+gap that remains" into the schedule.
