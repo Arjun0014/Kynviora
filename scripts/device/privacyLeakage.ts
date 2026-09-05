@@ -274,6 +274,12 @@ export const KNOWN_COMPONENTS: readonly string[] = Object.freeze([
   'com.kynviora.app/com.google.firebase.iid.FirebaseInstanceIdReceiver',
   'com.kynviora.app/com.google.firebase.messaging.FirebaseMessagingService',
   'com.kynviora.app/com.google.firebase.provider.FirebaseInitProvider',
+  // ML Kit's initialisation provider, which `expo-camera` brings in for barcode scanning. It
+  // arrived in the merged manifest with no screen changing and no file in this repository
+  // mentioning it, which is exactly the case this check exists for - and it is here because it
+  // was **looked at**, not because the run was noisy: the merged manifest declares it
+  // `android:exported="false"`, so it is a startup hook rather than a way into this app.
+  'com.kynviora.app/com.google.mlkit.common.internal.MlKitInitProvider',
   'com.kynviora.app/expo.modules.filesystem.FileSystemFileProvider',
   'com.kynviora.app/expo.modules.notifications.service.ExpoFirebaseMessagingService',
   'com.kynviora.app/expo.modules.notifications.service.NotificationsService',

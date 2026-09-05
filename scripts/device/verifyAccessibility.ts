@@ -46,6 +46,9 @@ import { foldDump, sheetChecks, type SheetSurvey, type SurveyedControl } from '.
 import { scrollDown, scrollUp } from './ui.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
 
+/** TalkBack's own package, which has its own runtime permission to ask for. */
+const TALKBACK_PACKAGE = 'com.google.android.marvin.talkback';
+
 const TALKBACK_SERVICE =
   'com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService';
 
@@ -283,6 +286,17 @@ function withTalkBack(): readonly Check[] {
     'secure',
     'enabled_accessibility_services',
   ]).stdout.trim();
+
+  // Before enabling it. TalkBack asks for `POST_NOTIFICATIONS` the first time it starts, and its
+  // dialog is a full-screen `permissioncontroller` window over whatever is behind it - so the
+  // hierarchy read below contains no app node at all and the run reports the app as having no
+  // controls. It is the same trap the camera harness records: a permission prompt from something
+  // that is not the app under test eats the screen, and the failure reads as a defect in the app
+  // (trap 201).
+  //
+  // Granted rather than dismissed, because dismissing it is a tap and `tapNamed` filters to the
+  // app's own package by design.
+  adb(['shell', 'pm', 'grant', TALKBACK_PACKAGE, 'android.permission.POST_NOTIFICATIONS']);
 
   const enabled = adb([
     'shell',

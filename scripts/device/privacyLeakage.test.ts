@@ -160,8 +160,13 @@ describe('PLAT-1, the package’s surface', () => {
   });
 
   it('lists the launcher activity as the only component this project wrote', () => {
+    // Anchored on the package prefix and on the library's own namespace, rather than an
+    // unanchored list of words. The unanchored version passed until `expo-camera` brought
+    // `com.google.mlkit` in, at which point it reported a Google library as something this
+    // project had authored - a regex growing a word per dependency is a regex that eventually
+    // matches the wrong thing.
     const ours = KNOWN_COMPONENTS.filter(
-      (component) => !/androidx|firebase|expo\.modules/i.test(component),
+      (component) => !/^com\.kynviora\.app\/(androidx|com\.google|expo\.modules)\./.test(component),
     );
     expect(ours).toEqual(['com.kynviora.app/.MainActivity']);
   });

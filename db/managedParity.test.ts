@@ -274,6 +274,32 @@ runIfManaged('what the platform can reach (spec 14)', () => {
     expect(res.rows).toEqual([]);
   });
 
+  it('serves nothing to the anonymous API key over HTTP either', async () => {
+    // The catalog answers what the grants **are**; this answers what the platform actually
+    // **serves**, which is the thing somebody holding the publishable key can try. PostgREST is a
+    // separate process reading the same catalog, and a check that only read
+    // `has_table_privilege` would be trusting the two to agree.
+    //
+    // Returns early rather than failing without a key: the key is needed for nothing else in this
+    // file, and its absence is a configuration gap rather than a defect.
+    const key = process.env.KYNVIORA_SUPABASE_ANON_KEY?.trim() ?? '';
+    const issuer = process.env.KYNVIORA_SUPABASE_ISSUER?.trim() ?? '';
+    if (key === '' || issuer === '') return;
+    const origin = issuer.replace(/\/auth\/v1\/?$/, '');
+
+    // `schema_migration` is in this list on purpose: it is the one table with no row-level
+    // security, so a missing grant is the *only* thing standing in front of it.
+    for (const table of ['owned_item', 'app_user', 'profile', 'audit_event', 'schema_migration']) {
+      const response = await fetch(`${origin}/rest/v1/${table}?select=*&limit=1`, {
+        headers: { apikey: key, authorization: `Bearer ${key}` },
+      });
+      // 401, not 200 with an empty array. An empty array would mean the grant exists and
+      // row-level security is doing all the work alone - which is the arrangement this project
+      // declined when it chose the migration credential.
+      expect(response.status, table).toBe(401);
+    }
+  });
+
   it('gives no Kynviora role SUPERUSER or BYPASSRLS', async () => {
     const res = await db.withService((conn) =>
       conn.query<{ rolname: string; rolsuper: boolean; rolbypassrls: boolean }>(

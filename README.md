@@ -36,7 +36,7 @@ npm test
 
 The API runs against a local PostgreSQL that the process owns - PGlite persisted to a directory,
 which is genuine PostgreSQL 18.3 rather than a mock. There is no service to provision and no
-connection string to set, which is how `BLK-001` is worked around for development.
+connection string to set.
 
 ```bash
 KYNVIORA_DEV_AUTH=1 KYNVIORA_DEV_SEED=1 npm run dev
@@ -49,14 +49,48 @@ user ID to send as a header:
 curl -H "x-kynviora-dev-user: 00000000-0000-4000-8000-00000000d001" http://127.0.0.1:3000/v1/profiles
 ```
 
-**`KYNVIORA_DEV_AUTH` is a development backdoor.** Phase 1.1 has not chosen an auth provider, so
-nothing yet produces a real session; this fills the gap so the app can be run at all. It refuses to
-exist under `NODE_ENV=production`, it grants no reviewer role - a header is a client claim, and
-`14` says staff roles are never inferred from one - and with no header every request is
-unauthenticated. All three are tested.
+**`KYNVIORA_DEV_AUTH` is a development backdoor.** It fills the gap where no identity provider is
+configured, so the app can be run at all. It refuses to exist under `NODE_ENV=production`, it
+grants no reviewer role - a header is a client claim, and `14` says staff roles are never inferred
+from one - and with no header every request is unauthenticated. All three are tested.
 
 Without the flag the server refuses to start rather than silently authenticating nobody. Set
 `KYNVIORA_ALLOW_ANONYMOUS_START=1` if that is what you want.
+
+### Against a managed Postgres
+
+`KYNVIORA_DATABASE_URL` switches the store. Two credentials rather than one, and no fallback
+between them - `db/provision/README.md` says why, and the short version is that a managed platform
+grants its own anonymous API role everything on any table its own superuser creates.
+
+```bash
+KYNVIORA_MIGRATE_DATABASE_URL=... npm run migrate     # DDL, one command, owns every object
+KYNVIORA_DATABASE_URL=... npm run dev                 # NOINHERIT, must SET ROLE for every statement
+KYNVIORA_DATABASE_URL=... npm run worker              # the retention sweep, as its own process
+```
+
+The runtime URL must name a **session-scoped** port: identity is a session GUC and privilege is a
+session role, and a transaction-mode pooler discards both between statements. The adapter refuses
+to serve a request whose role did not survive, so the failure is closed rather than silent.
+
+Two suites run only with a database configured and skip as whole files without one:
+
+```bash
+npx vitest run --project server db/managedParity.test.ts db/managedWorker.test.ts
+```
+
+### Against a real identity provider
+
+`KYNVIORA_SUPABASE_ISSUER` switches the API from a header to a verified token, and the two are
+mutually exclusive by construction - a process configured for both refuses to start, because the
+weaker path would be the one an attacker picks. The app gets the same switch through
+`EXPO_PUBLIC_SUPABASE_AUTH_URL`; without it there is no sign-in screen and the development
+identity is used instead.
+
+```bash
+npx vitest run --project server services/api/src/supabaseLive.test.ts
+npm run verify:device:signin
+```
 
 ### What will be empty, and why that is correct
 
@@ -199,12 +233,18 @@ explainable, and CHECK constraints so a direct database write cannot bypass it.
 
 ## Testing
 
-Tests run in-process with no external services:
+Tests run in-process with no external services, except for three suites that skip as whole
+files unless one is configured (below):
 
 - **Database and authorization tests** execute against real PostgreSQL 18.3 via PGlite. The
   harness asserts the session is the expected non-superuser role before any authorization
   assertion, because superusers bypass row-level security even under `FORCE ROW LEVEL SECURITY` -
   without that guard the whole suite would pass while testing nothing.
+- **Against a managed Postgres and a real identity provider**, three suites measure what an
+  in-process engine cannot: platform roles and default privileges, connection pooling and the
+  session state a pool can leak, two workers contending one lease, and a token a real provider
+  issued. They need `KYNVIORA_DATABASE_URL` and `KYNVIORA_SUPABASE_ISSUER` respectively, and skip
+  in full without them so `npm run verify` passes on a machine with neither.
 - **The vertical slice** (`packages/fixtures/src/verticalSlice.test.ts`) walks the full loop:
   profile, capture, observation, formulation resolution, normalization, regulatory lookup,
   assessment, result.

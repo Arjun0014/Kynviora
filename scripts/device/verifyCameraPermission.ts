@@ -78,6 +78,21 @@ const CAMERA = 'android.permission.CAMERA';
  * granted permission shows no dialog, and this run has nothing to say about notifications.
  */
 const NOTIFICATIONS = 'android.permission.POST_NOTIFICATIONS';
+
+/**
+ * The other package on this device that asks for notifications the moment it is reset.
+ *
+ * `pm reset-permissions` is device-wide, which the comment above already says - and the
+ * consequence is not confined to this app. The Accessibility Suite asks at once, and its dialog is
+ * a full-screen `permissioncontroller` window over whatever is behind it, so the app never becomes
+ * ready and the run reports "the scan screen was never reached" - which is a fact about a dialog
+ * belonging to a different app (trap 201).
+ *
+ * Granted for the duration alongside this app's, for the same reason and with the same
+ * neutrality: a granted permission shows no dialog, and this run has nothing to say about
+ * notifications.
+ */
+const ACCESSIBILITY_SUITE = 'com.google.android.marvin.talkback';
 const METRO_PORT = 8081;
 
 function dumpsys(): string | null {
@@ -90,8 +105,8 @@ function cameraIsGranted(): boolean | null {
   return output === null ? null : grantedPermissions(output).includes(CAMERA);
 }
 
-function setPermission(permission: string, granted: boolean): boolean {
-  return adb(['shell', 'pm', granted ? 'grant' : 'revoke', PACKAGE, permission]).ok;
+function setPermission(permission: string, granted: boolean, pkg: string = PACKAGE): boolean {
+  return adb(['shell', 'pm', granted ? 'grant' : 'revoke', pkg, permission]).ok;
 }
 
 function setCamera(granted: boolean): boolean {
@@ -274,8 +289,11 @@ function main(): void {
     // refused twice permanently refused, and every check below then measures that instead of the
     // app.
     resetPermissionState();
-    // Out of the way. See `NOTIFICATIONS` - its dialog would otherwise eat every tap this makes.
+    // Out of the way. See `NOTIFICATIONS` - its dialog would otherwise eat every tap this makes -
+    // and `ACCESSIBILITY_SUITE` for the same reason, because the reset above is device-wide and
+    // that is the other package that asks immediately.
     setPermission(NOTIFICATIONS, true);
+    setPermission(NOTIFICATIONS, true, ACCESSIBILITY_SUITE);
 
     // ---- after a launch that never scanned ---------------------------------
     process.stdout.write('Launching without touching the scan control...\n');
