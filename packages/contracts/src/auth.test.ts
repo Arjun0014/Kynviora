@@ -30,10 +30,14 @@ import {
  * ones.
  */
 
+/** This device's clock, held still. Every session below is dated from it. */
+const DEVICE_NOW = 1_788_607_662;
+
 const ENDPOINT = (impl: typeof fetch): AuthEndpoint => ({
   issuer: 'https://project.supabase.co/auth/v1',
   anonKey: 'sb_publishable_not_a_secret',
   fetchImpl: impl,
+  nowSeconds: () => DEVICE_NOW,
 });
 
 /** A fetch that answers once, and records what it was asked. */
@@ -68,7 +72,9 @@ const SESSION = {
 const TOKENS: AuthTokens = {
   accessToken: 'header.payload.signature',
   refreshToken: 'a-refresh-token',
-  expiresAtSeconds: 1_788_611_262,
+  // The duration, measured from this device's clock - not the provider's `expires_at`, which is
+  // the same instant here only because the fixture's two clocks agree.
+  expiresAtSeconds: DEVICE_NOW + 3600,
 };
 
 describe('reading a session the provider handed over', () => {
@@ -76,18 +82,52 @@ describe('reading a session the provider handed over', () => {
     // DEC-118 part 6 in one assertion. The access token here is not a JWT at all and has no `exp`
     // to read; the session is still complete, because expiry is a field the provider sent
     // alongside the token rather than a claim inside it.
-    expect(readTokens(SESSION)).toEqual(TOKENS);
+    expect(readTokens(SESSION, DEVICE_NOW)).toEqual(TOKENS);
+  });
+
+  it('dates the session by this device’s clock, so a wrong one cannot cause a renewal loop', () => {
+    // The defect this replaced, found on a device (`19` scenario 14). `expires_at` is an instant
+    // on the *provider's* clock and the renewal rule compares it against `Date.now()` on the
+    // phone, so a device an hour fast held a session that was already past its expiry the moment
+    // it arrived - `needsRefresh` true again immediately, the effect rescheduling at zero, and a
+    // renewal loop against the provider on somebody's mobile data.
+    //
+    // A duration cannot do that: an offset clock cancels out of `now + expires_in` entirely.
+    const anHourFast = DEVICE_NOW + 3600;
+    const dated = readTokens(SESSION, anHourFast);
+
+    expect(dated?.expiresAtSeconds).toBe(anHourFast + 3600);
+    expect(needsRefresh(dated as AuthTokens, anHourFast)).toBe(false);
+    // And the same response read on a device an hour *slow* is not renewed an hour late either.
+    const anHourSlow = DEVICE_NOW - 3600;
+    expect(readTokens(SESSION, anHourSlow)?.expiresAtSeconds).toBe(anHourSlow + 3600);
+  });
+
+  it('falls back to the provider’s instant where a response carries no duration', () => {
+    // Skew-sensitive, and still better than a session that never renews at all.
+    expect(readTokens({ ...SESSION, expires_in: undefined }, DEVICE_NOW)?.expiresAtSeconds).toBe(
+      1_788_611_262,
+    );
+    // A duration that has already elapsed is not a duration. `0` and negatives fall through
+    // rather than dating the session into the past.
+    expect(readTokens({ ...SESSION, expires_in: 0 }, DEVICE_NOW)?.expiresAtSeconds).toBe(
+      1_788_611_262,
+    );
   });
 
   it('refuses a partial session rather than returning half of one', () => {
     // A session with no refresh token cannot be renewed and signs somebody out an hour later for
     // no visible reason; one with no expiry either never refreshes or refreshes constantly.
-    expect(readTokens({ ...SESSION, refresh_token: undefined })).toBeNull();
-    expect(readTokens({ ...SESSION, access_token: '' })).toBeNull();
-    expect(readTokens({ ...SESSION, expires_at: undefined })).toBeNull();
-    expect(readTokens({ ...SESSION, expires_at: 'soon' })).toBeNull();
-    expect(readTokens(null)).toBeNull();
-    expect(readTokens('nope')).toBeNull();
+    expect(readTokens({ ...SESSION, refresh_token: undefined }, DEVICE_NOW)).toBeNull();
+    expect(readTokens({ ...SESSION, access_token: '' }, DEVICE_NOW)).toBeNull();
+    expect(
+      readTokens({ ...SESSION, expires_in: undefined, expires_at: undefined }, DEVICE_NOW),
+    ).toBeNull();
+    expect(
+      readTokens({ ...SESSION, expires_in: 'soon', expires_at: 'soon' }, DEVICE_NOW),
+    ).toBeNull();
+    expect(readTokens(null, DEVICE_NOW)).toBeNull();
+    expect(readTokens('nope', DEVICE_NOW)).toBeNull();
   });
 });
 
@@ -233,14 +273,18 @@ describe('asking for a password reset', () => {
 
 describe('renewing', () => {
   it('exchanges the refresh token for a new session', async () => {
-    const next = { ...SESSION, access_token: 'new.token.here', expires_at: 1_788_614_862 };
+    const next = { ...SESSION, access_token: 'new.token.here', expires_in: 7200 };
     const { impl, calls } = answering(200, next);
     const outcome = await refreshSession(ENDPOINT(impl), 'a-refresh-token');
 
     expect(calls[0]?.url).toContain('grant_type=refresh_token');
     expect(outcome).toEqual({
       kind: 'OK',
-      value: { ...TOKENS, accessToken: 'new.token.here', expiresAtSeconds: 1_788_614_862 },
+      value: {
+        ...TOKENS,
+        accessToken: 'new.token.here',
+        expiresAtSeconds: DEVICE_NOW + 7200,
+      },
     });
   });
 

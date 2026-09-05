@@ -16,7 +16,7 @@
  * WHAT THE CLIENT MAY NOT DO, AND THE ONE THAT MATTERS
  * **Parse the token.** DEC-118 part 6: a phone reading `exp` or `sub` out of a token it cannot
  * verify is a phone believing a string an attacker could have written. So expiry comes from the
- * provider's own `expires_at` field in the token response - a number the provider sent alongside
+ * provider's own `expires_in` field in the token response - a number the provider sent alongside
  * the token rather than one read out of it - and identity is never read at all. The phone carries
  * bytes; the server verifies them.
  *
@@ -41,18 +41,27 @@ export interface AuthEndpoint {
   /** The publishable key. Identifies the project; grants nothing. */
   readonly anonKey: string;
   fetchImpl?: typeof fetch;
+  /**
+   * This device's clock, in Unix seconds. Injectable for the same reason `fetchImpl` is.
+   *
+   * A session is dated when it arrives (see {@link readTokens}), so the clock is part of reading a
+   * response rather than something the caller applies afterwards.
+   */
+  nowSeconds?: () => number;
 }
 
 /**
  * A session, as the provider handed it over.
  *
- * `expiresAtSeconds` is the provider's own `expires_at`, not something read out of the token.
- * That distinction is the whole of DEC-118 part 6 in one field.
+ * `expiresAtSeconds` comes from the provider's response rather than from anything read out of the
+ * token, which is the whole of DEC-118 part 6 in one field. It is measured against **this
+ * device's** clock - see {@link readTokens} for why that is not the same as the provider's
+ * `expires_at` and why the difference is a defect rather than a detail.
  */
 export interface AuthTokens {
   readonly accessToken: string;
   readonly refreshToken: string;
-  /** Unix seconds, as the provider reported. */
+  /** Seconds on the receiving device's clock, at which this session should be treated as over. */
   readonly expiresAtSeconds: number;
 }
 
@@ -112,6 +121,23 @@ const FAILURE_BY_PROVIDER_CODE: Readonly<Record<string, AuthFailure>> = Object.f
   email_provider_disabled: 'SIGNUP_DISABLED',
 });
 
+/**
+ * What a status and a provider code mean, as the app reads them.
+ *
+ * Exported for one caller: `scripts/device/verifySignIn.ts`, which observes what the provider
+ * answered and then asserts the app rendered the sentence **this table** produces for it. Asking
+ * the same function the app asks is the point - a harness with its own copy of the mapping would
+ * pass while the two disagreed, which is the only interesting way this can be wrong.
+ */
+export function authFailureFor(status: number, errorCode: string): AuthFailure {
+  return failureFor(status, { error_code: errorCode });
+}
+
+/** This device's clock, defaulted here so three call sites do not each default it differently. */
+function clockOf(endpoint: AuthEndpoint): number {
+  return endpoint.nowSeconds === undefined ? Math.floor(Date.now() / 1000) : endpoint.nowSeconds();
+}
+
 function failureFor(status: number, body: Record<string, unknown>): AuthFailure {
   const code = typeof body['error_code'] === 'string' ? body['error_code'] : '';
   const mapped = FAILURE_BY_PROVIDER_CODE[code];
@@ -124,18 +150,51 @@ function failureFor(status: number, body: Record<string, unknown>): AuthFailure 
 }
 
 /**
- * Read a token response.
+ * Read a token response, dating it by the clock that will later have to act on it.
  *
  * `null` where any of the three fields is missing, rather than a partial session: a session with
  * no refresh token cannot be renewed and would sign somebody out an hour later for no visible
  * reason, and one with no expiry would either never refresh or refresh constantly.
+ *
+ * WHY `expires_in` AND NOT `expires_at`, WHICH IS WHAT THIS USED TO READ
+ * The provider sends both: `expires_at` is an absolute instant on **its** clock, and `expires_in`
+ * is a duration. The renewal rule compares the stored value against `Date.now()` on the phone, so
+ * storing the provider's absolute instant compares two clocks that are only equal when the
+ * device's is right - and a device clock is a thing people set by hand, lose over a flat battery,
+ * or have wrong by an hour after a time-zone change goes badly.
+ *
+ * The failure is not symmetric and neither half is benign:
+ *
+ * | Device clock | Stored `expires_at` | What the phone does                                  |
+ * | ------------ | ------------------- | ---------------------------------------------------- |
+ * | an hour fast | already past        | renews **continuously** - `needsRefresh` is true      |
+ * |              |                     | again the instant the new session lands, so the       |
+ * |              |                     | effect reschedules at zero: a loop against the        |
+ * |              |                     | provider, on somebody's mobile data and battery       |
+ * | an hour slow | an hour away        | never renews in time; the session dies mid-use and    |
+ * |              |                     | the phone learns from a `401` instead                 |
+ *
+ * A duration has no such problem: `expires_in` seconds measured from **now on this device** ends
+ * after that many seconds of this device's own time, whatever its clock reads. A constant offset
+ * cancels out entirely.
+ *
+ * `expires_at` stays as a fallback for a response that omits the duration, because a session that
+ * renews on a skewed clock is still better than one that never renews at all.
+ *
+ * This was found on a device (`19` scenario 14, `SIGN-8`): the run advances the emulator's clock
+ * past the access token's lifetime to make the app renew, and the first version renewed in a loop.
  */
-export function readTokens(body: unknown): AuthTokens | null {
+export function readTokens(body: unknown, nowSeconds: number): AuthTokens | null {
   if (body === null || typeof body !== 'object') return null;
   const record = body as Record<string, unknown>;
   const accessToken = typeof record['access_token'] === 'string' ? record['access_token'] : '';
   const refreshToken = typeof record['refresh_token'] === 'string' ? record['refresh_token'] : '';
   if (accessToken === '' || refreshToken === '') return null;
+
+  const expiresIn = record['expires_in'];
+  if (typeof expiresIn === 'number' && Number.isFinite(expiresIn) && expiresIn > 0) {
+    return { accessToken, refreshToken, expiresAtSeconds: Math.floor(nowSeconds + expiresIn) };
+  }
 
   const expiresAt = record['expires_at'];
   if (typeof expiresAt === 'number' && Number.isFinite(expiresAt)) {
@@ -220,7 +279,7 @@ export async function signIn(
   if (response.status !== 200) {
     return { kind: 'FAILED', reason: failureFor(response.status, response.body) };
   }
-  const tokens = readTokens(response.body);
+  const tokens = readTokens(response.body, clockOf(endpoint));
   return tokens === null
     ? { kind: 'FAILED', reason: 'UNAVAILABLE' }
     : { kind: 'OK', value: tokens };
@@ -249,7 +308,7 @@ export async function signUp(
   if (response.status !== 200) {
     return { kind: 'FAILED', reason: failureFor(response.status, response.body) };
   }
-  const tokens = readTokens(response.body);
+  const tokens = readTokens(response.body, clockOf(endpoint));
   return {
     kind: 'OK',
     value: tokens === null ? { state: 'CONFIRMATION_REQUIRED' } : { state: 'SIGNED_IN', tokens },
@@ -295,7 +354,7 @@ export async function refreshSession(
   if (response.status !== 200) {
     return { kind: 'FAILED', reason: failureFor(response.status, response.body) };
   }
-  const tokens = readTokens(response.body);
+  const tokens = readTokens(response.body, clockOf(endpoint));
   return tokens === null
     ? { kind: 'FAILED', reason: 'UNAVAILABLE' }
     : { kind: 'OK', value: tokens };

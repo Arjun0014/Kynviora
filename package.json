@@ -42,7 +42,9 @@
     "verify:device:lowstorage": "tsx scripts/device/verifyLowStorage.ts",
     "purge": "npm --prefix db run purge",
     "verify:device:camera": "tsx scripts/device/verifyCameraPermission.ts",
-    "worker": "npm --prefix services/worker run start"
+    "worker": "npm --prefix services/worker run start",
+    "verify:device:signin": "tsx scripts/device/verifySignIn.ts",
+    "verify:device:delete": "tsx scripts/device/verifyDeleteAccount.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

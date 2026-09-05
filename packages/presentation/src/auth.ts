@@ -81,6 +81,84 @@ export const SIGN_OUT_COPY = Object.freeze({
 });
 
 /**
+ * Setting an account up, in the moment between signing in and seeing anything.
+ *
+ * A verified subject is not an account (DEC-124), so there is one request between the two - and it
+ * can be refused for a reason the person can act on. Each sentence below is one of those reasons.
+ */
+export const ACCOUNT_SETUP_COPY = Object.freeze({
+  working: 'Setting up your account…',
+  heading: 'We could not finish setting up',
+  /**
+   * The refusal DEC-125 exists to make: an address nobody has confirmed does not become an
+   * account. It is retryable because somebody can confirm it in another app and come back.
+   */
+  emailNotConfirmed:
+    'Your email address has not been confirmed yet. Open the link in the message we sent, then try again.',
+  /** DEC-117 keeps the record; nothing revives it. There is no retry, so none is offered. */
+  closed:
+    'This account has been closed. If you want to use Kynviora again, create a new account with this address.',
+  unavailable: 'We could not reach Kynviora to finish setting up. Check your connection.',
+  retryLabel: 'Try again',
+  signOutLabel: 'Sign out',
+});
+
+/**
+ * Closing an account, which is the one action in this app that cannot be undone (`DEV-062`).
+ *
+ * Spec references: `16` (a person may have their data removed, and the workflow enumerates what
+ * goes: device local data, primary records, object storage, derived projections, queued jobs,
+ * cached exports, notification tokens and backups), `14` (re-authentication for high-impact
+ * actions), `18` (say what a control will do before it does it; a refusal says what to do next),
+ * DEC-117, DEC-120, DEC-125.
+ *
+ * THE THREE THINGS THIS COPY HAS TO GET RIGHT
+ *
+ * **Say what goes, before it goes.** Not "are you sure" - a list. Somebody deleting an account
+ * after a bereavement is entitled to know that the dose history goes with it.
+ *
+ * **Say what does not go, and why.** `16` retains the *record that a deletion happened* for
+ * twenty-four months (DEC-117), and a screen claiming everything disappears would be untrue. It
+ * carries no medicines and no names, and saying so is the difference between a retention notice
+ * and a reason to distrust the whole screen.
+ *
+ * **Ask for the password, in the same breath.** `14` requires re-authentication and the honest
+ * framing is not a second dialog: it is the last field on the same screen, so the action and the
+ * proof arrive together.
+ */
+export const DELETE_ACCOUNT_COPY = Object.freeze({
+  openLabel: 'Delete my account',
+  heading: 'Delete your account',
+  intro: 'This closes your Kynviora account and removes what it holds. It cannot be undone.',
+  /** Rendered as a list. Each line is a thing `16`'s deletion workflow enumerates. */
+  removes: Object.freeze([
+    'Everyone you have set up, and their medicines and personal-care items',
+    'Every dose you have recorded, and every reminder you have scheduled',
+    'Anything you have shared with a caregiver, and their access to it',
+    'The copy of all of it kept on this phone',
+  ]),
+  keptHeading: 'What is kept',
+  keptBody:
+    'A record that an account was closed, and when. It is kept for two years because we have to be able to show that a deletion was carried out, and it holds no medicines, no names and no email address.',
+  passwordLabel: 'Your password',
+  passwordHelp: 'Asked for because this cannot be undone, and so that a borrowed phone cannot do it.',
+  submitLabel: 'Delete my account',
+  cancelLabel: 'Keep my account',
+  working: 'Deleting your account…',
+  doneHeading: 'Your account is closed',
+  doneBody: 'You have been signed out on every device. Nothing else is needed from you.',
+  refusalHeading: 'We could not delete your account',
+  /** Nothing was changed. The refusal DEC-125 makes rather than performing half a deletion. */
+  unavailable:
+    'Deleting an account is not available on this build, and nothing has been changed. Ask support to close it for you.',
+  wrongPassword: 'That password was not right. Nothing has been changed.',
+  /** The recoverable half-deletion: the data is gone, the sign-in account is not. */
+  partial:
+    'Your data has been removed. Closing your sign-in account did not finish - press Delete my account again to complete it.',
+  offline: 'We could not reach Kynviora. Nothing has been changed.',
+});
+
+/**
  * The one thing this build cannot do, said where somebody would look for it.
  *
  * `19`'s device scenario for sign-up and sign-in is what this unblocks; the account-deletion half

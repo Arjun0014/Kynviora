@@ -82,8 +82,16 @@ export interface AuthContextValue {
   readonly signIn: (email: string, password: string) => Promise<AuthOutcome<AuthTokens>>;
   readonly signUp: (email: string, password: string) => Promise<AuthOutcome<SignUpResult>>;
   readonly recover: (email: string) => Promise<AuthOutcome<'SENT_IF_KNOWN'>>;
-  /** A password re-entry, which produces a new token and therefore a fresh step-up (`14`). */
-  readonly reauthenticate: (password: string) => Promise<AuthOutcome<AuthTokens>>;
+  /**
+   * A password re-entry, which produces a new token and therefore a fresh step-up (`14`).
+   *
+   * `email` is for the case this provider deliberately cannot answer on its own: a **restored**
+   * session knows its tokens and not the address they belong to, because an address on disk is
+   * one more personal identifier at rest for a convenience. The caller supplies it - the account
+   * screens read it from `GET /v1/me`, which is the server's own answer over an authenticated
+   * request rather than anything kept on the phone.
+   */
+  readonly reauthenticate: (password: string, email?: string) => Promise<AuthOutcome<AuthTokens>>;
   /** Forget the session here, then revoke it everywhere. */
   readonly signOut: () => Promise<void>;
   /**
@@ -128,16 +136,23 @@ export function AuthProvider({ children, endpoint, value, nowSeconds }: AuthProv
   const store = useLocalStore();
   const clock = nowSeconds ?? (() => Math.floor(Date.now() / 1000));
 
-  const resolved = useMemo(
-    () =>
-      endpoint !== undefined
-        ? endpoint
-        : resolveAuthEndpoint({
-            EXPO_PUBLIC_SUPABASE_AUTH_URL: process.env.EXPO_PUBLIC_SUPABASE_AUTH_URL,
-            EXPO_PUBLIC_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
-          }),
-    [endpoint],
-  );
+  // Read through a ref rather than captured, so the endpoint below is not rebuilt on every render
+  // by a clock whose identity changes each time. What the endpoint needs is the *current* clock at
+  // the moment a response arrives, which is exactly what a ref gives it.
+  const clockRef = useRef(clock);
+  clockRef.current = clock;
+
+  const resolved = useMemo(() => {
+    const base =
+      endpoint ??
+      resolveAuthEndpoint({
+        EXPO_PUBLIC_SUPABASE_AUTH_URL: process.env.EXPO_PUBLIC_SUPABASE_AUTH_URL,
+        EXPO_PUBLIC_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+      });
+    // The same clock the renewal rule reads. A session dated by one clock and renewed against
+    // another is the skew defect `readTokens` documents, reintroduced one layer up.
+    return base === null ? null : { ...base, nowSeconds: () => clockRef.current() };
+  }, [endpoint]);
 
   const [signed, setSigned] = useState<Signed | null>(null);
   const [restored, setRestored] = useState(false);
@@ -260,12 +275,18 @@ export function AuthProvider({ children, endpoint, value, nowSeconds }: AuthProv
 
       recover: (email) => requestPasswordRecovery(endpointNow, email),
 
-      reauthenticate: async (password) => {
-        const email = signed?.email ?? '';
+      reauthenticate: async (password, suppliedEmail) => {
+        // The session's own address where it has one, and the caller's where it does not - a
+        // restored session knows its tokens and not the address behind them.
+        const email = (signed?.email ?? '') || (suppliedEmail?.trim().toLowerCase() ?? '');
         if (email === '') {
-          // A restored session does not know the address it belongs to, and asking the provider
-          // for it here would be a network call to learn something the person is about to type.
-          return { kind: 'FAILED', reason: 'WRONG_CREDENTIALS' };
+          // `UNAVAILABLE`, and emphatically **not** `WRONG_CREDENTIALS`, which is what this used
+          // to answer. Nothing was checked, so calling the password wrong is untrue - and it is
+          // untrue in the direction that matters: `18` asks a refusal to say what to do next, and
+          // "that password was not right" sends somebody to change a password that was fine.
+          // Every restored session hit this, so re-authentication was impossible after a restart
+          // and the screen blamed the person for it.
+          return { kind: 'FAILED', reason: 'UNAVAILABLE' };
         }
         const outcome = await providerSignIn(endpointNow, { email, password });
         if (outcome.kind === 'OK') await adopt(outcome.value, email);

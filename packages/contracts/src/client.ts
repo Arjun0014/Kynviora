@@ -555,6 +555,25 @@ export interface ScheduleChangeBody extends ScheduleBody {
   readonly active?: boolean;
 }
 
+/**
+ * The account, as this system holds it (DEC-124, DEC-125).
+ *
+ * Deliberately small. The provider holds the identity; this is what Kynviora keeps beside it, and
+ * every field here is one a person could already see about themselves.
+ */
+export interface Account {
+  readonly userId: string;
+  readonly email: string;
+  readonly emailVerified: boolean;
+  readonly status: string;
+  readonly createdAt: string;
+}
+
+export interface AccountResponse {
+  readonly account: Account;
+  readonly serverTime: string;
+}
+
 export interface Schedule {
   readonly id: string;
   readonly ownedItemId: string;
@@ -1324,6 +1343,36 @@ export interface KynvioraClient {
    */
   reportTimeZone(timeZone: string | null): Promise<ApiOutcome<TimeZoneRecorded>>;
   /**
+   * Turn a verified subject into an account (DEC-125).
+   *
+   * Called once, after signing in, and before anything else - a verified token reaches nothing
+   * until the row exists (DEC-124), so a screen that asked first would get a 401 and read it as
+   * having been signed out.
+   *
+   * Takes no arguments and needs none. The subject is the identity and the address comes from the
+   * provider, server to server; anything this side could send would be a caller describing
+   * themselves, which `13` does not allow.
+   *
+   * Idempotent: a second call returns the row the first one made.
+   */
+  registerAccount(): Promise<ApiOutcome<AccountResponse>>;
+  /**
+   * Close the account, everything under it, and the identity behind it (`DEV-062`, DEC-125).
+   *
+   * Needs a **fresh** step-up, which on a bearer session means having re-authenticated within the
+   * last fifteen minutes - not a flag a caller may set. `14` names deletion among the actions that
+   * require re-authentication and it is the most one-way of them.
+   *
+   * Idempotent, and that is not a nicety: a deletion interrupted after the local half has to be
+   * finishable by the person it belongs to rather than only by an operator, so calling it again is
+   * the documented recovery.
+   *
+   * Answers `204` and nothing else - there is no account left to describe.
+   */
+  deleteAccount(): Promise<ApiOutcome<null>>;
+  /** Who the caller is, as this system holds them. */
+  readAccount(): Promise<ApiOutcome<AccountResponse>>;
+  /**
    * Everything Kynviora holds about this account, as one document (spec 16 export, DEC-117).
    *
    * Requires fresh step-up, so this is called with an elevated client. There is no artifact and
@@ -1677,6 +1726,9 @@ export function createClient(options: ClientOptions): KynvioraClient {
     recordConsent: (body) => send<ConsentRecorded>('PUT', '/v1/consents', body),
 
     reportTimeZone: (timeZone) => send<TimeZoneRecorded>('PUT', '/v1/me/time-zone', { timeZone }),
+    registerAccount: () => send<AccountResponse>('POST', '/v1/me', {}),
+    readAccount: () => get<AccountResponse>('/v1/me'),
+    deleteAccount: () => request<null>(transport, { method: 'DELETE', path: '/v1/me' }),
 
     exportPersonalData: () => get<PersonalExportResponse>('/v1/export'),
 
