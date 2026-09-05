@@ -4224,3 +4224,80 @@ somebody deleted more than thirty days ago.
 
 **Sources.** `16` (deletion; the workflow enumerates what goes); `14`; `13`; `docs/RETENTION.md`;
 DEC-117; DEC-118; `DEV-036`; `DEV-057`; `BLK-010`.
+
+---
+
+## DEC-121 - The purge runs on a schedule the database keeps, and a production process that has not accounted for retention does not start
+
+**Context.** DEC-117 approved the retention matrix and `0023` built the sweep. `runPurgeSweep` was
+correct, measured by fifteen checks, and **nothing called it**. `npm run purge` ran it once, by
+hand, if somebody remembered. So every deadline in `docs/RETENTION.md` - thirty days for personal
+data, twenty-four hours for a Visit Pack's content, seven days for an unattached capture - was a
+commitment the code could keep and the operation could not.
+
+That was the only place in this system where a promise made to a person outran what the system
+does. Everything else outstanding is a feature that is absent and says so.
+
+**Decision 1: the schedule lives in the database, not in a timer.** "When is the next sweep due" is
+computed from `retention_run` on every pass. A worker restarted every minute sweeps on schedule; a
+worker down for a week sweeps the moment it returns; two workers pointed at one database sweep once
+between them. A `setInterval` gets all three wrong, and gets them wrong silently - which is the
+specific failure mode a retention job cannot afford, because nobody is watching it.
+
+**Decision 2: a lease row, not an advisory lock.** `pg_try_advisory_lock` is shorter and wrong
+twice over: it is session-scoped, so it is re-entrant within a session and therefore untestable
+against a single-connection database (DEC-037), and it is invisible to an operator asking why no
+sweep has run. A row can be read, can be contended in a test by writing somebody else's holder into
+it, and expires - so a worker killed mid-sweep recovers without anybody logging in.
+
+The lease is **not** what makes the purge safe. `0023` is: every deadline is a policy attached to
+`kynviora_retention`, so two concurrent sweeps would delete the same due rows twice and the second
+would find none. A bug in the lease wastes work; it cannot widen what may be deleted.
+
+**Decision 3: each category is isolated, and PARTIAL is not SUCCEEDED.** The sweep is seven
+categories, each in its own transaction, each with its own row in `retention_run_category`. One
+raising does not stop the others - and, the point, does not let the run be recorded as a success.
+A job that reported success because most of it worked is exactly how a table quietly stops being
+purged for a year while a dashboard stays green. A category that failed rolled back, so its
+recorded count is zero rather than "however far it got", and the schema refuses any other number.
+
+**Decision 4: what a failure may say is a step label and a SQLSTATE.** Not the driver's message.
+`detail` on a Postgres constraint violation quotes the offending row's values verbatim, and a
+retention job's output outlives the record it is about - it is the last place a deleted medicine
+could come back. So the label comes from this codebase's own closed vocabulary and the code is five
+characters from a checked alphabet, and both are provably free of content.
+
+**Decision 5: a production process that has not accounted for retention refuses to start.**
+`KYNVIORA_RETENTION` is `worker`, `external` or `none`; it defaults to `none`; and `none` in
+production without `KYNVIORA_ALLOW_UNSWEPT_START=1` is a startup failure.
+
+This is deliberate asymmetry with every other misconfiguration here. A missing authenticator is
+loud - every request fails. A missing sweep is silent, and stays silent for exactly as long as it
+takes somebody to ask why a table has grown. The acknowledgement exists because there are real
+reasons to run without a sweep - a read-only replica, a staging copy, a migration window - and none
+of them should require pretending one is happening somewhere.
+
+**Decision 6: in-process today, its own process when `BLK-001` clears.** PGlite is a single writer
+(DEC-037), so a separate worker on the same data directory would purge from a stale copy and write
+it back over everything the API had done - which has already silently destroyed data in this
+repository once. `KYNVIORA_RETENTION=worker` hosts the loop on the connection the API already
+holds, which is the same reasoning that put the staff surface in one process. `npm run worker`
+exists and **refuses** a local data directory without an explicit override.
+
+**What is not claimed.** There is no cloud scheduler, cron, queue or orchestrator, and none is
+implied. The worker keeps its own schedule, which is the shape that works with or without one - and
+if a scheduler is later put in front of it, the lease and the schedule make a duplicate invocation
+a no-op rather than a second sweep.
+
+**Consequences.** Migration `0026` adds three tables holding no personal data. The retention role
+gains INSERT on two of them, which changed the shape of an invariant rather than weakening it: the
+rule was "INSERT on none of its tables", the protection it was really expressing is "no table
+grants both INSERT and DELETE", and it is now stated that way and still holds everywhere.
+
+`DEV-063` records what this does not close: every eligibility floor sits exactly on its deadline,
+so a discrete sweep overshoots by up to one interval and no finite interval fixes that.
+
+**Sources.** `16` (retention deadlines; the deletion workflow); `14` (least privilege, deny by
+default); `20` (a job reports start, end, outcome, duration and counts, with correlation and
+without content); `21` (environments); DEC-005; DEC-013; DEC-037; DEC-117; DEC-120;
+`docs/RETENTION.md`; `DEV-057`; `BLK-001`.

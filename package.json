@@ -41,7 +41,8 @@
     "verify:device:privacy": "tsx scripts/device/verifyPrivacyLeakage.ts",
     "verify:device:lowstorage": "tsx scripts/device/verifyLowStorage.ts",
     "purge": "npm --prefix db run purge",
-    "verify:device:camera": "tsx scripts/device/verifyCameraPermission.ts"
+    "verify:device:camera": "tsx scripts/device/verifyCameraPermission.ts",
+    "worker": "npm --prefix services/worker run start"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

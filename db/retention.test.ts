@@ -130,13 +130,19 @@ describe('the retention role', () => {
     expect(res.rows[0]).toEqual({ app: false, service: false });
   });
 
-  it('holds a grant on exactly the tables it purges, and INSERT on none of them', async () => {
+  it('holds a grant on exactly the tables it purges and the three it keeps its own books in', async () => {
     // `0022` gave this role two tables. `0023` gave it the tables an item purge has to empty, so
     // the boundary is no longer "which tables" - it is "which rows", and that moved from the
     // grants to the policies. `db/purge.test.ts` is where the second half is measured.
     //
-    // What has not moved is that it may only read and remove. A role that could INSERT could
-    // manufacture the history it is trusted to remove.
+    // `0026` added three that are not purge targets at all: the lease and the run history the
+    // worker keeps about itself. **They are why the invariant below is stated the way it is.** It
+    // used to read "INSERT on none of them", which was the right protection expressed by
+    // accident: the danger is a role that can both *write* and *remove* rows on one table,
+    // because that role can manufacture the history it is trusted to delete. A worker cannot
+    // record that it ran without INSERT, and it holds no DELETE on anything it records into - so
+    // the sharper statement is that **no table grants this role both INSERT and DELETE**, which
+    // catches the original threat and keeps catching it if a fourth bookkeeping table appears.
     const res = await t.asOwner((db) =>
       db.query<{ table_name: string; privilege_type: string }>(
         `SELECT table_name, privilege_type
@@ -150,7 +156,8 @@ describe('the retention role', () => {
       byTable.set(row.table_name, [...(byTable.get(row.table_name) ?? []), row.privilege_type]);
     }
 
-    expect([...byTable.keys()].sort()).toEqual([
+    // What it purges.
+    const purgeTargets = [
       'alert_delivery',
       'alert_publication',
       'allergy_record',
@@ -174,17 +181,41 @@ describe('the retention role', () => {
       'review_task',
       'safety_receipt',
       'visit_pack',
-    ]);
+    ];
+
+    // What it writes about itself, and exactly which privileges each one needs. Spelled out per
+    // table rather than checked loosely, because "the worker needs to write things" is how a
+    // bookkeeping table quietly acquires DELETE.
+    const workerTables: Record<string, string[]> = {
+      // Taken and given back by conditional UPDATE. Never inserted - `0026` creates the one row -
+      // and never deleted.
+      retention_lease: ['SELECT', 'UPDATE'],
+      // Opened, then closed exactly once. The UPDATE policy admits only an open row.
+      retention_run: ['INSERT', 'SELECT', 'UPDATE'],
+      // Written once and never touched again: no UPDATE, no DELETE.
+      retention_run_category: ['INSERT', 'SELECT'],
+    };
+
+    expect([...byTable.keys()].sort()).toEqual(
+      [...purgeTargets, ...Object.keys(workerTables)].sort(),
+    );
 
     for (const [table, privileges] of byTable) {
-      // The invariant that has not moved through three migrations, and the one that matters most:
-      // a role that could INSERT could manufacture the history it is trusted to remove.
-      expect(privileges).not.toContain('INSERT');
+      // The invariant, sharpened. A role that could insert into a table it can also delete from
+      // could manufacture the history it is trusted to remove; a role that can only insert into
+      // tables it cannot delete from cannot.
+      expect(privileges.includes('INSERT') && privileges.includes('DELETE')).toBe(false);
 
-      // `visit_pack` is the one table with all three, because it is purged twice on two clocks
-      // (DEC-117, DEC-120): its **content** goes 24 hours after expiry, which is an UPDATE that
-      // leaves the row so "a pack was created and has expired" stays answerable - and the row
-      // itself goes with the profile it belonged to, which is a DELETE.
+      const workerPrivileges = workerTables[table];
+      if (workerPrivileges !== undefined) {
+        expect(privileges.sort()).toEqual(workerPrivileges);
+        continue;
+      }
+
+      // A purge target may read and remove, and nothing else - except `visit_pack`, the one table
+      // purged twice on two clocks (DEC-117, DEC-120): its **content** goes 24 hours after expiry,
+      // which is an UPDATE that leaves the row so "a pack was created and has expired" stays
+      // answerable, and the row itself goes with the profile it belonged to, which is a DELETE.
       const expected =
         table === 'visit_pack' ? ['DELETE', 'SELECT', 'UPDATE'] : ['DELETE', 'SELECT'];
       expect(privileges.sort()).toEqual(expected);

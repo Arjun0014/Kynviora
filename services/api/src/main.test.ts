@@ -66,6 +66,8 @@ async function startServer(overrides: Partial<MainConfig> = {}): Promise<Started
       seed: true,
       allowAnonymousStart: false,
       supabase: null,
+      retention: { mode: 'none', acknowledgedUnswept: false },
+      production: false,
       ...overrides,
     },
     { logger: noopLogger() },
@@ -101,6 +103,48 @@ describe('the process starts and serves', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: 'ok' });
   });
+
+  it('refuses to start in production with nothing accounting for retention', async () => {
+    // The fail-closed rule for a promise nothing keeps. `docs/RETENTION.md` says deleted personal
+    // data physically disappears within thirty days; a process serving that promise with no sweep
+    // behind it fails in a way no request will ever reveal, so it fails at startup instead
+    // (DEC-121).
+    await expect(
+      startServer({ production: true, retention: { mode: 'none', acknowledgedUnswept: false } }),
+    ).rejects.toThrow(/No retention is configured/);
+  });
+
+  it(
+    'starts in production once retention is accounted for elsewhere',
+    async () => {
+      const server = await startServer({
+        production: true,
+        retention: { mode: 'external', acknowledgedUnswept: false },
+        seed: false,
+      });
+      expect((await fetch(`${server.url}/health`)).status).toBe(200);
+    },
+    PROCESS_BOOT_TIMEOUT_MS,
+  );
+
+  it(
+    'hosts the retention loop in this process when asked to',
+    async () => {
+      // The only arrangement that can actually sweep the development database: PGlite is a single
+      // writer, so a separate worker process against the same directory would purge from a stale
+      // copy (DEC-037). Starting and stopping cleanly is the whole claim - that the loop is wired
+      // in, holds nothing on the way out, and does not keep the process alive.
+      const server = await startServer({
+        retention: { mode: 'worker', acknowledgedUnswept: false },
+        seed: false,
+      });
+      expect((await fetch(`${server.url}/health`)).status).toBe(200);
+      await expect(server.stop()).resolves.toBeUndefined();
+      // Stopped twice over: `afterAll` stops it again, which must not throw either.
+      started.splice(started.indexOf(server), 1);
+    },
+    PROCESS_BOOT_TIMEOUT_MS,
+  );
 
   it('refuses to start with no authenticator and no acknowledgement', async () => {
     // A server that authenticates nobody serves nobody, and it fails in a way that looks like a
@@ -230,6 +274,8 @@ describe('the development seed', () => {
         seed: true,
         allowAnonymousStart: false,
         supabase: null,
+        retention: { mode: 'none', acknowledgedUnswept: false },
+        production: false,
       };
 
       const first = await start(config, { logger: noopLogger() });

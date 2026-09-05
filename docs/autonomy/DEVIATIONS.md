@@ -2392,3 +2392,50 @@ its own limit on pending local notifications, which is lower than Android's and 
   half-built - the auth user must go first, so a failure part-way leaves an account that still
   works rather than one that cannot be reached and cannot be removed.
 - **Status**: OPEN, blocked on `BLK-010`.
+
+---
+
+## DEV-063 - The sweep interval is the overshoot past every deadline, and no interval makes it zero
+
+- **Affected specification**: `16` (retention deadlines: personal data purged **within** 30 days,
+  Visit Pack content **within** 24 hours of expiry, unattached capture artifacts **within** 7
+  days), `docs/RETENTION.md` sections 3.1, 3.2 and 8.3, DEC-117, DEC-121.
+- **Expected behaviour**: a row is physically gone by its deadline.
+- **Implemented behaviour**: a row is physically gone somewhere in
+  `[deadline, deadline + sweep interval]`. With the default interval that is up to one hour past a
+  thirty-day promise, and up to one hour past a twenty-four hour one.
+- **Reason**: every eligibility floor in `0023` sits **exactly on** its deadline -
+  `purge_floor()` is `now() - interval '30 days'`, and Visit Pack content becomes purgeable at
+  `expires_at + 24 hours`. A row therefore becomes eligible at the deadline and is removed by the
+  next sweep after it. Sweeping is discrete and the promise is not, so **no finite interval closes
+  this** - it can only be made small.
+
+  Worth naming precisely, because it is easy to read the worker as having closed the gap DEC-121
+  was about. It closed the large one: nothing ran at all, and the deadline was unbounded. What is
+  left is bounded, stated and configurable.
+
+- **Temporary or permanent**: temporary, and it is a decision rather than work. Two ways to close
+  it:
+  1. **A margin in the floors.** Purge at `deadline - interval`, so the promise is kept at the
+     deadline rather than shortly after it. Three lines of SQL - and it changes what the RLS
+     policies admit, which is a change to the security boundary `0023` is careful about, so it
+     wants deciding rather than doing. It is also the only direction that is safe to get wrong:
+     purging slightly early is more protective, not less.
+  2. **A continuous sweep.** Does not exist, and would be a much larger change for a smaller
+     benefit than (1).
+
+- **Risk**: low, bounded, and in the protective direction. A row in the overshoot window has
+  already been **inaccessible** for the whole of its deadline - revocation is synchronous
+  (`docs/RETENTION.md` section 1), so nothing reads it, no reminder plans from it, no export
+  includes it and no caregiver reaches it. What persists an hour longer than promised is bytes
+  nobody can address.
+
+  The bound is enforced rather than documented: `readRetentionWorkerConfig` refuses an interval
+  above 24 hours, which is the shortest deadline in the matrix, because an interval longer than a
+  deadline could more than double the life of the content it governs.
+
+- **Required future work**: a decision on (1), then `purge_floor()` and the four inline intervals
+  in `0023` gain the margin, and this closes. The arithmetic is written out in
+  `docs/RETENTION.md` section 8.3 so the choice is not made by whoever next edits a default.
+- **Status**: OPEN, not blocked. It is a decision about a security boundary, not a missing
+  credential.

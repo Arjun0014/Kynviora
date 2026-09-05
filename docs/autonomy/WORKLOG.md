@@ -4089,3 +4089,167 @@ provider (`BLK-010`), Phase 2.2, or `BLK-007` - except camera and file permissio
 ordinary work and is the one thing a next session could pick up without asking anybody anything.
 Phase 9.2's last two MASVS categories are decision-shaped too: there is no production endpoint to
 verify a certificate chain against (`BLK-001`), and `15` names no posture for tampering.
+
+---
+
+## 2026-09-05 - The sweep that ran itself, and the hour it is still late by
+
+Resumed from a clean tree at `e5bdac3` with `npm run verify` green at 4403/165, reconciled against
+git, STATUS, DECISIONS, DEVIATIONS, BLOCKERS and `docs/RETENTION.md` before anything was changed.
+Everything the handoff claimed held, including the one detail worth checking rather than trusting:
+`services/worker` existed as an empty, untracked directory. Nothing scheduled the purge.
+
+That was the task, and it was the right one. `runPurgeSweep` had been correct and measured since
+`0023`; it had simply never been called by anything but a person at a terminal. So the thirty-day
+deadline in `docs/RETENTION.md` - and the twenty-four hour one, and the seven-day one - were
+commitments the code could keep and the operation could not. It was the only place in this system
+where a promise made to a person outran what the system does; everything else outstanding is a
+feature that is absent and says so.
+
+### What the worker had to be, rather than what a worker usually is
+
+Four decisions, each of which had a shorter wrong answer.
+
+**The schedule is in the database, not in a timer.** Every pass reads the last run out of
+`retention_run` and computes how long to wait. A `setInterval` would have been two lines and would
+have been wrong three ways at once: a worker redeployed every five minutes would sweep every five
+minutes, a worker down for a week would wait a full interval after coming back, and neither failure
+announces itself. The property that follows is the one worth naming - **restarting the process does
+not restart the countdown** - and it gets its own test, twice, once as arithmetic and once as two
+consecutive loops against one database agreeing on when the next sweep is.
+
+**The lock is a lease row, not `pg_try_advisory_lock`.** The advisory lock is shorter and is wrong
+twice over. It is session-scoped, so it is re-entrant within a session, which makes it exactly
+untestable against a single-connection database (DEC-037) - the test would have proved nothing and
+looked like it proved something. And it is invisible: an operator asking why no sweep has run for
+two days cannot query it. A row can be read, can be contended in a test by writing somebody else's
+holder into it, and expires by itself, so a worker killed mid-sweep recovers without anybody
+logging in.
+
+Worth being clear about what the lease is **not**. It is not what makes the purge safe. `0023` is:
+every deadline is a policy attached to `kynviora_retention`, so two concurrent sweeps would delete
+the same due rows twice and the second would find none. A bug in the lease wastes work; it cannot
+widen what may be deleted. That asymmetry is why a lease was proportionate and a distributed lock
+service would not have been.
+
+**Each of the seven categories is a transaction, and PARTIAL is not SUCCEEDED.** The sweep used to
+be a function body: twenty-four statements in order, and the first one to raise abandoned the other
+twenty-three. So it became data - `PURGE_CATEGORIES`, grouped by what has to succeed together -
+with two consumers. `npm run purge` still runs the whole plan and stops at the first failure, which
+is what a person at a terminal wants. The worker runs each category in its own transaction and
+records an outcome for each.
+
+The outcome vocabulary is where the actual protection is. A run in which one category raised is
+`PARTIAL`, and `PARTIAL` is not `SUCCEEDED` - not in the schema, not in the schedule (it retries in
+five minutes rather than an hour), and not in the log line. A job that reported success because most
+of it worked is precisely how a table quietly stops being purged for a year while a dashboard stays
+green, and that failure mode gets the most explicit test in the file: a category is made to fail by
+**revoking a grant**, so the `42501` is a real one from a real statement, and the assertion is that
+the run is recorded as `PARTIAL` and specifically not as `SUCCEEDED` - while the other six
+categories are proved to have purged what was due.
+
+**What a failure may say is a step label and a SQLSTATE.** Not the driver's message. `detail` on a
+Postgres constraint violation quotes the offending row's values verbatim, and a retention job's
+output outlives the record it is about - it is the last place a deleted medicine could come back,
+into a table nobody would think to look in. So `PurgeStepFailure` carries the step's own label from
+the sweep's closed vocabulary, the code is five characters from an alphabet the column checks, and
+a test dumps every row of both history tables and asserts that neither medicine name, the owner ID
+or the profile ID appears anywhere in them.
+
+### Fail-closed, for a failure that is silent
+
+A missing authenticator is loud: every request fails, and `main.ts` has refused to start without one
+since Stage 7. A missing sweep is silent, and stays silent for exactly as long as it takes somebody
+to ask why a table has grown. So `KYNVIORA_RETENTION` is `worker`, `external` or `none`, it defaults
+to `none` so that the check has something to catch, and `none` in production without
+`KYNVIORA_ALLOW_UNSWEPT_START=1` is a startup failure naming all three ways out.
+
+The acknowledgement is not a loophole to be embarrassed about. There are real reasons to run without
+a sweep - a read-only replica, a staging copy, a migration window - and none of them should require
+pretending one is happening somewhere.
+
+### Where it runs, and where it is honest about not running
+
+Two arrangements, one of which works today. PGlite is a single writer (DEC-037), so a separate
+worker process against the API's data directory would purge from a stale copy and then write that
+copy back over everything the API had done - which has already silently destroyed data in this
+repository once. `KYNVIORA_RETENTION=worker` therefore hosts the loop on the connection the API
+already holds, which is the same reasoning that put the staff surface in one process, and it becomes
+two deployments unchanged when `BLK-001` clears.
+
+`npm run worker` exists and **refuses** a local data directory without an explicit override, with an
+error that names the reason rather than the flag.
+
+There is no cloud scheduler and nothing here pretends there is one. The worker keeps its own
+schedule, which is the shape that works with or without an orchestrator in front of it - and if one
+is later added, the lease and the schedule make a duplicate invocation a no-op rather than a second
+sweep.
+
+Run as a real process against a scratch database with a five-second interval, it swept every five
+seconds for forty-six seconds: `retention.loop.started`, then eight `run.started`/`run.finished`
+pairs at 22.970, 27.989, 33.001, 38.011, 43.023, 48.030, 53.052 and 58.064. `outcome: SUCCEEDED`,
+`categories_attempted: 7`, `categories_failed: 0`, `rows_purged: 0`, a real `duration_ms`, and not
+one field that is not a count, a code or an identifier.
+
+### Two defects, and one of them was a test doing its job
+
+**The grant invariant had been right for the wrong reason.** `db/retention.test.ts` asserted that
+the retention role holds INSERT on none of its tables, and the worker's run history needs INSERT to
+exist at all. The easy move was to add an exception. The right one was to notice what the rule was
+actually protecting: its own comment says "a role that could INSERT could manufacture the history it
+is trusted to remove", and that danger is about tables the role can **delete from**. The invariant
+is now that no table grants this role both INSERT and DELETE - which catches the original threat,
+still holds on all twenty-six tables, and keeps holding if a fourth bookkeeping table appears. The
+worker's three tables are also spelled out privilege by privilege, because "the worker needs to
+write things" is how a bookkeeping table quietly acquires DELETE.
+
+**A blocked UPDATE is a miss, not a refusal.** A test asserting that a closed run cannot be
+rewritten was written with `expectDenied` and failed - correctly. The RLS `USING` clause makes a
+closed row invisible to the statement, so Postgres reports zero rows changed rather than raising,
+which is exactly what the harness's own docstring says about SELECT and UPDATE. The assertion is now
+on the row count and on the row still saying `PARTIAL` afterwards, which would also catch the policy
+having been dropped entirely - the error-shaped version would not have.
+
+### The gap that is left, written down rather than rounded off
+
+`DEV-063`. Every eligibility floor in `0023` sits **exactly on** its deadline: `purge_floor()` is
+`now() - interval '30 days'`, Visit Pack content becomes purgeable at `expires_at + 24 hours`. So a
+discrete sweep purges a row somewhere in `[deadline, deadline + interval]`, and **no finite interval
+makes the upper end of that equal the deadline**. Sweeping is discrete; the promise is not.
+
+It would have been easy to leave that implicit behind a small default and call the deadline kept.
+The interval is instead named as what it is - the size of the gap between what the matrix promises
+and what the system does - defaulted to an hour, and **capped at 24 hours by the config reader**,
+because that is the shortest deadline in the matrix and an interval longer than a deadline could
+more than double the life of the content it governs.
+
+Closing it properly means giving the floors a margin, which changes what the RLS policies admit -
+a change to the security boundary `0023` is careful about, and one that wants deciding rather than
+doing. The arithmetic is in `docs/RETENTION.md` section 8.3 so the choice is not made by whoever
+next edits a default.
+
+### The deadlines, finally measured at the microsecond
+
+`db/purgeDeadline.test.ts`. `purge.test.ts` proves the sweep purges what is due with fixtures at 31
+days and 3 days - comfortably either side. This asks where the line is, because "within 30 days" is
+a number somebody will be held to and `<=` versus `<` is the whole of it.
+
+`now()` is constant within a transaction, so a fixture inserted at `kynviora.purge_floor()` and read
+back in the same transaction is exactly on the line rather than a few milliseconds past it, and a
+sibling one microsecond later is exactly off it. `SET LOCAL ROLE kynviora_retention` inside that
+transaction makes the answer come from the **policy** rather than from a predicate the test wrote,
+and the role and its non-superuser status are asserted first, because a superuser bypasses RLS and
+every boundary would read as inclusive (DEC-005). Six deadlines, both sides of each.
+
+The same file finally states the two halves of a deletion in one place and in order: an owner
+deletes a medicine, cannot see it or its dose history in the very next statement, **and the row is
+still physically there** - a sweep that day removes nothing, and only once `deleted_at` reaches the
+floor do the medicine and its doses go. Inaccessible is not gone, the matrix promises both at
+different times, and conflating them is how a product tells somebody their data is deleted while it
+is on disk with no stated end date.
+
+### Result
+
+`npm run verify` exit 0. 4496 tests across 170 files, up from 4403 across 165. Migration `0026`
+adds three tables that hold no personal data, and the app and service roles hold no grant on any of
+them.

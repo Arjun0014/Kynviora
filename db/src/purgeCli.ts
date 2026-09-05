@@ -8,10 +8,11 @@
  * finds nothing and says so.
  *
  * WHAT THIS IS NOT
- * A scheduler. There is no worker process in this build and no deployment to run one in, so the
- * thirty-day deadline is a commitment the code can keep and the operation cannot yet - which
- * `docs/RETENTION.md` says in place of a claim, and which this file does not pretend otherwise
- * about by printing a next-run time.
+ * A scheduler. `services/worker` is (DEC-121): it keeps a schedule from the run history, holds a
+ * lease so two workers cannot race, and records what each category did. This is the one-shot
+ * version for a person at a terminal, and it deliberately writes no run history - a sweep somebody
+ * ran by hand is not a scheduled sweep, and recording it as one would move the next scheduled
+ * sweep an interval into the future.
  *
  * IT SWITCHES ROLE AND WILL NOT PROCEED WITHOUT DOING SO
  * `runPurgeSweep`'s safety is entirely in the policies attached to `kynviora_retention`. Run as

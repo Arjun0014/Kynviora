@@ -46,6 +46,8 @@
       "@kynviora/fixtures/*": ["packages/fixtures/src/*"],
       "@kynviora/staff-web": ["services/staff-web/src/index.ts"],
       "@kynviora/staff-web/*": ["services/staff-web/src/*"],
+      "@kynviora/worker": ["services/worker/src/index.ts"],
+      "@kynviora/worker/*": ["services/worker/src/*"],
       "@kynviora/db": ["db/src/index.ts"],
       "@kynviora/db/*": ["db/src/*"]
     }

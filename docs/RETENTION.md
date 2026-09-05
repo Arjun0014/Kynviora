@@ -294,7 +294,88 @@ regardless of how many groups agree.
 
 ---
 
-## 8. What is implemented, and what is not
+## 8. How the purge is actually run
+
+A deadline nothing enforces is an intention. This section says what enforces the ones above, what
+it does when it goes wrong, and where it still falls short.
+
+### 8.1 The worker
+
+`services/worker` runs the sweep on a schedule. Three properties are what make it a deadline
+rather than a cron line somebody hopes is still installed:
+
+| Property                   | How                                                                                                                                                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Durable schedule**       | "When is the next sweep due" is computed from `retention_run` in the database, not from a timer. A worker restarted every minute sweeps on schedule; one that was down for a week sweeps the moment it returns.   |
+| **No overlap**             | A single-row lease (`retention_lease`), taken by conditional `UPDATE` and released in a `finally`. A worker that was killed holds it only until `expires_at`, so nothing needs unblocking by hand.                |
+| **Per-category isolation** | Each of the seven categories runs in its own transaction and gets its own row in `retention_run_category`. One failing does not stop the others, and - the point - does not let the run be recorded as a success. |
+
+**The run's outcome has four values and `PARTIAL` is not `SUCCEEDED`.** A sweep in which one
+category raised has not kept the deadline for that category, and a job that reported success
+because most of it worked is exactly how a table quietly stops being purged for a year.
+
+**What a run records**: start, end, outcome, duration, categories attempted, categories failed,
+rows purged, and per category the step that raised plus its five-character SQLSTATE. **Counts
+only.** No driver message is stored, because `detail` on a Postgres error quotes the offending row
+verbatim, and a retention job's output outlives the record it is about - it is the last place a
+deleted medicine could come back.
+
+**Privilege**: everything runs as `kynviora_retention` and nothing else. The worker gains no reach
+into personal data that `0023` did not already give the role, and `kynviora_app` and
+`kynviora_service` have no grant on any of the three worker tables.
+
+### 8.2 How it is meant to be deployed, and how it is run today
+
+Two arrangements, and only one of them can touch the development database:
+
+| Arrangement                 | How                                          | When                                                                                                                                                                                  |
+| --------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **In-process with the API** | `KYNVIORA_RETENTION=worker`                  | Today. PGlite is a single writer (DEC-037), so this is the only way anything sweeps the local database.                                                                               |
+| **Its own process**         | `npm run worker`, against a managed Postgres | When `BLK-001` clears. The entry point exists and refuses a local data directory without an explicit override, because a second process on one PGlite directory overwrites the first. |
+
+**There is no cloud scheduler, and this document does not pretend there is one.** No cron, no
+queue, no orchestrator, no deployment. The worker is a long-running process that keeps its own
+schedule from its own run history, which is the shape that works with or without one - and if a
+scheduler is later put in front of it, the lease and the schedule make a duplicate invocation a
+no-op rather than a second sweep.
+
+**A production process must say which of the three is true.** `KYNVIORA_RETENTION` is `worker`,
+`external` or `none`, it defaults to `none`, and a process that reaches production having said
+nothing **refuses to start**. This is deliberate asymmetry with every other misconfiguration in the
+system: a missing authenticator is loud because every request fails, whereas a missing sweep is
+silent and stays silent until somebody asks why a table has grown. `KYNVIORA_ALLOW_UNSWEPT_START=1`
+starts without retention on purpose, for the cases where that is genuinely right - a read-only
+replica, a staging copy, a migration window - none of which should require pretending a sweep is
+happening somewhere.
+
+### 8.3 The gap that remains: the sweep interval is the overshoot
+
+Recorded as `DEV-063` rather than left implicit.
+
+Every eligibility floor above sits **exactly on** its deadline: `purge_floor()` is `now() - 30
+days`, Visit Pack content becomes purgeable at `expires_at + 24 hours`, and so on. A discrete
+sweep therefore purges a row somewhere in `[deadline, deadline + interval]`, and **no finite
+interval makes the upper end of that equal the deadline.** Sweeping is discrete; the promise is
+not.
+
+So the interval is not a performance setting - it is the size of the gap between what this
+document promises and what the system does. It is bounded in the only two ways available without
+moving a security boundary:
+
+- the default is **one hour**, so the overshoot is one hour on a thirty-day promise;
+- the configured interval is **capped at 24 hours**, the shortest deadline in the matrix, because
+  an interval longer than that could more than double the life of the content it governs.
+
+Closing it properly means either a margin built into the floors themselves - purging at
+`deadline - interval` so the promise is kept at the deadline rather than shortly after it - or a
+continuous sweep. The first changes what the RLS policies admit, which is a change to the
+security boundary and wants deciding rather than doing; the second does not exist. Neither is
+attempted here, and the arithmetic is written down so that the choice is not made by whoever next
+edits a default.
+
+---
+
+## 9. What is implemented, and what is not
 
 Implementation status is tracked in `docs/autonomy/STATUS.md` and the deviations it names. This
 document is the target; it does not claim the target has been reached.

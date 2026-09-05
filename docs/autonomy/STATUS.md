@@ -13,18 +13,24 @@ Last updated: 2026-09-05
 | ------------------ | ------------------------------------------------------------------ |
 | **Current stage**  | Stage 4 complete; Stage 1 privacy work reopened and largely closed |
 | **Current phase**  | Phase 1.4 (export, deletion), Phase 1.1 (auth), Phase 2.2 (scan)   |
-| **Last completed** | Deleting a profile, and the account deletion that would be a lie   |
+| **Last completed** | The purge sweep on a schedule, with a lease and a run history      |
 | **Branch**         | `master`                                                           |
-| **Latest commit**  | `feat(profiles): deleting a person, and the account deletion...`   |
+| **Latest commit**  | `feat(retention): a sweep that runs itself, and the hour it...`    |
 | **Baseline tag**   | `baseline-spec-only`                                               |
 
-The retention decision unblocked six deviations at once and this session spent itself on them.
-What was **decided** rather than engineered - a retention matrix, an auth provider, quiet-hours
-semantics, the scan/OCR split - is recorded in DEC-117 through DEC-120 and in `docs/RETENTION.md`.
+The retention decision unblocked six deviations at once and the previous session spent itself on
+them. What was **decided** rather than engineered - a retention matrix, an auth provider,
+quiet-hours semantics, the scan/OCR split - is recorded in DEC-117 through DEC-120 and in
+`docs/RETENTION.md`.
+
+This session closed the one place where a promise made to a person outran what the system does:
+the sweep now runs on a schedule (DEC-121). What it did **not** close is written down as
+`DEV-063` - every eligibility floor sits exactly on its deadline, so a discrete sweep overshoots
+by up to one interval and no finite interval makes that zero.
 
 ## Verification state
 
-- **4403 tests passing**, 0 failing, across 165 files.
+- **4496 tests passing**, 0 failing, across 170 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -383,6 +389,35 @@ Migrates, seeds one synthetic household and listens on `127.0.0.1:3000`. The see
 ID to send as `x-kynviora-dev-user`. Safety and Regulatory Lens are **empty** against this seed on
 purpose - `BLK-006` and DEC-016, not a configuration mistake.
 
+### Running retention
+
+The sweep runs on a schedule now (DEC-121). Nothing runs it by default - `KYNVIORA_RETENTION`
+defaults to `none`, and a **production** process that has said nothing about retention refuses to
+start.
+
+In-process with the API, which is the only arrangement that can touch the local database:
+
+```bash
+KYNVIORA_DEV_AUTH=1 KYNVIORA_RETENTION=worker npm run dev
+```
+
+One sweep by hand, against the same database with nothing else running:
+
+```bash
+npm run purge
+```
+
+Its own process, which is the deployment shape and needs a database the API does not have open -
+PGlite is a single writer (DEC-037), so it refuses `KYNVIORA_LOCAL_DB_DIR` without
+`KYNVIORA_WORKER_ALLOW_LOCAL_DB=1`:
+
+```bash
+npm run worker
+```
+
+The interval is the maximum overshoot past every deadline in `docs/RETENTION.md` (`DEV-063`), not a
+performance setting. Default one hour, capped at 24.
+
 ### Running the staff surface and the reviewer console
 
 Three origins. The household API serves no reviewer route and the staff API serves nothing else
@@ -406,50 +441,51 @@ the API will not distinguish them.
 
 ## What is genuinely built and tested
 
-| Area                                                        | State                                                       |
-| ----------------------------------------------------------- | ----------------------------------------------------------- |
-| Domain vocabularies, IDs, provenance, untrusted quarantine  | Complete, 94 tests                                          |
-| Database schema, 21 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                  |
-| Catalog engine, capture pipeline, Trust Passport            | Complete, 178 tests                                         |
-| Regulatory registry, Citation Gate, Lens                    | Complete, 72 tests                                          |
-| Safety rule engine with replay; schedule and refill         | Complete, 88 tests                                          |
-| Ingestion pipeline with hostile-source defences             | Complete, 37 tests                                          |
-| Presentation layer, accessibility tokens, safety copy       | Complete, 436 tests                                         |
-| API boundary (Fastify), RLS-scoped context                  | Complete, 37 tests                                          |
-| Offline sync protocol, per-entity conflict policy           | Complete, 43 tests                                          |
-| Caregiver invitation, acceptance, revocation, audit         | Complete, 214 tests                                         |
-| Visit Pack export, reviewed-content gate, expiry            | Complete, 100 tests                                         |
-| Caregiver alert delivery, notification privacy              | Complete, 126 tests; **not sent** (BLK-009)                 |
-| Household Review Inbox, record-writing completion           | Complete, 95 tests                                          |
-| Medicine Reconciliation, two lists and no chosen answer     | Complete, 109 tests                                         |
-| Reviewer console: roles, two-person approval, withdrawal    | Complete, 116 tests; **publishes nothing** (BLK-006)        |
-| Staff surface split, console package, console process       | Complete, 172 tests; AAL2 modelled, no project (BLK-010)    |
-| Alert detail, explainability, report-incorrect              | Complete, 89 tests; **no alert to open** (BLK-006)          |
-| Notification delivery policy, quiet hours, revalidation     | Complete, 161 tests; **holds, recipient-locally** (DEC-119) |
-| Household and profile creation, the profile switcher        | Complete, 90 tests; no emergency contact (`DEV-034`)        |
-| Allergy and sensitivity records, provenance, review date    | Complete, 86 tests; no conditions (`DEV-035`)               |
-| Consent state, withdrawal, and what withdrawing stops       | Complete, 96 tests; export built, account deletion not      |
-| Typed term mapped to a canonical substance                  | Complete, 27 tests; no review queue (`DEV-037`)             |
-| Regulatory version diff and change attribution              | Complete, 27 tests; **no route yet** (BLK-004)              |
-| Shadow runs, before/after comparison, assessment replay     | Complete, 74 tests; substance rules now measurable          |
-| Manual entry: the write path, the form and the screen       | Complete, 105 tests; the only surface that creates an item  |
-| Item update, the three lifecycle states, mark-as-checked    | Complete, 105 tests; deletion built (DEC-117)               |
-| End-to-end vertical slice, 7 required scenarios             | Complete, 36 tests                                          |
-| Mobile app shell, encrypted store, accessible primitives    | **Runs on Android 16; storage and 48dp verified on device** |
-| The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)           |
-| Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
-| Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
-| Device harnesses: fourteen, storage to a camera permission  | Complete, 418 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
-| The mobile app itself: rendering, hooks, providers          | 55 tests, and `apps/**` linted at last (`DEV-043` closed)   |
-| Recording a dose: `RECORD_DOSES`, its own capability        | Complete, 47 tests; 7/7 on a device (DEC-116)               |
-| Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                  |
-| Retention: the matrix, the roles, the doors, the sweep      | Complete, 55 tests; nothing schedules it (see next task)    |
-| Deleting an item and a profile, end to end                  | Complete, 48 tests; account deletion open (`DEV-062`)       |
-| Portable export: fourteen sections, sources referenced      | Complete, 26 tests; no artifact and no link, by choice      |
-| Scanning a barcode: permission, check digit, confirmation   | Complete, 45 tests; **5/5 on a device**; no OCR (BLK-007)   |
-| Supabase Auth behind the existing port, reviewer AAL2       | Complete, 34 tests; **no project** (BLK-010)                |
-| Recipient-local quiet hours, and the zone ICU would accept  | Complete, 22 tests; a device reports its own zone           |
-| CI pipeline                                                 | Written; not yet run on a real runner                       |
+| Area                                                        | State                                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------- |
+| Domain vocabularies, IDs, provenance, untrusted quarantine  | Complete, 94 tests                                            |
+| Database schema, 26 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                    |
+| Catalog engine, capture pipeline, Trust Passport            | Complete, 178 tests                                           |
+| Regulatory registry, Citation Gate, Lens                    | Complete, 72 tests                                            |
+| Safety rule engine with replay; schedule and refill         | Complete, 88 tests                                            |
+| Ingestion pipeline with hostile-source defences             | Complete, 37 tests                                            |
+| Presentation layer, accessibility tokens, safety copy       | Complete, 436 tests                                           |
+| API boundary (Fastify), RLS-scoped context                  | Complete, 37 tests                                            |
+| Offline sync protocol, per-entity conflict policy           | Complete, 43 tests                                            |
+| Caregiver invitation, acceptance, revocation, audit         | Complete, 214 tests                                           |
+| Visit Pack export, reviewed-content gate, expiry            | Complete, 100 tests                                           |
+| Caregiver alert delivery, notification privacy              | Complete, 126 tests; **not sent** (BLK-009)                   |
+| Household Review Inbox, record-writing completion           | Complete, 95 tests                                            |
+| Medicine Reconciliation, two lists and no chosen answer     | Complete, 109 tests                                           |
+| Reviewer console: roles, two-person approval, withdrawal    | Complete, 116 tests; **publishes nothing** (BLK-006)          |
+| Staff surface split, console package, console process       | Complete, 172 tests; AAL2 modelled, no project (BLK-010)      |
+| Alert detail, explainability, report-incorrect              | Complete, 89 tests; **no alert to open** (BLK-006)            |
+| Notification delivery policy, quiet hours, revalidation     | Complete, 161 tests; **holds, recipient-locally** (DEC-119)   |
+| Household and profile creation, the profile switcher        | Complete, 90 tests; no emergency contact (`DEV-034`)          |
+| Allergy and sensitivity records, provenance, review date    | Complete, 86 tests; no conditions (`DEV-035`)                 |
+| Consent state, withdrawal, and what withdrawing stops       | Complete, 96 tests; export built, account deletion not        |
+| Typed term mapped to a canonical substance                  | Complete, 27 tests; no review queue (`DEV-037`)               |
+| Regulatory version diff and change attribution              | Complete, 27 tests; **no route yet** (BLK-004)                |
+| Shadow runs, before/after comparison, assessment replay     | Complete, 74 tests; substance rules now measurable            |
+| Manual entry: the write path, the form and the screen       | Complete, 105 tests; the only surface that creates an item    |
+| Item update, the three lifecycle states, mark-as-checked    | Complete, 105 tests; deletion built (DEC-117)                 |
+| End-to-end vertical slice, 7 required scenarios             | Complete, 36 tests                                            |
+| Mobile app shell, encrypted store, accessible primitives    | **Runs on Android 16; storage and 48dp verified on device**   |
+| The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)             |
+| Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)    |
+| Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)      |
+| Device harnesses: fourteen, storage to a camera permission  | Complete, 418 tests; 13 of `19`'s 14 scenarios (`DEV-040`)    |
+| The mobile app itself: rendering, hooks, providers          | 55 tests, and `apps/**` linted at last (`DEV-043` closed)     |
+| Recording a dose: `RECORD_DOSES`, its own capability        | Complete, 47 tests; 7/7 on a device (DEC-116)                 |
+| Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                    |
+| Retention: the matrix, the roles, the doors, the sweep      | Complete, 67 tests; deadlines measured to the microsecond     |
+| The retention worker: schedule, lease, run history          | Complete, 81 tests; **runs**, in-process or its own (DEC-121) |
+| Deleting an item and a profile, end to end                  | Complete, 48 tests; account deletion open (`DEV-062`)         |
+| Portable export: fourteen sections, sources referenced      | Complete, 26 tests; no artifact and no link, by choice        |
+| Scanning a barcode: permission, check digit, confirmation   | Complete, 45 tests; **5/5 on a device**; no OCR (BLK-007)     |
+| Supabase Auth behind the existing port, reviewer AAL2       | Complete, 34 tests; **no project** (BLK-010)                  |
+| Recipient-local quiet hours, and the zone ICU would accept  | Complete, 22 tests; a device reports its own zone             |
+| CI pipeline                                                 | Written; not yet run on a real runner                         |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
 alert-delivery, Review Inbox, reconciliation and reviewer-console rows each count tests that
@@ -484,47 +520,53 @@ appears here.
 
 ## Immediate next task
 
-**Schedule the purge sweep, or say in writing that nothing does.**
+**The digest** (`DEV-033`).
 
-`runPurgeSweep` exists, is measured by fifteen checks, and `npm run purge` runs it once. Nothing
-calls it on a timer, because there is no worker process in this build and no deployment to run one
-in — so the thirty-day deadline in `docs/RETENTION.md` is a commitment the code keeps and the
-operation does not. That is stated in the matrix rather than implied by a job that does not exist,
-which is the honest position and is not a finished one.
+`MEDIUM` and `LOW` events are classified and never assembled. The approved cadence is 09:00
+recipient-local with revalidation before inclusion, and both of the things that were missing are
+now present: a recipient's local time (DEC-119) and a revalidation path
+(`notification_revalidation`). It still cannot be **delivered** (`BLK-009`), but a digest that is
+assembled and recorded is most of the feature and is the half `04` Phase 7.5 actually specifies.
 
-It is the highest-value remaining item because it is the only place where a **promise made to a
-person** currently outruns what the system does. Everything else outstanding is a feature that is
-absent and says so.
+It is the highest-value remaining item because it is the largest piece of specified behaviour that
+is classified, decided, and simply not built - and because it now has a worker to be assembled by.
 
 ## Next three planned tasks
 
-1. **A worker process, and the purge on it.** `services/worker` is an empty directory. What it
-   needs is a loop, a lock so two instances do not sweep at once, and a way to report a run —
-   counts only, per `20`. **Waiting on:** nothing. This is work.
+1. **The digest** (`DEV-033`), as above. **Waiting on:** nothing that is not built.
 
-2. **The digest.** `DEV-033`: `MEDIUM` and `LOW` events are classified and never assembled. The
-   approved cadence is 09:00 recipient-local with revalidation before inclusion, and the two
-   things that were missing are now both present — a recipient's local time (DEC-119) and a
-   revalidation path (`notification_revalidation`). **Waiting on:** nothing that is not built. It
-   still cannot be _delivered_ (`BLK-009`), but a digest that is assembled and recorded is most of
-   the feature and is the half `04` Phase 7.5 actually specifies.
-
-3. **The Review Inbox's two uncompletable task kinds** (`DEV-024`), and the substance-mapping
+2. **The Review Inbox's two uncompletable task kinds** (`DEV-024`), and the substance-mapping
    review queue (`DEV-037`). Both are ordinary Stage 5/6 work with no external dependency. The
-   second is now less blocked than it reads: DEC-117 approved that a raw household term never goes
-   to staff by default, which is the decision `DEV-037` was waiting on for its _shape_ even though
-   it was recorded as waiting for a queue.
+   second is less blocked than it reads: DEC-117 approved that a raw household term never goes to
+   staff by default, which is the decision `DEV-037` was waiting on for its _shape_ even though it
+   was recorded as waiting for a queue.
+
+3. **A decision on `DEV-063`**, the retention overshoot. Not work - a decision about a security
+   boundary. Giving `purge_floor()` and the four inline intervals in `0023` a margin equal to the
+   sweep interval would make every deadline in `docs/RETENTION.md` met **at** the deadline rather
+   than shortly after it, and it changes what the RLS policies admit, which is the thing `0023` is
+   careful about. The arithmetic is in `docs/RETENTION.md` section 8.3.
 
 **What is still genuinely blocked, and by what.** Account deletion and the sign-up/sign-in device
 scenario on `BLK-010`; OCR and the possible-formula-change task on `BLK-007`; substance vocabulary
 depth on `BLK-003`; publishing anything on `BLK-004` and `BLK-006`; sending any server-originated
 notification on `BLK-009`; managed-Postgres parity on `BLK-001`. None of them is a decision any
-more — all six are a credential, a licence or a person.
+more - all six are a credential, a licence or a person.
 
 **The `19` device scenarios that remain.** One: sign-up, sign-in and recovery, which needs a
 Supabase project (`BLK-010`). Thirteen of fourteen are measured on hardware.
 
 ## Recent decisions worth knowing
+
+- **DEC-121** - the purge runs on a schedule the **database** keeps, not a timer: "when is the next
+  sweep due" is computed from `retention_run` on every pass, so a worker restarted every minute
+  sweeps on schedule and one down for a week sweeps the moment it returns. Overlap is prevented by
+  a lease **row** rather than an advisory lock, because a row can be read by an operator and
+  contended by a test. Each of the seven categories runs in its own transaction with its own
+  recorded outcome, and **`PARTIAL` is not `SUCCEEDED`** - a run where one category raised has not
+  kept that category's deadline, and reporting otherwise is how a table stops being purged for a
+  year. A production process that has not said what handles retention **refuses to start**, for
+  the asymmetry that a missing authenticator is loud and a missing sweep is silent.
 
 - **DEC-116** - recording a dose is `RECORD_DOSES`, and **no existing grant acquired it**.
   `VIEW_MEDICINES` stays strictly read-only, `MANAGE_MEDICINES` is not a way in either - the
@@ -1610,3 +1652,11 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      that have passed for weeks, suspect the app is not on screen at all before suspecting the
      app: `uiautomator dump` and `dumpsys window | grep mCurrentFocus` answer that in two seconds,
      and Metro's own log names the module it could not bundle.
+203. `npm run worker` starts **four** processes on Windows and killing the one you started
+     leaves the other three. `npm` spawns `npm --prefix services/worker`, which spawns the `tsx`
+     shim, which spawns the actual node process - so `kill $!` on the outer `npm` returns to a
+     prompt while a worker carries on sweeping in the background. It was still running sixteen
+     seconds after being "stopped", which against a shared data directory is exactly the
+     single-writer accident (DEC-037) the worker's own entry point refuses to allow. Stop it by
+     command line, not by process tree: `Get-CimInstance Win32_Process` filtered on `tsx` or
+     `worker`, then `Stop-Process -Force` on each.

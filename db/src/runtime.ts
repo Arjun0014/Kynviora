@@ -25,7 +25,13 @@
  */
 
 import { PGlite } from '@electric-sql/pglite';
-import { APP_ROLE, SERVICE_ROLE, loadMigrations, type Migration } from './migrations.js';
+import {
+  APP_ROLE,
+  RETENTION_ROLE,
+  SERVICE_ROLE,
+  loadMigrations,
+  type Migration,
+} from './migrations.js';
 
 export interface RuntimeQueryResult<TRow> {
   readonly rows: TRow[];
@@ -44,6 +50,16 @@ export interface RuntimeDb {
   withUser<T>(userId: string | null, fn: (db: RuntimeConnection) => Promise<T>): Promise<T>;
   /** A connection as `kynviora_service`. Privileged operations only (`13`). */
   withService<T>(fn: (db: RuntimeConnection) => Promise<T>): Promise<T>;
+  /**
+   * A connection as `kynviora_retention`. The purge sweep, and nothing else (DEC-117, `0026`).
+   *
+   * It is a third role rather than a mode of the service role for the reason `0022` gives: the
+   * privilege being minimised is exactly the one an attacker who reached the service role would
+   * use to cover their tracks. Every deadline the sweep relies on is a policy attached to this
+   * role, so running the same statements as anybody else would delete far more - which is why
+   * this is a separate method a caller has to ask for by name rather than a flag on `withService`.
+   */
+  withRetention<T>(fn: (db: RuntimeConnection) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -174,6 +190,7 @@ export async function createRuntimeDb(options: RuntimeDbOptions = {}): Promise<R
   return {
     withUser: (userId, fn) => runAs(APP_ROLE, userId, fn),
     withService: (fn) => runAs(SERVICE_ROLE, null, fn),
+    withRetention: (fn) => runAs(RETENTION_ROLE, null, fn),
     close: () => db.close(),
   };
 }

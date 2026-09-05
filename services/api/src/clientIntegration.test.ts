@@ -120,6 +120,8 @@ beforeAll(async () => {
       seed: true,
       allowAnonymousStart: false,
       supabase: null,
+      retention: { mode: 'none', acknowledgedUnswept: false },
+      production: false,
     },
     { logger: noopLogger() },
   );

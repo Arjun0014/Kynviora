@@ -21,6 +21,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRuntimeDb, resolveDataDir, seedDevelopmentData, type RuntimeDb } from '@kynviora/db';
 import {
+  cryptoIdGenerator,
   systemClock,
   type Clock,
   type Instant,
@@ -30,6 +31,15 @@ import {
 import { ALL_FIXTURE_SOURCES } from '@kynviora/fixtures';
 import type { SourceRegistryEntry } from '@kynviora/regulatory';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import {
+  assertRetentionAccountedFor,
+  readRetentionDeployment,
+  readRetentionWorkerConfig,
+  startRetentionLoop,
+  type RetentionDeployment,
+  type RetentionLoop,
+} from '@kynviora/worker';
+import { randomUUID } from 'node:crypto';
 import { createServer } from './server.js';
 import type { DatabasePool, Principal } from './context.js';
 import { DevAuthRefused, createDevAuthenticator } from './devAuth.js';
@@ -62,6 +72,18 @@ export interface MainConfig {
    * configuration does not bite here - there is nothing to leak.
    */
   readonly supabase: { readonly issuer: string; readonly audience: string } | null;
+  /**
+   * What this deployment has said about retention (DEC-121).
+   *
+   * `docs/RETENTION.md` promises that deleted personal data physically disappears within thirty
+   * days. Nothing in an API process does that, so a production deployment has to name what does -
+   * this process, a separate worker, or nothing on purpose. A missing answer is refused at
+   * startup, for the same reason a missing authenticator is: the failure is otherwise silent, and
+   * stays silent until somebody asks why a table has grown.
+   */
+  readonly retention: RetentionDeployment;
+  /** Whether this is a production environment (`21`). Read once, here, rather than ambiently. */
+  readonly production: boolean;
 }
 
 function readNumber(name: string, fallback: number): number {
@@ -140,6 +162,8 @@ export function readConfig(): MainConfig {
     seed: process.env.KYNVIORA_DEV_SEED === '1',
     allowAnonymousStart: process.env.KYNVIORA_ALLOW_ANONYMOUS_START === '1',
     supabase: readSupabase(),
+    retention: readRetentionDeployment(),
+    production: process.env.NODE_ENV === 'production',
   };
 }
 
@@ -275,6 +299,10 @@ export async function start(
 
   const authenticate = chooseAuthenticator(config, logger);
 
+  // Before anything is opened or bound. A deployment that has not accounted for retention is
+  // misconfigured in a way no request will ever reveal (spec 16, DEC-121).
+  assertRetentionAccountedFor(config.retention, config.production);
+
   if (authenticate === null && !config.allowAnonymousStart) {
     // A server that authenticates nobody serves nobody, and it fails in a way that looks like a
     // bug in every route rather than an absent configuration. Say which it is, once, here.
@@ -375,10 +403,43 @@ export async function start(
     logger.info('staff_api.started', { port: staffBoundPort, dev_auth: config.devAuth });
   }
 
+  // -------------------------------------------------------------------------
+  // Retention
+  // -------------------------------------------------------------------------
+  // In this process, when asked for. Two processes would be the deployment shape and cannot be
+  // the development shape here for the reason the staff surface gives above: PGlite is a single
+  // writer (DEC-037), so a separate worker pointed at the same data directory would purge from a
+  // stale copy and write it back over everything this process had done. `services/worker`
+  // therefore has its own entry point that refuses a local data directory, and this is the mode
+  // that actually sweeps today.
+  //
+  // Nothing is started for `external` - the deployment has said something else does it - or for
+  // `none`, which `assertRetentionAccountedFor` has already refused in production.
+
+  let retentionLoop: RetentionLoop | null = null;
+
+  if (config.retention.mode === 'worker') {
+    const retentionConfig = readRetentionWorkerConfig();
+    retentionLoop = startRetentionLoop({
+      db,
+      config: retentionConfig,
+      clock,
+      logger,
+      ids: cryptoIdGenerator(randomUUID),
+    });
+    logger.info('retention.hosted', {
+      holder: retentionLoop.holder,
+      interval_ms: retentionConfig.intervalMs,
+    });
+  }
+
   return {
     url: `http://${config.host}:${String(boundPort)}`,
     staffUrl,
     stop: async () => {
+      // First. The loop holds a lease and a connection, and closing the database underneath it
+      // would turn an orderly shutdown into a run recorded as failed.
+      if (retentionLoop !== null) await retentionLoop.stop();
       if (staffApp !== null) await staffApp.close();
       await app.close();
       await db.close();
