@@ -217,9 +217,31 @@ implemented, the exact configuration required is documented, and independent wor
   development identity is refused outright over any non-loopback staff origin. Everything else
   `13` and `14` ask for is implemented: absolute and idle session expiry, step-up at publish and
   withdraw, an opaque server-side session, and an append-only audit of every privileged action.
-- **To resolve**: complete Phase 1.1, add a `PASSKEY` (or equivalent) member to
-  `AuthenticationStrength`, implement the challenge, and remove the development member from the
-  console's accepted strengths.
+- **Narrowed on 2026-09-05** (DEC-118). Phase 1.1 has chosen a provider - **Supabase Auth**, with
+  verified email/password plus recovery for a household and mandatory TOTP at AAL2 for reviewers -
+  and everything that does not need a project is built:
+
+  | Built                                                                                                      | Still blocked                          |
+  | ---------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+  | Token verification behind the existing port: ES256/RS256, JWKS, key rotation, issuer and audience          | A project to fetch a key set from      |
+  | `AuthenticationStrength` gains `SUPABASE_AAL2`, so the standing banner stops **because the value changed** | Any real session to carry that value   |
+  | `createReviewerAuthenticator` refuses a verified AAL1 token outright                                       | Any reviewer to refuse                 |
+  | Step-up read from the token's own `amr`, so a client cannot assert re-authentication it did not perform    | `19`'s sign-up/sign-in device scenario |
+  | `ClientSession` gains a `BEARER` member carrying the token verbatim                                        | Account deletion (`DEV-062`)           |
+
+  HS256 is refused, before a key is chosen. Supabase supports it and discourages it: a shared
+  secret means every service that can check a token can also mint one.
+
+  **What is not built, and why not:** no refresh loop, no session persistence, no sign-in screens.
+  Each would be written against a provider nobody can reach and tested against a fixture of this
+  build's own devising, and would look finished. Every test signs its own tokens with a locally
+  generated key pair - which exercises the signature check, the algorithm gate, the key rotation
+  path and the AAL modelling for real, and establishes nothing about what a Supabase project
+  issues.
+
+- **To resolve**: provision a Supabase project, set `KYNVIORA_SUPABASE_ISSUER`, enrol a reviewer
+  with TOTP, and run the sign-up/sign-in device scenario against it. The development authenticator
+  is refused when the issuer is set, so there is no configuration where both are live.
 
 ## BLK-011 - Which caregiver capability may record a dose has not been decided
 

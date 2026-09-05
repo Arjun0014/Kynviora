@@ -3,7 +3,7 @@
 **Resume checkpoint.** Read this first on any autonomous restart, then `git log`, then the tail
 of `WORKLOG.md`, then `BLOCKERS.md`.
 
-Last updated: 2026-09-04
+Last updated: 2026-09-05
 
 ---
 
@@ -11,16 +11,20 @@ Last updated: 2026-09-04
 
 |                    |                                                                    |
 | ------------------ | ------------------------------------------------------------------ |
-| **Current stage**  | Stage 4 - Medicine Care Workflows                                  |
-| **Current phase**  | Phase 4.1 and 4.2 complete; Stage 4 complete                       |
-| **Last completed** | Recording a dose is its own capability (DEC-116, `BLK-011` closed) |
+| **Current stage**  | Stage 4 complete; Stage 1 privacy work reopened and largely closed |
+| **Current phase**  | Phase 1.4 (export, deletion), Phase 1.1 (auth), Phase 2.2 (scan)   |
+| **Last completed** | Deleting a profile, and the account deletion that would be a lie   |
 | **Branch**         | `master`                                                           |
-| **Latest commit**  | `fix(mobile): a dose nothing could keep, described as kept`        |
+| **Latest commit**  | `feat(profiles): deleting a person, and the account deletion...`   |
 | **Baseline tag**   | `baseline-spec-only`                                               |
+
+The retention decision unblocked six deviations at once and this session spent itself on them.
+What was **decided** rather than engineered - a retention matrix, an auth provider, quiet-hours
+semantics, the scan/OCR split - is recorded in DEC-117 through DEC-120 and in `docs/RETENTION.md`.
 
 ## Verification state
 
-- **4184 tests passing**, 0 failing, across 152 files.
+- **4403 tests passing**, 0 failing, across 165 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -54,7 +58,7 @@ npm run verify
 
 ### On a device
 
-Thirteen harnesses need an attached Android device or emulator and are **not** part of `npm run
+Fourteen harnesses need an attached Android device or emulator and are **not** part of `npm run
 verify`. Their judgements are, though: 397 of the tests above exercise the rules they apply, so a
 rule cannot change without CI noticing even where no hardware exists.
 
@@ -334,6 +338,41 @@ as before it was taken away.
 A check that could not be performed reports `INCONCLUSIVE` and fails the run. Two of the storage
 checks are absence tests, and an absence test over an empty input passes trivially (DEC-102).
 
+```bash
+npm run verify:device:camera
+```
+
+Five checks on `19`'s camera and file permissions, and the scenario found a defect nothing else
+could (`DEV-060`).
+
+`CAM-1` is the one `16` is about: the manifest has declared `android.permission.CAMERA` since the
+first build, and a declared permission is one Android will prompt for at any moment the app
+chooses. Read twice - after a launch that never scanned, and after the scan screen is **opened**
+without the control being pressed - because a permission requested when a screen mounts still
+looks just-in-time from the launcher and is what a `useEffect` produces.
+
+`CAM-3` is a subtraction and the one most likely to start failing by accident: a library added
+later can pull `READ_MEDIA_IMAGES` into the merged manifest with no screen changing. Granted
+**and declared** are both checked, because a declared permission still appears on the Play listing
+and in the Data-safety form.
+
+It cost four runs and every failure was a defect. Three were in the harness and each made a check
+that could not run look like one that ran and found something: `dumpsys window windows` names
+permissioncontroller 26 times on an idle launcher; Android renders the button as `Don’t allow`
+with U+2019; and `nodeNamed` filters to the app's own package by design, so `tapNamed`
+structurally cannot press a system dialog. The fourth was in the app.
+
+**`pm revoke` is not enough to reset a permission**, and that is worth carrying. Revoking clears
+the grant and leaves `USER_SET`/`USER_FIXED`, so a permission this harness has refused twice stays
+permanently refused - the scenario poisons its own precondition by doing its job.
+`pm reset-permissions` is the only command that clears the flags and is **device-wide**, which is
+why the run also grants `POST_NOTIFICATIONS` for its duration: the reset clears that too, the app
+asks for it at launch, and its dialog eats every tap.
+
+Last run **5/5 PASS** against a Pixel 7 / Android 16 emulator, on a build carrying `expo-camera`.
+A real read of a real symbol is **not** covered and never will be by a harness: an emulator's
+virtual scene is not a product pack. That check is manual and the runner says so.
+
 ### Running it
 
 ```bash
@@ -384,26 +423,32 @@ the API will not distinguish them.
 | Household Review Inbox, record-writing completion           | Complete, 95 tests                                          |
 | Medicine Reconciliation, two lists and no chosen answer     | Complete, 109 tests                                         |
 | Reviewer console: roles, two-person approval, withdrawal    | Complete, 116 tests; **publishes nothing** (BLK-006)        |
-| Staff surface split, console package, console process       | Complete, 172 tests; **authenticates nobody** (BLK-010)     |
+| Staff surface split, console package, console process       | Complete, 172 tests; AAL2 modelled, no project (BLK-010)    |
 | Alert detail, explainability, report-incorrect              | Complete, 89 tests; **no alert to open** (BLK-006)          |
-| Notification delivery policy, quiet hours, revalidation     | Complete, 139 tests; **holds nothing** (`DEV-030`)          |
+| Notification delivery policy, quiet hours, revalidation     | Complete, 161 tests; **holds, recipient-locally** (DEC-119) |
 | Household and profile creation, the profile switcher        | Complete, 90 tests; no emergency contact (`DEV-034`)        |
 | Allergy and sensitivity records, provenance, review date    | Complete, 86 tests; no conditions (`DEV-035`)               |
-| Consent state, withdrawal, and what withdrawing stops       | Complete, 87 tests; no export/deletion (`DEV-036`)          |
+| Consent state, withdrawal, and what withdrawing stops       | Complete, 96 tests; export built, account deletion not      |
 | Typed term mapped to a canonical substance                  | Complete, 27 tests; no review queue (`DEV-037`)             |
 | Regulatory version diff and change attribution              | Complete, 27 tests; **no route yet** (BLK-004)              |
 | Shadow runs, before/after comparison, assessment replay     | Complete, 74 tests; substance rules now measurable          |
 | Manual entry: the write path, the form and the screen       | Complete, 105 tests; the only surface that creates an item  |
-| Item update, the three lifecycle states, mark-as-checked    | Complete, 105 tests; no deletion (`DEV-032`)                |
+| Item update, the three lifecycle states, mark-as-checked    | Complete, 105 tests; deletion built (DEC-117)               |
 | End-to-end vertical slice, 7 required scenarios             | Complete, 36 tests                                          |
 | Mobile app shell, encrypted store, accessible primitives    | **Runs on Android 16; storage and 48dp verified on device** |
 | The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)           |
 | Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)  |
 | Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)    |
-| Device harnesses: thirteen, storage to a store that is full | Complete, 397 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
+| Device harnesses: fourteen, storage to a camera permission  | Complete, 418 tests; 13 of `19`'s 14 scenarios (`DEV-040`)  |
 | The mobile app itself: rendering, hooks, providers          | 55 tests, and `apps/**` linted at last (`DEV-043` closed)   |
 | Recording a dose: `RECORD_DOSES`, its own capability        | Complete, 47 tests; 7/7 on a device (DEC-116)               |
 | Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                  |
+| Retention: the matrix, the roles, the doors, the sweep      | Complete, 55 tests; nothing schedules it (see next task)    |
+| Deleting an item and a profile, end to end                  | Complete, 48 tests; account deletion open (`DEV-062`)       |
+| Portable export: fourteen sections, sources referenced      | Complete, 26 tests; no artifact and no link, by choice      |
+| Scanning a barcode: permission, check digit, confirmation   | Complete, 45 tests; **5/5 on a device**; no OCR (BLK-007)   |
+| Supabase Auth behind the existing port, reviewer AAL2       | Complete, 34 tests; **no project** (BLK-010)                |
+| Recipient-local quiet hours, and the zone ICU would accept  | Complete, 22 tests; a device reports its own zone           |
 | CI pipeline                                                 | Written; not yet run on a real runner                       |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
@@ -435,65 +480,49 @@ appears here.
 | BLK-007 | `EXTERNAL_CREDENTIAL`               | Real OCR/multimodal extraction                |
 | BLK-008 | `DATA_AVAILABILITY`                 | Every numeric release threshold (Stage 9.1)   |
 | BLK-009 | `EXTERNAL_CREDENTIAL`               | Actually sending any notification to a device |
-| BLK-010 | `EXTERNAL_CREDENTIAL`               | Strong authentication for a reviewer account  |
+| BLK-010 | `EXTERNAL_CREDENTIAL`               | A Supabase project: account deletion, sign-in |
 
 ## Immediate next task
 
-**The three tasks this list named are done, and the list is now empty of engineering.** Every
-remaining item in `IMPLEMENTATION_PLAN.md`'s "immediate next work", and every remaining `19` device
-scenario, waits on a decision or a credential that is not mine to invent.
+**Schedule the purge sweep, or say in writing that nothing does.**
 
-What this session should be read for is not the three ticks. It is that **the tree with no tests
-had four defects in it**, and three of them were found by the act of giving it tests rather than by
-the tests themselves.
+`runPurgeSweep` exists, is measured by fifteen checks, and `npm run purge` runs it once. Nothing
+calls it on a timer, because there is no worker process in this build and no deployment to run one
+in — so the thirty-day deadline in `docs/RETENTION.md` is a commitment the code keeps and the
+operation does not. That is stated in the matrix rather than implied by a job that does not exist,
+which is the honest position and is not a finished one.
 
-- `DEV-053` - a save held the version of `queue` that existed before the encrypted store opened, so
-  an offline edit was reported as failed and dropped. Found by `exhaustive-deps`, on the first run
-  of ESLint over `apps/**` ever.
-- `DEV-054` - a test file written next to the component it tests, which is inside Expo Router's
-  route directory, made the app's bundle fail. **Every gate stayed green over a build that could
-  not start**, because none of them bundles the app. It surfaced eighteen minutes into a device run
-  as every check reporting `INCONCLUSIVE`.
-- `DEV-055` - with an unwritable store, `queue` let its rejection escape and the screen told
-  somebody their dose was kept on this phone. Found by implementing `19`'s low-storage scenario,
-  which is what that scenario is for.
-- And the harness's own `DEV-050` shape appeared twice more: a fixed scroll budget that had quietly
-  stopped reaching the bottom of a growing list, and a full-visibility test that no tab bar can
-  ever pass.
-
-The pattern worth carrying: **a gate that has never failed is not evidence, and a green suite over
-a tree it does not compile is not coverage.**
+It is the highest-value remaining item because it is the only place where a **promise made to a
+person** currently outruns what the system does. Everything else outstanding is a feature that is
+absent and says so.
 
 ## Next three planned tasks
 
-There are none that are unblocked. What follows is what each remaining candidate is waiting for, so
-the next session can tell at a glance whether anything has changed.
+1. **A worker process, and the purge on it.** `services/worker` is an empty directory. What it
+   needs is a loop, a lock so two instances do not sweep at once, and a way to report a run —
+   counts only, per `20`. **Waiting on:** nothing. This is work.
 
-1. **The retention matrix.** Six deviations converge on it - `DEV-009`, `DEV-032`, `DEV-034`,
-   `DEV-035`, `DEV-036` and the deletion half of `16`. It unblocks item deletion, the
-   export-and-deletion shell, emergency information and Visit Pack retention in one stroke, and it
-   is the largest single unblocking left. **Waiting on:** a retention and disclosure decision.
-   `audit_event` and `consent_receipt` refuse DELETE to every role and `dose_event` is what a Visit
-   Pack is built from, so "remove it" cannot be answered without a statement of what is kept
-   regardless.
-2. **A licensed substance vocabulary.** Every mechanism that would use one exists and is tested; with
-   an empty vocabulary all of it is correct and finds nothing. **Waiting on:** `BLK-003` - a
-   commercial agreement and credentials.
-3. **Phase 5.5's possible-formula-change task.** `diffIngredients`, the Trust Passport and the
-   Review Inbox all exist; what does not is a _second_ observation to compare against, because
-   nothing can read a label. **Waiting on:** `BLK-007` - an OCR/multimodal provider.
+2. **The digest.** `DEV-033`: `MEDIUM` and `LOW` events are classified and never assembled. The
+   approved cadence is 09:00 recipient-local with revalidation before inclusion, and the two
+   things that were missing are now both present — a recipient's local time (DEC-119) and a
+   revalidation path (`notification_revalidation`). **Waiting on:** nothing that is not built. It
+   still cannot be _delivered_ (`BLK-009`), but a digest that is assembled and recorded is most of
+   the feature and is the half `04` Phase 7.5 actually specifies.
 
-**The `19` device scenarios that remain, and what each waits for.** Sign-up/sign-in/recovery has
-nothing measured because Phase 1.1 has not chosen an authentication provider (`BLK-010`). Scan
-waits on `04` Phase 2.2, OCR on `BLK-007`. Camera and file permissions are the one remaining piece
-of ordinary work, and it is small: `verify:device` already knows how to drive the app and read
-`dumpsys`.
+3. **The Review Inbox's two uncompletable task kinds** (`DEV-024`), and the substance-mapping
+   review queue (`DEV-037`). Both are ordinary Stage 5/6 work with no external dependency. The
+   second is now less blocked than it reads: DEC-117 approved that a raw household term never goes
+   to staff by default, which is the decision `DEV-037` was waiting on for its _shape_ even though
+   it was recorded as waiting for a queue.
 
-**Phase 9.2's other two MASVS categories** are also decision-shaped rather than work-shaped.
-Network communication has no production endpoint to verify a certificate chain against
-(`BLK-001`), and testing the transport rule against loopback measures the exception rather than
-the rule. Tampering and rooted-device behaviour is scoped "per the threat model" by `14`, and `15`
-names no posture - choosing one is a decision about who this app defends against.
+**What is still genuinely blocked, and by what.** Account deletion and the sign-up/sign-in device
+scenario on `BLK-010`; OCR and the possible-formula-change task on `BLK-007`; substance vocabulary
+depth on `BLK-003`; publishing anything on `BLK-004` and `BLK-006`; sending any server-originated
+notification on `BLK-009`; managed-Postgres parity on `BLK-001`. None of them is a decision any
+more — all six are a credential, a licence or a person.
+
+**The `19` device scenarios that remain.** One: sign-up, sign-in and recovery, which needs a
+Supabase project (`BLK-010`). Thirteen of fourteen are measured on hardware.
 
 ## Recent decisions worth knowing
 
