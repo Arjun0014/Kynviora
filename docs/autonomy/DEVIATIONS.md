@@ -768,7 +768,7 @@ route.
 
 ---
 
-## DEV-031 - `dose_event`'s idempotency key is still globally unique
+## DEV-031 - `dose_event`'s idempotency key is still globally unique - RESOLVED
 
 - **Affected specification**: `13` ("idempotency key on mutations that can be retried"; "server
   commits exactly once").
@@ -793,10 +793,26 @@ route.
   nothing was returned. It is on this list because "the two idempotency guarantees in this codebase
   have different shapes" is exactly the kind of inconsistency a later reader resolves by copying the
   wrong one.
-- **Required future work**: a migration replacing `dose_event_idempotency` with a unique index on
-  `(owned_item_id, client_operation_id)` or on the profile, whichever the dose route can scope to
-  without a second query, and the same replay-read behaviour `POST /v1/items` now has. The route
-  change is small; the migration is the part that needs care.
+- **Required future work**: none.
+- **Status**: **RESOLVED 2026-09-05**, by migration `0030`.
+
+  `dose_event_idempotency` is now UNIQUE on `(owned_item_id, client_operation_id)`. The item rather
+  than the profile, because the item is the identifier the dose route actually has - the request
+  names `ownedItemId`, so the replay read can be scoped to exactly what the caller asked about, and
+  the narrower the scope the smaller the set of writes one key can refuse.
+
+  Narrowing a unique index cannot fail on existing rows: a set that was globally unique is unique
+  within every item by construction. The reverse would not be, which is why this direction needed no
+  data audit and the opposite one would have.
+
+  The route's replay read is scoped to the item as well. `{ id: null, replayed: true }` survives and
+  now means exactly one thing - already recorded, and not readable by this caller - which is a real
+  case since DEC-116 gave `RECORD_DOSES` its own capability: somebody may be entitled to record a
+  dose and not to read the shelf it belongs to.
+
+  **Proved by reverting.** The cross-household test was run against the old global index before the
+  fix was restored, and failed with `expected 200 to be 201` - the false replay this deviation
+  describes, reproduced rather than reasoned about.
 
 ---
 

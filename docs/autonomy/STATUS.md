@@ -30,7 +30,7 @@ by up to one interval and no finite interval makes that zero.
 
 ## Verification state
 
-- **4561 tests passing**, 0 failing, across 172 files.
+- **4567 tests passing**, 0 failing, across 172 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -444,7 +444,7 @@ the API will not distinguish them.
 | Area                                                        | State                                                         |
 | ----------------------------------------------------------- | ------------------------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine  | Complete, 94 tests                                            |
-| Database schema, 29 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                    |
+| Database schema, 30 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                    |
 | Catalog engine, capture pipeline, Trust Passport            | Complete, 178 tests                                           |
 | Regulatory registry, Citation Gate, Lens                    | Complete, 72 tests                                            |
 | Safety rule engine with replay; schedule and refill         | Complete, 88 tests                                            |

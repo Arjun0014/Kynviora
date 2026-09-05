@@ -415,3 +415,66 @@ describe('review tasks are separate from safety alerts (spec 04 Phase 8.3)', () 
     expect(shelfOnly.rows).toEqual([]);
   });
 });
+
+describe('the shape of the dose idempotency guarantee (DEV-031)', () => {
+  const CROSS_KEY = testUuid(60);
+
+  it('scopes the key to the item, so one household cannot refuse another household’s write', async () => {
+    // `0004` made this index global and `0030` narrowed it. Global, a UUID one household had used
+    // made the other's INSERT conflict - and the route's replay read then found nothing under
+    // row-level security and reported a dose as recorded that was never recorded.
+    await t.asService((db) =>
+      db.query(
+        `INSERT INTO dose_event (owned_item_id, event_kind, client_operation_id)
+         VALUES ($1, 'TAKEN', $2)`,
+        [MEDICINE, CROSS_KEY],
+      ),
+    );
+
+    // The same key against a different item. Two rows, and no conflict.
+    await expect(
+      t.asService((db) =>
+        db.query(
+          `INSERT INTO dose_event (owned_item_id, event_kind, client_operation_id)
+           VALUES ($1, 'TAKEN', $2)`,
+          [SHAMPOO, CROSS_KEY],
+        ),
+      ),
+    ).resolves.toBeDefined();
+
+    const count = await t.asService((db) =>
+      db.query<{ c: number }>(
+        'SELECT count(*)::int AS c FROM dose_event WHERE client_operation_id = $1',
+        [CROSS_KEY],
+      ),
+    );
+    expect(count.rows[0]?.c).toBe(2);
+  });
+
+  it('still refuses the same key on the same item', async () => {
+    // Narrowing the scope must not weaken the guarantee `13` asks for.
+    const message = await expectDenied(() =>
+      t.asService((db) =>
+        db.query(
+          `INSERT INTO dose_event (owned_item_id, event_kind, client_operation_id)
+           VALUES ($1, 'TAKEN', $2)`,
+          [MEDICINE, CROSS_KEY],
+        ),
+      ),
+    );
+    expect(message).toMatch(/duplicate key|dose_event_idempotency/i);
+  });
+
+  it('is declared on the two columns and nothing else', async () => {
+    // Asserted against the catalog rather than against behaviour, so a future migration that
+    // widened it back would fail here rather than in a route six months later.
+    const index = await t.asOwner((db) =>
+      db.query<{ definition: string }>(
+        `SELECT indexdef AS definition FROM pg_indexes WHERE indexname = 'dose_event_idempotency'`,
+      ),
+    );
+    expect(index.rows[0]?.definition).toMatch(/UNIQUE/);
+    expect(index.rows[0]?.definition).toMatch(/owned_item_id/);
+    expect(index.rows[0]?.definition).toMatch(/client_operation_id/);
+  });
+});

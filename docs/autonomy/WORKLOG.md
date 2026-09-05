@@ -4453,3 +4453,53 @@ is answered would be inventing a design nobody asked for.
 adds two tables holding nothing renderable - a reference, a revalidation outcome and two counts -
 readable by the recipient and by nobody else, not even the profile owner whose household the events
 came from.
+
+---
+
+## 2026-09-05 - A dose reported as recorded that was never recorded
+
+`DEV-031` has been on the list since `0016` gave `owned_item` a per-profile idempotency key and
+said in writing that changing `dose_event`'s shipped one was not a thing to do in passing. This is
+that change, done on its own.
+
+`0004` made `dose_event_idempotency` UNIQUE on `client_operation_id` **alone**, across every
+household in the system. So a UUID one household had already used made another household's INSERT
+conflict; the route read the conflict as a retry, re-read the row under row-level security, found
+nothing - the row belongs to somebody it cannot see - and answered `200` with
+`{ id: null, replayed: true }`.
+
+**A person is told their dose was recorded and no dose is recorded.** Nothing leaks and nothing of
+anybody else's changes: the row suppressed is the caller's own. But it is the same class of failure
+as `DEV-055`, where a screen said a dose was kept over a store that could not keep it, and this
+codebase does not leave that class open on the grounds that it is hard to trigger.
+
+`0030` narrows the index to `(owned_item_id, client_operation_id)`. The **item** rather than the
+profile, because the item is the identifier the dose route actually has - the request names
+`ownedItemId`, so the replay read can be scoped to exactly what the caller asked about, and the
+narrower the scope the smaller the set of writes one key can refuse.
+
+Worth saying, because rebuilding a unique index on a populated table is usually the risky part:
+**narrowing one cannot fail on existing rows.** A set that was globally unique is unique within
+every item by construction. The reverse would not be, which is why this direction needs no data
+audit and the opposite one would have.
+
+The route's replay read is scoped to the item too. `{ id: null, replayed: true }` survives and now
+means exactly one thing rather than two: already recorded, and not readable by this caller. That is
+a real case since DEC-116 gave `RECORD_DOSES` its own capability - somebody may be entitled to
+record a dose and not to read the shelf it belongs to - and it used to be indistinguishable from
+"somebody else's key blocked you".
+
+### The test was run against the old index before it was trusted
+
+A regression test that passes before the fix proves nothing. So the migration was temporarily
+reverted to the global index and the cross-household test re-run: it failed with
+`expected 200 to be 201`, which is the false replay this deviation describes, reproduced rather
+than reasoned about. Then the fix was restored and it passed.
+
+The schema-level assertion reads `pg_indexes` rather than behaviour, so a future migration that
+widened the index back fails in `db/shelf.test.ts` rather than in a route six months later.
+
+### Result
+
+`npm run verify` exit 0. 4567 tests across 172 files. `DEV-031` resolved - the two idempotency
+guarantees in this codebase now have the same shape, which was the reason it was on the list at all.

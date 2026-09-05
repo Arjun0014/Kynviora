@@ -305,3 +305,112 @@ describe('what RECORD_DOSES is for (DEC-116)', () => {
     expect((await recordDose(OWNER, 107)).statusCode).toBe(201);
   });
 });
+
+describe('an idempotency key another household has already used (DEV-031)', () => {
+  const NEIGHBOUR = testUuid(7);
+  const NEIGHBOUR_HOUSEHOLD = testUuid(11);
+  const NEIGHBOUR_PROFILE = testUuid(21);
+  const NEIGHBOUR_MEDICINE = testUuid(31);
+  /** One UUID, used by two households that have never heard of each other. */
+  const SHARED_KEY = testUuid(900);
+
+  beforeAll(async () => {
+    await t.asService(async (db) => {
+      await db.query(
+        `INSERT INTO app_user (id, external_auth_id, email_normalized, email_verified_at)
+         VALUES ($1, $2, 'neighbour@example.test', now())`,
+        [NEIGHBOUR, `auth|${NEIGHBOUR}`],
+      );
+      await db.query(
+        `INSERT INTO household (id, owner_user_id, display_name) VALUES ($1, $2, 'B')`,
+        [NEIGHBOUR_HOUSEHOLD, NEIGHBOUR],
+      );
+      await db.query(
+        `INSERT INTO profile (id, household_id, owner_user_id, display_name)
+         VALUES ($1, $2, $3, 'Neighbour (synthetic)')`,
+        [NEIGHBOUR_PROFILE, NEIGHBOUR_HOUSEHOLD, NEIGHBOUR],
+      );
+      await db.query(
+        `INSERT INTO owned_item (id, profile_id, item_kind, display_name)
+         VALUES ($1, $2, 'MEDICINE', 'Synthetic Tablet B')`,
+        [NEIGHBOUR_MEDICINE, NEIGHBOUR_PROFILE],
+      );
+    });
+  });
+
+  async function recordAgainst(as: string, itemId: string, keyUuid: string) {
+    return request(principalFor(as), {
+      method: 'POST',
+      url: '/v1/dose-events',
+      headers: { 'idempotency-key': keyUuid },
+      payload: { ownedItemId: itemId, eventKind: 'TAKEN', note: 'synthetic' },
+    });
+  }
+
+  it('does not stop the second household recording their own dose', async () => {
+    // The defect, end to end. Under a globally unique key the second write conflicted, the route
+    // read the conflict as a retry, the replay read found nothing under row-level security, and a
+    // person was told their dose was recorded when nothing was recorded.
+    const first = await recordAgainst(OWNER, MEDICINE, SHARED_KEY);
+    expect(first.statusCode).toBe(201);
+
+    const second = await recordAgainst(NEIGHBOUR, NEIGHBOUR_MEDICINE, SHARED_KEY);
+    expect(second.statusCode).toBe(201);
+    expect(second.headers['idempotent-replay']).toBeUndefined();
+
+    const body = second.json<{ id: string | null }>();
+    expect(body.id).not.toBeNull();
+
+    // And it is genuinely a second row, on the neighbour's own medicine.
+    const rows = await t.asService((db) =>
+      db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM dose_event WHERE client_operation_id = $1`,
+        [SHARED_KEY],
+      ),
+    );
+    expect(rows.rows[0]?.n).toBe(2);
+  });
+
+  it('still commits a genuine retry exactly once', async () => {
+    // The guarantee `13` actually asks for, unchanged: same item, same key, one row.
+    const key = testUuid(901);
+    const first = await recordAgainst(OWNER, MEDICINE, key);
+    expect(first.statusCode).toBe(201);
+    const firstId = first.json<{ id: string }>().id;
+
+    const retry = await recordAgainst(OWNER, MEDICINE, key);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.headers['idempotent-replay']).toBe('true');
+
+    const body = retry.json<{ id: string | null; replayed: boolean }>();
+    expect(body.replayed).toBe(true);
+    // The real id, not null. Scoping the replay read to the item is what makes that reliable:
+    // the row a conflict names is now unambiguously the caller's own.
+    expect(body.id).toBe(firstId);
+
+    const rows = await t.asService((db) =>
+      db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM dose_event WHERE client_operation_id = $1`,
+        [key],
+      ),
+    );
+    expect(rows.rows[0]?.n).toBe(1);
+  });
+
+  it('treats the same key on a different medicine as a different write', async () => {
+    // Within one household this time, so nothing about visibility is involved. A retry sends the
+    // same body and therefore the same item; two items with one key are two writes, and recording
+    // both is the answer that loses nothing.
+    const key = testUuid(902);
+    expect((await recordAgainst(OWNER, MEDICINE, key)).statusCode).toBe(201);
+
+    await t.asService((db) =>
+      db.query(
+        `INSERT INTO owned_item (id, profile_id, item_kind, display_name)
+         VALUES ($1, $2, 'MEDICINE', 'Synthetic Tablet C')`,
+        [testUuid(32), PROFILE],
+      ),
+    );
+    expect((await recordAgainst(OWNER, testUuid(32), key)).statusCode).toBe(201);
+  });
+});

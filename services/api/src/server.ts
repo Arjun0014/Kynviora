@@ -2364,11 +2364,21 @@ export function createServer(options: ServerOptions): FastifyInstance {
         const message = error instanceof Error ? error.message : String(error);
 
         // A repeated operation ID is a retry, not a failure. `13`: "Server commits exactly once."
+        //
+        // Scoped to the item, which since `0030` is the scope the index enforces. A conflict now
+        // means the same key on the same item, so the row this reads back is unambiguously the
+        // caller's own - it used to mean "somebody, anywhere, used this UUID", and the read then
+        // found nothing and reported a dose as recorded that was never recorded (`DEV-031`).
+        //
+        // `id: null` survives and now means one thing: already recorded, and not readable by this
+        // caller. That is a real case since DEC-116 - a caregiver may hold `RECORD_DOSES` and not
+        // the capability that admits `dose_event_select`.
         if (/duplicate key|dose_event_idempotency/i.test(message)) {
           const existing = await ctx.db((db) =>
-            db.query<{ id: string }>(`SELECT id FROM dose_event WHERE client_operation_id = $1`, [
-              ctx.operationId,
-            ]),
+            db.query<{ id: string }>(
+              `SELECT id FROM dose_event WHERE owned_item_id = $1 AND client_operation_id = $2`,
+              [ownedItemId, ctx.operationId],
+            ),
           );
           return reply
             .status(200)
