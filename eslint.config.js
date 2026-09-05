@@ -17,6 +17,11 @@ export default tseslint.config(
       'apps/**/ios/**',
       'apps/**/*.js',
       'apps/**/expo-env.d.ts',
+      // `supabase/functions` is Deno, not this workspace. It has no `tsconfig` here, its globals
+      // are `Deno.*`, and it is deployed rather than built - so the type-aware rules have nothing
+      // to run against and report every file as outside the project service. What it is and why
+      // it exists is in the file's own header (DEC-126).
+      'supabase/functions/**',
       'KYNVIORA_PROJECT_SPEC/**',
       'eslint.config.js',
       'vitest.config.ts',

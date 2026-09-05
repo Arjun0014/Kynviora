@@ -11,7 +11,27 @@ implemented, the exact configuration required is documented, and independent wor
 ## BLK-001 - Managed Postgres / Supabase parity unverified
 
 - **Class**: `EXTERNAL_SERVICE`
-- **Status**: OPEN - worked around
+- **Status**: **RESOLVED 2026-09-05**
+
+- **How it resolved.** `kynviora-dev` exists and every part of the workaround has been replaced by
+  a measurement. Migrations `0001`-`0030` were applied **unmodified** through the repository's own
+  migration runner to managed Postgres 17.6 behind Supavisor; the pooled managed runtime is real
+  (`db/src/managed.ts`), with pinned TLS against a root fetched out of band; the parity and RLS
+  suites run against that instance; the API and multiple concurrent retention workers were
+  exercised on it; and `19`'s fourteenth device scenario drives a phone against it end to end.
+
+  The privilege boundary is not documentation either. `app_user` is owned by `kynviora_migrate`
+  and granted only to `kynviora_app` and `kynviora_service`; Supabase's own `postgres`, `anon`,
+  `authenticated` and `service_role` hold **no privilege on any Kynviora table**, asserted through
+  the catalog and again over the HTTP surface, where PostgREST answers
+  `401 permission denied for table owned_item` to every one.
+
+  Two things this deliberately does not claim: performance under load, which nothing here has
+  measured, and Postgres version parity - the local harness is PGlite 18.3 and the managed instance
+  is 17.6, which the parity suite exists to keep honest rather than to hide.
+
+- **Historical detail follows.**
+- **Status (historical)**: OPEN - worked around
 - **Blocks**: production deployment; Supabase-specific auth integration; connection pooling and
   performance validation.
 - **Detail**: No Supabase project, no managed Postgres, and no Docker in this environment.
@@ -239,9 +259,28 @@ implemented, the exact configuration required is documented, and independent wor
   path and the AAL modelling for real, and establishes nothing about what a Supabase project
   issues.
 
-- **To resolve**: provision a Supabase project, set `KYNVIORA_SUPABASE_ISSUER`, enrol a reviewer
-  with TOTP, and run the sign-up/sign-in device scenario against it. The development authenticator
-  is refused when the issuer is set, so there is no configuration where both are live.
+- **Narrowed again on 2026-09-06.** The project exists and a person signs in on a phone against
+  it: `SIGN-4` passes - a Supabase-issued ES256 token, minted by somebody typing a password on the
+  device, verified by the API against the published key set, resolved to an `app_user` row and used
+  by row-level security to choose rows. `SIGN-1`, `SIGN-3`, `SIGN-7` and `SIGN-11` pass with it.
+
+  The **service-role credential is no longer part of this blocker**. DEC-126 removes an identity
+  through an Edge Function that holds the key inside Supabase, so no privileged credential enters
+  this deployment; `can_remove_identity` is true, and `DEV-062` is now blocked on two ordinary
+  defects rather than on a secret.
+
+  | Still blocked                        | By what                                                                               |
+  | ------------------------------------ | ------------------------------------------------------------------------------------- |
+  | The email round trip                 | a mailbox, and a mailer that allows two an hour                                       |
+  | An account created through the app   | the same quota - see trap 206; not yet attempted with `KYNVIORA_SIGNIN_PHASES=signup` |
+  | A reviewer with a real second factor | `BLK-006`: nobody is staffed to hold one                                              |
+
+  AAL2 itself is proven on a synthetic account (real TOTP factor, real RFC 6238 codes); what is
+  missing is a _reviewer_, which is a person rather than a mechanism.
+
+- **To resolve**: custom SMTP or a mailbox on the project, and a named reviewer per `10`. The
+  development authenticator is refused when the issuer is set, so there is no configuration where
+  both are live.
 
 ## BLK-011 - Which caregiver capability may record a dose has not been decided
 

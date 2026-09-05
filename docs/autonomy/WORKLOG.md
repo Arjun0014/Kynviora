@@ -5119,3 +5119,148 @@ alone is no meaning at all to somebody who cannot see the colour.
 
 What this does **not** do is prove any of it on a device or against the real provider from a phone:
 that is the next thing, and `19`'s sign-up/sign-in scenario is what it is for.
+
+---
+
+## 2026-09-05/06 - The fourteenth scenario on a real stack, and a renewal that got worse when it got right
+
+Three commits: `6e8897b`, `615bb50`, `c251142`. `npm test` **4,747 passed / 180 files**, up from
+4,573 / 173. Typecheck, mobile typecheck, lint and format all clean.
+
+### Where the session started
+
+The previous one ended mid-run: `SIGN-4` had failed and the cause was found - an old dev-auth API
+still owning port 3000, so the app's Bearer token reached a process that only accepts a development
+header, got a 401, and the transport correctly reported the session lost. Not an auth defect. The
+first job was to make that impossible rather than unlikely.
+
+`taskkill /F /IM node.exe` was the fix the previous session reached for and it is wrong twice over.
+It does not reliably kill the listeners - Metro held 8081 and the API held 3000 across two attempts,
+both silently - and it kills **every** node process on the machine, which here included MCP servers
+and an unrelated dev server on 5173 belonging to somebody else's work. Ports are freed by owning
+process now, and the phase script refuses to continue if either is still held, if the API did not
+bind, if it bound with `dev_auth:true`, if it is not on the managed database, or if Metro started
+without the provider in its environment. Every one of those failures is silent in the way that
+matters (trap 207).
+
+With that, the API came up on `kynviora-dev`'s pooler with `dev_auth:false`, and the scenario ran
+end to end for the first time.
+
+### What the device proved
+
+`SIGN-4` **passes**: a Supabase-issued ES256 token, minted by a person typing a password into the
+phone, carried by the app, verified by the API against the published key set, resolved to an
+`app_user` row, and used by row-level security to choose rows. Six components, one assertion, and
+it is the thing `BLK-010` existed to block.
+
+`SIGN-1`, `SIGN-3`, `SIGN-7` and `SIGN-11` pass with it: a signed-out app that offers all three
+ways in with nothing behind them; a wrong password refused by the provider and rendered as the
+sentence the app's own mapping produces; a session that survives the process being killed; and a
+recovery request that reaches the provider and is reported honestly rather than as a message that
+is not coming.
+
+### The defect the clock trick found, and the one it may have caused
+
+Two checks are about a session that has run out of access token, and the provider issues them with
+an hour's life. Waiting is not a strategy, so the run moves the emulator's clock past the lifetime
+and restarts the app.
+
+The first time it did, the app renewed **in a loop**. `readTokens` stored the provider's absolute
+`expires_at` and the renewal rule compares it against `Date.now()` on the phone - two clocks, equal
+only when the device's is right. A device an hour fast holds a session already past its expiry the
+moment it arrives; an hour slow never renews in time and finds out from a 401. Expiry is a duration
+now, measured from the receiving device's own clock, so a constant offset cancels out.
+
+**And `SIGN-8` regressed from PASS to FAIL across that change, which is not resolved.** With the old
+absolute-expiry code the app renewed in a loop and stayed signed in; with the duration it asked for
+a sign-in instead - which means `refreshSession` returned `SESSION_EXPIRED` and the app signed
+itself out. The API log has **zero** 401s for the whole run, so nothing was refused by Kynviora:
+the refusal came from the provider. `SIGN-9` failed in the mirror image on the same run - the
+session was revoked and the phone stayed signed in - which is the opposite of what a working
+renewal produces, so the two are likely one fault rather than two.
+
+It is recorded as unresolved rather than explained. The candidate worth checking first is refresh
+token rotation: Supabase invalidates the previous token on each refresh, and two renewals racing
+the same token answer `refresh_token_already_used`, which maps to `SESSION_EXPIRED` and signs
+somebody out. That is a real defect if it is happening, and it is exactly the shape a loop would
+have hidden.
+
+### Three harness faults, each of which read as a finding about the app
+
+`SIGN-5` reported "no encrypted database was found" over a device holding 32,768 bytes of one.
+`adb shell` joins its arguments back into one string for the device's shell without re-quoting, so
+the `<` inside `sh -c 'wc -c < files/SQLite/kynviora.db'` was consumed by the **outer** shell, in a
+working directory that is not the app's (trap 204).
+
+`SIGN-7` reported the app coming back signed in with none of its data. A cold start rebundles and
+then fetches, and thirty-five seconds was a few short of it; the identical restart at forty-five
+passed. It waits for a determinate state now - the account's data or the sign-in control, both of
+which are answers - and returns the reading it settled on, so waiting and looking cannot disagree
+(trap 205).
+
+`SIGN-5`, `SIGN-6` and `SIGN-9` all went inconclusive together on one run, for a reason none of
+them named: a single direct sign-in that failed silently. Instrumented, it said "the provider could
+not be reached", which is trap 187 - `fetch` across the forty-five-second synchronous sleeps this
+suite is made of, reusing a socket the provider closed long ago. `connection: close` and a retry,
+which every other harness here has had for weeks and the new one did not.
+
+### Sign-up, and the quota that a probe spends
+
+`SIGN-2` used to make its **own** sign-up to a second address and infer that the app's went the
+same way. That reasons about a different request, and worse: `kynviora-dev`'s built-in mailer
+allows two messages an hour and the quota is spent by an **attempt**, not a delivery - so the probe
+could take the last of it and hand the app the rate limit it then reported as the provider's usual
+behaviour. The app goes first now and the provider is asked about that exact address with a password
+sign-in: `email_not_confirmed` is an account that exists and cannot be used yet,
+`invalid_credentials` is one that was never created. Neither needs a privilege.
+
+Four consecutive runs answered `NOT_CREATED`, because a full run makes three email-triggering calls
+and each one pushes the window out again (trap 206). `KYNVIORA_SIGNIN_PHASES=signup` exists for
+that: it runs `SIGN-1`, `SIGN-2` and `SIGN-10` and makes exactly one such call - the app's own -
+after an hour of asking for nothing. That has not been run yet, so **no account has been created
+through the app's own form** and `SIGN-10` is untested.
+
+### Account deletion, and a credential that never arrives
+
+`DEV-062` was blocked on a service-role key. The key is not obtainable here - the JWT secret is not
+exposed to the `postgres` role, which was checked - and it is the wrong shape anyway: it bypasses
+row-level security on everything Supabase owns, and `DELETE /v1/me` needs one capability from it.
+
+So the removal is an Edge Function, `close-identity`, deployed to the project, and this API holds no
+privileged credential at all (DEC-126). Supabase injects the service key into the function's own
+environment. The function takes **no user id** - it reads `sub` from claims the gateway has already
+verified, which was measured: a token with real-looking claims and a signature the project never
+issued is refused at the edge with `UNAUTHORIZED_LEGACY_JWT` before the function runs. Smoke-tested
+against a throwaway identity: 401 with no token, 405 on `GET`, 204 on `POST`, and the identity
+genuinely gone afterwards - the provider answers `invalid_credentials` to credentials that worked
+one second earlier.
+
+The API reports `can_remove_identity: true` for the first time.
+
+That cost an ordering, for a reason DEC-124 already measured. The function authenticates as the
+caller and a global sign-out invalidates that token immediately, so signing out first left the
+removal unable to authenticate - on a route whose whole design is that it can be called again. Local,
+then identity, then sessions. And on failure the session is deliberately kept: it is the only
+credential the person has left to finish with, and it grants nothing.
+
+A least-privilege result worth recording came out of the same investigation. Kynviora's tables are
+owned by `kynviora_migrate` and granted only to `kynviora_app`, `kynviora_service` and
+`kynviora_retention`. Supabase's own `postgres`, `anon`, `authenticated` and `service_role` have
+**no privilege on `app_user` at all** - which is why the function cannot check that Kynviora stamped
+the account first, and why that gap is closed by a secret instead (`DEV-066`) rather than by
+granting a platform role access to health data.
+
+### What is not proven
+
+- **No account has been created through the app's own sign-up form.** The mailer quota refused every
+  attempt. `SIGN-10` (an unconfirmed address cannot be signed in to) is untested as a result.
+- **`SIGN-8` and `SIGN-9` fail**, and the renewal path is the suspect. Nothing about a device
+  session should be treated as settled until that is understood.
+- **The deletion scenario has not produced a clean run.** Its first attempt seeded no profile -
+  `POST /v1/households` answered 400, so the request shape is wrong - which leaves `DEL-5` unable
+  to show that anything went with the account.
+- **The email round trip** remains untestable without a mailbox (`BLK-010`), unchanged.
+
+Section 19's device coverage is therefore **not** 14/14. The fourteenth scenario exists, runs
+against the real stack, and proves six of its eleven checks; it is not green, and an inconclusive
+check is not a pass.

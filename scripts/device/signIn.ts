@@ -160,10 +160,7 @@ export function signedOutCheck(evidence: SignedOutEvidence): Check {
  * flow except the message itself.
  */
 export type SignUpProviderOutcome =
-  | 'CREATED_UNCONFIRMED'
-  | 'CREATED_CONFIRMED'
-  | 'NOT_CREATED'
-  | 'UNREADABLE';
+  'CREATED_UNCONFIRMED' | 'CREATED_CONFIRMED' | 'NOT_CREATED' | 'UNREADABLE';
 
 export interface SignUpEvidence {
   /** Names on screen after submitting the create-account form, or `null` if unreadable. */

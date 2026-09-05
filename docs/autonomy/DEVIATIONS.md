@@ -2396,7 +2396,7 @@ its own limit on pending local notifications, which is lower than Android's and 
 
 ---
 
-## DEV-062 - There is no account deletion, and there cannot honestly be one yet
+## DEV-062 - Account deletion is built and does not yet complete on a device
 
 - **Affected specification**: `16` (a person can have their data removed; the deletion workflow
   enumerates device local data, primary records, object storage, derived projections, queued jobs,
@@ -2425,7 +2425,43 @@ its own limit on pending local notifications, which is lower than Android's and 
   session, and let the purge take the rest. The order matters and is the reason this cannot be
   half-built - the auth user must go first, so a failure part-way leaves an account that still
   works rather than one that cannot be reached and cannot be removed.
-- **Status**: OPEN, blocked on `BLK-010`.
+- **Status**: OPEN, and **no longer blocked on a credential** (2026-09-06).
+
+- **What changed, 2026-09-06.** The credential objection is gone. DEC-126 removes the identity
+  through the `close-identity` Edge Function, so no service-role key enters this process at all,
+  and the API reports `can_remove_identity: true` for the first time. The function was smoke-tested
+  against a throwaway identity end to end: 401 with no token, 405 on `GET`, 204 on `POST`, and the
+  identity genuinely gone afterwards - the provider answers `invalid_credentials` to credentials
+  that worked one second before.
+
+  The screen exists and two of its six device checks pass against the real stack:
+
+  | Check   | Result | What it showed                                                             |
+  | ------- | ------ | -------------------------------------------------------------------------- |
+  | `DEL-1` | PASS   | the screen names all four things the deletion removes, and what is kept    |
+  | `DEL-2` | PASS   | a wrong password deleted nothing - verified in the database, not on screen |
+  | `DEL-3` | FAIL   | the real deletion was refused                                              |
+  | `DEL-4` | FAIL   | follows from DEL-3: the identity is still there                            |
+  | `DEL-5` | INCONC | the account owned nothing, so nothing had to go with it                    |
+  | `DEL-6` | FAIL   | follows from DEL-3: no `account.deleted` record                            |
+
+- **Why it is still open, precisely.** Two faults, both in code written on 2026-09-06 and neither
+  in the deletion itself.
+
+  1. **The screen calls `deleteAccount()` on a client captured before re-authentication.**
+     `reauthenticate` produces a _new_ token - that is what a step-up **is** on this provider - and
+     the client in the callback's closure still carries the old one, so the server sees a stale
+     step-up and refuses. The API log shows no deletion request completing, which is consistent.
+     The fix is to issue the deletion on the client the new session produces.
+  2. **The scenario seeds nothing to lose.** `POST /v1/households` answered 400, so the request
+     shape in `verifyDeleteAccount.ts` is wrong, and `DEL-5` cannot show that anything went with
+     the account because nothing was under it.
+
+- **Risk**: unchanged and low. The route refuses rather than half-completing, which is the property
+  DEC-125 was built around and which `DEL-2` measured directly: a wrong password left the account
+  and its rows untouched. Nothing is deleted that should not be; what does not work yet is the
+  deletion succeeding.
+- **Required future work**: the two fixes above, then a clean `npm run verify:device:delete`.
 
 ---
 
@@ -2566,3 +2602,49 @@ its own limit on pending local notifications, which is lower than Android's and 
   entries under the same disclosure rules a live read uses, and a screen. Delivery stays on
   `BLK-009` and is independent of both.
 - **Status**: OPEN, not blocked for the read surface; the delivery half is blocked on `BLK-009`.
+
+---
+
+## DEV-066 - Anybody with their own token can remove their own identity without Kynviora knowing
+
+- **Affected specification**: `16` (the deletion workflow removes an account and everything under
+  it), `14`, DEC-120 (the ordering that stops a half-deletion), DEC-125, DEC-126.
+- **Expected behaviour**: an identity is removed only as the last step of a Kynviora deletion, so
+  the rows the identity owned are always stamped first.
+- **Implemented behaviour**: the `close-identity` Edge Function can be invoked directly by any
+  caller presenting a valid access token, and it will remove that token's own identity. A person
+  who did so would leave an `app_user` row - and every profile, medicine and dose under it - live
+  and permanently unreachable, because nothing can authenticate as that subject again.
+- **Reason**: the check that would prevent it cannot be made where it would have to be made. The
+  function would have to know that Kynviora had already stamped the account, and it cannot look:
+  Kynviora's tables are owned by `kynviora_migrate` and granted only to `kynviora_app`,
+  `kynviora_service` and `kynviora_retention`, so Supabase's own `service_role` has **no privilege
+  on `app_user` at all**. That was measured, not assumed, and it is a property worth keeping - the
+  parity suite asserts a version of it - rather than a gap to widen by granting a platform role
+  access to health data so that one function can read one column.
+
+  The alternative check is a shared secret only Kynviora's API holds, and the function already
+  implements it: `KYNVIORA_DELETION_SECRET`, required in `x-kynviora-deletion` when the function
+  has one and ignored when it does not, compared in constant time. Setting it needs
+  `supabase secrets set` - the CLI with a project access token, or the dashboard - and neither is
+  reachable from this environment, which has the MCP connector's deploy verb and no secret verb.
+
+- **Temporary or permanent**: temporary, and closed by one command rather than by any code change.
+  The function checks the secret already; setting it on both sides is the whole of the work.
+- **Risk**: low, and self-inflicted rather than reachable by anybody else. The worst outcome is
+  that a person removes **their own** sign-in and orphans **their own** rows - there is no
+  parameter naming a user, so no token can be used against a second account, which is the failure
+  that would matter. It requires deliberately calling an undocumented function URL with one's own
+  bearer token; the app never does it, and the ordinary path through `DELETE /v1/me` stamps first
+  and always has.
+
+  What it costs if it happens is retention rather than exposure: the orphaned rows stay behind
+  their own row-level security, unreadable by every role and every session, until the purge
+  windows take them. Nobody sees anything they should not; some bytes outlive their owner's
+  intention.
+
+- **Required future work**: `supabase secrets set KYNVIORA_DELETION_SECRET=<value>` on the project,
+  and the same value in `KYNVIORA_SUPABASE_DELETION_SECRET` for the API. No redeploy of either
+  side is needed - the function reads it at request time and the API sends the header when it has
+  one.
+- **Status**: OPEN, blocked on tooling rather than on a decision.

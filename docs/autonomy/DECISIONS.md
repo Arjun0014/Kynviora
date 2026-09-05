@@ -4597,3 +4597,72 @@ and the other offers nothing at all.
 
 **Sources.** `16` (removal; the workflow enumerates what goes); `14`; `13`; `04` Phase 1.4;
 DEC-117; DEC-118; DEC-120; DEC-124; `DEV-062`; `BLK-010`.
+
+---
+
+## DEC-126 - The identity is removed by a function that holds the key, not by an API that is given one
+
+**Context.** DEC-125 built `DELETE /v1/me` and it worked in every respect but one: removing the
+identity at the provider needs a service-role credential, and this deployment had none.
+`canRemoveIdentity` was `false`, so the route refused with `PROVIDER_UNAVAILABLE` and changed
+nothing - correct, and not a deletion. `BLK-010` recorded the credential as the whole of what
+stood between `DEV-062` being built and being usable.
+
+The obvious resolution is to obtain the key and set `KYNVIORA_SUPABASE_SERVICE_KEY`. It is worth
+saying why that was not done even where it was possible, because the reasoning generalises.
+
+**A service-role key in this process is a bad shape independently of who has it.** It is the
+project's most powerful credential - it bypasses row-level security on everything Supabase owns -
+and `DELETE /v1/me` needs exactly one capability from it: remove the caller's own auth user. A
+credential granted for one call and capable of everything is the shape that turns a small
+compromise into a large one. It also has to live somewhere: an environment file, a secret store, a
+deployment pipeline, and eventually somebody's shell history.
+
+**Decision.** The removal is performed by a Supabase Edge Function, `close-identity`, and this API
+holds no privileged credential at all.
+
+Supabase injects `SUPABASE_SERVICE_ROLE_KEY` into every Edge Function's environment. So the
+credential does its job **without ever leaving the platform that issued it**, which is what `14`
+means by keeping a secret server-side and is not what an environment file achieves. What Kynviora
+configures is a URL.
+
+**The property that makes it better rather than merely different.** The function takes **no user
+id**. It reads `sub` from the claims Supabase's own gateway has already verified - `verify_jwt` is
+on, and a token with real-looking claims and a signature the project never issued is refused at the
+edge with `UNAUTHORIZED_LEGACY_JWT` before the function runs, which was measured rather than
+assumed. It also requires `role: authenticated`, because the anon key is itself a valid project JWT
+and the gateway admits it too.
+
+So the worst thing this endpoint can do, to anybody, is remove the identity of whoever holds the
+token presented to it. A service-role key can remove anyone. The capability is scoped by
+construction rather than by the correctness of the caller - which is the same reason DEC-124 reads
+identity from a token instead of a request field.
+
+**What it cost: the deletion order changed a second time.** DEC-125 chose local, then sessions,
+then identity. The function authenticates as the caller, and a global sign-out invalidates that
+token at the provider immediately - the finding behind DEC-124, measured in `supabaseLive.test.ts`.
+Signing out first therefore left the removal unable to authenticate at all.
+
+So the order is **local, then identity, then sessions**. And when the removal fails, the session is
+deliberately **kept**: it is the only credential the person has left to finish with, on a route
+whose entire design is that it can be called again, and it grants nothing - the account check
+refuses that subject on every route but this one and `POST`.
+
+**A code, not a sentence.** The partial failure now answers `ACCOUNT_DELETION_INCOMPLETE` (500)
+rather than sharing `PROVIDER_UNAVAILABLE` (503) with the two refusals that change nothing. `13`
+has clients branch on codes, and these two mean opposite things to the person reading them: "your
+medicines are still there" against "your data is gone, press it again". One sentence over both
+states would be untrue in the direction that matters.
+
+**What is not closed, and it is written down rather than glossed.** The function can be called
+directly by any client holding its own token, which would remove that identity while Kynviora had
+stamped nothing - leaving rows nothing can reach, which is the ordering DEC-120 cared about. It
+cannot be closed inside the function: Kynviora's tables are owned by `kynviora_migrate` and granted
+only to its own three roles, so `service_role` has no privilege on `app_user` at all, and that is a
+property worth keeping rather than a gap to widen. `KYNVIORA_DELETION_SECRET` closes it instead -
+checked by the function when set, absent otherwise - and setting it needs tooling this environment
+does not have. `DEV-066`.
+
+**Sources.** `14` (secrets server-side; re-authentication for high-impact actions); `13` (identity
+from a verified session; clients branch on codes); `16`; `12`; DEC-117; DEC-118; DEC-120; DEC-124;
+DEC-125; `DEV-062`; `DEV-066`; `BLK-010`.

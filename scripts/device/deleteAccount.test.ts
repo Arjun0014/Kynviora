@@ -76,9 +76,9 @@ describe('DEL-2 - a wrong password', () => {
   const base = { refusalHeading: REFUSAL, signedInOnlyName: ITEM };
 
   it('passes when nothing was stamped and the screen said so', () => {
-    expect(
-      wrongPasswordDeletionCheck({ ...base, rowsAfter: LIVE, names: [REFUSAL] }).status,
-    ).toBe('PASS');
+    expect(wrongPasswordDeletionCheck({ ...base, rowsAfter: LIVE, names: [REFUSAL] }).status).toBe(
+      'PASS',
+    );
   });
 
   it('fails when a wrong password closed the account', () => {
@@ -107,9 +107,9 @@ describe('DEL-2 - a wrong password', () => {
 
   it('is inconclusive when the rows could not be read', () => {
     // An unread database cannot show that nothing changed, and this check is entirely about that.
-    expect(
-      wrongPasswordDeletionCheck({ ...base, rowsAfter: null, names: [REFUSAL] }).status,
-    ).toBe('INCONCLUSIVE');
+    expect(wrongPasswordDeletionCheck({ ...base, rowsAfter: null, names: [REFUSAL] }).status).toBe(
+      'INCONCLUSIVE',
+    );
   });
 });
 

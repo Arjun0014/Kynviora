@@ -141,7 +141,8 @@ export const DELETE_ACCOUNT_COPY = Object.freeze({
   keptBody:
     'A record that an account was closed, and when. It is kept for two years because we have to be able to show that a deletion was carried out, and it holds no medicines, no names and no email address.',
   passwordLabel: 'Your password',
-  passwordHelp: 'Asked for because this cannot be undone, and so that a borrowed phone cannot do it.',
+  passwordHelp:
+    'Asked for because this cannot be undone, and so that a borrowed phone cannot do it.',
   submitLabel: 'Delete my account',
   cancelLabel: 'Keep my account',
   working: 'Deleting your account…',

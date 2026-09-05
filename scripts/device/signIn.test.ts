@@ -381,9 +381,9 @@ describe('SIGN-8 - a session outliving its access token', () => {
   });
 
   it('is inconclusive when the screen could not be read', () => {
-    expect(
-      renewedSessionCheck({ ...base, clockAdvancedBySeconds: 3900, names: null }).status,
-    ).toBe('INCONCLUSIVE');
+    expect(renewedSessionCheck({ ...base, clockAdvancedBySeconds: 3900, names: null }).status).toBe(
+      'INCONCLUSIVE',
+    );
   });
 });
 

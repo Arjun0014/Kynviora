@@ -520,7 +520,11 @@ export function registerAccountRoutes(app: FastifyInstance, deps: AccountRouteDe
              (actor_user_id, actor_role, action, target_kind, target_id, correlation_id, detail)
            VALUES ($1, 'kynviora_service', 'account.identity_removal_pending', 'app_user', $1, $2,
                    $3::jsonb)`,
-          [ctx.principal.userId, ctx.correlationId, JSON.stringify({ session_kept_for_retry: true })],
+          [
+            ctx.principal.userId,
+            ctx.correlationId,
+            JSON.stringify({ session_kept_for_retry: true }),
+          ],
         ),
       );
       return fail(

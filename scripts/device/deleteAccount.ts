@@ -232,8 +232,7 @@ export function deletionCompletedCheck(evidence: DeletionCompletedEvidence): Che
     id,
     title,
     status: 'PASS',
-    detail:
-      'The app returned to the sign-in screen with none of the account’s content on it.',
+    detail: 'The app returned to the sign-in screen with none of the account’s content on it.',
   };
 }
 

@@ -45,10 +45,7 @@ import {
   type IdentityState,
 } from './deleteAccount.js';
 import { withManagedClient, readMigrateDatabaseUrl } from '@kynviora/db';
-import {
-  DELETE_ACCOUNT_COPY,
-  SIGN_IN_COPY,
-} from '@kynviora/presentation';
+import { DELETE_ACCOUNT_COPY, SIGN_IN_COPY } from '@kynviora/presentation';
 import {
   captureFailure,
   centreOf,
@@ -231,9 +228,7 @@ async function accountRows(userId: string): Promise<AccountRows | null> {
   }
 }
 
-async function auditRows(
-  userId: string,
-): Promise<{ actions: string[]; details: string[] } | null> {
+async function auditRows(userId: string): Promise<{ actions: string[]; details: string[] } | null> {
   const url = readMigrateDatabaseUrl();
   if (url === null) return null;
   try {

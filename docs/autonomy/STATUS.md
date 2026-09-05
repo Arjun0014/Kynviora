@@ -13,9 +13,9 @@ Last updated: 2026-09-05
 | ------------------ | ------------------------------------------------------------------ |
 | **Current stage**  | Stage 4 complete; Stage 1 privacy work reopened and largely closed |
 | **Current phase**  | Phase 1.4 (export, deletion), Phase 1.1 (auth), Phase 2.2 (scan)   |
-| **Last completed** | The digest, then a guard so two closed vocabularies cannot drift   |
+| **Last completed** | Account deletion through an Edge Function; the fourteenth scenario |
 | **Branch**         | `master`                                                           |
-| **Latest commit**  | `test(schema): four closed vocabularies that existed twice...`     |
+| **Latest commit**  | `feat(deletion): the key that removes an identity never enters...` |
 | **Baseline tag**   | `baseline-spec-only`                                               |
 
 The retention decision unblocked six deviations at once and the previous session spent itself on
@@ -519,7 +519,7 @@ appears here.
 
 | ID      | Class                               | Blocks                                        |
 | ------- | ----------------------------------- | --------------------------------------------- |
-| BLK-001 | `EXTERNAL_SERVICE`                  | Managed Postgres/Supabase parity              |
+| BLK-010 | `EXTERNAL_CREDENTIAL`               | A mailbox: email confirmation and recovery    |
 | BLK-003 | `EXTERNAL_CREDENTIAL` + `LICENSING` | GS1/provider identity resolution              |
 | BLK-004 | `DATA_AVAILABILITY`                 | Publishing any regulatory status as trusted   |
 | BLK-005 | `LEGAL_REVIEW`                      | Source snapshot retention                     |
@@ -527,15 +527,33 @@ appears here.
 | BLK-007 | `EXTERNAL_CREDENTIAL`               | Real OCR/multimodal extraction                |
 | BLK-008 | `DATA_AVAILABILITY`                 | Every numeric release threshold (Stage 9.1)   |
 | BLK-009 | `EXTERNAL_CREDENTIAL`               | Actually sending any notification to a device |
-| BLK-010 | `EXTERNAL_CREDENTIAL`               | A Supabase project: account deletion, sign-in |
+
+`BLK-001` is **resolved** as of 2026-09-05: migrations `0001`-`0030` are applied unmodified to
+managed Postgres 17.6, the pooled runtime is real, and the parity, RLS, worker and device suites
+all run against it. `BLK-010` is narrowed to a mailbox - the service-role credential left it on
+2026-09-06 (DEC-126).
 
 ## Immediate next task
 
-**The Review Inbox's two uncompletable task kinds** (`DEV-024`).
+**Finish the deletion the screen already asks for** (`DEV-062`), and it is one line of the two.
 
-Ordinary Stage 5/6 work with no external dependency: two task kinds a household can be shown and
-cannot act on, in the surface whose whole purpose is that a household can act. It is the largest
-remaining piece of specified behaviour that is neither blocked nor waiting on a decision.
+`verify:device:delete` proves the parts that matter for safety - `DEL-1`, the screen names all four
+things the deletion removes and what is kept, before offering the control; `DEL-2`, a wrong
+password deleted nothing, verified in the database rather than on the screen. The deletion itself
+was refused, and the API log shows no deletion request completing.
+
+The diagnosis, which is a defect in code written on 2026-09-06 rather than in the deletion:
+`DeleteAccount.tsx` calls `client.deleteAccount()` on the client **captured in the callback's
+closure**, which still carries the pre-re-authentication token. `reauthenticate` produces a new
+token - that is what a step-up _is_ on this provider (DEC-118 part 3) - so the server sees a stale
+step-up and refuses. Issue the deletion on the client the new session produces. The file's own
+comment says to do this and the code does not.
+
+Second, smaller: `verifyDeleteAccount.ts` seeds nothing to lose. `POST /v1/households` answers 400,
+so the request shape is wrong, and `DEL-5` cannot show that anything went with the account.
+
+Then re-run, and recreate the account with `scripts/device/provisionDeleteAccount.sql` afterwards -
+a scenario that deletes its own subject cannot run twice without it.
 
 ## Next three planned tasks
 
@@ -556,14 +574,30 @@ a digest surface should be **instead of** the Safety Inbox, which already shows 
 events, is a product question rather than an engineering one. Building a second list of the same
 rows before that is answered would be inventing a design nobody asked for.
 
-**What is still genuinely blocked, and by what.** Account deletion and the sign-up/sign-in device
-scenario on `BLK-010`; OCR and the possible-formula-change task on `BLK-007`; substance vocabulary
-depth on `BLK-003`; publishing anything on `BLK-004` and `BLK-006`; sending any server-originated
-notification - now including the digest - on `BLK-009`; managed-Postgres parity on `BLK-001`. None
-of them is a decision any more: all six are a credential, a licence or a person.
+**What is still genuinely blocked, and by what.** The email round trip - confirmation and recovery
+links - on `BLK-010`, which is now a mailbox rather than a project; OCR and the
+possible-formula-change task on `BLK-007`; substance vocabulary depth on `BLK-003`; publishing
+anything on `BLK-004` and `BLK-006`; sending any server-originated notification, the digest
+included, on `BLK-009`. Account deletion and managed-Postgres parity have left this list.
 
-**The `19` device scenarios that remain.** One: sign-up, sign-in and recovery, which needs a
-Supabase project (`BLK-010`). Thirteen of fourteen are measured on hardware.
+**The `19` device scenarios.** All fourteen now have a harness, and thirteen are green. The
+fourteenth - sign-up, sign-in and recovery - runs against the real stack and is **not** green:
+
+| Passing                                            | Not passing                                                                  |
+| -------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `SIGN-1` a signed-out app offers all three ways in | `SIGN-2` the app's refusal did not match the provider's code on the last run |
+| `SIGN-3` a wrong password, refused and said        | `SIGN-8` the session was **not** renewed when its token came due             |
+| `SIGN-4` a real token reaches this account's rows  | `SIGN-9` a revoked session left the phone working                            |
+| `SIGN-7` a session survives the process dying      | `SIGN-5`, `SIGN-6` inconclusive on one failed direct sign-in                 |
+| `SIGN-11` recovery reaches the provider            | `SIGN-10` no account has been created through the app's own form             |
+
+So Section 19 is **13/14 measured green**, not 14/14, and it should not be written up as 14/14
+until `SIGN-8` and `SIGN-9` are understood. `SIGN-8` passed before the `expires_in` change and
+failed after it, on runs that were otherwise identical, and the API log has zero 401s - so the
+refusal came from the provider rather than from Kynviora. Refresh token rotation is the first thing
+to check: Supabase invalidates the previous token on each renewal, and two renewals racing the same
+one answer `refresh_token_already_used`, which maps to `SESSION_EXPIRED` and signs somebody out.
+A renewal loop, which is what the old absolute-expiry code produced, would have hidden exactly that.
 
 ## Recent decisions worth knowing
 
@@ -1679,3 +1713,36 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      single-writer accident (DEC-037) the worker's own entry point refuses to allow. Stop it by
      command line, not by process tree: `Get-CimInstance Win32_Process` filtered on `tsx` or
      `worker`, then `Stop-Process -Force` on each.
+204. `adb shell` joins its arguments back into one string and hands it to the **device's** shell
+     without re-quoting, so a redirect inside `sh -c '...'` is consumed by the wrong shell.
+     `run-as com.kynviora.app sh -c 'wc -c < files/SQLite/kynviora.db'` reads the file in the
+     _outer_ shell's working directory, which is not the app's, and answers
+     `can't open files/SQLite/kynviora.db` over a file sitting there with 32,768 bytes in it.
+     `SIGN-5` then reported "no encrypted database was found" about a device that had one - an
+     inconclusive result that looks like a finding about storage. Pass the path as an **argument**
+     (`stat -c %s files/SQLite/kynviora.db`), which no shell can redirect, or quote the whole
+     command so the inner `sh` owns the `<`. Both were checked against the device before choosing.
+205. A restart measured with a stopwatch reports the app losing its data. A cold start rebundles
+     and then fetches, and thirty-five seconds was a few short of it - so `SIGN-7` found the app
+     signed in with its shelf still arriving and said "came back signed in and showed none of this
+     account's data", which reads exactly like a session that survived without its contents. The
+     identical restart at forty-five seconds passed. Wait for a **determinate state** instead: the
+     account's data on screen or the sign-in control on screen, both of which are answers, and
+     return the reading that settled so waiting and looking cannot disagree. Trap 195 is the same
+     mistake in its other direction - there, a launch that never happened was described as
+     something a screen did.
+206. Supabase's built-in mailer allows two messages an hour and the quota is spent by an
+     **attempt**, not by a delivery. Every probe that comes back `over_email_send_rate_limit`
+     pushes the window out again - so checking whether the quota is free is the thing that
+     guarantees it is not. A full `verify:device:signin` makes three such calls (the app's sign-up,
+     the repeat that reads the refusal code, and the recovery request), which is why four
+     consecutive runs all reported `NOT_CREATED` and `SIGN-10` stayed inconclusive. To create an
+     account for real: ask for nothing at all for an hour, then run
+     `KYNVIORA_SIGNIN_PHASES=signup`, which makes exactly one - the app's own.
+207. `taskkill /F /IM node.exe` is not a way to free a port, twice over. It does not reliably kill
+     the listeners - Metro held 8081 and the API held 3000 across two attempts, both silently, and
+     the run then measured the previous bundle against the previous API (`SIGN-4`'s only failure
+     to date) - and it kills **every** node process on the machine, which here included MCP servers
+     and an unrelated dev server on 5173 belonging to somebody else's work. Free a port by its
+     owning process: `Get-NetTCPConnection -LocalPort <n> -State Listen` then `Stop-Process` on
+     `OwningProcess`, and refuse to continue if it is still held.
