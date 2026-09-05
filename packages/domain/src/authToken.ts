@@ -266,3 +266,41 @@ export function lastAuthenticatedAtSeconds(claims: VerifiedClaims): number | nul
 export function meetsReviewerAssurance(claims: VerifiedClaims): boolean {
   return claims.assuranceLevel === 'aal2';
 }
+
+// ---------------------------------------------------------------------------
+// What can go wrong signing in
+// ---------------------------------------------------------------------------
+
+/**
+ * Every way an authentication attempt can fail, as a closed set (DEC-118).
+ *
+ * Here rather than in `@kynviora/contracts` for one structural reason: `@kynviora/presentation`
+ * has to word each of these and cannot import contracts, which already depends on it. A closed
+ * vocabulary two packages both need is a domain vocabulary.
+ *
+ * Every member exists because a screen does something different about it. `EMAIL_UNCONFIRMED`
+ * points at a mailbox; `RATE_LIMITED` says to wait; `WRONG_CREDENTIALS` says the email and the
+ * password do not go together and deliberately does not say which is wrong, because the provider
+ * does not either and a client that guessed would be inventing an oracle for which addresses have
+ * accounts.
+ *
+ * An array rather than a bare union, so the vocabulary exists at run time and a copy table can be
+ * checked against it - which is how the one wording nobody wrote gets caught before it ships.
+ */
+export const AUTH_FAILURES = [
+  'WRONG_CREDENTIALS',
+  'EMAIL_UNCONFIRMED',
+  'EMAIL_ALREADY_REGISTERED',
+  'EMAIL_INVALID',
+  'PASSWORD_TOO_WEAK',
+  'RATE_LIMITED',
+  /** A second factor is enrolled and this session has not used it yet. */
+  'SECOND_FACTOR_REQUIRED',
+  /** The refresh token is spent, revoked or unknown. The person has to sign in again. */
+  'SESSION_EXPIRED',
+  'SIGNUP_DISABLED',
+  /** The provider could not be reached, or answered something this build does not understand. */
+  'UNAVAILABLE',
+] as const;
+
+export type AuthFailure = (typeof AUTH_FAILURES)[number];

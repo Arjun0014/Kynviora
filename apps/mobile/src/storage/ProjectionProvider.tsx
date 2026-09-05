@@ -17,13 +17,13 @@
  * the only defence.
  */
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { ClientSession } from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
 import type { Projection } from './projection';
 import type { PendingOperationStore } from './pendingOperations';
-import { openLocalStore } from './localStore';
+import { useLocalStore } from './LocalStoreProvider';
 
 export interface ProjectionContextValue {
   /** `null` until it opens, and permanently where it could not. */
@@ -100,35 +100,10 @@ export function ProjectionProvider({ children }: { readonly children: ReactNode 
   // Read rather than passed in, so the store cannot be mounted against one identity while the
   // client sends another. There is one session and one place it comes from.
   const { session } = useApi();
-  const [opened, setOpened] = useState<{
-    readonly projection: Projection | null;
-    readonly pending: PendingOperationStore | null;
-    readonly error: string | null;
-  }>({ projection: null, pending: null, error: null });
+  // Opened once, above the API client, because the signed-in session lives in the same encrypted
+  // store and is needed to build that client. See `LocalStoreProvider`.
+  const opened = useLocalStore();
   const previousSessionId = useRef<string | null>(null);
-
-  useEffect(() => {
-    let live = true;
-
-    void openLocalStore().then(
-      (store) => {
-        if (!live) return;
-        setOpened({ projection: store.projection, pending: store.pending, error: null });
-      },
-      (reason: unknown) => {
-        if (!live) return;
-        setOpened({
-          projection: null,
-          pending: null,
-          error: reason instanceof Error ? reason.message : 'The local store could not be opened.',
-        });
-      },
-    );
-
-    return () => {
-      live = false;
-    };
-  }, []);
 
   const sessionId = sessionIdOf(session);
 

@@ -4994,3 +4994,128 @@ the caller's own token - and is therefore the half that can be exercised against
 `DEV-062` moves from "not built" to "built, and needs one credential":
 `KYNVIORA_SUPABASE_SERVICE_KEY`. `BLK-010` narrows to that key and to the email round trip, and
 neither is a decision.
+
+---
+
+## 2026-09-05 - The phone can sign somebody in
+
+Everything before this could verify a token. Nothing could get one. The app's only identity was
+`EXPO_PUBLIC_DEV_USER_ID`, inlined into a bundle at build time, and `19`'s sign-up/sign-in/recovery
+scenario had nothing to drive.
+
+### The provider client is six requests, not a library
+
+`@supabase/supabase-js` brings a realtime client, a storage client, a PostgREST client and a
+session manager that writes to `AsyncStorage` **by default** - which `14` names explicitly as not
+approved for session data. What this app needs is six requests and a refresh rule, and those fit
+in one file that can be read in full and tested without a network.
+
+**Expiry comes from the provider's `expires_at`, never from the token.** DEC-118 part 6 in one
+field. The test that pins it uses an access token that is not a JWT at all: it has no `exp` to
+read, and the session is still complete - which it could not be if anything were parsing.
+
+**Every outcome is a code, and the mapping is one table.** `13` says clients branch on codes and
+never on message text, and this is where that earns its keep: `invalid_credentials`,
+`email_not_confirmed` and `over_email_send_rate_limit` lead to three entirely different screens and
+the provider distinguishes them only in `error_code`. A code this build has never seen becomes
+`UNAVAILABLE` rather than being guessed at - because the safe reading of "the provider said
+something new" is that we do not know what happened, and guessing would put somebody on a screen
+about their password during an outage.
+
+The response shapes in the test are the ones `supabaseLive.test.ts` observed against the real
+project, not invented ones.
+
+### Where a session is kept, and where it is not
+
+In the **encrypted SQLite store**, as a table beside the projection and the journal. Not
+`AsyncStorage`, which `14` rules out in the same sentence as health data. And not `SecureStore`
+either, which is the tempting answer and is where the **database key** already lives - a refresh
+token there would sit beside the key protecting everything else and share its failure modes.
+
+One row, because a phone has one signed-in person. A table that could hold two would need a rule
+for which is current, and that rule would be the bug: `12` requires an identity change to
+invalidate local access, and the way to guarantee it is for there to be nowhere for the previous
+identity to still be.
+
+**The store moved up a level.** `ProjectionProvider` used to open it, which was right while it held
+only the projection and the journal; the session is needed **above** the API client, because the
+client is built from it. Two providers calling `openLocalStore()` would be two connections racing
+one SQLCipher file, which is the failure `ProjectionProvider` has warned about since it was
+written. So a `LocalStoreProvider` opens it once at the root and `ProjectionProvider` keeps the
+part that was actually its own - scoping rows to an identity and clearing them when the identity
+changes.
+
+### Four things, and the fourth is the one that gets skipped
+
+**Restore** reads the stored session before anything renders, and `LOADING` is a real state - a
+gate treating "not yet known" as "signed out" flashes a sign-in screen past every returning person
+on every cold start, and some of them tap it.
+
+**Renew** is one timer computed from `expires_at`, rescheduled when the session changes. Not an
+interval: one that fires while the app is backgrounded bunches up. Only `SESSION_EXPIRED` signs
+somebody out - an outage must not, because the session is still valid and signing out over a
+dropped connection takes away an offline shelf somebody may be relying on.
+
+**Sign out** happens locally first and unconditionally, then at the provider, globally. A phone
+that refused to forget its token because the network was down would stay signed in exactly when
+somebody most wants it not to be.
+
+**Losing authorization** is the fourth. A token can stop being accepted while it is still perfectly
+valid on its face - the account was deleted, the session was revoked from another device - and
+`supabaseLive.test.ts` measured that nothing local can know. So the API's answer decides: one
+`fetch` wrapper in `ApiProvider` watches for a `401` and tells the auth provider the session is
+gone. Once, on the transport, rather than in each of forty screens. `403` is deliberately not
+watched - that is a step-up or a permission - and neither is `404`, which `13` makes
+indistinguishable from a refusal on purpose.
+
+### Re-authentication turned out to need no ceremony
+
+`14` requires it for exports, caregiver administration and deletion. Supabase records each
+authentication step in `amr` and the server reads step-up from the newest (DEC-118 part 3), so a
+password re-entry producing a **new token** _is_ a step-up. `elevate()` on a bearer session
+therefore returns the ordinary client and adds nothing - a client that could assert freshness would
+be asserting a re-authentication it did not perform, which is exactly what the development header
+does and why it is a development header.
+
+### The copy is in `presentation`, and the tests are about what it must not say
+
+`apps/**` is outside the test run, so a sentence in a component is the one family of user-visible
+strings nothing scans - and these are read by somebody who has just failed to get into their own
+account.
+
+The refusal for a wrong credential is about the **pair**: "that email address and password do not
+go together". Asserted, along with the absence of "no account", "not registered" and "we don't
+know" - the provider does not distinguish them and a screen that did would be an oracle for which
+addresses have accounts, readable by anybody with a phone. The recovery screen goes further and
+explains its own silence, because somebody who gets no email needs to know that "nothing arrived"
+does not mean "you typed it wrong".
+
+`AUTH_FAILURES` moved to `@kynviora/domain` for a structural reason: `presentation` has to word
+each member and cannot import `contracts`, which already depends on it. A closed vocabulary two
+packages both need is a domain vocabulary - and a test now asserts the copy table covers it
+exactly, so a failure added later cannot reach a screen as `undefined`.
+
+### The screen is one screen
+
+Sign in, create an account and ask for a new password, with all three ways out present at once. A
+person who has just been told their password is wrong is one tap from the third of them; three
+routes would put a navigation transition between "that did not work" and "then send me a link",
+which is the moment somebody gives up.
+
+**Sign-up ends at a mailbox, not at an error.** `kynviora-dev` requires confirmation, so the
+provider returns a user and no session - and a screen rendering that as a failure would send
+somebody to try again at an account they made one second ago, where the next attempt says the
+address is already registered.
+
+Two defects were caught by writing the tests. `submit` was guarded only by a disabled button, and
+a press that lands anyway - a screen reader activating a control, a double tap racing a re-render -
+would have asked the provider about a blank form; it is guarded in the handler now as well. And
+the refusal box was a tinted box with no heading, which `18` forbids: meaning carried by colour
+alone is no meaning at all to somebody who cannot see the colour.
+
+### Result
+
+`npm run verify` exit 0. **4,655 passed**, 66 skipped. The mobile project is 102 tests, up from 91.
+
+What this does **not** do is prove any of it on a device or against the real provider from a phone:
+that is the next thing, and `19`'s sign-up/sign-in scenario is what it is for.

@@ -50,6 +50,7 @@ import { ResourceState } from '@/components/ScreenState';
 import { DeliveryPolicy } from '@/features/notifications/DeliveryPolicy';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
 import { ConsentSettings } from '@/features/consent/ConsentSettings';
+import { SignOutControl } from '@/features/auth/SignOutControl';
 import { HealthContext } from '@/features/profiles/HealthContext';
 import { ProfileSwitcher } from '@/features/profiles/ProfileSwitcher';
 import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
@@ -405,6 +406,11 @@ export default function YouScreen() {
           />
         </>
       )}
+
+      {/* Last on the screen and outside every gate above it. Signing out must be reachable
+          whatever else failed to load - a person whose profile list would not arrive is one of
+          the people most likely to want it. */}
+      <SignOutControl />
     </Screen>
   );
 }

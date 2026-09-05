@@ -5,6 +5,7 @@
  * sends" and "what the tests exercise" are the same code rather than two descriptions of it.
  */
 
+export * from './auth.js';
 export * from './config.js';
 export * from './outcome.js';
 export * from './http.js';
