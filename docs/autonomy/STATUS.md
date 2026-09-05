@@ -30,7 +30,7 @@ by up to one interval and no finite interval makes that zero.
 
 ## Verification state
 
-- **4510 tests passing**, 0 failing, across 170 files.
+- **4524 tests passing**, 0 failing, across 170 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -444,7 +444,7 @@ the API will not distinguish them.
 | Area                                                        | State                                                         |
 | ----------------------------------------------------------- | ------------------------------------------------------------- |
 | Domain vocabularies, IDs, provenance, untrusted quarantine  | Complete, 94 tests                                            |
-| Database schema, 27 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                    |
+| Database schema, 28 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                    |
 | Catalog engine, capture pipeline, Trust Passport            | Complete, 178 tests                                           |
 | Regulatory registry, Citation Gate, Lens                    | Complete, 72 tests                                            |
 | Safety rule engine with replay; schedule and refill         | Complete, 88 tests                                            |
@@ -454,7 +454,7 @@ the API will not distinguish them.
 | Offline sync protocol, per-entity conflict policy           | Complete, 43 tests                                            |
 | Caregiver invitation, acceptance, revocation, audit         | Complete, 214 tests                                           |
 | Visit Pack export, reviewed-content gate, expiry            | Complete, 100 tests                                           |
-| Caregiver alert delivery, notification privacy              | Complete, 126 tests; **not sent** (BLK-009)                   |
+| Caregiver alert delivery, notification privacy              | Complete, 140 tests; channel recorded per row; **not sent**   |
 | Household Review Inbox, record-writing completion           | Complete, 95 tests                                            |
 | Medicine Reconciliation, two lists and no chosen answer     | Complete, 109 tests                                           |
 | Reviewer console: roles, two-person approval, withdrawal    | Complete, 116 tests; **publishes nothing** (BLK-006)          |

@@ -559,3 +559,84 @@ describe('row level security: the ceiling', () => {
     expect(res.rows).toEqual([]);
   });
 });
+
+describe('the channel columns', () => {
+  /** A delivery carrying an explicit channel triple, so each constraint has something to refuse. */
+  function deliverWithChannel(
+    recipient: string,
+    channel: string | null,
+    reason: string | null,
+    held: boolean | null,
+    occurrenceKey = 'channel-1',
+  ) {
+    return t.asService((db) =>
+      db.query(
+        `INSERT INTO alert_delivery
+           (profile_id, recipient_user_id, event_kind, alert_publication_id, dose_occurrence_key,
+            detail_level, delivered_at, channel, channel_reason, held)
+         VALUES ($1, $2, 'MISSED_DOSE', NULL, $3, 'GENERIC', $4, $5, $6, $7)`,
+        [PROFILE_A, recipient, occurrenceKey, NOW, channel, reason, held],
+      ),
+    );
+  }
+
+  it('accepts a complete triple', async () => {
+    await expect(
+      deliverWithChannel(OWNER, 'DIGEST', 'URGENCY_CEILING', false, 'channel-ok'),
+    ).resolves.toBeDefined();
+  });
+
+  it('accepts a row that has none of them, because rows predate the columns', async () => {
+    // NULL means "written before migration 0028", which is a fact rather than a missing value.
+    // A default would have been a guess that reads as a fact.
+    await expect(
+      deliverWithChannel(OWNER, null, null, null, 'channel-none'),
+    ).resolves.toBeDefined();
+  });
+
+  it('refuses a channel outside the vocabulary', async () => {
+    const message = await expectDenied(() =>
+      deliverWithChannel(OWNER, 'SHOUT', 'URGENCY_CEILING', false, 'channel-bad'),
+    );
+    expect(message).toMatch(/alert_delivery_channel_valid/);
+  });
+
+  it('refuses a reason outside the vocabulary', async () => {
+    const message = await expectDenied(() =>
+      deliverWithChannel(OWNER, 'DIGEST', 'BECAUSE', false, 'channel-bad-reason'),
+    );
+    expect(message).toMatch(/alert_delivery_channel_reason_valid/);
+  });
+
+  it('refuses a channel with no reason beside it', async () => {
+    // The half an operator actually reads. A row saying DIGEST and not why is a row that recorded
+    // the decision and lost its explanation.
+    const message = await expectDenied(() =>
+      deliverWithChannel(OWNER, 'DIGEST', null, false, 'channel-half'),
+    );
+    expect(message).toMatch(/alert_delivery_channel_together/);
+  });
+
+  it('refuses a held digest, because only an interrupt has a time it would have arrived', async () => {
+    // The invariant that lived only in `deliveryDecision`'s control flow until `0028`. Holding a
+    // digest line is meaningless - there is no moment it was going to appear - and a held digest
+    // would be a lower urgency wearing the language of a deferred alert.
+    const message = await expectDenied(() =>
+      deliverWithChannel(OWNER, 'DIGEST', 'HELD_FOR_QUIET_HOURS', true, 'channel-held-digest'),
+    );
+    expect(message).toMatch(/alert_delivery_held_is_an_interrupt/);
+  });
+
+  it('refuses a hold claiming any reason but quiet hours', async () => {
+    const message = await expectDenied(() =>
+      deliverWithChannel(OWNER, 'INTERRUPT', 'URGENCY_CEILING', true, 'channel-held-why'),
+    );
+    expect(message).toMatch(/alert_delivery_held_has_one_reason/);
+  });
+
+  it('accepts an interrupt held for quiet hours, which is the case that exists', async () => {
+    await expect(
+      deliverWithChannel(OWNER, 'INTERRUPT', 'HELD_FOR_QUIET_HOURS', true, 'channel-held-ok'),
+    ).resolves.toBeDefined();
+  });
+});

@@ -4301,3 +4301,50 @@ would have been reassuring and wrong at exactly the moment it mattered most.
 
 `npm run verify` exit 0. 4510 tests across 170 files. Migration `0027` adds one function and no
 tables, and the service role that reads it still cannot select a row from any of `0026`'s three.
+
+---
+
+## 2026-09-05 - The channel a delivery took, which nothing wrote down
+
+The next task STATUS names is the digest (`DEV-033`), and reading it turned up a prerequisite that
+is worth having on its own.
+
+`DEV-033` says a digest is assembled from "`alert_delivery` rows planned onto the digest channel".
+There were no such rows to find. `deliveryDecision` has decided a channel **per recipient** since
+DEC-119 - a caregiver in London looking after somebody in Kolkata must not be woken at four in the
+morning because the household's night is elsewhere - and `dispatchAlert` acted on that decision and
+then discarded it. The row recorded that a delivery happened; it did not record whether anything
+reached a device.
+
+The only surviving trace was a profile-level summary inside an `audit_event` detail blob: **one**
+channel for a dispatch that may have made six different decisions. So the question a person
+actually asks - "why was I not notified?" - had no answer at the granularity it is asked at, and
+the digest had no candidate set.
+
+`0028` adds `channel`, `channel_reason` and `held` to `alert_delivery`, and `dispatchAlert`
+computes each recipient's own decision **before** writing their row rather than after.
+
+**Nullable, and that is the honest choice.** Rows written before this migration took a channel
+nobody wrote down, and there is no value to backfill them with. `IN_APP_ONLY` would be a guess that
+reads as a fact, and a default is precisely how a guess becomes one. NULL means "written before the
+channel was recorded", the three columns are absent together, and a reader looking for digest
+material asks for `channel = 'DIGEST'` - which excludes them without needing to know why.
+
+**Two constraints move an invariant out of control flow and into the schema.** Only an interrupt
+can be **held**, and a hold has exactly one reason. Both are true today as properties of which
+branch of `deliveryDecision` returned, which means they are true only for as long as nobody edits
+that function without reading it. Holding a digest line is meaningless - there is no moment it was
+going to appear - and a held digest would be a lower urgency wearing the language of a deferred
+alert.
+
+**The test that justifies the column being per row** puts one recipient in Kolkata and one in
+London, sets the profile's quiet hours to 22:00-07:00, and dispatches a `HIGH` alert at 20:00 UTC -
+01:30 in one place and 21:00 in the other. Two rows, two answers: one held, one not. The
+profile-level audit detail could not have expressed that even in principle.
+
+### Result
+
+`npm run verify` exit 0. 4524 tests across 170 files. `DEV-033` is updated rather than closed: one
+of its two stated reasons - "there is no scheduler in this build" - is no longer true, and the
+other, `BLK-009`, still is. What remains of it is an assembler, and every input it needs now
+exists.

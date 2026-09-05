@@ -530,11 +530,17 @@ export async function dispatchAlert(
     const withheldFromDevice: UserId[] = [];
 
     for (const recipient of plan.recipients) {
+      // This recipient's own decision, in this recipient's own night (DEC-119), computed before
+      // the row is written so the row can carry it. It used to be computed after, which is how
+      // the channel survived only as a profile-level number in an audit blob - one answer for a
+      // dispatch that may have made six different ones (`0028`).
+      const recipientTiming = timingFor(recipient.userId);
+
       const inserted = await db.query<{ id: string }>(
         `INSERT INTO alert_delivery
            (profile_id, recipient_user_id, event_kind, alert_publication_id, dose_occurrence_key,
-            detail_level, delivered_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+            detail_level, delivered_at, channel, channel_reason, held)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT DO NOTHING
          RETURNING id`,
         [
@@ -545,6 +551,9 @@ export async function dispatchAlert(
           input.doseOccurrenceKey ?? null,
           recipient.detailLevel,
           ctx.now,
+          recipientTiming.channel,
+          recipientTiming.reason,
+          recipientTiming.held,
         ],
       );
 
@@ -562,8 +571,6 @@ export async function dispatchAlert(
       // Exit criterion 1 arrives here: an INFORMATIONAL event - which is what a foreign
       // regulatory difference defaults to (`09`) - takes this branch and the transport is never
       // called, so there is no push and no digest line to mistake for a personal alert.
-      // This recipient's own decision, in this recipient's own night (DEC-119).
-      const recipientTiming = timingFor(recipient.userId);
       if (recipientTiming.channel !== 'INTERRUPT' || recipientTiming.held) {
         withheldFromDevice.push(recipient.userId);
         continue;

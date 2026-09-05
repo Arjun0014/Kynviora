@@ -690,3 +690,157 @@ describe('what the settings say about whether quiet hours work', () => {
     expect(body.quietHoursApplied).toBe(false);
   });
 });
+
+describe('the channel a delivery actually took, on the row', () => {
+  async function channelRows(alertId: string) {
+    const res = await t.asService((db) =>
+      db.query<{
+        recipient_user_id: string;
+        channel: string | null;
+        channel_reason: string | null;
+        held: boolean | null;
+      }>(
+        `SELECT recipient_user_id, channel, channel_reason, held
+           FROM alert_delivery WHERE alert_publication_id = $1
+          ORDER BY recipient_user_id`,
+        [alertId],
+      ),
+    );
+    return res.rows;
+  }
+
+  /** The real dispatcher, as the block above drives it. */
+  async function dispatchFor(
+    urgency: ActionUrgency,
+    alertId: string,
+    localMinuteOfDay: number | null = null,
+  ) {
+    const ctx = createRequestContext({
+      pool: {
+        withUser: (userId, fn) => t.asUser(userId, (db) => fn(db as unknown as DatabaseConnection)),
+        withService: (fn) => t.asService((db) => fn(db as unknown as DatabaseConnection)),
+      },
+      principal: principalFor(OWNER),
+      correlationId: 'test-correlation',
+      now: currentNow,
+      logger: noopLogger(),
+    });
+    const result = await dispatchAlert(
+      ctx,
+      {
+        profileId: PROFILE,
+        eventKind: 'SAFETY_ALERT',
+        alertPublicationId: alertId,
+        urgency,
+        localMinuteOfDay,
+        subject: {
+          kind: 'SAFETY_ALERT',
+          profileDisplayName: 'Parent A (synthetic)',
+          itemDisplayName: 'Synthetic Tablet',
+        },
+      },
+      recordingTransport(),
+    );
+    if (!result.ok) throw new Error('expected dispatch to succeed');
+    return result.value;
+  }
+
+  it('records the digest channel for a low urgency, which is what a digest is assembled from', async () => {
+    // `DEV-033`: a digest reads the rows *planned onto the digest channel*. Before `0028` nothing
+    // recorded which those were, so the assembler had no candidate set to read.
+    const { alertId } = await publishAlert();
+    await dispatchFor('LOW', alertId);
+
+    const rows = await channelRows(alertId);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.channel).toBe('DIGEST');
+      expect(row.channel_reason).toBe('URGENCY_CEILING');
+      expect(row.held).toBe(false);
+    }
+  });
+
+  it('records an interrupt for an urgency that reaches a device', async () => {
+    const { alertId } = await publishAlert();
+    await dispatchFor('HIGH', alertId);
+    for (const row of await channelRows(alertId)) {
+      expect(row.channel).toBe('INTERRUPT');
+      expect(row.held).toBe(false);
+    }
+  });
+
+  it('records in-app-only for a foreign regulatory difference, with the reason', async () => {
+    // Exit criterion 1, now answerable from the row rather than only from an audit blob: an
+    // operator asked why nothing arrived can see that nothing was meant to.
+    const { alertId } = await publishAlert();
+    await dispatchFor('INFORMATIONAL', alertId);
+    for (const row of await channelRows(alertId)) {
+      expect(row.channel).toBe('IN_APP_ONLY');
+      expect(row.channel_reason).toBe('URGENCY_CEILING');
+    }
+  });
+
+  it('records the hold, and the reason for it, when quiet hours defer an interrupt', async () => {
+    await t.asService((db) =>
+      db.query(
+        `INSERT INTO profile_notification_policy
+           (profile_id, quiet_hours_start_minute, quiet_hours_end_minute)
+         VALUES ($1, $2, $3)`,
+        [PROFILE, 22 * 60, 7 * 60],
+      ),
+    );
+    const { alertId } = await publishAlert();
+    await dispatchFor('HIGH', alertId, 3 * 60);
+
+    for (const row of await channelRows(alertId)) {
+      // Held is not downgraded. The channel is still INTERRUPT, which is the distinction a screen
+      // reporting this as a digest item would lose.
+      expect(row.channel).toBe('INTERRUPT');
+      expect(row.held).toBe(true);
+      expect(row.channel_reason).toBe('HELD_FOR_QUIET_HOURS');
+    }
+  });
+
+  it('gives two recipients in two zones two different rows', async () => {
+    // The reason this is a column rather than an audit line. 20:00 UTC is 01:30 in Kolkata and
+    // 21:00 in London: one dispatch, two recipients, two answers - which the profile-level audit
+    // detail could not express even in principle, because it records one channel per dispatch.
+    await t.asService(async (db) => {
+      await db.query(
+        `INSERT INTO profile_notification_policy
+           (profile_id, quiet_hours_start_minute, quiet_hours_end_minute)
+         VALUES ($1, $2, $3)`,
+        [PROFILE, 22 * 60, 7 * 60],
+      );
+      await db.query(`UPDATE app_user SET time_zone = 'Asia/Kolkata' WHERE id = $1`, [OWNER]);
+      await db.query(`UPDATE app_user SET time_zone = 'Europe/London' WHERE id = $1`, [CAREGIVER]);
+      await db.query(
+        `INSERT INTO caregiver_grant
+           (profile_id, grantee_user_id, granted_by_user_id, capabilities, status, accepted_at)
+         VALUES ($1, $2, $3, ARRAY['VIEW_SAFETY']::text[], 'ACTIVE', now())`,
+        [PROFILE, CAREGIVER, OWNER],
+      );
+    });
+
+    currentNow = instantFrom('2026-09-05T20:00:00.000Z');
+    const { alertId } = await publishAlert();
+    // No caller-supplied local minute, so each recipient's stored zone answers for them.
+    await dispatchFor('HIGH', alertId, null);
+
+    const rows = await channelRows(alertId);
+    const heldFor = new Map(rows.map((r) => [r.recipient_user_id, r.held]));
+    expect(rows).toHaveLength(2);
+    expect(heldFor.get(OWNER)).toBe(true);
+    expect(heldFor.get(CAREGIVER)).toBe(false);
+  });
+
+  it('carries no medicine, person or free text in any of the three columns', async () => {
+    // The three are a channel, a reason from a closed set, and a boolean. `20` keeps operator
+    // output free of content and this is the column set most likely to acquire an explanation.
+    const { alertId } = await publishAlert();
+    await dispatchFor('LOW', alertId);
+    const serialized = JSON.stringify(await channelRows(alertId));
+    expect(serialized).not.toContain('Synthetic Tablet');
+    expect(serialized).not.toContain('Parent A');
+  });
+});

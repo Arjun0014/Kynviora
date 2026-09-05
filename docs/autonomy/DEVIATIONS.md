@@ -855,27 +855,42 @@ route.
 - **Expected behaviour**: `MEDIUM` and `LOW` events do not interrupt anybody; they are collected
   and shown together, so a household sees them without a phone lighting up for each one.
 - **Implemented behaviour**: the first half only. `MAX_CHANNEL_FOR_URGENCY` maps `MEDIUM` and `LOW`
-  to `DIGEST`, `deliveryDecision` returns the channel with its reason, `dispatchAlert` records the
-  plan and the channel on `alert_delivery` and sends nothing for any channel that is not
-  `INTERRUPT`, and the settings screen says in words what each urgency does. Nothing gathers the
-  digest-channel rows into a summary, and there is no route, no schedule and no screen for one.
-- **Reason**: a digest is a thing that is _sent_ on a cadence, and nothing sends anything
-  (`BLK-009`) or runs on a cadence at all - there is no scheduler in this build, which is the same
-  gap `DEV-011` records for missed doses. Assembling a summary nothing can deliver would be
-  building the half that cannot be checked against reality: the questions it has to answer -
-  how often, what a person sees if they open the app before it arrives, whether an item resolved
-  since it was collected still appears - are all about a delivery that does not happen.
+  to `DIGEST`, `deliveryDecision` returns the channel with its reason, `dispatchAlert` sends
+  nothing for any channel that is not `INTERRUPT`, and the settings screen says in words what each
+  urgency does. Since `0028` the channel, its reason and whether the event was held are recorded
+  **per recipient on `alert_delivery`**, so the rows a digest would be assembled from are now
+  identifiable. Nothing gathers them into a summary, and there is no route, no schedule and no
+  screen for one.
+- **Reason**: two reasons were recorded and only one of them is still true.
+
+  **No longer true:** "nothing runs on a cadence at all - there is no scheduler in this build".
+  `services/worker` is one (DEC-121), and it keeps a durable schedule from run history rather than
+  from a timer, which is exactly what an 09:00 recipient-local cadence needs. `DEV-030`, the other
+  half of that argument, closed with DEC-119: a recipient's local time is known where they have
+  reported a zone.
+
+  **Still true:** nothing sends anything (`BLK-009`). A digest that is assembled and recorded is
+  most of the feature and is the half `04` Phase 7.5 specifies; a digest that is _delivered_ needs
+  push credentials that do not exist.
+
+  What that changes is the shape of the remaining work rather than whether it can be done. The
+  questions this deviation said were unanswerable - how often, what a person sees if they open the
+  app first, whether an item resolved since collection still appears - are answerable now: the
+  cadence is approved, the app already shows every one of these events through the Safety Inbox,
+  and `revalidate` is what decides the third.
+
 - **Temporary or permanent**: temporary.
 - **Risk**: low, and the safe direction. Nothing is lost: the events are recorded, and every one of
   them is already reachable in the app through the Safety Inbox and the Shelf, which is what
   `IN_APP_ONLY` and `DIGEST` both mean today. The failure it leaves is that a household must open
   Kynviora to see a `MEDIUM` finding rather than being told, and `02` treats not interrupting as
   the default rather than a degradation.
-- **Required future work**: a scheduler, which `DEV-011` also needs, then a digest assembler that
-  reads `alert_delivery` rows planned onto the digest channel and revalidates each one at assembly
-  time - `revalidate` already exists, and a summary that reported a withdrawn alert as current
-  would breach `04` Phase 7.5's own second exit criterion. Quiet hours and the digest want the same
-  missing input, a local time (`DEV-030`), so the two are best done together.
+- **Required future work**: the assembler. Every input it named is now present - a scheduler
+  (DEC-121), a recipient's local time (DEC-119), a revalidation path, and since `0028` a candidate
+  set it can actually query. What remains is a job that gathers a recipient's `DIGEST`-channel
+  deliveries, revalidates each at assembly time - `revalidate` already exists, and a summary that
+  reported a withdrawn alert as current would breach `04` Phase 7.5's own second exit criterion -
+  and records the result. Delivering it stays on `BLK-009`.
 
 ---
 
