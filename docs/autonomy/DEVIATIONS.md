@@ -2734,9 +2734,25 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Risk**: low, and not a safety boundary. Nothing is written that should not be - the constraint
   holds - and the caller is told the write failed. What they are not told is why, so a screen
   cannot offer a next step, and an operator reading the log sees only that something threw.
-- **Required future work**: decide the refusal vocabulary for a unique violation, then map it in
-  `insertOrRefusal` so every route inherits it.
-- **Status**: OPEN.
+- **Required future work**: none.
+- **Status**: **RESOLVED 2026-09-06** (DEC-129).
+
+  The vocabulary decision went to a new `ALREADY_EXISTS` at 409, and the mapping went to the
+  **Fastify error handler** rather than to `insertOrRefusal` - which is a wrapper over five call
+  sites, while a `23505` can come out of any statement. Every route inherits it, and the routes
+  that answer their own duplicates by reading the stored row back under an idempotency key never
+  reach it at all, because `ON CONFLICT DO NOTHING` raises nothing.
+
+  The half worth recording is what the refusal may not say. A unique index is enforced over every
+  row in the table, **including rows row-level security hides from this caller**, so naming the
+  constraint or describing the conflicting row would be an oracle for data they were never allowed
+  to read. The message is generic, there is no `detail`, and the driver's own `detail` field -
+  which reads `Key (self_user_id)=(<uuid>) already exists.` - is read nowhere. The constraint name
+  goes to the log as `api.write_refused_as_duplicate`, validated against an identifier pattern
+  first.
+
+  The deletion scenario's workaround is left in place. `DEL-5` needs a profile rather than this
+  account's own, so asking for `isSelf` was never what that check was about.
 
 ---
 

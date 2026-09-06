@@ -158,6 +158,14 @@ export const DOMAIN_ERROR_CODES = [
   'VERSION_CONFLICT',
   'IDEMPOTENCY_REPLAY',
   'SYNC_CONFLICT',
+  // A uniqueness rule the caller cannot see refused this write (DEC-129, `DEV-068`).
+  //
+  // Its own code rather than `VALIDATION_FAILED`, because nothing about the request was
+  // malformed and no field can be highlighted: the conflict is with stored state, and a client
+  // that corrected a field would be refused again. Its own code rather than `VERSION_CONFLICT`
+  // for the opposite reason - that one means "re-read and retry", and retrying this one never
+  // succeeds. `13` has clients branch on codes because the next step differs, and here it does.
+  'ALREADY_EXISTS',
 
   // Infrastructure
   'RATE_LIMITED',

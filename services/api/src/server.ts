@@ -56,7 +56,7 @@ import type { DatabasePool, Principal, RequestContext } from './context.js';
 import { createRequestContext } from './context.js';
 import { resolveAccountState, type UnprovisionedRoute } from './account.js';
 import { registerAccountRoutes, type AuthProvider } from './accountLifecycle.js';
-import { toErrorResponse, statusForCode } from './errors.js';
+import { toErrorResponse, statusForCode, uniqueViolationConstraint } from './errors.js';
 import { nodeInviteTokenService, registerCaregiverRoutes } from './caregiver.js';
 import { registerVisitPackRoutes, sha256ContentDigest } from './visitPack.js';
 import { registerAlertDeliveryRoutes } from './alertDelivery.js';
@@ -2758,6 +2758,25 @@ export function createServer(options: ServerOptions): FastifyInstance {
         domainError('VALIDATION_FAILED', 'Malformed request.', { reason_code: 'malformed' }),
         correlationId,
       );
+    }
+
+    // A uniqueness rule refused the write (DEC-129, `DEV-068`). Handled here rather than in
+    // `insertOrRefusal`, because a `23505` can come out of any statement and only some writes go
+    // through that wrapper - the routes that answer their own duplicates, by reading the stored
+    // row back under an idempotency key, never reach this at all because `ON CONFLICT DO NOTHING`
+    // raises nothing.
+    //
+    // The constraint name is logged and never sent. A unique index is enforced over every row in
+    // the table, including the rows row-level security hides from this caller, so naming the rule
+    // that refused would say something about data they were never allowed to read. The driver's
+    // `detail` field carries the offending value itself and is not read anywhere.
+    const constraint = uniqueViolationConstraint(error);
+    if (constraint !== null) {
+      options.logger.info('api.write_refused_as_duplicate', {
+        correlation_id: correlationId,
+        constraint,
+      });
+      return fail(reply, domainError('ALREADY_EXISTS', 'This already exists.'), correlationId);
     }
 
     // Never surface an internal message: it may contain a query fragment or a value.

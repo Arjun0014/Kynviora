@@ -400,6 +400,69 @@ describe('who a profile can say it is for', () => {
     expect(stored.rows[0]?.is_managed).toBe(false);
   });
 
+  it('refuses a second self-profile with a code a screen can act on', async () => {
+    // `DEV-068`. `profile_self_user_unique` is right and the refusal was missing: the violation
+    // reached the error handler as `INTERNAL`, so a 500 with no reason in it was what somebody
+    // got for pressing a button twice.
+    const first = await request(principalFor(OWNER), {
+      method: 'POST',
+      url: '/v1/profiles',
+      headers: key(),
+      payload: { householdId: household, displayName: 'Me', isSelf: true },
+    });
+    expect(first.statusCode).toBe(201);
+
+    // A different idempotency key, so this is a second request rather than a replay - a replay is
+    // answered by the stored row and never reaches the constraint at all.
+    const second = await request(principalFor(OWNER), {
+      method: 'POST',
+      url: '/v1/profiles',
+      headers: key(),
+      payload: { householdId: household, displayName: 'Me again', isSelf: true },
+    });
+    expect(second.statusCode).toBe(409);
+    expect(second.json<WireBody>().error.code).toBe('ALREADY_EXISTS');
+
+    // And exactly one row, which is what the constraint was for.
+    const stored = await t.asService((db) =>
+      db.query<{ n: string }>(`SELECT count(*) AS n FROM profile WHERE self_user_id = $1`, [OWNER]),
+    );
+    expect(Number(stored.rows[0]?.n)).toBe(1);
+  });
+
+  it('names neither the rule that refused nor the row that already existed', async () => {
+    // A unique index is enforced over every row in the table, including rows row-level security
+    // hides from this caller, so the refusal must say nothing about what is already there. The
+    // driver hands us both - `constraint` and a `detail` reading `Key (...)=(...) already exists`
+    // - and neither may reach the wire (`19`, no enumeration oracle).
+    await request(principalFor(OWNER), {
+      method: 'POST',
+      url: '/v1/profiles',
+      headers: key(),
+      payload: { householdId: household, displayName: 'Me', isSelf: true },
+    });
+    const second = await request(principalFor(OWNER), {
+      method: 'POST',
+      url: '/v1/profiles',
+      headers: key(),
+      payload: { householdId: household, displayName: 'Me again', isSelf: true },
+    });
+
+    const raw = second.body;
+    expect(raw).not.toContain('profile_self_user_unique');
+    expect(raw).not.toContain('self_user_id');
+    // The driver's own `detail` reads `Key (self_user_id)=(<uuid>) already exists.` and is the
+    // one field that carries the value somebody submitted.
+    expect(raw).not.toContain('Key (');
+    expect(raw).not.toContain(OWNER);
+    // No `detail` at all: there is no field a form could point at, and the only thing this
+    // refusal could name is the row it must not describe.
+    expect(second.json<WireBody>().error.detail).toBeUndefined();
+    // And not retryable - retrying this one never succeeds, which is the whole reason it does not
+    // share `VERSION_CONFLICT`'s code.
+    expect(second.json<{ error: { retryable: boolean } }>().error.retryable).toBe(false);
+  });
+
   it('has no way to name anybody else as the subject', async () => {
     // `.strict()` refuses the field, and there is no parameter it could reach if it did not. A
     // profile asserting that another user is its subject would be an authorization statement

@@ -102,6 +102,9 @@ const STATUS_BY_CODE: Readonly<Record<DomainErrorCode, number>> = Object.freeze(
   VERSION_CONFLICT: 409,
   IDEMPOTENCY_REPLAY: 200,
   SYNC_CONFLICT: 409,
+  // 409 because the request conflicts with the current state of the collection, which is exactly
+  // what Conflict means. Not 400: the body is well-formed and there is no field to correct.
+  ALREADY_EXISTS: 409,
 
   // Infrastructure
   RATE_LIMITED: 429,
@@ -137,6 +140,12 @@ const MESSAGE_BY_CODE: Partial<Record<DomainErrorCode, string>> = Object.freeze(
   EXPORT_CONTENT_CHANGED:
     'This information changed since you reviewed it. Check it again before sharing.',
   EXPORT_EXPIRED: 'This Visit Pack has expired. Create a new one to share it again.',
+  // Deliberately says nothing about *which* rule refused, and nothing about the conflicting row.
+  // A unique index is enforced across every row in the table, including rows row-level security
+  // hides from this caller, so a message naming the constraint or the existing record would be
+  // an oracle for data the caller was never allowed to read (`19`, no enumeration oracle). The
+  // constraint name goes to the log, where an operator can read it against the correlation ID.
+  ALREADY_EXISTS: 'This already exists. Check what is there before adding it again.',
   RATE_LIMITED: 'Too many requests. Try again shortly.',
   BUDGET_EXCEEDED: 'This request exceeds the current processing budget. Try again later.',
   INTERNAL: 'Something went wrong.',
@@ -169,6 +178,57 @@ export function toErrorResponse(error: DomainError, correlationId: string): Erro
     ? { error: body }
     : { error: { ...body, detail: error.detail } };
 }
+
+/**
+ * The SQLSTATE Postgres raises for a unique-constraint violation.
+ *
+ * Named rather than written at the comparison, because `23505` and `23503` (foreign key) differ
+ * by one character and mean opposite things about whose mistake it was.
+ */
+const UNIQUE_VIOLATION = '23505';
+
+/**
+ * Constraint names are schema identifiers, and nothing else is accepted as one.
+ *
+ * The name is written by a migration in this repository, so this can only ever fail if a driver
+ * put something unexpected in the field. It is validated anyway: this value is about to be
+ * written to a log, and a value that reached a log unchecked is how a log becomes an injection
+ * surface. Anything else is reported as an unnamed constraint rather than passed through.
+ */
+const CONSTRAINT_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
+
+/**
+ * The unique constraint a failed write violated, or `null` if it did not violate one.
+ *
+ * WHY THE MESSAGE IS PARSED AS WELL AS THE FIELD READ
+ * `pg` and PGlite both populate `constraint` on a `23505`, and both were checked. The message
+ * fallback is not for them: it is for the day a pooler or a wrapper re-raises the error with the
+ * fields flattened, which would otherwise turn a refusal back into a 500 silently. Both drivers
+ * also carry a `detail` reading `Key (column)=(value) already exists.` - **that** field carries
+ * the value somebody submitted and is deliberately never read here.
+ */
+export function uniqueViolationConstraint(cause: unknown): string | null {
+  if (cause === null || typeof cause !== 'object') return null;
+  const error = cause as { code?: unknown; constraint?: unknown; message?: unknown };
+  if (error.code !== UNIQUE_VIOLATION) return null;
+
+  if (typeof error.constraint === 'string' && CONSTRAINT_NAME.test(error.constraint)) {
+    return error.constraint;
+  }
+
+  const message = typeof error.message === 'string' ? error.message : '';
+  const named = /violates unique constraint "([^"]*)"/.exec(message);
+  const parsed = named?.[1];
+  return parsed !== undefined && CONSTRAINT_NAME.test(parsed) ? parsed : UNNAMED_CONSTRAINT;
+}
+
+/**
+ * What is logged when a unique violation arrives without a usable constraint name.
+ *
+ * A distinct value rather than an empty string, so "the driver told us nothing" and "the field
+ * was blank" read differently to whoever is holding the correlation ID at 3am.
+ */
+export const UNNAMED_CONSTRAINT = 'unnamed';
 
 /**
  * Fields that must never appear in a log line or an error response.

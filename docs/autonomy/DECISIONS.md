@@ -4752,3 +4752,58 @@ next provider added above `AuthGate` from reintroducing it. The invariant is the
 is a statement about what a refusal means - and the gate is the one that also stops the noise: a
 signed-out app was making two authenticated calls per launch and being refused, which nothing had
 noticed because the API recorded no refusals at all until the same day.
+
+---
+
+## DEC-129 - A uniqueness rule refuses with `ALREADY_EXISTS`, in the error handler, naming nothing
+
+**Context.** `DEV-068`. `POST /v1/profiles` with `isSelf`, for an account that already has a live
+self-profile, answered `500 INTERNAL` with `api.unhandled_error` in the log and no reason in it.
+`profile_self_user_unique` is right and the refusal was missing. The open question was not whether
+to map `23505` but what it should carry, because the same answer has to hold for every other unique
+index a route can reach.
+
+**Options.** (a) `VALIDATION_FAILED` with a reason code. (b) Reuse `VERSION_CONFLICT`. (c) A new
+`ALREADY_EXISTS` at 409. (d) Read the conflicting row back and answer it, the way the idempotency
+indexes already do.
+
+**Decision.** (c), mapped in the **Fastify error handler** rather than in `insertOrRefusal`, with a
+generic message that names neither the constraint nor the conflicting row. The constraint name is
+logged as `api.write_refused_as_duplicate` beside the correlation ID.
+
+**Rationale.** Four separate arguments, and each rules out one option.
+
+_Not `VALIDATION_FAILED`._ Nothing about the request was malformed and there is no field to
+highlight. A 400 tells a form to point at a control; here the conflict is with stored state, and a
+client that corrected every field would be refused again.
+
+_Not `VERSION_CONFLICT`._ That code means "somebody changed this since you read it - re-read and
+retry", and retrying a second self-profile never succeeds. `13` has clients branch on codes because
+the next step differs, and here it differs.
+
+_Not (d), and this is the sharpest of the four._ Reading the row back is exactly right for an
+idempotency key, where the caller is asking for the row they already made, and exactly wrong here,
+where they are asking for a row somebody else may hold. **A unique index is enforced over every row
+in the table, including rows row-level security hides from this caller.** So the refusal must be
+able to say "no" without saying what is already there - which is why the message names no
+constraint, carries no `detail`, and why the driver's own `detail` field, which reads
+`Key (self_user_id)=(<uuid>) already exists.`, is read nowhere in this repository.
+
+_The error handler rather than the wrapper._ `insertOrRefusal` wraps five call sites; a `23505` can
+come out of any statement. Put in the handler, every route inherits it - including the ones with no
+wrapper - and the routes that answer their own duplicates never reach it, because `ON CONFLICT DO
+NOTHING` raises nothing at all.
+
+**Consequences.** `ALREADY_EXISTS` joins the closed vocabulary at 409, `retryable: false`. A screen
+gets a `REFUSED` outcome with a sentence a person can act on instead of "Something went wrong".
+An operator gets the constraint name in the log, which is a schema identifier rather than anybody's
+data - validated against an identifier pattern before it is written, because a value that reaches a
+log unchecked is how a log becomes an injection surface.
+
+What this deliberately does **not** do is give the caller a way to tell "you already have one" from
+"somebody else does". Both are `ALREADY_EXISTS` with the same sentence. For `profile_self_user_unique`
+the two cannot differ - the index is on the caller's own user ID - and for a future index where they
+could, the indistinguishable answer is the safe one.
+
+**Sources.** `13` (stable machine-readable codes; clients branch on codes, never on message text),
+`14` (errors leak nothing), `19` (no enumeration oracle), `DEV-068`.

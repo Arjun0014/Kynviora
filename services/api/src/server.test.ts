@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { FastifyInstance, FastifyRequest, InjectOptions } from 'fastify';
 import { createServer } from './server.js';
 import type { DatabaseConnection, DatabasePool, Principal } from './context.js';
-import { assertNoSensitiveFields } from './errors.js';
+import { assertNoSensitiveFields, uniqueViolationConstraint } from './errors.js';
 import { createTestDb, testUuid, type TestDb } from '../../../db/harness/harness.js';
 import { instantFrom, noopLogger, unsafeId, type UserId } from '@kynviora/domain';
 import { ALL_FIXTURE_SOURCES, asApprovedSourceForTest } from '@kynviora/fixtures';
@@ -514,6 +514,51 @@ describe('error responses leak nothing (spec 14)', () => {
     expect(() => {
       assertNoSensitiveFields(response.json());
     }).not.toThrow();
+  });
+});
+
+describe('uniqueViolationConstraint (`DEV-068`)', () => {
+  /** What both drivers actually put on a `23505`, measured rather than assumed. */
+  function violation(overrides: Record<string, unknown> = {}): unknown {
+    return {
+      code: '23505',
+      constraint: 'profile_self_user_unique',
+      message: 'duplicate key value violates unique constraint "profile_self_user_unique"',
+      detail: 'Key (self_user_id)=(00000000-0000-4000-8000-000000000001) already exists.',
+      ...overrides,
+    };
+  }
+
+  it('names the constraint a unique violation names', () => {
+    expect(uniqueViolationConstraint(violation())).toBe('profile_self_user_unique');
+  });
+
+  it('reads the message when the field is missing', () => {
+    // Not for `pg` or PGlite - both populate `constraint`, and both were checked. This is for a
+    // pooler or a wrapper that re-raises with the fields flattened, which would otherwise turn a
+    // refusal quietly back into a 500.
+    expect(uniqueViolationConstraint(violation({ constraint: undefined }))).toBe(
+      'profile_self_user_unique',
+    );
+  });
+
+  it('reports an unnamed constraint rather than passing something unexpected through', () => {
+    // About to be written to a log. A value that reaches a log unchecked is how a log becomes an
+    // injection surface, and a constraint name is an identifier or it is nothing.
+    expect(
+      uniqueViolationConstraint(
+        violation({ constraint: 'PROFILE SELF; DROP', message: 'no name here' }),
+      ),
+    ).toBe('unnamed');
+  });
+
+  it('is not a foreign-key violation, and is not an ordinary error', () => {
+    // `23505` and `23503` differ by one character and mean opposite things about whose mistake
+    // it was: a duplicate is the caller's, a dangling reference is ours.
+    expect(uniqueViolationConstraint(violation({ code: '23503' }))).toBeNull();
+    expect(uniqueViolationConstraint(new Error('boom'))).toBeNull();
+    expect(uniqueViolationConstraint(null)).toBeNull();
+    expect(uniqueViolationConstraint('23505')).toBeNull();
   });
 });
 
