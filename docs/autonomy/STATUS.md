@@ -584,7 +584,7 @@ appears here.
 | BLK-008 | `DATA_AVAILABILITY`                 | Every numeric release threshold (Stage 9.1)       |
 | BLK-009 | `EXTERNAL_CREDENTIAL`               | Actually sending any notification to a device     |
 
-`BLK-001` is **resolved** as of 2026-09-05: migrations `0001`-`0030` are applied unmodified to
+`BLK-001` is **resolved** as of 2026-09-05: migrations `0001`-`0031` are applied unmodified to
 managed Postgres 17.6, the pooled runtime is real, and the parity, RLS, worker and device suites
 all run against it. `BLK-010` is narrowed to a mailbox - the service-role credential left it on
 2026-09-06 (DEC-126) - and it is now known to block **sign-up itself**, which four runs had

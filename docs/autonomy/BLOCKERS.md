@@ -14,7 +14,7 @@ implemented, the exact configuration required is documented, and independent wor
 - **Status**: **RESOLVED 2026-09-05**
 
 - **How it resolved.** `kynviora-dev` exists and every part of the workaround has been replaced by
-  a measurement. Migrations `0001`-`0030` were applied **unmodified** through the repository's own
+  a measurement. Migrations `0001`-`0031` were applied **unmodified** through the repository's own
   migration runner to managed Postgres 17.6 behind Supavisor; the pooled managed runtime is real
   (`db/src/managed.ts`), with pinned TLS against a root fetched out of band; the parity and RLS
   suites run against that instance; the API and multiple concurrent retention workers were
