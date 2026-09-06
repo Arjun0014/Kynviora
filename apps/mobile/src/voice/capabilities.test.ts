@@ -41,7 +41,9 @@ describe('a caregiver', () => {
 
   it('gains recording only when the server said so', () => {
     // DEC-116. No existing grant acquired `RECORD_DOSES`, and `VIEW_MEDICINES` is not a way in.
-    expect(capabilitiesFor({ isOwner: false, mayRecordDoses: true }).has('RECORD_DOSES')).toBe(true);
+    expect(capabilitiesFor({ isOwner: false, mayRecordDoses: true }).has('RECORD_DOSES')).toBe(
+      true,
+    );
     expect(capabilitiesFor({ isOwner: false, mayRecordDoses: false }).has('RECORD_DOSES')).toBe(
       false,
     );

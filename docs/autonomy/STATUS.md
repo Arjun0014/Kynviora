@@ -35,7 +35,7 @@ the fourth was found by a device scenario on its first run: Voice Mode did not s
 
 ## Verification state
 
-- **4949 tests passing**, 0 failing, across 190 files.
+- **4980 tests passing**, 0 failing, across 192 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -129,9 +129,9 @@ The five destinations are excluded from a sheet's survey. They are drawn over ev
 not part of one, and the leftmost and rightmost tabs cannot pass by construction - their outer
 edges _are_ the screen's, which `isFullyVisible` reads as clipped.
 
-Last run **66/66 PASS**: 13 controls on the invitation form, 6 on the dose sheet, 11 on the
-schedule editor and 14 on manual entry, every one of them reachable, announced and at least 48dp at
-both scales.
+Last run **74/74 PASS** on 2026-09-07, over the redesigned golden path and Voice Mode at both
+scales: every control on all five destinations and on all five sheets reachable, announced and at
+least 48dp. That is the run that says the design work did not cost anything `18` asks for.
 
 ```bash
 npm run verify:device:reminders
@@ -396,6 +396,9 @@ why the run also grants `POST_NOTIFICATIONS` for its duration: the reset clears 
 asks for it at launch, and its dialog eats every tap.
 
 Last run **5/5 PASS** against a Pixel 7 / Android 16 emulator, on a build carrying `expo-camera`.
+Re-run on 2026-09-07 after the design and Voice Mode work: still 5/5, and `CAM-3` still finds none
+of the eight granted **or declared** - which is the check most likely to start failing by accident,
+and this session added a package and a screen.
 A real read of a real symbol is **not** covered and never will be by a harness: an emulator's
 virtual scene is not a product pack. That check is manual and the runner says so.
 

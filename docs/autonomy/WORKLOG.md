@@ -5568,5 +5568,21 @@ the number `main.test.ts` reached first and set per file (`DEV-072`).
 
 ### Result
 
-`npm run verify` exit **0**. **4,949 passed / 190 files**, up from 4,764 / 182. Migrations
+`npm run verify` exit **0**. **4,980 passed / 192 files**, up from 4,764 / 182. Migrations
 unchanged at `0031`.
+
+On hardware, against the seeded stack, on a Pixel 7 / Android 16 emulator:
+
+| Scenario                   | Result                                                         |
+| -------------------------- | -------------------------------------------------------------- |
+| `verify:device:voice`      | **9/9 PASS** - new, and it found `DEV-075` on its first run    |
+| `verify:device:a11y`       | **74/74 PASS** - the golden path and Voice Mode, scale 1 and 2 |
+| `verify:device:camera`     | **5/5 PASS** - no permission arrived with the new package      |
+| `verify:device:doseaccess` | **7/7 PASS** - the redesigned shelf row and dose sheet         |
+
+One thing worth recording about the last full run before this one: a vitest worker died of a heap
+allocation failure with 191 files passing, on a machine also running an emulator, Metro, an API and
+a gradle daemon. Nothing was wrong with the code - the same suite is green with those stopped - but
+it is the second resource-shaped failure of `npm run verify` this session, after `DEV-072`, and
+both were quiet. A worker that dies takes its file's results with it and the run still prints a
+count.

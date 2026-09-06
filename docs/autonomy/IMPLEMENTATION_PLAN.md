@@ -57,6 +57,22 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
   name a screen reader can announce. It found one violation of `18`'s "support system font scaling
   without clipping": at 2x the tab bar rendered Safety as "Safet..." (DEC-103, now fixed).
 
+- **Extended 2026-09-07 into a design system** (DEC-130, DEC-131). The tokens grew from a palette
+  and a type scale into named **roles**, a four-step elevation ladder, a radius ladder, motion
+  durations routed through one reduce-motion decision, and a haptic vocabulary named by intent -
+  and, most of all, into **two themes at equal rank**. Written down in
+  `docs/design/DESIGN_SYSTEM.md`, which is explicit that the code wins on conflict.
+
+  Every one of the 43 files that reached for a palette now reads it from a context, so the app is
+  coherent in both themes rather than in one. Contrast is asserted at 4.5:1 for every pair in
+  **both**, `line.strong` and `line.focus` at 3:1 against both grounds, and the dark elevation
+  ladder as four distinct colours - because a shadow on a near-black ground is invisible and colour
+  is the only mechanism left there.
+
+  A golden path is rebuilt on the new component set - Today, Shelf, the item detail, recording a
+  dose - and Voice Mode joins the accessibility survey as a fifth sheet at both font scales.
+  `DEV-076` records what removing the navigator's duplicate header cost and what it revealed.
+
 ### 0.4 - Domain contracts and data-classification baseline
 
 - Branded entity IDs across all eight product layers; provenance model with append-only field
@@ -862,6 +878,46 @@ app.
 
 `DEV-021` records that screen behaviour is tested in the packages rather than in the app, and what
 that does and does not cover.
+
+---
+
+## Voice Mode
+
+Not a spec phase either. `04` predates it and none of `06`, `17` or `18` anticipated a
+conversational surface - so it is recorded here rather than folded into a stage it would misdate.
+
+**What it is.** A way to operate Kynviora, for somebody who finds a touchscreen difficult:
+
+```
+speech -> agent -> a typed proposal -> six gates -> the app's own client -> result
+       -> the Speech Gate -> spoken and shown, together
+```
+
+**Status.** Everything that does not need a speech provider is built, tested and driven on
+hardware. `packages/agent` holds the registry, the gates, the confirmation machine and the Speech
+Gate, with no React and no database; `apps/mobile/src/voice` holds the executor, the provider, the
+screen and the bridge; `docs/design/VOICE_MODE.md` is the source of truth for the contracts.
+
+| Part                                              | State                                        |
+| ------------------------------------------------- | -------------------------------------------- |
+| Agent Tool Registry - 30 tools, six answers each  | Complete, and the six have no defaults       |
+| The six gates, in order, re-checked at execution  | Complete; every refusal asserted both ways   |
+| Confirmation machine - named, expiring, disarmed  | Complete                                     |
+| The Speech Gate - facts from tool results only    | Complete                                     |
+| Executor over the existing `KynvioraClient`       | Complete for 15 tools; extraction is blocked |
+| Voice Mode screen, transcript, 88dp confirmations | Complete; **9/9 on a device**                |
+| Speech recognition, a model, speech synthesis     | **`BLK-012`** - three purchases, `16` review |
+
+**What it deliberately cannot do.** Prescribe, change a dose, stop, split, replace or recommend -
+there is no tool naming any of those, because no such capability exists for a tool to name. Close
+an account, share a health record, give somebody access or record consent by voice - each is
+`TOUCH_ONLY` and each for its own reason (DEC-133). Read a package label - there is no extraction
+provider, and a stub answering "nothing was read" would be indistinguishable from an extraction
+that ran (`BLK-007`).
+
+**What it needs next.** A provider decision, which is three of them and each one needs the `16`
+model and data privacy review first. Everything else about Voice Mode is provider-independent by
+construction, so nothing else changes when one lands.
 
 ---
 
