@@ -307,6 +307,52 @@ describe('renewing', () => {
       reason: 'UNAVAILABLE',
     });
   });
+
+  it('reads a refresh token the provider will not parse as a session that is over', async () => {
+    // Measured against `kynviora-dev` on 2026-09-06: a refresh token that never existed answers
+    // `400 validation_failed`, "Refresh token is not valid" - the same code a malformed *email
+    // address* gets on a sign-up, which is where the shared table maps it. On a renewal that
+    // reading is wrong twice: the screen says the email address is invalid about an address
+    // nobody typed, and `EMAIL_INVALID` does not sign anybody out, so the phone keeps a session
+    // it can never renew until an API call is refused hours later.
+    const { impl } = answering(400, {
+      error_code: 'validation_failed',
+      msg: 'Refresh token is not valid',
+    });
+    expect(await refreshSession(ENDPOINT(impl), 'not-a-token')).toEqual({
+      kind: 'FAILED',
+      reason: 'SESSION_EXPIRED',
+    });
+  });
+
+  it('still calls a malformed address on a sign-up what it is', async () => {
+    // The same code, the other request. The override is per request kind rather than a change to
+    // the shared table, so fixing the renewal cannot quietly change what a sign-up form says.
+    const { impl } = answering(400, { error_code: 'validation_failed' });
+    expect(await signUp(ENDPOINT(impl), { email: 'not-an-address', password: 'x' })).toEqual({
+      kind: 'FAILED',
+      reason: 'EMAIL_INVALID',
+    });
+  });
+
+  it('does not call a renewal a wrong password when the code is one it has never seen', async () => {
+    // The status-only fallback. Nothing a person could have typed was sent - the only credential
+    // in the request is a token this app stored itself - so `WRONG_CREDENTIALS` would put
+    // somebody on a screen about their password, and leave the session in place.
+    const { impl } = answering(401, { error_code: 'some_code_from_next_year' });
+    expect(await refreshSession(ENDPOINT(impl), 'a-refresh-token')).toEqual({
+      kind: 'FAILED',
+      reason: 'SESSION_EXPIRED',
+    });
+  });
+
+  it('reports a rate-limited renewal as one, because that is not the end of a session', async () => {
+    const { impl } = answering(429, { error_code: 'over_request_rate_limit' });
+    expect(await refreshSession(ENDPOINT(impl), 'a-refresh-token')).toEqual({
+      kind: 'FAILED',
+      reason: 'RATE_LIMITED',
+    });
+  });
 });
 
 describe('signing out', () => {

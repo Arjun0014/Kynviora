@@ -122,6 +122,30 @@ const FAILURE_BY_PROVIDER_CODE: Readonly<Record<string, AuthFailure>> = Object.f
 });
 
 /**
+ * Which request was refused.
+ *
+ * Two provider codes mean different things depending on what was asked, and one of them is a
+ * defect this exists to fix. `validation_failed` on a sign-up is a malformed address; on a
+ * renewal it is GoTrue's answer to a refresh token it will not parse ("Refresh token is not
+ * valid", measured against `kynviora-dev`) - and mapping that to `EMAIL_INVALID` told somebody
+ * their email address was wrong while the app went on holding a session it could never renew.
+ * A credential the provider will not honour is a session that is over, whatever it is malformed
+ * for, and the safe direction is to say so rather than to wait for the `401`.
+ */
+export type AuthRequestKind = 'CREDENTIALS' | 'SIGN_UP' | 'RECOVERY' | 'REFRESH';
+
+/**
+ * The codes that mean something different on a renewal from what they mean anywhere else.
+ *
+ * Only the overrides, so the shared table above stays the one place a code is named once.
+ */
+const FAILURE_BY_KIND: Readonly<
+  Partial<Record<AuthRequestKind, Readonly<Record<string, AuthFailure>>>>
+> = Object.freeze({
+  REFRESH: Object.freeze({ validation_failed: 'SESSION_EXPIRED' }),
+});
+
+/**
  * What a status and a provider code mean, as the app reads them.
  *
  * Exported for one caller: `scripts/device/verifySignIn.ts`, which observes what the provider
@@ -129,8 +153,12 @@ const FAILURE_BY_PROVIDER_CODE: Readonly<Record<string, AuthFailure>> = Object.f
  * the same function the app asks is the point - a harness with its own copy of the mapping would
  * pass while the two disagreed, which is the only interesting way this can be wrong.
  */
-export function authFailureFor(status: number, errorCode: string): AuthFailure {
-  return failureFor(status, { error_code: errorCode });
+export function authFailureFor(
+  status: number,
+  errorCode: string,
+  kind: AuthRequestKind = 'CREDENTIALS',
+): AuthFailure {
+  return failureFor(status, { error_code: errorCode }, kind);
 }
 
 /** This device's clock, defaulted here so three call sites do not each default it differently. */
@@ -138,14 +166,26 @@ function clockOf(endpoint: AuthEndpoint): number {
   return endpoint.nowSeconds === undefined ? Math.floor(Date.now() / 1000) : endpoint.nowSeconds();
 }
 
-function failureFor(status: number, body: Record<string, unknown>): AuthFailure {
+function failureFor(
+  status: number,
+  body: Record<string, unknown>,
+  kind: AuthRequestKind = 'CREDENTIALS',
+): AuthFailure {
   const code = typeof body['error_code'] === 'string' ? body['error_code'] : '';
+  const overridden = FAILURE_BY_KIND[kind]?.[code];
+  if (overridden !== undefined) return overridden;
   const mapped = FAILURE_BY_PROVIDER_CODE[code];
   if (mapped !== undefined) return mapped;
   // A status-only fallback, and only for the two that are unambiguous. 429 is a rate limit
   // whatever it says; 400 and 401 on a credential exchange are a refusal of the credential.
   if (status === 429) return 'RATE_LIMITED';
-  if (status === 400 || status === 401 || status === 403) return 'WRONG_CREDENTIALS';
+  if (status === 400 || status === 401 || status === 403) {
+    // On a renewal there is no credential a person could have got wrong: the only thing sent was
+    // a token this app stored itself. `WRONG_CREDENTIALS` there would be a screen telling
+    // somebody their password is wrong about a password nobody typed - and, worse, it does not
+    // sign them out, so the phone keeps a session it cannot renew until a `401` catches it.
+    return kind === 'REFRESH' ? 'SESSION_EXPIRED' : 'WRONG_CREDENTIALS';
+  }
   return 'UNAVAILABLE';
 }
 
@@ -277,7 +317,7 @@ export async function signIn(
   }
 
   if (response.status !== 200) {
-    return { kind: 'FAILED', reason: failureFor(response.status, response.body) };
+    return { kind: 'FAILED', reason: failureFor(response.status, response.body, 'CREDENTIALS') };
   }
   const tokens = readTokens(response.body, clockOf(endpoint));
   return tokens === null
@@ -306,7 +346,7 @@ export async function signUp(
   }
 
   if (response.status !== 200) {
-    return { kind: 'FAILED', reason: failureFor(response.status, response.body) };
+    return { kind: 'FAILED', reason: failureFor(response.status, response.body, 'SIGN_UP') };
   }
   const tokens = readTokens(response.body, clockOf(endpoint));
   return {
@@ -335,7 +375,7 @@ export async function requestPasswordRecovery(
   if (response.status === 200 || response.status === 204) {
     return { kind: 'OK', value: 'SENT_IF_KNOWN' };
   }
-  return { kind: 'FAILED', reason: failureFor(response.status, response.body) };
+  return { kind: 'FAILED', reason: failureFor(response.status, response.body, 'RECOVERY') };
 }
 
 /** Exchange a refresh token for a new session. */
@@ -352,8 +392,11 @@ export async function refreshSession(
     return { kind: 'FAILED', reason: 'UNAVAILABLE' };
   }
   if (response.status !== 200) {
-    return { kind: 'FAILED', reason: failureFor(response.status, response.body) };
+    return { kind: 'FAILED', reason: failureFor(response.status, response.body, 'REFRESH') };
   }
+  // A renewal that answered 200 with a body this build cannot read is not a session either, and
+  // there is nothing to renew from - `UNAVAILABLE` keeps the session and the retry above is what
+  // gets another chance at it.
   const tokens = readTokens(response.body, clockOf(endpoint));
   return tokens === null
     ? { kind: 'FAILED', reason: 'UNAVAILABLE' }

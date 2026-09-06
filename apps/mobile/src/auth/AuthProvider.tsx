@@ -126,6 +126,17 @@ export interface AuthProviderProps {
   readonly nowSeconds?: () => number;
 }
 
+/**
+ * How many times a renewal is attempted before the `401` path is left to do it.
+ *
+ * Four, at two seconds doubling to sixteen - about half a minute in all, which covers a cold
+ * start whose first request raced the network coming up, and a tunnel. Longer than that is a
+ * device with no connection, where the useful thing to do is nothing.
+ */
+const RENEWAL_ATTEMPTS = 4;
+const RENEWAL_FIRST_RETRY_MS = 2_000;
+const RENEWAL_BACKOFF = 2;
+
 /** The email this account signed in with, remembered only to re-authenticate with it. */
 interface Signed {
   readonly tokens: AuthTokens;
@@ -156,7 +167,6 @@ export function AuthProvider({ children, endpoint, value, nowSeconds }: AuthProv
 
   const [signed, setSigned] = useState<Signed | null>(null);
   const [restored, setRestored] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Persist and adopt, in that order: a session on screen and not on disk is one a restart loses. */
   const adopt = useCallback(
@@ -210,15 +220,46 @@ export function AuthProvider({ children, endpoint, value, nowSeconds }: AuthProv
   // Renew
   // -------------------------------------------------------------------------
   useEffect(() => {
-    if (timer.current !== null) clearTimeout(timer.current);
-    timer.current = null;
     if (resolved === null || signed === null) return;
 
     const endpointNow = resolved;
     const current = signed;
 
-    const renew = (): void => {
+    // Everything this run owns, so the cleanup can disown it. A renewal is a network round trip
+    // and the session it was started for can be gone before the answer lands - signed out, or
+    // replaced by a newer one - and neither of the two things a renewal does is safe to apply to
+    // a session it was not asked about:
+    //
+    // - `adopt` after a sign-out **restores** the session, on disk as well as on screen. A person
+    //   who signed out because they were handing the phone over would be signed back in by a
+    //   request they made before they decided to leave.
+    // - `forget` after a *new* sign-in signs out the new session, for the old one's sake.
+    //
+    // The timer is a local rather than a ref for the same reason: one run's timer belongs to that
+    // run, and a ref shared across runs is a timer the wrong cleanup can cancel.
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    /**
+     * Ask for a new session, and keep asking where the answer was not an answer.
+     *
+     * A renewal that failed used to do nothing at all - no retry, no reschedule - so a single
+     * dropped packet at the moment a token came due left the app holding an access token it would
+     * never replace. It then went on using it until the API refused it, and *that* is what signed
+     * somebody out: a phone in a lift for ten seconds, an hour later, back at the sign-in screen.
+     *
+     * The old absolute-expiry code hid this, which is why it surfaced when that was corrected: a
+     * clock-skewed device renewed continuously, so every failure was retried a moment later by
+     * accident.
+     *
+     * It stops after `RENEWAL_ATTEMPTS`, rather than retrying for ever, because a phone with no
+     * network is not a phone that needs to be asked every minute - and the backstop is real: the
+     * API's `401` reports the session lost, which is the path that exists for the case nothing
+     * local can predict.
+     */
+    const renew = (attempt: number): void => {
       void refreshSession(endpointNow, current.tokens.refreshToken).then((outcome) => {
+        if (!live) return;
         if (outcome.kind === 'OK') {
           void adopt(outcome.value, current.email);
           return;
@@ -226,19 +267,35 @@ export function AuthProvider({ children, endpoint, value, nowSeconds }: AuthProv
         // Only a definite end signs somebody out. An outage must not: the session is still valid
         // and the next attempt may well succeed, and signing out over a dropped connection loses
         // an offline shelf somebody may be relying on (`03` group J).
-        if (outcome.reason === 'SESSION_EXPIRED') forget();
+        if (outcome.reason === 'SESSION_EXPIRED') {
+          forget();
+          return;
+        }
+        if (attempt + 1 < RENEWAL_ATTEMPTS) {
+          timer = setTimeout(
+            () => {
+              renew(attempt + 1);
+            },
+            RENEWAL_FIRST_RETRY_MS * Math.pow(RENEWAL_BACKOFF, attempt),
+          );
+        }
       });
     };
 
     if (needsRefresh(current.tokens, clock())) {
-      renew();
-      return;
+      renew(0);
+    } else {
+      timer = setTimeout(
+        () => {
+          renew(0);
+        },
+        msUntilRefresh(current.tokens, clock()),
+      );
     }
-    timer.current = setTimeout(renew, msUntilRefresh(current.tokens, clock()));
 
     return () => {
-      if (timer.current !== null) clearTimeout(timer.current);
-      timer.current = null;
+      live = false;
+      if (timer !== null) clearTimeout(timer);
     };
     // `clock` is stable per render by construction and is deliberately not a dependency: a new
     // function identity each render would reschedule the timer on every render, which is a
