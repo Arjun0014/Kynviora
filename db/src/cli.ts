@@ -58,19 +58,27 @@ function describe(connectionString: string): string {
 }
 
 async function migrateManaged(connectionString: string): Promise<void> {
-  const result = await withManagedClient(connectionString, async (client) => {
-    const target: MigrationTarget = {
-      exec: async (sql: string): Promise<void> => {
-        await client.query(sql);
-      },
-      query: async (sql: string, params?: readonly unknown[]) => {
-        const res =
-          params === undefined ? await client.query(sql) : await client.query(sql, [...params]);
-        return { rows: res.rows as never[] };
-      },
-    };
-    return applyMigrations(target);
-  });
+  // No statement timeout, and it is the only caller that asks for none: DDL over a table that is
+  // not small is legitimately slower than any bound worth setting, and a migration cancelled
+  // halfway is worse than one that takes its time.
+  const result = await withManagedClient(
+    connectionString,
+    async (client) => {
+      const target: MigrationTarget = {
+        exec: async (sql: string): Promise<void> => {
+          await client.query(sql);
+        },
+        query: async (sql: string, params?: readonly unknown[]) => {
+          const res =
+            params === undefined ? await client.query(sql) : await client.query(sql, [...params]);
+          return { rows: res.rows as never[] };
+        },
+      };
+      return applyMigrations(target);
+    },
+    undefined,
+    0,
+  );
   report(result, describe(connectionString));
 }
 

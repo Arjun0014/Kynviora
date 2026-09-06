@@ -372,6 +372,22 @@ export async function withManagedClient<T>(
   connectionString: string,
   fn: (client: pg.Client) => Promise<T>,
   caCertificate?: string,
+  /**
+   * How long a single statement may run before the **server** cancels it.
+   *
+   * The pooled path has had this since it was written; this one did not, and the difference is a
+   * hang rather than an error. `connectionTimeoutMillis` bounds getting a connection and nothing
+   * after it, so a query that never comes back - a pooler with no free server connection, a lock
+   * nobody releases - waits for ever, and every caller here is a script whose whole run then
+   * waits with it. That cost a session on 2026-09-06: two API processes left over from earlier
+   * runs held pooler connections, `verify:device:delete` blocked on its first read after the
+   * screen work, and thirty minutes of a device run produced one line of output.
+   *
+   * `0` disables it, which is what the migration runner asks for: DDL over a table that is not
+   * small is legitimately slower than any bound worth setting, and a migration cancelled halfway
+   * is a worse outcome than one that takes its time.
+   */
+  statementTimeoutMs: number = DEFAULT_STATEMENT_TIMEOUT_MS,
 ): Promise<T> {
   assertTransportIsEncrypted(connectionString);
   const client = new pg.Client({
@@ -384,6 +400,12 @@ export async function withManagedClient<T>(
   });
   await client.connect();
   try {
+    if (statementTimeoutMs > 0) {
+      await client.query(
+        `SET statement_timeout = ${String(statementTimeoutMs)};
+         SET idle_in_transaction_session_timeout = ${String(DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS)};`,
+      );
+    }
     return await fn(client);
   } finally {
     await client.end();

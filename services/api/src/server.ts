@@ -608,6 +608,20 @@ export function createServer(options: ServerOptions): FastifyInstance {
     const principal = await options.authenticate(request);
 
     if (!principal) {
+      // Recorded, because the absence of this line was read as evidence.
+      //
+      // A token that does not verify produced a `401` and left nothing behind, so "the API log
+      // has no 401s in it" was true of every run - including the ones where a phone was being
+      // refused - and a device scenario was diagnosed against that silence. The route and the
+      // method, never the token and never a subject: there is no verified subject to name here,
+      // and `13` does not let this API become an oracle for which credentials exist. What the
+      // line answers is only "did this process refuse anybody", which is the question an
+      // operator was already asking it.
+      options.logger.warn('api.request.unauthenticated', {
+        method: request.method,
+        route: request.routeOptions?.url ?? request.url.split('?')[0] ?? request.url,
+        correlation_id: correlationId,
+      });
       fail(reply, domainError('UNAUTHENTICATED', 'No valid session.'), correlationId);
       return null;
     }
