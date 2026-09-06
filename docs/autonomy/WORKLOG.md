@@ -5445,3 +5445,128 @@ renewed and a revoked one signs the phone out.
 - **A device whose keystore refuses** is still untested. The gate now holds while the store opens,
   and `LocalStoreProvider` settles either way, so it resolves - but nothing measures that on
   hardware.
+
+---
+
+## 2026-09-07 - Two themes, a golden path, and an agent that proposes
+
+**Where this started.** `npm run verify` at 4,764 tests over 182 files, exit 0, and a clean tree.
+`DEV-068` open: a second self-profile answered 500. Section 19 at 13/14 on a mailbox. The product
+direction was new: a premium consumer UI layer, and Voice Mode as a product architecture rather
+than a microphone.
+
+### The duplicate that said "something went wrong"
+
+`profile_self_user_unique` was right and the refusal was missing, so a person pressing a button
+twice got `INTERNAL` with `api.unhandled_error` in the log and no reason in it. The vocabulary
+question `DEV-068` was really about got an answer (DEC-129): `ALREADY_EXISTS` at 409, and not
+`VALIDATION_FAILED` - nothing was malformed and there is no field to point at - and not
+`VERSION_CONFLICT`, which means "re-read and retry" about something that never succeeds.
+
+Mapped in the **error handler** rather than in `insertOrRefusal`. That wrapper covers five call
+sites and a `23505` can come out of any statement; in the handler every route inherits it, and the
+routes that answer their own duplicates by reading the stored row back never reach it at all,
+because `ON CONFLICT DO NOTHING` raises nothing.
+
+The half worth carrying: **a unique index is enforced over every row in the table, including rows
+row-level security hides from the caller.** So the refusal names no constraint, carries no
+`detail`, and the driver's own `Key (self_user_id)=(<uuid>) already exists` is read nowhere. The
+constraint name goes to the log, validated against an identifier pattern first.
+
+### Both themes, at the same rank
+
+The app committed to light because thirty-four files imported the palette directly (DEC-101). All
+43 of them read it from a context now (DEC-130), because a half-converted app is white text on
+white for exactly the person who turned dark mode on because they needed it.
+
+The dark ground is `#0E1116` and not black, twice over. An elevation ladder needs somewhere below
+its first step, and on black a card can only ever be lighter - "further away" stops being
+expressible. And white on black is the highest-glare pairing a screen can produce, which matters
+most for the audience `01` names first.
+
+**Hue is reserved for state.** The primary action is contrast - near-black on light, near-white on
+dark - so an accent does not become a fourth colour on a screen already using amber and red to say
+something about a medicine. One teal carries focus and selection and nothing else.
+
+What keeps it honest: contrast asserted at 4.5:1 for every pair in **both** themes, `line.strong`
+and `line.focus` at 3:1 against both grounds, and the dark elevation ladder asserted as four
+distinct colours - because a shadow on a near-black ground is invisible and colour is the only
+mechanism left there.
+
+### The golden path, and three things looking at it found
+
+Today, Shelf, the item detail and recording a dose, rebuilt on `Card`, `Typography`, `FieldRow`
+and `SectionHeader`. Then the app was run and looked at, which found what tests did not:
+
+- **Two headings said "Today"** - the navigator drew one and every screen drew its own. Removing
+  the navigator's left the first line under the status bar, because that header had been reserving
+  the top inset; and it revealed that **Care had no heading at all**, which is `18`'s
+  heading-navigation requirement going unmet on one destination out of five (`DEV-076`).
+- **The tab bar was white in both themes.** The navigator paints its own and does not know about
+  the theme - a strip of daylight under a dark screen.
+- **A disabled primary action was the loudest thing on the screen.** Half of a near-black accent is
+  a solid grey slab saying "press me" about the one control that cannot be pressed. Disabled takes
+  the muted surface now and recedes.
+
+### Voice Mode: an agent that proposes, and six gates that decide
+
+`packages/agent` - platform-neutral, no React, no database. Thirty tools over the existing client,
+each answering six questions with no defaults, so a new tool cannot compile without an answer to
+all six.
+
+**What `17` forbids has no name to be called by.** There is no tool for prescribing, changing a
+dose, stopping, splitting, replacing or recommending, because no such capability exists in Kynviora
+for a tool to name - asserted by word, so adding one fails a test rather than passing a review.
+Closing an account, sharing a health record, giving somebody access and recording consent are
+`TOUCH_ONLY`, each for its own reason, and listed anyway so the agent can say where the control is.
+
+**The Speech Gate** is the Citation Gate applied to speech: every fact spoken came out of a tool
+result, **exactly**, and every other word from about fifteen fixed sentences. Exact matching rather
+than substring, because "no matched rule was found within coverage" becoming "no rule found" loses
+the words doing the work. The whole assembled sentence is scanned again, because a combination can
+say something neither half said.
+
+**A confirmation names its proposal**, expires at ninety seconds on a clock the caller supplies,
+and is disarmed by anything that is not it. The summary is composed by this repository rather than
+by the model, because "shall I record that you took it" is one word from "shall I record that you
+skipped it" and both are fluent.
+
+No provider is chosen (`BLK-012`). A deterministic phrase matcher drives the whole pipeline in CI -
+including hostile proposals - and is named for what it is.
+
+### What a device found that nothing else could
+
+`verify:device:voice`, nine checks, and its **first run found a real defect**: Voice Mode did not
+scroll. It is drawn instead of the navigator, so unlike every other screen it was not inside a
+container with a height, and its ScrollView sized itself to its content. By the third exchange the
+field and both buttons were below the fold with no way to reach them - `DEV-046` again, on a new
+surface, found this time by writing the scenario before claiming the surface worked (`DEV-075`).
+
+Four things about the harness itself were wrong, and each made a check that could not run look like
+one that ran and found something:
+
+- It scrolled **up** to reach a field that is at the bottom of the page.
+- `scrollTo` returned the field's own **visible label**, which carries the same words - and hiding
+  that label from a screen reader was the right fix for a person and no fix at all here, because
+  `uiautomator` dumps the view hierarchy rather than the accessibility tree.
+- The confirmation summary was read as "the line after the marker" out of a **de-duplicated set**,
+  which on one run returned the state glyph. It is read off the card's own accessible name now -
+  and the card is one announced node, which is better for a screen reader too.
+- The state hint and the confirmation card said the same sentence, which is bad copy and made the
+  marker ambiguous.
+
+Final: **9/9 PASS**, including the touch-only refusal spoken out loud, the one sentence that exists
+for "is it safe", the composed summary on screen before anything happens, and two 88dp answers
+16dp apart.
+
+### Also
+
+`npm run verify` failed twice on hook timeouts with nothing wrong. **Fifty test files open their
+own PGlite instance in `beforeAll`**, in parallel, and the suite grew past what 60s covered - two
+files on one run, a different one on the next, each passing in seconds alone. 180s now, which is
+the number `main.test.ts` reached first and set per file (`DEV-072`).
+
+### Result
+
+`npm run verify` exit **0**. **4,949 passed / 190 files**, up from 4,764 / 182. Migrations
+unchanged at `0031`.

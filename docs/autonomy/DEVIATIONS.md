@@ -2859,3 +2859,98 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Risk**: a genuinely hung `beforeAll` now takes three minutes to report instead of one. Accepted:
   a hang is rare and loud, and a flake is common and quiet.
 - **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-073 - A scripted agent behind a flag, because a device run had nothing to drive
+
+- **Affected specification**: `19` (a device scenario measures what only a device can show), `17`
+  (no provider is chosen), `14` (a development affordance grants nothing). DEC-136, `BLK-012`.
+- **Situation**: with no speech or language provider, the app understands nothing, so the only
+  thing a device could show about Voice Mode was that a screen renders. The confirmation flow, the
+  touch-only refusal and the very large controls - the parts worth measuring on hardware - were all
+  unreachable.
+- **What was done**: `EXPO_PUBLIC_DEV_VOICE_SCRIPT=1` installs `createScriptedAgent`, a list of
+  regular expressions, in a development build. Absent in every ordinary run, and the recogniser and
+  synthesizer stay `null` either way - a fake microphone would be a fake measurement.
+- **Why it is not a cheat**: it grants nothing. Every proposal it makes goes through the same six
+  gates as any other, which is exactly what `verify:device:voice` measures - and the most useful
+  scripts in it are the ones that **misbehave**: a proposal to close the account, one to change a
+  dose, one carrying an argument no tool declares. What the run establishes is that those are
+  refused on real hardware and that the refusal is a sentence somebody can read.
+- **What it does not establish**: that a real model would propose the right tool for a real
+  sentence. That half is unmeasured because there is no provider (`BLK-012`), not because nobody
+  looked, and the scenario's own header says so.
+- **Risk**: low. The flag defaults to off; nothing listens, so there is no path from a person's
+  speech to it; and it cannot reach anything the app's own screens cannot.
+- **Required future work**: delete it when a provider lands, or keep it as the deterministic agent
+  CI drives - which is what it already is in `packages/agent`.
+- **Status**: OPEN, by design.
+
+---
+
+## DEV-074 - Voice offers a caregiver less than they may actually do
+
+- **Affected specification**: `11` and `13` (the server decides), `14` (deny by default), DEC-116,
+  DEC-132.
+- **Expected behaviour**: a caregiver granted `MANAGE_MEDICINES` can set a reminder time by voice,
+  as they can by touch.
+- **Implemented behaviour**: they are told to use the screen. `capabilitiesFor` gives an owner
+  everything and gives a caregiver the read capabilities plus whatever the server has actually
+  reported - `mayRecordDoses` from a shelf page, `mayEdit` from an item detail. There is no route
+  that answers "what may this caller do on this profile", so anything not reported is not offered.
+- **Reason**: the alternative is assuming a capability and letting the route refuse, which is a
+  person completing a spoken form for nothing - the failure DEC-116's screen half exists to prevent,
+  arriving through a different door.
+- **Workaround in place**: the refusal says what to do next and the screen it points at works. An
+  owner - which is who Voice Mode is for first - is unaffected.
+- **Risk**: none to safety, and it is in the safe direction. What it costs is a caregiver's
+  convenience.
+- **Required future work**: either a route that reports a caller's capabilities for a profile, or
+  wire the answers the shelf and the item detail already carry into the dispatch context as they
+  arrive. The second is smaller and is what the interface is shaped for.
+- **Status**: OPEN.
+
+---
+
+## DEV-075 - Voice Mode did not scroll, and a device run found it on its first day (resolved)
+
+- **Affected specification**: `18` (a control below the fold with no way to reach it is a control
+  nobody can use), `19`, `DEV-046`.
+- **Expected behaviour**: a conversation grows and the field and the two buttons stay reachable.
+- **Implemented behaviour**: by the third exchange the transcript had pushed the field and both
+  buttons past the bottom of the screen with nothing able to bring them into view.
+- **Reason**: Voice Mode is drawn **instead of** the navigator (`VoiceHost`), so unlike every other
+  screen in this app it was not inside a container the navigator had already given a height. Its
+  `ScrollView` therefore sized itself to its content, which grows with the transcript, and stopped
+  being a scroll view at all.
+- **How it resolved**: `flex: 1` on the ScrollView and a flex container in `VoiceHost` where the
+  navigator would have been. `verify:device:voice` is the check that found it and the check that
+  keeps it fixed: two of its exchanges are unreachable without a scroll.
+- **What this is a repeat of**: `DEV-046`, exactly - a form three taps in whose controls were drawn
+  below the fold on a build reporting 34/34. That one was found by adding sheets to the
+  accessibility survey; this one by writing the device scenario for a new surface **before**
+  claiming the surface worked.
+- **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-076 - Two headings said "Today", and removing one left the first line under the status bar (resolved)
+
+- **Affected specification**: `18` (one heading per screen, announced as a header), `06`.
+- **Implemented behaviour**: the tab navigator drew a header carrying the destination's name, and
+  every destination then drew its own heading through `Screen` - so a screen reader navigating by
+  headings heard "Today" twice, and ninety pixels of a screen whose audience reads it at twice the
+  font size went to a duplicate.
+- **How it resolved**: `headerShown: false`. Three consequences had to be handled, and the second
+  was found by looking at the screen rather than by a test:
+  1. **Care had no heading of its own** - it is the one destination that does not use `Screen` -
+     so it gained one, which `18` had been going unmet on for that screen.
+  2. **The top inset had been reserved by the header.** Without it the first line of every screen
+     was drawn under the status bar. `Screen`, Care and Voice Mode take `edges={['top','bottom']}`
+     now; the inset belongs to whatever is outermost and that is no longer the navigator.
+  3. **The tab bar was white in both themes**, because the navigator paints its own and does not
+     know about the theme - a strip of daylight under a dark screen. It takes the theme's surface
+     and hairline now, and the chosen destination carries `selection` rather than `informational`,
+     which is the colour a fact about somebody's medicine is drawn in.
+- **Status**: **RESOLVED 2026-09-07**.

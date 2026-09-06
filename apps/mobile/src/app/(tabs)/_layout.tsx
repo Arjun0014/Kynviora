@@ -90,9 +90,24 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerShown: true,
-        tabBarActiveTintColor: theme.informational.foreground,
+        // The navigator draws no header. Every destination draws its own heading through
+        // `Screen`, announced as a header - and two headings saying "Today", one above the other,
+        // is `18`'s "one heading per screen" broken by the navigator rather than by a screen.
+        // It also cost ninety pixels of a screen whose audience reads it at twice the font size.
+        headerShown: false,
+        // The chosen destination carries `selection` - the one hue in this app that is about the
+        // interface rather than about a product (DEC-130). It was `informational` before, which is
+        // the colour a fact about somebody's medicine is drawn in: two different things saying the
+        // same thing in the same colour, and the second one stops being noticeable.
+        tabBarActiveTintColor: theme.selection.foreground,
         tabBarInactiveTintColor: theme.surfaceMuted.foreground,
+        // The navigator paints its own bar and does not know about the theme. Left alone it is
+        // white in both, which in the dark theme is a strip of daylight under a dark screen -
+        // and the inactive labels are then a grey chosen to sit on a dark ground.
+        tabBarStyle: {
+          backgroundColor: theme.surface.background,
+          borderTopColor: theme.line.hairline,
+        },
         // Labels are always shown. An icon-only tab bar communicates by shape alone, which the
         // primary audience should not have to decode.
         tabBarShowLabel: true,

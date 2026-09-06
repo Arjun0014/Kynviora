@@ -57,7 +57,9 @@ const STATE_COPY = Object.freeze({
   AWAITING_CONFIRMATION: {
     label: 'Waiting for you',
     glyph: '?',
-    hint: 'Nothing has happened yet. Choose one of the two below.',
+    // Deliberately not "nothing has happened yet" - the card below says exactly that, and the
+    // same sentence twice on one screen is one a person reads once and then stops reading.
+    hint: 'Choose one of the two answers below.',
   },
   WORKING: { label: 'Doing it', glyph: '⚙', hint: 'One moment.' },
 });
@@ -71,6 +73,14 @@ const STATE_COPY = Object.freeze({
  */
 const CONFIRM_TARGET_DP = 88;
 
+/**
+ * What the confirmation card says before it says what is about to happen.
+ *
+ * A constant because it is also the thing `verify:device:voice` looks for: a marker a harness has
+ * to spell out by hand is one that goes stale the first time the copy is edited.
+ */
+export const ARMED_MARKER = 'Nothing has happened yet';
+
 export function VoiceScreen({ onClose }: { readonly onClose: () => void }) {
   const styles = useThemedStyles(makeStyles);
   const theme = useTheme();
@@ -82,8 +92,15 @@ export function VoiceScreen({ onClose }: { readonly onClose: () => void }) {
   const pending = session.pending;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      {/* `flex: 1` on the ScrollView itself, not only on the frame around it.
+          Voice Mode is drawn **instead of** the navigator (`VoiceHost`), so unlike every other
+          screen in this app it is not inside a container the navigator has already given a
+          height. Without this the ScrollView sizes itself to its content, which grows with the
+          transcript - and by the third exchange the field and both buttons were below the fold
+          with nothing able to bring them into view. That is `DEV-046` on a new screen, found by
+          `verify:device:voice` on its first run (`DEV-075`). */}
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         <Typography role="heading" heading>
           Talk to Kynviora
         </Typography>
@@ -119,11 +136,18 @@ export function VoiceScreen({ onClose }: { readonly onClose: () => void }) {
             and at `bodyLarge`, because a person agreeing to something has to be able to read the
             whole of what they are agreeing to without scrolling it out of view. */}
         {pending === null ? null : (
-          <Card tone="attention" level="raised">
+          <Card
+            tone="attention"
+            level="raised"
+            // One announcement rather than two. A screen reader landing on the warning and then
+            // on the summary hears two fragments and may act on the first; landing on both
+            // together hears the thing it is about to be asked to agree to.
+            accessibilityLabel={`${ARMED_MARKER}. ${pending.summary}`}
+          >
             <Typography role="overline" colour="attention" decorative>
-              Nothing has happened yet
+              {ARMED_MARKER}
             </Typography>
-            <Typography role="bodyLarge" colour="attention">
+            <Typography role="bodyLarge" colour="attention" decorative>
               {pending.summary}
             </Typography>
             <View style={styles.confirmActions}>
@@ -188,7 +212,12 @@ export function VoiceScreen({ onClose }: { readonly onClose: () => void }) {
           </Card>
         )}
 
-        <Typography role="label">Type what you would say</Typography>
+        {/* Decorative, because the field below carries the same name. Two nodes with one
+            accessible name is a screen reader announcing "Type what you would say" twice, and it
+            is what stops anything - a person or a harness - saying which of the two it means. */}
+        <Typography role="label" decorative>
+          Type what you would say
+        </Typography>
         <TextInput
           accessibilityLabel="Type what you would say"
           value={typed}
@@ -221,6 +250,7 @@ export function VoiceScreen({ onClose }: { readonly onClose: () => void }) {
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: theme.canvas.background },
+    scroll: { flex: 1 },
     content: { padding: SPACING.lg, gap: SPACING.lg, paddingBottom: SPACING.xxxl },
     state: {
       gap: SPACING.xs,

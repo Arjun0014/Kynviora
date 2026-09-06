@@ -3,7 +3,7 @@
 **Resume checkpoint.** Read this first on any autonomous restart, then `git log`, then the tail
 of `WORKLOG.md`, then `BLOCKERS.md`.
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 ---
 
@@ -11,26 +11,31 @@ Last updated: 2026-09-06
 
 |                    |                                                                            |
 | ------------------ | -------------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; Stage 1 privacy work reopened and largely closed         |
-| **Current phase**  | Phase 1.4 (export, deletion), Phase 1.1 (auth), Phase 2.2 (scan)           |
-| **Last completed** | Account deletion, end to end on a device; the session that stays signed in |
+| **Current stage**  | Stage 4 complete; a product design layer and Voice Mode's foundation added |
+| **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the new UI/agent work                 |
+| **Last completed** | Two themes at equal rank, a redesigned golden path, and Voice Mode V1      |
 | **Branch**         | `master`                                                                   |
-| **Latest commit**  | `fix(auth): the app signed a returning person out on its own cold start`   |
+| **Latest commit**  | `feat(voice): an agent that proposes, and six gates that decide`           |
 | **Baseline tag**   | `baseline-spec-only`                                                       |
 
-This session was about a session: why one that had just been renewed signed itself out. The answer
-was not where the previous one looked - refresh token rotation has an alibi, measured against the
-provider - and it was in three places at once. **The app signed a returning person out on its own
-cold start** (DEC-128), a renewal that failed **was never asked again** (DEC-127), and the two
-device checks that would have shown either were being taken over a phone the harness had just cut
-off from the network by moving its clock (trap 208).
+This session added the two things the product was missing rather than the two things that were
+broken. **A design system with two themes at equal rank** (DEC-130), applied to a golden path -
+Today, Shelf, the item detail, recording a dose - and written down in `docs/design/DESIGN_SYSTEM.md`.
+And **Voice Mode as a product architecture** (DEC-132 to DEC-136): an agent that proposes a typed
+call, six gates that decide, a Speech Gate that will not let a sentence about somebody's medicine
+be spoken unless this repository composed it, and `docs/design/VOICE_MODE.md`.
 
-The API had never recorded a refusal, so "the API log has zero 401s" had been true of every run
-there has ever been. It records them now, and found the first defect within a minute.
+`DEV-068` is closed on the way past: a duplicate answered 500 and now answers a refusal a screen
+can act on.
+
+**Three of the four defects found this session were found by looking at the app**, not by a test -
+two headings saying "Today", a first line under the status bar, a white tab bar in a dark app - and
+the fourth was found by a device scenario on its first run: Voice Mode did not scroll, which is
+`DEV-046` on a new surface.
 
 ## Verification state
 
-- **4764 tests passing**, 0 failing, across 182 files.
+- **4949 tests passing**, 0 failing, across 190 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -72,10 +77,9 @@ npm run verify
 
 ### On a device
 
-Sixteen harnesses need an attached Android device or emulator and are **not** part of `npm run
-verify`. Their judgements are, though: 511 of the tests above - every test under `scripts/` -
-exercise the rules they apply, so a rule cannot change without CI noticing even where no hardware
-exists.
+Seventeen harnesses need an attached Android device or emulator and are **not** part of `npm run
+verify`. Their judgements are, though: every test under `scripts/` exercises the rules they apply,
+so a rule cannot change without CI noticing even where no hardware exists.
 
 Every one of them wakes the screen first (`prepareDeviceForDriving`). An emulator left alone turns
 its display off, and a display that is off has no view hierarchy at all - `uiautomator dump`
@@ -96,10 +100,17 @@ a Pixel 7 / Android 16 emulator.
 npm run verify:device:a11y
 ```
 
-Sixty-six checks. Every control on all five destinations at font scale 1 and at 2, measured against
-the 48dp minimum and against having a name a screen reader can announce; a TalkBack smoke test; and
-**four sheets** surveyed at both scales - the invitation form, the record-a-dose sheet, the schedule
-editor and manual entry.
+Every control on all five destinations at font scale 1 and at 2, measured against the 48dp minimum
+and against having a name a screen reader can announce; a TalkBack smoke test; and **five sheets**
+surveyed at both scales - the invitation form, the record-a-dose sheet, the schedule editor, manual
+entry, and **Voice Mode** since 2026-09-07.
+
+Voice Mode is surveyed as a sheet although it is not one: it is a full screen whose controls are
+sized by their content, which is the property that makes a sheet worth surveying. It is also where
+the measurement matters most - `18`'s audience is the audience Voice Mode exists for, and at twice
+the font size a screen holding a state block, a confirmation, a transcript and a text field is the
+one most likely to push something below the fold. It did, on the first device run, and
+`verify:device:voice` found it (`DEV-075`).
 
 The sheets are the half that was missing, and `DEV-046` is why: it reported 34/34 over the five
 destinations while a sheet three taps in had its controls drawn below the fold with no way to reach
@@ -438,6 +449,39 @@ on the development stack. They use the development identity, where the auth prov
 `UNCONFIGURED` rather than `LOADING`, so the new gate passes them straight through - which is what
 those runs confirm rather than assume.
 
+```bash
+npm run verify:device:voice
+```
+
+Nine checks on Voice Mode, and every one of them is about **rendering** - the gates themselves are
+proved in `packages/agent`, in Node, without React or a phone. What a phone adds is whether a
+refusal is a sentence somebody can read, whether the summary of a write is on screen before the
+write, and whether the two answers can be pressed by somebody who is not looking at them.
+
+Last run **9/9 PASS** against a Pixel 7 / Android 16 emulator:
+
+| Check     | What it showed                                                                          |
+| --------- | --------------------------------------------------------------------------------------- |
+| `VOICE-0` | both `adb reverse` tunnels, so nothing below reads "No connection" as a missing control |
+| `VOICE-1` | the way in is on all five destinations, within 24dp of the same position on each        |
+| `VOICE-2` | the state is said in a word - "Ready" - and not only drawn as a shape                   |
+| `VOICE-3` | "delete my account" refused **out loud**, pointing at the screen, nothing armed         |
+| `VOICE-4` | "is it safe" answered with the one fixed sentence that exists for it                    |
+| `VOICE-5` | the composed summary on screen: "Open the camera, and guide you through photographing…" |
+| `VOICE-6` | the two answers are 88dp tall and 16dp apart, named for what they do                    |
+| `VOICE-7` | saying no changed nothing - the same four items on the shelf, read from the API         |
+| `VOICE-8` | two turns on screen, each with what was asked and what was answered                     |
+
+It needs `EXPO_PUBLIC_DEV_VOICE_SCRIPT=1` and a Metro restart. With no speech provider
+(`BLK-012`) the app understands nothing, so the flag installs a **scripted agent** - a list of
+regular expressions, named for what it is (`DEV-073`). It grants nothing: every proposal it makes
+goes through the same six gates, and the most useful scripts in it are the ones that misbehave.
+
+Its **first run found a defect nothing else could** (`DEV-075`): Voice Mode did not scroll, so by
+the third exchange the field and both buttons were below the fold with no way to reach them. That
+is `DEV-046` on a new surface, found this time by writing the scenario before claiming the surface
+worked.
+
 Recreate the account with `scripts/device/provisionDeleteAccount.sql` afterwards. A scenario that
 deletes its own subject cannot run twice without it - and how that account comes to exist is not
 evidence about sign-up: an operator creates and confirms it, because confirming an address needs a
@@ -505,54 +549,58 @@ the API will not distinguish them.
 
 ## What is genuinely built and tested
 
-| Area                                                        | State                                                         |
-| ----------------------------------------------------------- | ------------------------------------------------------------- |
-| Domain vocabularies, IDs, provenance, untrusted quarantine  | Complete, 94 tests                                            |
-| Database schema, 30 migrations, full RLS                    | Complete, 321 tests incl. threats A1/A2/A3                    |
-| Catalog engine, capture pipeline, Trust Passport            | Complete, 178 tests                                           |
-| Regulatory registry, Citation Gate, Lens                    | Complete, 72 tests                                            |
-| Safety rule engine with replay; schedule and refill         | Complete, 88 tests                                            |
-| Ingestion pipeline with hostile-source defences             | Complete, 37 tests                                            |
-| Presentation layer, accessibility tokens, safety copy       | Complete, 436 tests                                           |
-| API boundary (Fastify), RLS-scoped context                  | Complete, 37 tests                                            |
-| Offline sync protocol, per-entity conflict policy           | Complete, 43 tests                                            |
-| Caregiver invitation, acceptance, revocation, audit         | Complete, 214 tests                                           |
-| Visit Pack export, reviewed-content gate, expiry            | Complete, 100 tests                                           |
-| Caregiver alert delivery, notification privacy              | Complete, 140 tests; channel recorded per row; **not sent**   |
-| Household Review Inbox, record-writing completion           | Complete, 95 tests                                            |
-| Medicine Reconciliation, two lists and no chosen answer     | Complete, 109 tests                                           |
-| Reviewer console: roles, two-person approval, withdrawal    | Complete, 116 tests; **publishes nothing** (BLK-006)          |
-| Staff surface split, console package, console process       | Complete, 172 tests; AAL2 modelled, no project (BLK-010)      |
-| Alert detail, explainability, report-incorrect              | Complete, 89 tests; **no alert to open** (BLK-006)            |
-| Notification delivery policy, quiet hours, revalidation     | Complete, 161 tests; **holds, recipient-locally** (DEC-119)   |
-| Household and profile creation, the profile switcher        | Complete, 90 tests; no emergency contact (`DEV-034`)          |
-| Allergy and sensitivity records, provenance, review date    | Complete, 86 tests; no conditions (`DEV-035`)                 |
-| Consent state, withdrawal, and what withdrawing stops       | Complete, 96 tests; export built, account deletion not        |
-| Typed term mapped to a canonical substance                  | Complete, 27 tests; no review queue (`DEV-037`)               |
-| Regulatory version diff and change attribution              | Complete, 27 tests; **no route yet** (BLK-004)                |
-| Shadow runs, before/after comparison, assessment replay     | Complete, 74 tests; substance rules now measurable            |
-| Manual entry: the write path, the form and the screen       | Complete, 105 tests; the only surface that creates an item    |
-| Item update, the three lifecycle states, mark-as-checked    | Complete, 105 tests; deletion built (DEC-117)                 |
-| End-to-end vertical slice, 7 required scenarios             | Complete, 36 tests                                            |
-| Mobile app shell, encrypted store, accessible primitives    | **Runs on Android 16; storage and 48dp verified on device**   |
-| The encrypted read projection, offline shelf and profiles   | Complete, 11 tests; no offline writes (`DEV-038`)             |
-| Medicine schedules: the write path, the editor, the reads   | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)    |
-| Local reminders: plan, reconcile, exact alarms, lock screen | Complete, 52 tests; **measured on a device** (`DEV-041`)      |
-| Device harnesses: fourteen, storage to a camera permission  | Complete, 418 tests; 13 of `19`'s 14 scenarios (`DEV-040`)    |
-| The mobile app itself: rendering, hooks, providers          | 55 tests, and `apps/**` linted at last (`DEV-043` closed)     |
-| Recording a dose: `RECORD_DOSES`, its own capability        | Complete, 47 tests; 7/7 on a device (DEC-116)                 |
-| Caregiver, export, inbox, reconciliation, add-an-item UI    | Wired; **not device-verified** (`DEV-007`)                    |
-| Retention: the matrix, the roles, the doors, the sweep      | Complete, 67 tests; deadlines measured to the microsecond     |
-| The retention worker: schedule, lease, run history          | Complete, 81 tests; **runs**, in-process or its own (DEC-121) |
-| Retention health on the operations snapshot                 | Complete, 14 tests; five aggregates, no read on a run row     |
-| Closed vocabularies checked against their CHECK constraints | Complete, 6 tests; TypeScript and SQL cannot drift silently   |
-| The digest: cadence, revalidation, and what it dropped      | Complete, 52 tests; assembled, **not sent** (`DEV-064`)       |
-| Deleting an item and a profile, end to end                  | Complete, 48 tests; account deletion open (`DEV-062`)         |
-| Portable export: fourteen sections, sources referenced      | Complete, 26 tests; no artifact and no link, by choice        |
-| Scanning a barcode: permission, check digit, confirmation   | Complete, 45 tests; **5/5 on a device**; no OCR (BLK-007)     |
-| Supabase Auth behind the existing port, reviewer AAL2       | Complete, 34 tests; **no project** (BLK-010)                  |
-| Recipient-local quiet hours, and the zone ICU would accept  | Complete, 22 tests; a device reports its own zone             |
-| CI pipeline                                                 | Written; not yet run on a real runner                         |
+| Area                                                         | State                                                           |
+| ------------------------------------------------------------ | --------------------------------------------------------------- |
+| Domain vocabularies, IDs, provenance, untrusted quarantine   | Complete, 94 tests                                              |
+| Database schema, 30 migrations, full RLS                     | Complete, 321 tests incl. threats A1/A2/A3                      |
+| Catalog engine, capture pipeline, Trust Passport             | Complete, 178 tests                                             |
+| Regulatory registry, Citation Gate, Lens                     | Complete, 72 tests                                              |
+| Safety rule engine with replay; schedule and refill          | Complete, 88 tests                                              |
+| Ingestion pipeline with hostile-source defences              | Complete, 37 tests                                              |
+| Presentation layer, accessibility tokens, safety copy        | Complete, 436 tests                                             |
+| API boundary (Fastify), RLS-scoped context                   | Complete, 37 tests                                              |
+| Offline sync protocol, per-entity conflict policy            | Complete, 43 tests                                              |
+| Caregiver invitation, acceptance, revocation, audit          | Complete, 214 tests                                             |
+| Visit Pack export, reviewed-content gate, expiry             | Complete, 100 tests                                             |
+| Caregiver alert delivery, notification privacy               | Complete, 140 tests; channel recorded per row; **not sent**     |
+| Household Review Inbox, record-writing completion            | Complete, 95 tests                                              |
+| Medicine Reconciliation, two lists and no chosen answer      | Complete, 109 tests                                             |
+| Reviewer console: roles, two-person approval, withdrawal     | Complete, 116 tests; **publishes nothing** (BLK-006)            |
+| Staff surface split, console package, console process        | Complete, 172 tests; AAL2 modelled, no project (BLK-010)        |
+| Alert detail, explainability, report-incorrect               | Complete, 89 tests; **no alert to open** (BLK-006)              |
+| Notification delivery policy, quiet hours, revalidation      | Complete, 161 tests; **holds, recipient-locally** (DEC-119)     |
+| Household and profile creation, the profile switcher         | Complete, 90 tests; no emergency contact (`DEV-034`)            |
+| Allergy and sensitivity records, provenance, review date     | Complete, 86 tests; no conditions (`DEV-035`)                   |
+| Consent state, withdrawal, and what withdrawing stops        | Complete, 96 tests; export built, account deletion not          |
+| Typed term mapped to a canonical substance                   | Complete, 27 tests; no review queue (`DEV-037`)                 |
+| Regulatory version diff and change attribution               | Complete, 27 tests; **no route yet** (BLK-004)                  |
+| Shadow runs, before/after comparison, assessment replay      | Complete, 74 tests; substance rules now measurable              |
+| Manual entry: the write path, the form and the screen        | Complete, 105 tests; the only surface that creates an item      |
+| Item update, the three lifecycle states, mark-as-checked     | Complete, 105 tests; deletion built (DEC-117)                   |
+| End-to-end vertical slice, 7 required scenarios              | Complete, 36 tests                                              |
+| Mobile app shell, encrypted store, accessible primitives     | **Runs on Android 16; storage and 48dp verified on device**     |
+| The encrypted read projection, offline shelf and profiles    | Complete, 11 tests; no offline writes (`DEV-038`)               |
+| Medicine schedules: the write path, the editor, the reads    | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)      |
+| Local reminders: plan, reconcile, exact alarms, lock screen  | Complete, 52 tests; **measured on a device** (`DEV-041`)        |
+| Device harnesses: fourteen, storage to a camera permission   | Complete, 418 tests; 13 of `19`'s 14 scenarios (`DEV-040`)      |
+| The mobile app itself: rendering, hooks, providers           | 55 tests, and `apps/**` linted at last (`DEV-043` closed)       |
+| Recording a dose: `RECORD_DOSES`, its own capability         | Complete, 47 tests; 7/7 on a device (DEC-116)                   |
+| Caregiver, export, inbox, reconciliation, add-an-item UI     | Wired; **not device-verified** (`DEV-007`)                      |
+| Retention: the matrix, the roles, the doors, the sweep       | Complete, 67 tests; deadlines measured to the microsecond       |
+| The retention worker: schedule, lease, run history           | Complete, 81 tests; **runs**, in-process or its own (DEC-121)   |
+| Retention health on the operations snapshot                  | Complete, 14 tests; five aggregates, no read on a run row       |
+| Closed vocabularies checked against their CHECK constraints  | Complete, 6 tests; TypeScript and SQL cannot drift silently     |
+| The digest: cadence, revalidation, and what it dropped       | Complete, 52 tests; assembled, **not sent** (`DEV-064`)         |
+| Deleting an item and a profile, end to end                   | Complete, 48 tests; account deletion open (`DEV-062`)           |
+| Portable export: fourteen sections, sources referenced       | Complete, 26 tests; no artifact and no link, by choice          |
+| Scanning a barcode: permission, check digit, confirmation    | Complete, 45 tests; **5/5 on a device**; no OCR (BLK-007)       |
+| Supabase Auth behind the existing port, reviewer AAL2        | Complete, 34 tests; **no project** (BLK-010)                    |
+| Recipient-local quiet hours, and the zone ICU would accept   | Complete, 22 tests; a device reports its own zone               |
+| Design system: two themes, roles, elevation, motion, haptics | Complete, 44 tests; every pair at AA in **both** themes         |
+| The theme layer on a device: provider, preference, override  | Complete, 11 tests; the whole app reads it (DEC-130)            |
+| Agent Tool Registry: 30 tools, six answers each, no defaults | Complete, 107 tests; what `17` forbids has no name to be called |
+| Voice Mode: gates, confirmation, Speech Gate, the shell      | Complete; **9/9 on a device**; no provider (`BLK-012`)          |
+| CI pipeline                                                  | Written; not yet run on a real runner                           |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
 alert-delivery, Review Inbox, reconciliation and reviewer-console rows each count tests that
@@ -573,16 +621,17 @@ documented configuration requirements.
 `BLK-002` is **resolved** as of 2026-09-03 and `BLK-011` as of 2026-09-04 (DEC-116); neither
 appears here.
 
-| ID      | Class                               | Blocks                                            |
-| ------- | ----------------------------------- | ------------------------------------------------- |
-| BLK-010 | `EXTERNAL_CREDENTIAL`               | A mailbox: confirmation, recovery **and sign-up** |
-| BLK-003 | `EXTERNAL_CREDENTIAL` + `LICENSING` | GS1/provider identity resolution                  |
-| BLK-004 | `DATA_AVAILABILITY`                 | Publishing any regulatory status as trusted       |
-| BLK-005 | `LEGAL_REVIEW`                      | Source snapshot retention                         |
-| BLK-006 | `CLINICAL_REVIEW` + `LEGAL_REVIEW`  | Publishing any safety rule; public beta           |
-| BLK-007 | `EXTERNAL_CREDENTIAL`               | Real OCR/multimodal extraction                    |
-| BLK-008 | `DATA_AVAILABILITY`                 | Every numeric release threshold (Stage 9.1)       |
-| BLK-009 | `EXTERNAL_CREDENTIAL`               | Actually sending any notification to a device     |
+| ID      | Class                                  | Blocks                                            |
+| ------- | -------------------------------------- | ------------------------------------------------- |
+| BLK-010 | `EXTERNAL_CREDENTIAL`                  | A mailbox: confirmation, recovery **and sign-up** |
+| BLK-003 | `EXTERNAL_CREDENTIAL` + `LICENSING`    | GS1/provider identity resolution                  |
+| BLK-004 | `DATA_AVAILABILITY`                    | Publishing any regulatory status as trusted       |
+| BLK-005 | `LEGAL_REVIEW`                         | Source snapshot retention                         |
+| BLK-006 | `CLINICAL_REVIEW` + `LEGAL_REVIEW`     | Publishing any safety rule; public beta           |
+| BLK-007 | `EXTERNAL_CREDENTIAL`                  | Real OCR/multimodal extraction                    |
+| BLK-008 | `DATA_AVAILABILITY`                    | Every numeric release threshold (Stage 9.1)       |
+| BLK-009 | `EXTERNAL_CREDENTIAL`                  | Actually sending any notification to a device     |
+| BLK-012 | `EXTERNAL_CREDENTIAL` + `LEGAL_REVIEW` | Voice Mode listening or speaking at all           |
 
 `BLK-001` is **resolved** as of 2026-09-05: migrations `0001`-`0031` are applied unmodified to
 managed Postgres 17.6, the pooled runtime is real, and the parity, RLS, worker and device suites
@@ -614,17 +663,24 @@ decision about where mail is allowed to go, not an engineering one.
 
 ## Next three planned tasks
 
-1. **`DEV-024`**, as before. **Waiting on:** nothing.
+1. **Carry the redesign past the golden path** - Safety, Care and You are on the new theme and the
+   new components exist, but their layouts are still the old ones. Safety first: it is the screen
+   where "an absence of a matched rule is never approval" has to be visible at a glance, and it is
+   the one the design system was written for. **Waiting on:** nothing.
 
-2. **The substance-mapping review queue** (`DEV-037`). Less blocked than it reads: DEC-117 approved
-   that a raw household term never goes to staff by default, which is the decision this was waiting
-   on for its _shape_ even though it was recorded as waiting for a queue.
+2. **Wire the offline journal into the voice executor** (`DEV-071`). A dose recorded by voice with
+   no signal is currently lost rather than queued, and the sentence says so honestly. What it needs
+   first is a decision about the wording of a proposal whose outcome may be a queued write - the
+   confirmation a person gave was for "record this", not for "keep this and send it later".
 
 3. **A decision on `DEV-063`**, the retention overshoot. Not work - a decision about a security
    boundary. Giving `purge_floor()` and the four inline intervals in `0023` a margin equal to the
    sweep interval would make every deadline in `docs/RETENTION.md` met **at** the deadline rather
-   than shortly after it, and it changes what the RLS policies admit, which is the thing `0023` is
-   careful about. The arithmetic is in `docs/RETENTION.md` section 8.3.
+   than shortly after it, and it changes what the RLS policies admit.
+
+**Also open and unstarted:** `DEV-024`, and the substance-mapping review queue (`DEV-037`), which
+DEC-117 unblocked in shape - a raw household term never goes to staff by default. The arithmetic
+for `DEV-063` is in `docs/RETENTION.md` section 8.3.
 
 **Deliberately not next: a digest screen** (`DEV-064`). The digest is assembled and recorded; what
 a digest surface should be **instead of** the Safety Inbox, which already shows every one of these
@@ -636,7 +692,17 @@ confirmation and recovery round trips, and creating an account through the app's
 `BLK-010`, which is now a mailbox rather than a project; OCR and the
 possible-formula-change task on `BLK-007`; substance vocabulary depth on `BLK-003`; publishing
 anything on `BLK-004` and `BLK-006`; sending any server-originated notification, the digest
-included, on `BLK-009`. Account deletion and managed-Postgres parity have left this list.
+included, on `BLK-009`; and **Voice Mode listening or speaking at all** on `BLK-012`, which is
+three separate purchases each needing the `16` model and data privacy review first. Account
+deletion and managed-Postgres parity have left this list.
+
+**What Voice Mode can actually do today.** Everything except hear and speak. The registry, the six
+gates, the confirmation machine, the Speech Gate, the executor, the navigation and camera bridge
+and the screen are real and are driven end to end on hardware - by typing, and in CI by a
+deterministic phrase matcher. A person can already ask for what they are taking, record a dose,
+set a reminder, add an item, open the camera, hear what is missing and get to a screen, and be
+refused - out loud and in writing - when they ask for something voice may not carry. What is
+missing is the three providers, and the screen says so on itself rather than pretending to listen.
 
 **The `19` device scenarios.** All fourteen have a harness and thirteen are green. The fourteenth,
 which is sign-up, sign-in and recovery, now passes **ten of its eleven checks** on one run against
@@ -673,6 +739,36 @@ evidence: the API had never logged a refusal in its life. It does now, and there
 the next run (`DEV-067`).
 
 ## Recent decisions worth knowing
+
+- **DEC-130 to DEC-136** are this session's, and the three worth carrying are these.
+
+  **Hue is reserved for state, so the primary action is contrast** - near-black on light,
+  near-white on dark. An accent with a hue would be a fourth colour on a screen already using amber
+  and red to say something about a medicine, and a person would have to learn which greens mean
+  nothing. The dark ground is `#0E1116` rather than black for two reasons that point the same way:
+  an elevation ladder needs somewhere below its first step, and white on black is the
+  highest-glare pairing a screen can produce - which matters most for the audience `01` names
+  first. Both themes are asserted at 4.5:1 on every pair, and the dark elevation ladder as four
+  distinct colours, because a shadow on a near-black ground is invisible.
+
+  **The agent proposes and never acts, and its reach is the app's reach.** Every tool executes by
+  calling the same `KynvioraClient` method a screen calls, on the same session - so row-level
+  security, caregiver capabilities, step-up and the offline journal apply unchanged, and there is
+  nothing to leak because the agent never holds anything. What `17` forbids has **no name to be
+  called by**: there is no tool for prescribing, changing a dose, stopping, splitting, replacing or
+  recommending, asserted by word rather than left to review.
+
+  **The Speech Gate is the Citation Gate applied to speech.** Every fact spoken came out of a tool
+  result, exactly - substring matching would let "no matched rule was found within coverage" become
+  "no rule found", and the missing words are the ones doing the work - and every other word came
+  from about fifteen fixed sentences in this repository. It costs fluency; what it buys is that
+  there is no path, including a jailbroken or prompt-injected one, by which a sentence about
+  somebody's medicine reaches their ears without having been composed here.
+
+- **DEC-129** - a uniqueness rule refuses with `ALREADY_EXISTS` at 409, in the **error handler**
+  rather than in `insertOrRefusal`, and it names nothing. A unique index is enforced over every row
+  in the table, including rows row-level security hides from the caller, so the constraint name and
+  the driver's own `Key (...)=(...) already exists` go nowhere near the wire.
 
 - **DEC-128** - a `401` reports a session lost **only where a session was sent**, and nothing under
   the gate asks the API anything until it is known who is asking. `sessionLost` deletes the session

@@ -35,7 +35,16 @@ import type { ReactNode } from 'react';
  */
 export function VoiceHost({ children }: { readonly children: ReactNode }) {
   const { isOpen, close } = useVoice();
-  return isOpen ? <VoiceScreen onClose={close} /> : <>{children}</>;
+  // A flex container around it, because this is where the navigator would have been. Every other
+  // screen gets its height from the navigator's own container; Voice Mode replaces that, so
+  // without one here its ScrollView sizes to its content and stops scrolling (`DEV-075`).
+  return isOpen ? (
+    <View style={hostStyles.host}>
+      <VoiceScreen onClose={close} />
+    </View>
+  ) : (
+    <>{children}</>
+  );
 }
 
 /** The control. Rendered by the five destinations, in the same place on each. */
@@ -62,6 +71,8 @@ export function VoiceBar() {
     </View>
   );
 }
+
+const hostStyles = StyleSheet.create({ host: { flex: 1 } });
 
 const makeStyles = (_theme: Theme) =>
   StyleSheet.create({

@@ -109,7 +109,11 @@ export function RecordDose({
       </Card>
 
       <Card>
-        <Typography role="label">{DOSE_COPY.noteLabel}</Typography>
+        {/* Decorative for the reason Voice Mode's is: the field below carries the same name, and
+            two nodes with one accessible name is that name announced twice. */}
+        <Typography role="label" decorative>
+          {DOSE_COPY.noteLabel}
+        </Typography>
         <Typography role="caption" colour="secondary">
           {DOSE_COPY.noteHelp}
         </Typography>

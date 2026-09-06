@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SPACING, type ScreenState as ScreenStateKind, type Theme } from '@kynviora/presentation';
 import {
@@ -55,6 +55,7 @@ import { RemoveCaregiverAccess } from '@/features/caregivers/RemoveCaregiverAcce
 import { newIdempotencyKey } from '@/platform/ids';
 import { useThemedStyles } from '@/theme/ThemeProvider';
 import { VoiceBar } from '@/voice/VoiceHost';
+import { Typography } from '@/components/Typography';
 
 /** Matches `DEFAULT_INVITATION_TTL_DAYS` on the server. Shown, not sent. */
 const INVITATION_TTL_DAYS = 7;
@@ -317,7 +318,7 @@ export default function CareScreen() {
   }, []);
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       {removing !== null ? (
         <ScrollView contentContainerStyle={styles.sheet}>
           <RemoveCaregiverAccess
@@ -344,6 +345,19 @@ export default function CareScreen() {
         </ScrollView>
       ) : (
         <ScrollView contentContainerStyle={styles.sheet}>
+          {/* This tab draws its own heading rather than borrowing `Screen`'s, because it is the one
+              destination whose branches are full-screen sheets rather than content inside a frame.
+              It had none at all until the navigator's header was removed, which is `18`'s
+              heading-navigation requirement going unmet on one screen out of five. */}
+          <View style={styles.heading}>
+            <Typography role="heading" heading>
+              Care
+            </Typography>
+            <Typography role="body" colour="secondary">
+              Who is in this household, who may see what, and what you can share.
+            </Typography>
+          </View>
+
           {/* Only on the list, not over a sheet. A conversation started from inside a half-filled
               invitation form would lose the form; Voice Mode has no way to put it back. */}
           <VoiceBar />
@@ -400,4 +414,5 @@ const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: theme.surface.background },
     sheet: { padding: SPACING.lg, gap: SPACING.md },
+    heading: { gap: SPACING.xxs, marginBottom: SPACING.xs },
   });

@@ -58,8 +58,17 @@ export function PrimaryButton({
   const theme = useTheme();
   const { fontScale } = useWindowDimensions();
   const scale = Math.max(1, Math.min(fontScale, MAX_SUPPORTED_FONT_SCALE));
-  const tone =
-    variant === 'primary' ? theme.accent : variant === 'destructive' ? theme.action : theme.surface;
+  // A disabled control recedes rather than dimming. The accent is near-black on light and
+  // near-white on dark, and half of either is a solid grey slab - which on a screen where it is the
+  // only filled shape reads as the loudest thing there, saying "press me" about the one control
+  // that cannot be pressed. Disabled takes the muted surface instead, which reads as "not yet".
+  const tone = disabled
+    ? theme.surfaceMuted
+    : variant === 'primary'
+      ? theme.accent
+      : variant === 'destructive'
+        ? theme.action
+        : theme.surface;
 
   return (
     <Pressable
@@ -78,10 +87,10 @@ export function PrimaryButton({
         styles.button,
         {
           backgroundColor: tone.background,
-          borderColor: variant === 'secondary' ? theme.line.strong : tone.border,
-          // Disabled state is conveyed by opacity AND the accessibilityState above, never by
-          // colour alone (spec 18).
-          opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
+          borderColor: disabled || variant === 'secondary' ? theme.line.strong : tone.border,
+          // Dimmed as well as recessed, and announced by the `accessibilityState` above - never by
+          // appearance alone (`18`). The dimming is lighter now that the colour is doing work.
+          opacity: disabled ? 0.65 : pressed ? 0.85 : 1,
           minHeight: Math.max(MIN_TOUCH_TARGET_DP, MIN_TOUCH_TARGET_DP * scale * 0.75),
         },
         style,

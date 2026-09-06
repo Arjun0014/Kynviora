@@ -34,7 +34,6 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  NO_PROVIDERS,
   checkCall,
   dispatch,
   emptySession,
@@ -55,6 +54,8 @@ import {
 import { useApi } from '@/api/ApiProvider';
 import { useProfiles } from '@/api/ProfileProvider';
 import { createToolExecutor, type ToolResult, type VoiceBridge } from './executor';
+import { resolveVoiceProviders } from './devScript';
+import { capabilitiesFor } from './capabilities';
 import { newIdempotencyKey } from '@/platform/ids';
 
 export interface VoiceContextValue {
@@ -88,8 +89,14 @@ export interface VoiceProviderProps {
   readonly providers?: VoiceProviders;
   /** Where the app goes when a tool says to. Absent in tests, which assert on the session. */
   readonly bridge?: VoiceBridge;
-  /** Capabilities the server has reported, assembled by the caller. */
+  /**
+   * Capabilities, where a caller has assembled them. Absent means derive from the active profile.
+   *
+   * Injected by tests, which are asserting what the gates do with a given set rather than how the
+   * set is arrived at.
+   */
   readonly capabilities?: ReadonlySet<ToolCapability>;
+  /** Whether the caller owns the active profile. Absent means read it from the profile list. */
   readonly isOwner?: boolean;
   readonly online?: boolean;
   /** The clock, injected so a confirmation window is not measured against a device somebody moved. */
@@ -105,15 +112,32 @@ const NO_BRIDGE: VoiceBridge = {
 
 export function VoiceProvider({
   children,
-  providers = NO_PROVIDERS,
+  providers,
   bridge = NO_BRIDGE,
   capabilities,
-  isOwner = true,
+  isOwner,
   online = true,
   now = () => Date.now(),
 }: VoiceProviderProps) {
   const { client } = useApi();
-  const { activeProfileId } = useProfiles();
+  const { activeProfile, activeProfileId } = useProfiles();
+  // The server's own answer. `false` where the profile list has not arrived, which is the safe
+  // direction: an agent offered nothing is a person told to use the screen, and the screen works.
+  const owns = isOwner ?? activeProfile?.isOwner ?? false;
+  // Nothing, unless a development build asked for the scripted agent (`DEV-073`). `NO_PROVIDERS`
+  // is what an ordinary run gets, and it is what ships.
+  const resolvedProviders = useMemo(
+    () =>
+      providers ??
+      resolveVoiceProviders(
+        {
+          EXPO_PUBLIC_DEV_VOICE_SCRIPT: process.env.EXPO_PUBLIC_DEV_VOICE_SCRIPT,
+        },
+        activeProfileId,
+        null,
+      ),
+    [providers, activeProfileId],
+  );
   const [session, setSession] = useState<VoiceSession>(() => emptySession(activeProfileId));
   const [isOpen, setIsOpen] = useState(false);
   // Ids only have to be unique within a conversation, and they are never stored or sent.
@@ -125,8 +149,10 @@ export function VoiceProvider({
 
   const context = useMemo<DispatchContext>(
     () => ({
-      capabilities: capabilities ?? new Set<ToolCapability>(),
-      isOwner,
+      // Derived from what the server said rather than assumed (`DEV-074`). This authorises
+      // nothing: the route checks again, on the session, every time.
+      capabilities: capabilities ?? capabilitiesFor({ isOwner: owns }),
+      isOwner: owns,
       // Always false. Nothing in this build can re-authenticate by voice, and every tool that
       // needs it is `TOUCH_ONLY` anyway - so this is the second of two mechanisms rather than the
       // only one (`14`).
@@ -135,7 +161,7 @@ export function VoiceProvider({
       origin: 'VOICE',
       confirmed: false,
     }),
-    [capabilities, isOwner, online],
+    [capabilities, owns, online],
   );
 
   const executor = useMemo(
@@ -160,12 +186,12 @@ export function VoiceProvider({
       // failure rather than an answer: the person is not looking at the screen.
       const text = gated.ok ? gated.text : UTTERANCES.cannotDoThat;
       setSession((current) => {
-        const spoken = providers.synthesizer !== null;
-        if (spoken) void providers.synthesizer?.speak(text);
+        const spoken = resolvedProviders.synthesizer !== null;
+        if (spoken) void resolvedProviders.synthesizer?.speak(text);
         return reduce(current, { kind: 'SAY', text, at: now(), id: nextId(), spoken }).session;
       });
     },
-    [providers, now, nextId],
+    [resolvedProviders, now, nextId],
   );
 
   const run = useCallback(
@@ -194,7 +220,7 @@ export function VoiceProvider({
       const at = now();
       setSession((current) => reduce(current, { kind: 'HEARD', text, at, id: nextId() }).session);
 
-      const agent = providers.agent;
+      const agent = resolvedProviders.agent;
       if (agent === null) {
         // No model, so nothing is understood. Said rather than silently ignored, and it points at
         // the screen - which is the whole app and is working.
@@ -267,7 +293,7 @@ export function VoiceProvider({
           },
         );
     },
-    [providers, session.transcript, context, speak, run, now, nextId],
+    [resolvedProviders, session.transcript, context, speak, run, now, nextId],
   );
 
   const confirm = useCallback(
@@ -310,10 +336,10 @@ export function VoiceProvider({
       confirm,
       cancel,
       close,
-      canListen: providers.recognizer !== null,
-      canSpeak: providers.synthesizer !== null,
+      canListen: resolvedProviders.recognizer !== null,
+      canSpeak: resolvedProviders.synthesizer !== null,
     }),
-    [session, isOpen, open, say, confirm, cancel, close, providers],
+    [session, isOpen, open, say, confirm, cancel, close, resolvedProviders],
   );
 
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>;

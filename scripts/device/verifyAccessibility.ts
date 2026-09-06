@@ -79,6 +79,15 @@ const SHEETS: readonly {
   { label: 'Record what happened', path: ['Shelf', 'Record what happened'] },
   { label: 'The schedule editor', path: ['Shelf', 'When do you take this?', 'Add a schedule'] },
   { label: 'Add a medicine', path: ['Shelf', 'Add a medicine'] },
+  // Voice Mode (DEC-136). Surveyed as a sheet even though it is not one: it is a full screen
+  // whose controls are sized by their content, which is the property that makes a sheet worth
+  // surveying rather than the property of being a form.
+  //
+  // It is also the surface where the measurement matters most. `18`'s audience is the audience
+  // Voice Mode exists for, its confirmation controls are the largest in the app on purpose, and
+  // at twice the font size a screen holding a transcript, a state block, a confirmation and a
+  // text field is the one most likely to push something below the fold.
+  { label: 'Voice Mode', path: ['Talk to Kynviora'] },
 ];
 
 /** How many scroll steps a survey will take before deciding it has seen the whole sheet. */

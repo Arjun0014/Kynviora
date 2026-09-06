@@ -13,6 +13,12 @@
  * separation; on dark it is the whole mechanism, because a shadow on a near-black ground is
  * invisible (`docs/design/DESIGN_SYSTEM.md`, section 5).
  *
+ * BOTH EDGES, NOT ONLY THE BOTTOM
+ * The navigator drew a header until 2026-09-07 and that header was reserving the top inset. With
+ * it gone - two headings saying "Today", one above the other, is `18`'s one-heading rule broken by
+ * the navigator - the screen's first line was drawn under the status bar. The inset belongs to
+ * whatever is outermost, and that is now this.
+ *
  * WHAT `eyebrow` IS FOR
  * `06` requires any screen showing medicine, product, alert or care information to make the
  * current person clear. It sits **above** the heading rather than below it, because that is where
@@ -53,7 +59,7 @@ export function Screen({
   const named = eyebrow !== undefined && eyebrow !== null && eyebrow.trim() !== '';
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <ScrollView
         contentContainerStyle={[styles.content, contentStyle]}
         refreshControl={
