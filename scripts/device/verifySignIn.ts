@@ -76,6 +76,7 @@ import {
   killApp,
   launch,
   prepareDeviceForDriving,
+  processId,
   scrollToAndTap,
   suppressStylusHandwriting,
   tapAt,
@@ -94,6 +95,30 @@ const EXPECTED_ITEM = process.env.KYNVIORA_SIGNIN_EXPECTED_ITEM?.trim() ?? 'Synt
 
 /** A synthetic password for the account the app creates. Never reused and never a real one. */
 const NEW_PASSWORD = 'a-long-enough-synthetic-password';
+
+/**
+ * The domain the app's sign-up address is at, and the reason SIGN-10 has never produced an account.
+ *
+ * **This project refuses an address it cannot deliver to, before the account exists.** Measured in
+ * the provider's own auth log on 2026-09-06: the app's sign-up to
+ * `kynviora-signin-mtp2e532@kynviora.test` answered
+ * `400 email_address_invalid`, "Email address ... is invalid", carrying an
+ * `auth_event` of `user_confirmation_requested` - so GoTrue got as far as sending the
+ * confirmation, could not, and rolled the user back. `kynviora.test` has no MX record at all;
+ * `example.com` and `example.org` publish a null MX (RFC 7505), which is a domain saying in the
+ * DNS that it accepts no mail.
+ *
+ * That is not the mailer quota, which is what four runs of this scenario recorded it as. The
+ * quota is real - two messages an hour, spent by an attempt - but it never fired here: no
+ * `over_email_send_rate_limit` appears in the provider's log for any of those runs, and a refusal
+ * for an undeliverable address costs none of it, because nothing is sent.
+ *
+ * So creating an account through the app's own form needs an address at a domain that accepts
+ * mail, which is a **mailbox** - `BLK-010`, the same blocker as confirmation and recovery, rather
+ * than a separate one. Set this to a domain whose mail somebody can receive and SIGN-10 becomes
+ * measurable; leave it and the run reports honestly that the provider refused the address.
+ */
+const SIGN_UP_DOMAIN = process.env.KYNVIORA_SIGNIN_SIGNUP_DOMAIN?.trim() ?? 'kynviora.test';
 
 /**
  * How far past the token's lifetime to move the clock.
@@ -116,8 +141,19 @@ const CLOCK_OVERSHOOT_SECONDS = 300;
  * `KYNVIORA_SIGNIN_PHASES=signup` runs SIGN-1, SIGN-2 and SIGN-10 and makes **exactly one**
  * email-triggering call: the app's own. That is what a real account creation needs - an hour of
  * asking for nothing, then one attempt, made by the app rather than by the harness.
+ *
+ * `KYNVIORA_SIGNIN_PHASES=session` is the other side of the same constraint and exists so that the
+ * half of this scenario which has nothing to do with email can be re-run while the quota is being
+ * deliberately left alone. It runs SIGN-1 and SIGN-3 to SIGN-9 - signing in, the session at rest,
+ * surviving a kill, renewal, signing out, revocation - and makes **no** email-triggering call at
+ * all. Without it, measuring a renewal defect twice costs the hour that creating an account needs.
  */
-const PHASES = process.env.KYNVIORA_SIGNIN_PHASES?.trim() === 'signup' ? 'signup' : 'all';
+type Phase = 'all' | 'signup' | 'session';
+
+const PHASES: Phase = ((): Phase => {
+  const asked = process.env.KYNVIORA_SIGNIN_PHASES?.trim();
+  return asked === 'signup' || asked === 'session' ? asked : 'all';
+})();
 
 // ---------------------------------------------------------------------------
 // The provider, asked directly
@@ -305,26 +341,78 @@ function clockSkewSeconds(): number | null {
   return device - Math.floor(Date.now() / 1000);
 }
 
+/** The two ports the phone reaches this machine through, and cannot work without. */
+const METRO_PORT = 8081;
+const API_PORT = 3000;
+
+/**
+ * Put back the `adb reverse` tunnels, and say whether they are there.
+ *
+ * `adb reverse` is idempotent, so re-establishing one that already exists costs a round trip and
+ * nothing else. The listing is read back rather than the exit codes trusted: `adb reverse` returns
+ * success for a mapping the device then does not hold, and the whole point of this function is
+ * that a missing tunnel had been invisible.
+ */
+function reverseTunnelsRestored(): boolean {
+  adb(['reverse', `tcp:${String(METRO_PORT)}`, `tcp:${String(METRO_PORT)}`]);
+  adb(['reverse', `tcp:${String(API_PORT)}`, `tcp:${String(API_PORT)}`]);
+  const listed = adb(['reverse', '--list']);
+  if (!listed.ok) return false;
+  return (
+    listed.stdout.includes(`tcp:${String(METRO_PORT)}`) &&
+    listed.stdout.includes(`tcp:${String(API_PORT)}`)
+  );
+}
+
 /**
  * Move the device's clock forward.
  *
  * `auto_time` off first, or the next NTP sync puts it back mid-check and a due token silently
  * stops being due. `adb root` because `date` is not a thing an unprivileged shell may set.
+ *
+ * AND THE PART THAT COST TWO CHECKS
+ * **`adb root` restarts adbd, and every `adb reverse` mapping dies with it.** They are held by the
+ * device's own daemon, not by the host, so a restart takes them all - measured on 2026-09-06:
+ * `adb reverse --list` names both ports before `adb root` and is empty after it.
+ *
+ * Every step of this scenario from here on is a phone that has been cut off from Metro *and* from
+ * the API, and nothing said so. SIGN-8 and SIGN-9 - the renewal and the revocation, the only two
+ * checks that run after the clock moves - were measuring an app with no route to anything, and
+ * their failures were read as a defect in the renewal. It is also why the API log had no `401`s in
+ * it for the whole run: no request reached the API to be refused (trap 208).
+ *
+ * `verifyReminders.ts` already knew this - `setDeviceTimeZone` puts both tunnels back after its
+ * own `adb root` - which is what makes it a trap rather than a discovery: the lesson existed in
+ * this directory and the newest harness in it did not have it.
+ *
+ * So they go back, and whether they came back is evidence the checks are given rather than an
+ * assumption they make (DEC-102: a check that could not look must not report a pass **or** a
+ * failure).
  */
-function advanceDeviceClock(bySeconds: number): void {
+function advanceDeviceClock(bySeconds: number): boolean {
   adb(['root']);
   sleep(3_000);
+  adb(['wait-for-device']);
   adb(['shell', 'settings', 'put', 'global', 'auto_time', '0']);
   const now = deviceEpoch();
-  if (now === null) return;
+  if (now === null) return false;
   adb(['shell', `date @${String(now + bySeconds)}`]);
   sleep(2_000);
+  const restored = reverseTunnelsRestored();
+  process.stdout.write(`  the phone can reach this machine again: ${String(restored)}\n`);
+  return restored;
 }
 
-/** Back to the host's time. Runs on every exit path, including a thrown error. */
+/**
+ * Back to the host's time. Runs on every exit path, including a thrown error.
+ *
+ * The tunnels go back too, because the next harness to run assumes they are there and the one
+ * that broke them is the one that should put them back.
+ */
 function restoreDeviceClock(): void {
   adb(['shell', 'settings', 'put', 'global', 'auto_time', '1']);
   sleep(3_000);
+  reverseTunnelsRestored();
 }
 
 // ---------------------------------------------------------------------------
@@ -470,6 +558,11 @@ async function run(checks: Check[]): Promise<void> {
     captureFailure('signin-no-screen');
   }
 
+  // Whether the subject of this run is still there, asked before anything is concluded about what
+  // it shows. A native crash on the first Fabric mount leaves the home screen up and every check
+  // after it measuring an app that is not running - which happened on 2026-09-06 and produced six
+  // failures and two inconclusive results, none of them about authentication.
+  const running = processId() !== null;
   checks.push(
     signedOutCheck({
       names: names(),
@@ -477,8 +570,18 @@ async function run(checks: Check[]): Promise<void> {
       createLabel: SIGN_IN_COPY.createLabel,
       forgotLabel: SIGN_IN_COPY.forgotLabel,
       signedInOnlyName: EXPECTED_ITEM,
+      appRunning: running,
     }),
   );
+  if (!running) {
+    // Stop. Every check below drives a screen, and a run that carried on would report each of them
+    // as a defect in the app rather than as the one thing that is true: the app is not running.
+    process.stdout.write(
+      'The app is not running after launch - it crashed or would not start. Stopping here; ' +
+        '`adb logcat -b crash` says why.\n',
+    );
+    return;
+  }
 
   // -------------------------------------------------------------------------
   // SIGN-2 - creating an account, through the app's own form
@@ -486,7 +589,18 @@ async function run(checks: Check[]): Promise<void> {
   // The app goes first and the provider is asked afterwards, about this exact address. The
   // built-in mailer allows two messages an hour, so a probe made first could take the last of the
   // quota and hand the app the rate limit it then reported as the provider's usual behaviour.
-  const appEmail = `kynviora-signin-${Date.now().toString(36)}@kynviora.test`;
+  //
+  // Skipped whole in the `session` phase, along with SIGN-10 and SIGN-11: those three are every
+  // email-triggering call this scenario makes, and the point of that phase is to make none.
+  if (PHASES !== 'session') await signUpPhase(checks, unconfirmed);
+  if (PHASES === 'signup') return;
+
+  await sessionPhase(checks, wrongCredentials);
+}
+
+/** SIGN-2 and SIGN-10: creating an account through the app's own form, and what it is worth. */
+async function signUpPhase(checks: Check[], unconfirmed: { message: string }): Promise<void> {
+  const appEmail = `kynviora-signin-${Date.now().toString(36)}@${SIGN_UP_DOMAIN}`;
   process.stdout.write(`Creating an account through the app: ${appEmail}\n`);
 
   if (scrollToAndTap(SIGN_IN_COPY.createLabel)) {
@@ -541,38 +655,67 @@ async function run(checks: Check[]): Promise<void> {
     }),
   );
 
-  // Everything below needs the account this run signs in as, and none of it is about sign-up.
-  if (PHASES === 'signup') return;
-
-  // -------------------------------------------------------------------------
-  // SIGN-11 - asking for a new password
-  // -------------------------------------------------------------------------
+  // The sign-up screen is still on top where SIGN-10 did not navigate away from it.
   if (!madeAnAccount) {
-    // The sign-up screen is still on top where SIGN-10 did not navigate away from it.
     scrollToAndTap(SIGN_UP_COPY.signInLabel);
     sleep(2_000);
   }
+}
+
+/**
+ * SIGN-11 and SIGN-3 to SIGN-9: everything about a session, from the sign-in screen.
+ *
+ * SIGN-11 is here rather than in the sign-up phase because it is about the account this run signs
+ * in as. It is the one email-triggering call in this half, and it is skipped in `session`.
+ */
+async function sessionPhase(checks: Check[], wrongCredentials: { message: string }): Promise<void> {
+  // -------------------------------------------------------------------------
+  // SIGN-11 - asking for a new password
+  // -------------------------------------------------------------------------
   let recoveryScreen: readonly string[] | null = null;
-  if (scrollToAndTap(SIGN_IN_COPY.forgotLabel)) {
+  if (PHASES !== 'session' && scrollToAndTap(SIGN_IN_COPY.forgotLabel)) {
     sleep(2_000);
     retype(RECOVERY_COPY.emailLabel, EMAIL);
     scrollToAndTap(RECOVERY_COPY.submitLabel);
     sleep(10_000);
     recoveryScreen = names();
-  } else {
+  } else if (PHASES !== 'session') {
     captureFailure('signin-no-forgot-control');
   }
-  const recovery = await recoveryOutcomeFor(EMAIL);
-  process.stdout.write(`  the provider answers a recovery request with: ${recovery.outcome}\n`);
-  checks.push(
-    recoveryCheck({
-      names: recoveryScreen,
-      providerOutcome: recovery.outcome,
-      sentHeading: RECOVERY_COPY.sentHeading,
-      refusalHeading: AUTH_REFUSAL_HEADING,
-      expectedRefusalMessage: recovery.expectedMessage,
-    }),
-  );
+  if (PHASES !== 'session') {
+    // The probe is made **only where the app was refused**, and that is trap 206 applied to this
+    // check rather than to SIGN-2's.
+    //
+    // `/recover` is an email-triggering call and the built-in mailer allows two an hour, spent by
+    // an attempt rather than by a delivery. A full run already makes two - the app's sign-up and
+    // the app's recovery - so a probe made unconditionally is the third, comes back rate-limited,
+    // and this check then compares a refusal *the probe* received against a screen reporting what
+    // *the app* was told. Those are two different requests, and reading one as the other is the
+    // error that once made SIGN-2 report a rate limit as the provider's usual behaviour.
+    //
+    // Where the app showed the sent state there is nothing left to ask: it renders that only on a
+    // 200 or a 204, so the provider accepted **the request the app made**, and asking again spends
+    // a message to learn about a different one. Where the app showed a refusal the quota was not
+    // spent by it, the address is in the same condition, and the repeat is both affordable and
+    // about the same thing - which is exactly where the mapping is worth checking.
+    const appWasRefused = recoveryScreen?.includes(AUTH_REFUSAL_HEADING) === true;
+    const recovery = appWasRefused
+      ? await recoveryOutcomeFor(EMAIL)
+      : { outcome: 'ACCEPTED' as const, expectedMessage: null };
+    process.stdout.write(
+      `  the provider answers a recovery request with: ${recovery.outcome}` +
+        `${appWasRefused ? '' : ' (not asked again - the app was not refused)'}\n`,
+    );
+    checks.push(
+      recoveryCheck({
+        names: recoveryScreen,
+        providerOutcome: recovery.outcome,
+        sentHeading: RECOVERY_COPY.sentHeading,
+        refusalHeading: AUTH_REFUSAL_HEADING,
+        expectedRefusalMessage: recovery.expectedMessage,
+      }),
+    );
+  }
 
   // -------------------------------------------------------------------------
   // SIGN-3 - a wrong password
@@ -654,7 +797,7 @@ async function run(checks: Check[]): Promise<void> {
   process.stdout.write(
     `Moving the device clock past the token's ${String(lifetime)}s lifetime...\n`,
   );
-  advanceDeviceClock(lifetime + CLOCK_OVERSHOOT_SECONDS);
+  const reachableAfterFirstMove = advanceDeviceClock(lifetime + CLOCK_OVERSHOOT_SECONDS);
   const skewAfterFirstMove = clockSkewSeconds();
   process.stdout.write(`  the device is now ${String(skewAfterFirstMove)}s ahead of real time\n`);
   const afterRenewal = settledAfterRestart();
@@ -665,6 +808,7 @@ async function run(checks: Check[]): Promise<void> {
       submitLabel: SIGN_IN_COPY.submitLabel,
       clockAdvancedBySeconds: skewAfterFirstMove,
       accessTokenLifetimeSeconds: lifetime,
+      canReachHost: reachableAfterFirstMove,
     }),
   );
 
@@ -705,7 +849,7 @@ async function run(checks: Check[]): Promise<void> {
   process.stdout.write(`  every session revoked at the provider: ${String(revoked)}\n`);
 
   // The phone is told nothing. It finds out when its token comes due and it asks.
-  advanceDeviceClock(lifetime + CLOCK_OVERSHOOT_SECONDS);
+  const reachableAfterSecondMove = advanceDeviceClock(lifetime + CLOCK_OVERSHOOT_SECONDS);
   const skewAfterSecondMove = clockSkewSeconds();
   const afterRevocation = settledAfterRestart();
 
@@ -720,6 +864,7 @@ async function run(checks: Check[]): Promise<void> {
           ? null
           : skewAfterSecondMove - skewAfterFirstMove,
       accessTokenLifetimeSeconds: lifetime,
+      canReachHost: reachableAfterSecondMove,
     }),
   );
 }

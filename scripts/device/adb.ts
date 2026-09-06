@@ -22,13 +22,40 @@ export interface AdbResult {
   readonly stderr: string;
 }
 
-export function adb(args: readonly string[]): AdbResult {
+/**
+ * How long any single device call may take before it is a failure rather than a wait.
+ *
+ * **Every call here used to have no bound at all**, and a device call that does not return stops
+ * the whole harness: these are synchronous by design (see {@link sleep}), so one wedged
+ * `uiautomator dump` is a run that produces no further output and never ends. That happened twice
+ * on 2026-09-06 - `verify:device:delete` sat for thirty minutes between two lines of its own log
+ * with nothing wrong that anybody could see, and the session went looking for it in the deletion.
+ *
+ * A hundred and eighty seconds is far longer than any interactive call needs and short enough that
+ * a wedged one is a result. Nothing has to change to handle it: a timed-out call is `ok: false`
+ * with the reason in `stderr`, which is the shape every caller already reads. `adb install`, the
+ * one legitimately slow call, passes its own.
+ */
+export const ADB_TIMEOUT_MS = 180_000;
+
+export function adb(args: readonly string[], timeoutMs = ADB_TIMEOUT_MS): AdbResult {
   const result = spawnSync(adbPath(), [...args], {
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
+    timeout: timeoutMs,
   });
   if (result.error !== undefined) {
     return { ok: false, stdout: '', stderr: result.error.message };
+  }
+  // `spawnSync` reports a timeout as a signal rather than as an error, so a run that was killed
+  // for taking too long would otherwise arrive as an ordinary non-zero exit with empty output -
+  // true, and not the thing an operator needs told.
+  if (result.signal !== null) {
+    return {
+      ok: false,
+      stdout: '',
+      stderr: `adb ${args.join(' ')} was killed (${result.signal}) after ${String(timeoutMs)}ms`,
+    };
   }
   return {
     ok: result.status === 0,
@@ -43,9 +70,12 @@ export function adb(args: readonly string[]): AdbResult {
  * `adb shell` rewrites LF to CRLF on some platforms, which would corrupt every byte of a database
  * and turn the encryption checks into noise.
  */
-export function adbBytes(args: readonly string[]): Uint8Array | null {
-  const result = spawnSync(adbPath(), [...args], { maxBuffer: 256 * 1024 * 1024 });
-  if (result.error !== undefined || result.status !== 0) return null;
+export function adbBytes(args: readonly string[], timeoutMs = ADB_TIMEOUT_MS): Uint8Array | null {
+  const result = spawnSync(adbPath(), [...args], {
+    maxBuffer: 256 * 1024 * 1024,
+    timeout: timeoutMs,
+  });
+  if (result.error !== undefined || result.signal !== null || result.status !== 0) return null;
   const out = result.stdout;
   if (out === null || out.length === 0) return null;
   return new Uint8Array(out);

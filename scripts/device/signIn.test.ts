@@ -39,7 +39,17 @@ describe('SIGN-1 - a signed-out app', () => {
     createLabel: CREATE,
     forgotLabel: FORGOT,
     signedInOnlyName: ITEM,
+    appRunning: true,
   };
+
+  it('is inconclusive, and says so plainly, when the app is not running', () => {
+    // The guess this replaces. A native crash on the first mount leaves the home screen up, so
+    // all three controls are absent - and this check used to report that as a build without a
+    // provider, which sent a session reading Metro's environment over an app that had segfaulted.
+    const check = signedOutCheck({ ...base, appRunning: false, names: ['Gmail', 'Photos'] });
+    expect(check.status).toBe('INCONCLUSIVE');
+    expect(check.detail).toContain('not running');
+  });
 
   it('passes with all three ways out and nothing behind them', () => {
     expect(signedOutCheck({ ...base, names: [SUBMIT, CREATE, FORGOT] }).status).toBe('PASS');
@@ -324,6 +334,7 @@ describe('the run as a whole', () => {
     // and it was fine", and almost every check here is an absence.
     const checks = [
       signedOutCheck({
+        appRunning: true,
         names: [SUBMIT, CREATE, FORGOT],
         submitLabel: SUBMIT,
         createLabel: CREATE,
@@ -345,7 +356,23 @@ describe('SIGN-8 - a session outliving its access token', () => {
     expectedItemName: ITEM,
     submitLabel: SUBMIT,
     accessTokenLifetimeSeconds: 3600,
+    canReachHost: true,
   };
+
+  it('is inconclusive when the phone could not reach this machine', () => {
+    // The fault that cost this check and SIGN-9 a whole run. Moving the device's clock needs
+    // `adb root`, `adb root` restarts adbd, and every `adb reverse` mapping dies with it - so the
+    // app was measured with no route to Metro and none to the API, and its failure was read as a
+    // defect in the renewal.
+    const check = renewedSessionCheck({
+      ...base,
+      canReachHost: false,
+      clockAdvancedBySeconds: 3900,
+      names: [SUBMIT],
+    });
+    expect(check.status).toBe('INCONCLUSIVE');
+    expect(check.detail).toContain('adb reverse');
+  });
 
   it('passes when the clock passed the lifetime and the app came back with the account’s data', () => {
     expect(
@@ -389,6 +416,7 @@ describe('SIGN-8 - a session outliving its access token', () => {
 
 describe('SIGN-9 - a session revoked elsewhere', () => {
   const base = {
+    canReachHost: true,
     submitLabel: SUBMIT,
     expectedItemName: ITEM,
     revoked: true,
@@ -428,6 +456,23 @@ describe('SIGN-9 - a session revoked elsewhere', () => {
     expect(
       revokedSessionCheck({ ...base, clockAdvancedBySeconds: null, names: [ITEM] }).status,
     ).toBe('INCONCLUSIVE');
+  });
+
+  it('is inconclusive when the app showed neither the sign-in screen nor the account’s data', () => {
+    // Not a FAIL. "Not the sign-in screen" was being reported as "a withdrawn authorization
+    // leaves a phone still working", which is a claim about household content being readable -
+    // over a screen that had none on it. An app on a spinner is neither signed out nor working.
+    const check = revokedSessionCheck({ ...base, names: ['Setting up your account'] });
+    expect(check.status).toBe('INCONCLUSIVE');
+    expect(check.detail).toContain('Setting up your account');
+  });
+
+  it('is inconclusive when the phone could not reach this machine', () => {
+    // A signed-in-looking screen over a phone with no route to the API is not evidence that a
+    // revoked session still works: it is evidence of nothing.
+    const check = revokedSessionCheck({ ...base, canReachHost: false, names: [ITEM] });
+    expect(check.status).toBe('INCONCLUSIVE');
+    expect(check.detail).toContain('adb reverse');
   });
 
   it('is inconclusive when the screen could not be read', () => {

@@ -59,11 +59,31 @@ export interface SignedOutEvidence {
   readonly forgotLabel: string;
   /** A name that only appears once somebody is signed in. Must be absent. */
   readonly signedInOnlyName: string;
+  /**
+   * Whether the app was still running when the screen was read.
+   *
+   * Asked because the answer to "no sign-in screen" used to be a guess, and the guess was wrong.
+   * A native crash on the first mount leaves the home screen up, `uiautomator` reports no control
+   * of the three, and this check said the app had been built without a provider - which sent a
+   * session looking at Metro's environment over an app that had segfaulted. A process that is not
+   * there is a fact, and it is cheaper to read than to infer.
+   */
+  readonly appRunning: boolean | null;
 }
 
 export function signedOutCheck(evidence: SignedOutEvidence): Check {
   const id = 'SIGN-1';
   const title = 'A signed-out app offers a way in, and nothing behind it';
+  if (evidence.appRunning === false) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail:
+        'The app is not running. It either crashed or never started, so nothing on screen is ' +
+        'about signing in and nothing below this line is either. `adb logcat -b crash` says why.',
+    };
+  }
   const onScreen = evidence.names;
   if (onScreen === null) {
     return {
@@ -585,11 +605,31 @@ export interface RenewedSessionEvidence {
   readonly clockAdvancedBySeconds: number | null;
   /** How long the provider's access tokens last, so "past its lifetime" is checkable. */
   readonly accessTokenLifetimeSeconds: number;
+  /**
+   * Whether the phone could still reach this machine when the reading was taken.
+   *
+   * `adb root` - which moving the device's clock requires - restarts adbd, and every `adb reverse`
+   * mapping dies with it. An app that cannot reach Metro or the API is an app measured with no
+   * route to anything, and both possible readings are then meaningless: signed out proves nothing
+   * about renewal, and signed in proves nothing about a session still being honoured. DEC-102's
+   * rule for a check that could not look, applied to the tunnels rather than to the screen.
+   */
+  readonly canReachHost: boolean | null;
 }
 
 export function renewedSessionCheck(evidence: RenewedSessionEvidence): Check {
   const id = 'SIGN-8';
   const title = 'A session outlives its access token, renewed against the provider';
+  if (evidence.canReachHost !== true) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail:
+        'The `adb reverse` tunnels were not in place after the clock moved, so the app could ' +
+        'reach neither Metro nor the API and whatever it showed is not about renewal.',
+    };
+  }
   const advanced = evidence.clockAdvancedBySeconds;
   if (advanced === null) {
     return {
@@ -628,7 +668,9 @@ export function renewedSessionCheck(evidence: RenewedSessionEvidence): Check {
       id,
       title,
       status: 'FAIL',
-      detail: 'The app stayed signed in and showed none of this account’s data.',
+      detail:
+        'The app did not ask for a sign-in and did not reach this account’s data either. ' +
+        `On screen: ${JSON.stringify(evidence.names.slice(0, 12))}`,
     };
   }
   return {
@@ -671,11 +713,31 @@ export interface RevokedSessionEvidence {
   /** Seconds the clock moved by, so the renewal the app makes was genuinely due. */
   readonly clockAdvancedBySeconds: number | null;
   readonly accessTokenLifetimeSeconds: number;
+  /**
+   * Whether the phone could still reach this machine when the reading was taken.
+   *
+   * `adb root` - which moving the device's clock requires - restarts adbd, and every `adb reverse`
+   * mapping dies with it. An app that cannot reach Metro or the API is an app measured with no
+   * route to anything, and both possible readings are then meaningless: signed out proves nothing
+   * about renewal, and signed in proves nothing about a session still being honoured. DEC-102's
+   * rule for a check that could not look, applied to the tunnels rather than to the screen.
+   */
+  readonly canReachHost: boolean | null;
 }
 
 export function revokedSessionCheck(evidence: RevokedSessionEvidence): Check {
   const id = 'SIGN-9';
   const title = 'A session revoked elsewhere signs this phone out';
+  if (evidence.canReachHost !== true) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail:
+        'The `adb reverse` tunnels were not in place after the clock moved, so the app could ' +
+        'reach neither Metro nor the API and whatever it showed is not about the revocation.',
+    };
+  }
   if (evidence.revoked !== true) {
     return {
       id,
@@ -700,22 +762,30 @@ export function revokedSessionCheck(evidence: RevokedSessionEvidence): Check {
   if (evidence.names === null) {
     return { id, title, status: 'INCONCLUSIVE', detail: 'The screen could not be read.' };
   }
-  if (!evidence.names.includes(evidence.submitLabel)) {
-    return {
-      id,
-      title,
-      status: 'FAIL',
-      detail:
-        'The session was revoked at the provider and the app did not return to the sign-in ' +
-        'screen, so a withdrawn authorization leaves a phone still working.',
-    };
-  }
+  // The order is deliberate, and it used to be the other way round. "Not the sign-in screen"
+  // was being reported as "a withdrawn authorization leaves a phone still working" - which is a
+  // claim about household content being readable, over a screen that may have had none on it. An
+  // app sitting on a spinner or on an account-setup refusal is neither signed out nor working,
+  // and calling that a security failure sends the next session looking for a defect in the
+  // renewal when the run could not see one either way (DEC-102's rule, applied to a third state
+  // rather than to an unreadable screen).
   if (evidence.names.includes(evidence.expectedItemName)) {
     return {
       id,
       title,
       status: 'FAIL',
       detail: 'Household content is still on screen after the session was revoked.',
+    };
+  }
+  if (!evidence.names.includes(evidence.submitLabel)) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail:
+        'The app showed neither the sign-in screen nor this account’s data, so what it did ' +
+        'with the revocation is not readable from this run. ' +
+        `On screen: ${JSON.stringify(evidence.names.slice(0, 12))}`,
     };
   }
   return {

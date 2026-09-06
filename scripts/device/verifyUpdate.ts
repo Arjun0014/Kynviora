@@ -187,7 +187,9 @@ function main(): void {
 
   // ---- The update ---------------------------------------------------------
   process.stdout.write('Installing over the existing app...\n');
-  const install = adb(['install', '-r', APK_PATH]);
+  // Its own bound: installing a four-ABI debug build is the one device call that is legitimately
+  // slower than the default.
+  const install = adb(['install', '-r', APK_PATH], 900_000);
   const installed = install.ok && /Success/i.test(install.stdout + install.stderr);
   sleep(5_000);
 
