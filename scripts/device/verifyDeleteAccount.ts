@@ -32,6 +32,7 @@
  * already proves.
  */
 
+import { randomUUID } from 'node:crypto';
 import { PACKAGE, adb, isInstalled, sleep } from './adb.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
 import {
@@ -148,6 +149,17 @@ async function apiCall(
   path: string,
   token: string,
   body?: unknown,
+  /**
+   * The idempotency key, as a **header**.
+   *
+   * `13` requires one on every retryable mutation and the API reads it from `Idempotency-Key`,
+   * validated as a UUID - never from a body field. Sending `idempotencyKey` in the body instead
+   * fails twice over: `ctx.operationId` is then absent, so the route answers
+   * `400 idempotency_key_required`, and the body schemas are `.strict()`, so the extra key would
+   * be refused even if the header were there. That is why an earlier run of this scenario seeded
+   * nothing and DEL-5 could not show that anything went with the account.
+   */
+  idempotencyKey?: string,
 ): Promise<{ status: number; body: Record<string, unknown> } | null> {
   // The retry trap 187 records: `sleep` blocks the event loop for most of a run, so a pooled
   // connection is dead by the time the next call uses it.
@@ -159,6 +171,7 @@ async function apiCall(
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
           connection: 'close',
+          ...(idempotencyKey === undefined ? {} : { 'idempotency-key': idempotencyKey }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
@@ -174,27 +187,70 @@ async function apiCall(
   return null;
 }
 
-/** Register the account and give it one person to own, through the routes the screens use. */
+/**
+ * Register the account and give it one person to own, through the routes the screens use.
+ *
+ * A profile needs the household it goes in, so the household's ID is read back from the response
+ * rather than guessed at: `POST /v1/profiles` takes `householdId`, and `profile_insert` refuses
+ * one the caller does not own.
+ *
+ * `POST /v1/me` deliberately takes **no** idempotency key - it is idempotent by nature, because
+ * the subject *is* the identity, so a second call finds the row the first one made.
+ *
+ * Every step says what it got when it fails. A seed that half-worked is the difference between
+ * "the deletion removed nothing" and "there was nothing to remove", and DEL-5 cannot tell them
+ * apart on its own.
+ */
 async function seedSomethingToLose(token: string): Promise<boolean> {
   const registered = await apiCall('POST', '/v1/me', token, {});
-  if (registered === null || (registered.status !== 200 && registered.status !== 201)) return false;
-
-  const household = await apiCall('POST', '/v1/households', token, {
-    displayName: 'Synthetic Deletion Household',
-    idempotencyKey: `del-${Date.now().toString(36)}`,
-  });
-  if (household === null || (household.status !== 200 && household.status !== 201)) {
-    // A household may already exist from an earlier run of this scenario against a recreated
-    // account; a profile can still be added to it.
-    process.stdout.write(`  (household: ${String(household?.status ?? 'unreachable')})\n`);
+  if (registered === null || (registered.status !== 200 && registered.status !== 201)) {
+    process.stdout.write(`  (register: ${describe(registered)})\n`);
+    return false;
   }
 
-  const profile = await apiCall('POST', '/v1/profiles', token, {
-    displayName: PROFILE_NAME,
-    relationship: 'SELF',
-    idempotencyKey: `delp-${Date.now().toString(36)}`,
-  });
-  return profile !== null && (profile.status === 200 || profile.status === 201);
+  const household = await apiCall(
+    'POST',
+    '/v1/households',
+    token,
+    { displayName: 'Synthetic Deletion Household' },
+    randomUUID(),
+  );
+  if (household === null || (household.status !== 200 && household.status !== 201)) {
+    process.stdout.write(`  (household: ${describe(household)})\n`);
+    return false;
+  }
+  const householdId = typeof household.body['id'] === 'string' ? household.body['id'] : '';
+  if (householdId === '') {
+    process.stdout.write(`  (household: no id in ${JSON.stringify(household.body)})\n`);
+    return false;
+  }
+
+  const profile = await apiCall(
+    'POST',
+    '/v1/profiles',
+    token,
+    // No `isSelf`, deliberately. `profile_self_user_unique` allows one live self-profile per
+    // account, so a second run against a recreated account - or against one whose earlier profile
+    // survived a run that did not delete anything - hits the constraint. What DEL-5 needs is a
+    // profile, not this account's own; asking for `isSelf` bought nothing and cost every repeat.
+    //
+    // `isSelf` is in any case the only identity statement this body may carry: there is no
+    // `relationship` field and `.strict()` refuses one, because who owns a profile is decided by
+    // who is asking rather than by what the body claims (`13`).
+    { householdId, displayName: PROFILE_NAME },
+    randomUUID(),
+  );
+  if (profile === null || (profile.status !== 200 && profile.status !== 201)) {
+    process.stdout.write(`  (profile: ${describe(profile)})\n`);
+    return false;
+  }
+  return true;
+}
+
+/** What an API call answered, for a line an operator reads when a seed did not take. */
+function describe(answer: { status: number; body: Record<string, unknown> } | null): string {
+  if (answer === null) return 'unreachable';
+  return `HTTP ${String(answer.status)} ${JSON.stringify(answer.body)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +346,11 @@ function requireConfiguration(): string | null {
       'uses. Recreate it with scripts/device/provisionDeleteAccount.sql.'
     );
   }
-  if (EMAIL === (process.env.KYNVIORA_SUPABASE_TEST_EMAIL?.trim() ?? ' ')) {
+  const mainAccount = process.env.KYNVIORA_SUPABASE_TEST_EMAIL?.trim() ?? '';
+  // Compared only when there is something to compare against. This used to default to a literal
+  // NUL byte written into the source - a value no address can equal, and therefore correct, but
+  // invisible in an editor and enough to make `grep` call this file binary.
+  if (mainAccount !== '' && EMAIL === mainAccount) {
     return (
       'KYNVIORA_DELETE_TEST_EMAIL is the same account as KYNVIORA_SUPABASE_TEST_EMAIL. This run\n' +
       'would delete the account every other scenario signs in as.'
@@ -300,6 +360,20 @@ function requireConfiguration(): string | null {
     return 'KYNVIORA_MIGRATE_DATABASE_URL must be set: three of the six checks read the database.';
   }
   return null;
+}
+
+/**
+ * Say where the run has got to, with the clock on it.
+ *
+ * This scenario used to print two lines and then nothing for the whole of the device work, so a
+ * run that stalled looked exactly like a run that was being thorough - and two of them were left
+ * for half an hour each on 2026-09-06 before anybody could say which step they were in. A step
+ * marker costs a line and turns "it is stuck" into "it is stuck **here**".
+ */
+const STARTED = Date.now();
+function step(what: string): void {
+  const seconds = Math.round((Date.now() - STARTED) / 1000);
+  process.stdout.write(`  [${String(seconds).padStart(4)}s] ${what}\n`);
 }
 
 async function run(checks: Check[]): Promise<void> {
@@ -325,9 +399,11 @@ async function run(checks: Check[]): Promise<void> {
       `profiles live=${String(rowsBefore?.profilesLive)}\n`,
   );
 
+  step('preparing the device');
   prepareDeviceForDriving();
   suppressStylusHandwriting();
 
+  step('clearing the app and launching it');
   adb(['shell', 'pm', 'clear', PACKAGE]);
   // `pm clear` revokes runtime permissions with the data, and the notification dialog that then
   // appears is a full-screen window that eats every tap (trap 201).
@@ -335,9 +411,11 @@ async function run(checks: Check[]): Promise<void> {
   launch();
   sleep(45_000);
 
+  step('waiting for the sign-in screen');
   if (waitForNamed(SIGN_IN_COPY.submitLabel, 60_000) === null) {
     captureFailure('delete-no-signin-screen');
   }
+  step('signing in through the app');
   retype(SIGN_IN_COPY.emailLabel, EMAIL);
   retype(SIGN_IN_COPY.passwordLabel, PASSWORD);
   scrollToAndTap(SIGN_IN_COPY.submitLabel);
@@ -346,6 +424,7 @@ async function run(checks: Check[]): Promise<void> {
   // ---------------------------------------------------------------------------
   // DEL-1 - what it says before it does anything
   // ---------------------------------------------------------------------------
+  step('DEL-1: opening the deletion screen');
   if (!openDeletionScreen()) captureFailure('delete-no-open-control');
   sleep(3_000);
   checks.push(
@@ -360,10 +439,12 @@ async function run(checks: Check[]): Promise<void> {
   // ---------------------------------------------------------------------------
   // DEL-2 - a wrong password changes nothing
   // ---------------------------------------------------------------------------
+  step('DEL-2: a wrong password');
   retype(DELETE_ACCOUNT_COPY.passwordLabel, 'definitely-not-the-password');
   scrollToAndTap(DELETE_ACCOUNT_COPY.submitLabel);
   sleep(12_000);
   const afterWrong = names();
+  step('DEL-2: reading the database');
   const rowsAfterWrong = await accountRows(session.userId);
   checks.push(
     wrongPasswordDeletionCheck({
@@ -378,8 +459,10 @@ async function run(checks: Check[]): Promise<void> {
   // DEL-3 - and the right one does
   // ---------------------------------------------------------------------------
   // The control DEL-4 needs, taken while the account still exists: these exact credentials work.
+  step('DEL-3: checking the credentials still work');
   const workedBefore = (await signIn()) !== null;
 
+  step('DEL-3: the real deletion');
   retype(DELETE_ACCOUNT_COPY.passwordLabel, PASSWORD);
   scrollToAndTap(DELETE_ACCOUNT_COPY.submitLabel);
   sleep(20_000);
@@ -400,6 +483,7 @@ async function run(checks: Check[]): Promise<void> {
   // ---------------------------------------------------------------------------
   // DEL-4, DEL-5, DEL-6 - what is left, at the provider and in the database
   // ---------------------------------------------------------------------------
+  step('DEL-4: asking the provider about the identity');
   const identity = await identityState();
   process.stdout.write(`  the provider now says the identity is: ${identity}\n`);
   checks.push(identityRemovedCheck({ identity, workedBefore }));

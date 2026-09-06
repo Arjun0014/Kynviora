@@ -46,6 +46,7 @@ import {
   LINE_HEIGHT_MULTIPLIER,
   DELETE_ACCOUNT_COPY,
 } from '@kynviora/presentation';
+import { bearerSession } from '@kynviora/contracts';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useApi } from '@/api/ApiProvider';
 import { useAuth } from '@/auth/AuthProvider';
@@ -103,10 +104,22 @@ export function DeleteAccount() {
         return;
       }
 
-      // 2. And only then the deletion, on the client the new session produced. The one from the
-      //    closure still carries the old token, and the server would refuse it for a stale
-      //    step-up - which would read as the password having been wrong.
-      const outcome = await client.deleteAccount();
+      // 2. And only then the deletion, on the client the new session produced.
+      //
+      //    **Built from the tokens `reauthenticate` returned, not read off the context.** `client`
+      //    here is the one this callback closed over, and it carries the *pre*-re-authentication
+      //    token: `ApiProvider` memoises the client on the access token, so the new one reaches
+      //    this component on the next render, which is after this function has finished. Issuing
+      //    the deletion on the closure's client sends the old token, the server reads step-up from
+      //    its `amr` and finds it stale, and the refusal arrives as `STEP_UP_REQUIRED` - which
+      //    this screen words as "that password was not right", about a password that was.
+      //
+      //    That is why `reauthenticate` returns the tokens rather than only reporting success: the
+      //    proof and the thing it authorises are one step, and nothing has to wait for a render
+      //    between them.
+      const outcome = await client
+        .withSession(bearerSession(proved.value.accessToken))
+        .deleteAccount();
       if (outcome.kind === 'OK') {
         // Locally too. The session is already dead at the provider - the identity it belonged to
         // is gone - but `12` wants the decrypted copy on this phone gone with it, and that is
