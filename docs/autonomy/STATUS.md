@@ -431,6 +431,13 @@ on it; credentials that worked moments earlier are refused as unknown, so the id
 the provider; the profile and the account are both stamped; and the retained record names
 `account.registered`, `account.deleted` and `account.identity_removed` while carrying no address.
 
+**Re-run after the session work of 2026-09-06**, because all five touch authentication and the
+change was in the transport: `verify:device:profile`, `verify:device:caregiver`,
+`verify:device:doseaccess`, `verify:device:offline` and `verify:device:privacy` are each **PASS**
+on the development stack. They use the development identity, where the auth provider is
+`UNCONFIGURED` rather than `LOADING`, so the new gate passes them straight through - which is what
+those runs confirm rather than assume.
+
 Recreate the account with `scripts/device/provisionDeleteAccount.sql` afterwards. A scenario that
 deletes its own subject cannot run twice without it - and how that account comes to exist is not
 evidence about sign-up: an operator creates and confirms it, because confirming an address needs a
