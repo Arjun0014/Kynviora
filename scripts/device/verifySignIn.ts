@@ -552,9 +552,15 @@ async function run(checks: Check[]): Promise<void> {
   // is about signing in (trap 201).
   adb(['shell', 'pm', 'grant', PACKAGE, 'android.permission.POST_NOTIFICATIONS']);
   launch();
-  sleep(45_000);
+  // Twenty seconds and then a patient wait, rather than a stopwatch. `pm clear` takes the app's
+  // data with it, so this launch re-creates the encrypted store and asks the keystore for a key,
+  // and on an emulator booted minutes earlier it is also the run that pays for dex optimisation
+  // and the first bundle. Three minutes is far more than any of that needs and it costs nothing
+  // when the screen is there in twenty seconds, because `waitForNamed` returns the moment it is
+  // (trap 205, which SIGN-7 learned first and this did not).
+  sleep(20_000);
 
-  if (waitForNamed(SIGN_IN_COPY.submitLabel, 60_000) === null) {
+  if (waitForNamed(SIGN_IN_COPY.submitLabel, 180_000) === null) {
     captureFailure('signin-no-screen');
   }
 

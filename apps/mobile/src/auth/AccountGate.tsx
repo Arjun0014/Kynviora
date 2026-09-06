@@ -99,6 +99,24 @@ export function AccountGate({ children }: { readonly children: ReactNode }) {
     void auth.signOut().catch(() => undefined);
   }, [auth]);
 
+  // Nothing below this gate asks the API anything until it is known who is asking.
+  //
+  // `LOADING` is not "signed out" and it is not "nobody" either - it is an encrypted database
+  // being opened, and until it settles the session is unknown. `ProfileProvider` and
+  // `TimeZoneReporter` sit under this gate and each fires a request on mount, so a cold start used
+  // to send `GET /v1/profiles` and `PUT /v1/me/time-zone` with no credential on them, be refused,
+  // and have the refusal read as the session being lost. That is the race the comment at the top
+  // of this file describes for registration, one state earlier: holding here is what makes it
+  // impossible rather than unlikely.
+  if (auth.state === 'LOADING') {
+    return (
+      <View style={styles.centred}>
+        {/* No words. Nothing has happened yet, and a sentence here would be read on every launch
+            by somebody who is about to be signed in anyway - the same reason `AuthGate` gives. */}
+        <ActivityIndicator accessibilityLabel={ACCOUNT_SETUP_COPY.working} />
+      </View>
+    );
+  }
   if (!applies) return <>{children}</>;
   if (progress.kind === 'READY') return <>{children}</>;
 

@@ -409,10 +409,13 @@ async function run(checks: Check[]): Promise<void> {
   // appears is a full-screen window that eats every tap (trap 201).
   adb(['shell', 'pm', 'grant', PACKAGE, 'android.permission.POST_NOTIFICATIONS']);
   launch();
-  sleep(45_000);
+  sleep(20_000);
 
   step('waiting for the sign-in screen');
-  if (waitForNamed(SIGN_IN_COPY.submitLabel, 60_000) === null) {
+  // Patient rather than fixed, for the reason `verifySignIn` records: this launch follows a
+  // `pm clear`, so it re-creates the encrypted store and asks the keystore for a key, and
+  // `waitForNamed` returns the moment the screen is there (trap 205).
+  if (waitForNamed(SIGN_IN_COPY.submitLabel, 180_000) === null) {
     captureFailure('delete-no-signin-screen');
   }
   step('signing in through the app');

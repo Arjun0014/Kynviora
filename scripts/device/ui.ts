@@ -587,14 +587,37 @@ export function keepScreenAwake(): void {
 }
 
 /**
+ * Stop the system putting its own dialogs over the app.
+ *
+ * `hide_error_dialogs` suppresses the "isn't responding" and "keeps stopping" windows. On a device
+ * somebody owns those are the right thing to show; on one a harness is driving they are a window
+ * belonging to **another package**, drawn over the app, and `uiautomator dump` then returns that
+ * window's hierarchy instead of the app's - so every control the run is looking for is absent and
+ * the first check to notice reports it as a defect.
+ *
+ * That is trap 201's shape with a different dialog. `verify:device:a11y` and
+ * `verify:device:camera` learned it from `permissioncontroller`; `verify:device:signin` lost a
+ * whole run on 2026-09-06 to **"System UI isn't responding"** over a sign-in screen that was
+ * drawn, complete and underneath it - eight checks about an app nothing was wrong with.
+ *
+ * Suppressing them loses nothing a run relied on: a crash is read from the process (`processId`)
+ * and from `adb logcat -b crash`, which say more than a dialog does and say it whether or not
+ * anybody was looking at the screen.
+ */
+export function suppressSystemErrorDialogs(): void {
+  adb(['shell', 'settings', 'put', 'global', 'hide_error_dialogs', '1']);
+}
+
+/**
  * Everything a run needs done to the device before it drives anything.
  *
- * One call, so a new harness cannot forget half of it. Both members are here because a run once
- * failed without them and the failure looked like the app's fault in both cases.
+ * One call, so a new harness cannot forget part of it. Every member is here because a run once
+ * failed without it and the failure looked like the app's fault every time.
  */
 export function prepareDeviceForDriving(): void {
   keepScreenAwake();
   suppressStylusHandwriting();
+  suppressSystemErrorDialogs();
 }
 
 /**

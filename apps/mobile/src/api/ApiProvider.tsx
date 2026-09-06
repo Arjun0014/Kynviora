@@ -27,6 +27,12 @@
  * against the published key set until it expires - so the API's answer is what decides. Every
  * response passes through one wrapper here, and a `401` tells the auth provider the session is
  * gone. Once, on the transport, rather than in each of forty screens.
+ *
+ * **And only where a session was sent.** A `401` for a request that carried no credential says
+ * nothing about a session; it says there was not one. Reporting it as a loss made the app sign
+ * itself out on a cold start, because the providers above the gate ask for a shelf before the
+ * stored session has been read from an encrypted database - and `sessionLost` does not only forget
+ * the session on screen, it deletes it from disk.
  */
 
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
@@ -103,7 +109,14 @@ export function resolveApiContext(
     const client = createClient({
       config,
       session: current,
-      fetch: watchingForRefusal(options.onSessionLost),
+      // **Only a request that carried a session can report one lost.** A `401` for a request with
+      // no credential on it means "there was never a session here", which is not news and must not
+      // be acted on - and acting on it was a defect with teeth: on a cold start the providers above
+      // the gate mount before the stored session has been read, fire with `ANONYMOUS`, and the
+      // `401` that comes back used to call `sessionLost`, which **clears the session from disk**.
+      // A returning person was signed out by their own app, and the faster their phone answered
+      // the more reliably it happened (`19` SIGN-7).
+      fetch: watchingForRefusal(current.kind === 'BEARER' ? options.onSessionLost : undefined),
     });
     return {
       client,
