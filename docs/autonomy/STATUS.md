@@ -3,34 +3,34 @@
 **Resume checkpoint.** Read this first on any autonomous restart, then `git log`, then the tail
 of `WORKLOG.md`, then `BLOCKERS.md`.
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 ---
 
 ## Current position
 
-|                    |                                                                    |
-| ------------------ | ------------------------------------------------------------------ |
-| **Current stage**  | Stage 4 complete; Stage 1 privacy work reopened and largely closed |
-| **Current phase**  | Phase 1.4 (export, deletion), Phase 1.1 (auth), Phase 2.2 (scan)   |
-| **Last completed** | Account deletion through an Edge Function; the fourteenth scenario |
-| **Branch**         | `master`                                                           |
-| **Latest commit**  | `feat(deletion): the key that removes an identity never enters...` |
-| **Baseline tag**   | `baseline-spec-only`                                               |
+|                    |                                                                            |
+| ------------------ | -------------------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; Stage 1 privacy work reopened and largely closed         |
+| **Current phase**  | Phase 1.4 (export, deletion), Phase 1.1 (auth), Phase 2.2 (scan)           |
+| **Last completed** | Account deletion, end to end on a device; the session that stays signed in |
+| **Branch**         | `master`                                                                   |
+| **Latest commit**  | `fix(auth): the app signed a returning person out on its own cold start`   |
+| **Baseline tag**   | `baseline-spec-only`                                                       |
 
-The retention decision unblocked six deviations at once and the previous session spent itself on
-them. What was **decided** rather than engineered - a retention matrix, an auth provider,
-quiet-hours semantics, the scan/OCR split - is recorded in DEC-117 through DEC-120 and in
-`docs/RETENTION.md`.
+This session was about a session: why one that had just been renewed signed itself out. The answer
+was not where the previous one looked - refresh token rotation has an alibi, measured against the
+provider - and it was in three places at once. **The app signed a returning person out on its own
+cold start** (DEC-128), a renewal that failed **was never asked again** (DEC-127), and the two
+device checks that would have shown either were being taken over a phone the harness had just cut
+off from the network by moving its clock (trap 208).
 
-This session closed the one place where a promise made to a person outran what the system does:
-the sweep now runs on a schedule (DEC-121). What it did **not** close is written down as
-`DEV-063` - every eligibility floor sits exactly on its deadline, so a discrete sweep overshoots
-by up to one interval and no finite interval makes that zero.
+The API had never recorded a refusal, so "the API log has zero 401s" had been true of every run
+there has ever been. It records them now, and found the first defect within a minute.
 
 ## Verification state
 
-- **4573 tests passing**, 0 failing, across 173 files.
+- **4764 tests passing**, 0 failing, across 182 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -72,9 +72,10 @@ npm run verify
 
 ### On a device
 
-Fourteen harnesses need an attached Android device or emulator and are **not** part of `npm run
-verify`. Their judgements are, though: 397 of the tests above exercise the rules they apply, so a
-rule cannot change without CI noticing even where no hardware exists.
+Sixteen harnesses need an attached Android device or emulator and are **not** part of `npm run
+verify`. Their judgements are, though: 511 of the tests above - every test under `scripts/` -
+exercise the rules they apply, so a rule cannot change without CI noticing even where no hardware
+exists.
 
 Every one of them wakes the screen first (`prepareDeviceForDriving`). An emulator left alone turns
 its display off, and a display that is off has no view hierarchy at all - `uiautomator dump`
@@ -387,6 +388,54 @@ Last run **5/5 PASS** against a Pixel 7 / Android 16 emulator, on a build carryi
 A real read of a real symbol is **not** covered and never will be by a harness: an emulator's
 virtual scene is not a product pack. That check is manual and the runner says so.
 
+```bash
+npm run verify:device:signin
+```
+
+Eleven checks on signing up, signing in, staying signed in and losing a session, against the **real
+provider** and the real managed database - the fourteenth of `19`'s scenarios and the only one that
+does not use the development identity. Last run **10 PASS, 1 INCONCLUSIVE**: `SIGN-10` needs an
+account created through the app's own form, and the provider refuses the address (`BLK-010`,
+`DEV-069`).
+
+It needs a whole stack pointed at `kynviora-dev` rather than at PGlite, so it has a launcher of its
+own (`scratchpad/signin-phase.sh`) that refuses rather than measuring the wrong build: a port still
+held, an API that did not bind, one that bound with `dev_auth:true`, one not on the managed
+database, or a Metro started without the provider in its environment are each a stop.
+
+Two things this scenario does that the others do not, and both have cost runs:
+
+**It moves the device's clock**, because an access token lasts an hour and waiting is not a
+strategy. `SIGN-8` and `SIGN-9` both depend on it. Setting a date needs `adb root`, **`adb root`
+restarts adbd, and every `adb reverse` mapping dies with it** - so the two checks that run after
+the clock moves were being taken over a phone with no route to Metro and none to the API. They put
+the tunnels back now, and whether they came back is evidence the checks are given rather than an
+assumption they make (trap 208).
+
+**It is the only scenario that can spend a quota.** The built-in mailer allows two messages an
+hour, spent by an attempt rather than a delivery, so a run that probes the provider on its own
+account can take the last of it and then grade the app on what a different request received.
+`KYNVIORA_SIGNIN_PHASES=session` runs `SIGN-1` and `SIGN-3` to `SIGN-9` and makes **no**
+email-triggering call at all, which is what makes the session half re-runnable; `signup` runs the
+other half and makes exactly one - the app's own.
+
+```bash
+npm run verify:device:delete
+```
+
+Six checks on closing an account, against the real stack, and it deletes the account it signs in
+as. Last run **6/6 PASS** (`DEV-062`): the screen names all four things the deletion removes and
+what is kept before offering the control; a wrong password deletes nothing, read in the database
+rather than on the screen; the app returns to the sign-in screen with none of the account's content
+on it; credentials that worked moments earlier are refused as unknown, so the identity is gone at
+the provider; the profile and the account are both stamped; and the retained record names
+`account.registered`, `account.deleted` and `account.identity_removed` while carrying no address.
+
+Recreate the account with `scripts/device/provisionDeleteAccount.sql` afterwards. A scenario that
+deletes its own subject cannot run twice without it - and how that account comes to exist is not
+evidence about sign-up: an operator creates and confirms it, because confirming an address needs a
+mailbox.
+
 ### Running it
 
 ```bash
@@ -517,47 +566,48 @@ documented configuration requirements.
 `BLK-002` is **resolved** as of 2026-09-03 and `BLK-011` as of 2026-09-04 (DEC-116); neither
 appears here.
 
-| ID      | Class                               | Blocks                                        |
-| ------- | ----------------------------------- | --------------------------------------------- |
-| BLK-010 | `EXTERNAL_CREDENTIAL`               | A mailbox: email confirmation and recovery    |
-| BLK-003 | `EXTERNAL_CREDENTIAL` + `LICENSING` | GS1/provider identity resolution              |
-| BLK-004 | `DATA_AVAILABILITY`                 | Publishing any regulatory status as trusted   |
-| BLK-005 | `LEGAL_REVIEW`                      | Source snapshot retention                     |
-| BLK-006 | `CLINICAL_REVIEW` + `LEGAL_REVIEW`  | Publishing any safety rule; public beta       |
-| BLK-007 | `EXTERNAL_CREDENTIAL`               | Real OCR/multimodal extraction                |
-| BLK-008 | `DATA_AVAILABILITY`                 | Every numeric release threshold (Stage 9.1)   |
-| BLK-009 | `EXTERNAL_CREDENTIAL`               | Actually sending any notification to a device |
+| ID      | Class                               | Blocks                                            |
+| ------- | ----------------------------------- | ------------------------------------------------- |
+| BLK-010 | `EXTERNAL_CREDENTIAL`               | A mailbox: confirmation, recovery **and sign-up** |
+| BLK-003 | `EXTERNAL_CREDENTIAL` + `LICENSING` | GS1/provider identity resolution                  |
+| BLK-004 | `DATA_AVAILABILITY`                 | Publishing any regulatory status as trusted       |
+| BLK-005 | `LEGAL_REVIEW`                      | Source snapshot retention                         |
+| BLK-006 | `CLINICAL_REVIEW` + `LEGAL_REVIEW`  | Publishing any safety rule; public beta           |
+| BLK-007 | `EXTERNAL_CREDENTIAL`               | Real OCR/multimodal extraction                    |
+| BLK-008 | `DATA_AVAILABILITY`                 | Every numeric release threshold (Stage 9.1)       |
+| BLK-009 | `EXTERNAL_CREDENTIAL`               | Actually sending any notification to a device     |
 
 `BLK-001` is **resolved** as of 2026-09-05: migrations `0001`-`0030` are applied unmodified to
 managed Postgres 17.6, the pooled runtime is real, and the parity, RLS, worker and device suites
 all run against it. `BLK-010` is narrowed to a mailbox - the service-role credential left it on
-2026-09-06 (DEC-126).
+2026-09-06 (DEC-126) - and it is now known to block **sign-up itself**, which four runs had
+recorded as the mailer's quota and which is really the provider refusing an address it cannot
+deliver to (`DEV-069`). One mailbox closes all three.
 
 ## Immediate next task
 
-**Finish the deletion the screen already asks for** (`DEV-062`), and it is one line of the two.
+**A mailbox** (`BLK-010`), and it is now the whole of what stands between the fourteenth device
+scenario and every one of its eleven checks passing.
 
-`verify:device:delete` proves the parts that matter for safety - `DEL-1`, the screen names all four
-things the deletion removes and what is kept, before offering the control; `DEL-2`, a wrong
-password deleted nothing, verified in the database rather than on the screen. The deletion itself
-was refused, and the API log shows no deletion request completing.
+`SIGN-10` is the only one not green, and it is not green because no account can be created through
+the app's own form: the provider refuses the **address**. `kynviora.test` has no MX record, so
+GoTrue reaches the point of sending a confirmation, cannot, and rolls the user back with
+`400 email_address_invalid`. Four earlier runs recorded this as the mailer's two-an-hour quota; the
+provider's own log has no `over_email_send_rate_limit` in it for any of them, and a refusal for an
+undeliverable address spends none of the quota because nothing is sent (`DEV-069`).
 
-The diagnosis, which is a defect in code written on 2026-09-06 rather than in the deletion:
-`DeleteAccount.tsx` calls `client.deleteAccount()` on the client **captured in the callback's
-closure**, which still carries the pre-re-authentication token. `reauthenticate` produces a new
-token - that is what a step-up _is_ on this provider (DEC-118 part 3) - so the server sees a stale
-step-up and refuses. Issue the deletion on the client the new session produces. The file's own
-comment says to do this and the code does not.
+So one thing closes three: a domain whose mail somebody can read makes `SIGN-2` and `SIGN-10`
+measurable, and it is the same mailbox the confirmation and recovery round trips have been waiting
+for. `KYNVIORA_SIGNIN_SIGNUP_DOMAIN` is where the address goes.
 
-Second, smaller: `verifyDeleteAccount.ts` seeds nothing to lose. `POST /v1/households` answers 400,
-so the request shape is wrong, and `DEL-5` cannot show that anything went with the account.
-
-Then re-run, and recreate the account with `scripts/device/provisionDeleteAccount.sql` afterwards -
-a scenario that deletes its own subject cannot run twice without it.
+**Deliberately not chosen here.** A domain with real MX would make the run work today, and every
+candidate is somebody else's: a public disposable inbox is world-readable, and a real provider is
+mail sent to a mailbox nobody owns. Which address a synthetic account signs up with is an operator
+decision about where mail is allowed to go, not an engineering one.
 
 ## Next three planned tasks
 
-1. **`DEV-024`**, as above. **Waiting on:** nothing.
+1. **`DEV-024`**, as before. **Waiting on:** nothing.
 
 2. **The substance-mapping review queue** (`DEV-037`). Less blocked than it reads: DEC-117 approved
    that a raw household term never goes to staff by default, which is the decision this was waiting
@@ -574,32 +624,62 @@ a digest surface should be **instead of** the Safety Inbox, which already shows 
 events, is a product question rather than an engineering one. Building a second list of the same
 rows before that is answered would be inventing a design nobody asked for.
 
-**What is still genuinely blocked, and by what.** The email round trip - confirmation and recovery
-links - on `BLK-010`, which is now a mailbox rather than a project; OCR and the
+**What is still genuinely blocked, and by what.** Everything that needs a mailbox - the
+confirmation and recovery round trips, and creating an account through the app's own form - on
+`BLK-010`, which is now a mailbox rather than a project; OCR and the
 possible-formula-change task on `BLK-007`; substance vocabulary depth on `BLK-003`; publishing
 anything on `BLK-004` and `BLK-006`; sending any server-originated notification, the digest
 included, on `BLK-009`. Account deletion and managed-Postgres parity have left this list.
 
-**The `19` device scenarios.** All fourteen now have a harness, and thirteen are green. The
-fourteenth - sign-up, sign-in and recovery - runs against the real stack and is **not** green:
+**The `19` device scenarios.** All fourteen have a harness and thirteen are green. The fourteenth,
+which is sign-up, sign-in and recovery, now passes **ten of its eleven checks** on one run against
+the real stack, with the eleventh unable to run rather than failing:
 
-| Passing                                            | Not passing                                                                  |
-| -------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `SIGN-1` a signed-out app offers all three ways in | `SIGN-2` the app's refusal did not match the provider's code on the last run |
-| `SIGN-3` a wrong password, refused and said        | `SIGN-8` the session was **not** renewed when its token came due             |
-| `SIGN-4` a real token reaches this account's rows  | `SIGN-9` a revoked session left the phone working                            |
-| `SIGN-7` a session survives the process dying      | `SIGN-5`, `SIGN-6` inconclusive on one failed direct sign-in                 |
-| `SIGN-11` recovery reaches the provider            | `SIGN-10` no account has been created through the app's own form             |
+| Check     | Result | What it showed                                                                        |
+| --------- | ------ | ------------------------------------------------------------------------------------- |
+| `SIGN-1`  | PASS   | a signed-out app offers all three ways in, and nothing behind them                    |
+| `SIGN-2`  | PASS   | the app rendered the sentence its own mapping produces for the provider's code        |
+| `SIGN-3`  | PASS   | a wrong password, refused by the provider and said on the screen                      |
+| `SIGN-4`  | PASS   | a real Supabase token reaches this account's rows, end to end                         |
+| `SIGN-5`  | PASS   | the session is in the encrypted store and in none of ten readable files               |
+| `SIGN-6`  | PASS   | signing out ends it here **and** at the provider - the refresh token is refused       |
+| `SIGN-7`  | PASS   | a session survives the process being killed                                           |
+| `SIGN-8`  | PASS   | the clock moved past the token's lifetime and the session was **renewed**             |
+| `SIGN-9`  | PASS   | a session revoked elsewhere signed the phone out, which it could only learn by asking |
+| `SIGN-11` | PASS   | a recovery request reaches the provider and is reported honestly                      |
+| `SIGN-10` | INCONC | no account could be created through the app's own form (`BLK-010`, `DEV-069`)         |
 
-So Section 19 is **13/14 measured green**, not 14/14, and it should not be written up as 14/14
-until `SIGN-8` and `SIGN-9` are understood. `SIGN-8` passed before the `expires_in` change and
-failed after it, on runs that were otherwise identical, and the API log has zero 401s - so the
-refusal came from the provider rather than from Kynviora. Refresh token rotation is the first thing
-to check: Supabase invalidates the previous token on each renewal, and two renewals racing the same
-one answer `refresh_token_already_used`, which maps to `SESSION_EXPIRED` and signs somebody out.
-A renewal loop, which is what the old absolute-expiry code produced, would have hidden exactly that.
+`SIGN-8` and `SIGN-9` are the pair, and neither is worth much alone: under the same conditions a
+live session renews and a revoked one does not, which is what makes the first a renewal rather than
+a stale token still being honoured.
+
+**Section 19 stays at 13/14**, because an inconclusive check is not a pass (DEC-102) and the
+fourteenth scenario has one. What blocks it is a mailbox rather than a defect: `SIGN-10` needs an
+unconfirmed account to refuse, and no account can be created because the provider refuses the
+address as undeliverable.
+
+**What the last session concluded about `SIGN-8` was wrong, and it is worth saying how.** Refresh
+token rotation was the named suspect; measured against `kynviora-dev`, a spent refresh token
+answers `200`, so `refresh_token_already_used` is not reachable on this project at all. The
+supporting evidence - "the API log has zero 401s, so the refusal came from the provider" - was not
+evidence: the API had never logged a refusal in its life. It does now, and there were eighteen in
+the next run (`DEV-067`).
 
 ## Recent decisions worth knowing
+
+- **DEC-128** - a `401` reports a session lost **only where a session was sent**, and nothing under
+  the gate asks the API anything until it is known who is asking. `sessionLost` deletes the session
+  from disk as well as from the screen, so a refusal for a request that carried no credential was
+  enough to sign a returning person out on their own cold start - and the faster their phone
+  answered the more reliably it happened. `LOADING` is not "signed out" and not "nobody" either: it
+  is an encrypted database being opened.
+- **DEC-127** - a renewal that fails is **asked again**, four times over half a minute, and then
+  left to the `401` path. It used to do nothing at all, so one dropped packet cost a session an
+  hour later. A renewal also acts only on the session it was asked about: adopting after a sign-out
+  would write the session back to disk and put somebody into an app they had left. And a provider
+  code means what it means for the request that was made - `validation_failed` is a malformed
+  address on a sign-up and an unusable refresh token on a renewal, and reading the second as the
+  first told somebody their email was wrong while the phone kept a session it could never renew.
 
 - **DEC-122** - the digest is assembled at **09:00 in the recipient's own morning**, and somebody
   whose zone nobody knows gets **no digest at all** rather than one at a guessed hour. That points

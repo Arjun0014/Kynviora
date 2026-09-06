@@ -69,7 +69,7 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
 
 | Phase | Title                                | Status        |
 | ----- | ------------------------------------ | ------------- |
-| 1.1   | Authentication and session lifecycle | `NOT_STARTED` |
+| 1.1   | Authentication and session lifecycle | `IN_PROGRESS` |
 | 1.2   | Household and profile creation       | `COMPLETE`    |
 | 1.3   | Health-context facts and provenance  | `COMPLETE`    |
 | 1.4   | Consent and privacy controls         | `COMPLETE`    |
@@ -160,8 +160,18 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
   two on the surface partition and twelve end to end. Outstanding: the export and deletion shell,
   which needs a retention matrix that does not exist (`DEV-036`).
 
-- **1.1**: blocked on an auth provider decision (`23` lists it as required before Stage 1
-  completion) - the schema deliberately holds no password hash, delegating to a managed provider.
+- **1.1**: `IN_PROGRESS` since 2026-09-06, and it was `NOT_STARTED` for longer than it was true.
+  The provider is chosen (Supabase Auth, DEC-118), the API verifies its tokens against the
+  published key set, and the phone does the rest: a sign-in screen offering all three ways in, a
+  session kept in the encrypted store, a renewal, a sign-out that ends the session at the provider,
+  and an account deletion that removes the identity behind it. Ten of the eleven checks in `19`'s
+  fourteenth scenario pass on hardware against the real project.
+
+  What keeps it out of `COMPLETE` is the one exit criterion nothing here can meet: a **verified**
+  email address. No confirmation link and no recovery link has been followed, and no account has
+  been created through the app's own form - the provider refuses an address it cannot deliver to,
+  so all three want the same mailbox (`BLK-010`, `DEV-069`). Reviewer AAL2 is proven on a synthetic
+  account and waits on a reviewer rather than on a mechanism (`BLK-006`).
 
 ---
 
@@ -943,20 +953,22 @@ rather than a structural one (DEC-099).
 
 ## What "complete" means here, and what it does not
 
-Thirty-four phases are marked `COMPLETE` above. In every case that means the logic is
+Thirty-six phases are marked `COMPLETE` above. In every case that means the logic is
 implemented, tested, documented and committed - and in most cases the tests execute against a real
 PostgreSQL engine or the real Expo toolchain rather than a mock.
 
-It does **not** mean the phase is releasable. Nine phases carry exit criteria that depend on a
+It does **not** mean the phase is releasable. Eight phases carry exit criteria that depend on a
 credential, a labelled dataset, human participants, or a qualified human reviewer, and those are
-marked `BLOCKED_EXTERNAL` (eight) or `BLOCKED_TECHNICAL` (one) rather than complete even where all
-buildable work is finished. `BLOCKERS.md` records what each one needs. None of them is waiting on
-a device any more: `BLK-002` resolved on 2026-09-03, and the one `BLOCKED_TECHNICAL` phase turned
-out to be blocked on something else underneath it (`DEV-039`).
+marked `BLOCKED_EXTERNAL` rather than complete even where all buildable work is finished.
+`BLOCKERS.md` records what each one needs. None of them is waiting on a device any more:
+`BLK-002` resolved on 2026-09-03, and the phase that used to be `BLOCKED_TECHNICAL` turned out to
+be blocked on something else underneath it (`DEV-039`).
 
-The counts above are the tables' own, recounted whenever a status changes: 35 `COMPLETE`, 4
-`IN_PROGRESS`, 3 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, 1 `BLOCKED_TECHNICAL`, over the 51 phases
-`04` defines. A prose count that drifts from the table it describes is the quiet way a status
+The counts above are the tables' own, recounted whenever a status changes: 36 `COMPLETE`, 5
+`IN_PROGRESS`, 2 `NOT_STARTED`, 8 `BLOCKED_EXTERNAL`, over the 51 phases `04` defines. The prose
+had drifted again before this recount - it read 35 and 1 `BLOCKED_TECHNICAL` over a table with
+neither - which is the failure the paragraph below describes happening to the paragraph that
+describes it. A prose count that drifts from the table it describes is the quiet way a status
 document stops being one - and the first version of this paragraph drifted immediately, because it
 was measured before the same commit moved 2.1. Count the rows:
 

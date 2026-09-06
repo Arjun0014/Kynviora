@@ -278,6 +278,40 @@ implemented, the exact configuration required is documented, and independent wor
   AAL2 itself is proven on a synthetic account (real TOTP factor, real RFC 6238 codes); what is
   missing is a _reviewer_, which is a person rather than a mechanism.
 
+- **Narrowed a third time on 2026-09-06, and the reason it blocks sign-up was wrong.** Everything
+  about a **session** is now proven on hardware, and the mailer quota turns out not to have been
+  what stood in the way of sign-up.
+
+  `verify:device:signin` in its session phase - `SIGN-1`, `SIGN-3` to `SIGN-9` - is **8/8 PASS** on
+  one run against the real stack. A person signs in, the session is in the encrypted store and in
+  no readable file, it survives the app being killed, it is **renewed** when its access token comes
+  due, signing out ends it here and at the provider, and a session revoked from somewhere else
+  signs the phone out. The last two are the pair that makes the fifth mean anything: under the same
+  conditions, a live session renews and a revoked one does not.
+
+  **Sign-up is refused for the address, not for the quota.** The provider's own auth log records
+  what the app's sign-up got:
+
+      400 email_address_invalid   Email address "kynviora-signin-...@kynviora.test" is invalid
+
+  with an `auth_event` of `user_confirmation_requested` - GoTrue reached the point of sending a
+  confirmation, could not, and rolled the user back. `kynviora.test` has no MX record;
+  `example.com` and `example.org` publish a null MX (RFC 7505). And there is no
+  `over_email_send_rate_limit` anywhere in the log for any run of this scenario: the two-an-hour
+  quota is real and it never fired. A refusal for an undeliverable address costs none of it,
+  because nothing is sent.
+
+  So `SIGN-2` and `SIGN-10` are blocked by **this** blocker and not by a separate one, which is the
+  useful half of the correction: one mailbox closes the confirmation round trip, the recovery round
+  trip, and account creation through the app's own form. `KYNVIORA_SIGNIN_SIGNUP_DOMAIN` is where
+  the address goes when there is one.
+
+  | Still blocked                        | By what                                                    |
+  | ------------------------------------ | ---------------------------------------------------------- |
+  | The email round trip                 | a mailbox: a domain that accepts mail somebody can read    |
+  | An account created through the app   | the same mailbox - the address is refused, not the attempt |
+  | A reviewer with a real second factor | `BLK-006`: nobody is staffed to hold one                   |
+
 - **To resolve**: custom SMTP or a mailbox on the project, and a named reviewer per `10`. The
   development authenticator is refused when the issuer is set, so there is no configuration where
   both are live.

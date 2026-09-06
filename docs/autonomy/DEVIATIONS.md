@@ -2396,7 +2396,7 @@ its own limit on pending local notifications, which is lower than Android's and 
 
 ---
 
-## DEV-062 - Account deletion is built and does not yet complete on a device
+## DEV-062 - Account deletion is built and does not yet complete on a device (resolved)
 
 - **Affected specification**: `16` (a person can have their data removed; the deletion workflow
   enumerates device local data, primary records, object storage, derived projections, queued jobs,
@@ -2462,6 +2462,36 @@ its own limit on pending local notifications, which is lower than Android's and 
   and its rows untouched. Nothing is deleted that should not be; what does not work yet is the
   deletion succeeding.
 - **Required future work**: the two fixes above, then a clean `npm run verify:device:delete`.
+
+- **Resolved 2026-09-06.** Both faults are fixed and `npm run verify:device:delete` is **6/6 PASS**
+  against the real stack - the app on an emulator, the API on `kynviora-dev`'s pooler with
+  `dev_auth:false`, and the identity removed by the `close-identity` Edge Function.
+
+  | Check   | What it showed                                                                                       |
+  | ------- | ---------------------------------------------------------------------------------------------------- |
+  | `DEL-1` | the screen names all four things the deletion removes, and what is kept, before offering the control |
+  | `DEL-2` | a wrong password deleted nothing - the account and its profile untouched, read in the database       |
+  | `DEL-3` | the app returned to the sign-in screen with none of the account's content on it                      |
+  | `DEL-4` | credentials that signed in moments earlier are refused as unknown - the identity is gone             |
+  | `DEL-5` | the profile and the account are both stamped; nothing is hard-deleted (DEC-117)                      |
+  | `DEL-6` | `account.registered`, `account.deleted`, `account.identity_removed`, and no row carries the address  |
+
+  The first fault was one line, and the file's own comment had already said what to do about it.
+  `DeleteAccount.tsx` issued the deletion on the client captured in the callback's closure, which
+  carries the **pre**-re-authentication token: `ApiProvider` memoises the client on the access
+  token, so the new one arrives on the next render, which is after the callback has finished. The
+  server read step-up from the stale `amr`, refused, and the screen worded that as "that password
+  was not right" - about a password that was. It is built from the tokens `reauthenticate` returns
+  now, which is why that function returns them.
+
+  The second was the harness. `idempotencyKey` went in the body, where the API reads
+  `Idempotency-Key` as a **header** validated as a UUID and the body schemas are `.strict()` - so
+  the request failed twice over, nothing was seeded, and `DEL-5` had nothing under the account to
+  measure.
+
+- **Status**: **RESOLVED 2026-09-06.** What a green run does not cover is written into the scenario
+  itself: the account it deletes was created and confirmed by an operator, because confirming an
+  address needs a mailbox (`BLK-010`), and a deletion that passes is not evidence about sign-up.
 
 ---
 
@@ -2648,3 +2678,95 @@ its own limit on pending local notifications, which is lower than Android's and 
   side is needed - the function reads it at request time and the API sends the header when it has
   one.
 - **Status**: OPEN, blocked on tooling rather than on a decision.
+
+---
+
+## DEV-067 - A signed-out app asked the API for things, and one refusal signed a returning person out (resolved)
+
+- **Affected specification**: `13` (every request derives authority from an authenticated session),
+  `12` (authorization loss invalidates local access), `04` Phase 1.1, DEC-118, DEC-124, `19`.
+- **Expected behaviour**: nothing asks the API anything until it is known who is asking.
+- **Implemented behaviour (historical)**: `ProfileProvider` and `TimeZoneReporter` sit under
+  `AccountGate` and above `AuthGate`, and each fires a request on mount. On a cold start the stored
+  session has not been read yet - it lives in an encrypted database and opening one is a keystore
+  round trip - so `GET /v1/profiles` and `PUT /v1/me/time-zone` went out with no credential on
+  them.
+- **Why it mattered, which was not obvious**: the transport watches for a `401` and reports the
+  session lost, and `sessionLost` does not only forget the session on screen - it **deletes it from
+  disk**. So the app signed the person out on its own cold start and erased their session, and a
+  phone that answered faster did it more reliably. `19` `SIGN-7` failed on a fresh emulator and
+  passed on a warm one, which is what a race looks like from the outside; `SIGN-8` and `SIGN-6`
+  then failed downstream, because there was no session left to renew or to revoke.
+- **How it was found**: `api.request.unauthenticated`, added the same day. The API had never
+  recorded a refusal, so "the API log has zero 401s" had been true of every run there has ever
+  been - including the ones where a phone was being refused - and the previous session's diagnosis
+  rested on that silence.
+- **Status**: **RESOLVED 2026-09-06**, twice over. Only a request that carried a session may report
+  one lost, which is the invariant and would be right on its own; and `AccountGate` holds the whole
+  subtree while the auth state is `LOADING`, so those requests are not made at all. `LOADING` is
+  not "signed out" and it is not "nobody" either - it is a database being opened.
+- **Risk now**: none known. What remains untested is what was untested before: a device whose
+  keystore refuses, where the store never opens. `LocalStoreProvider` settles either way so the
+  gate resolves, and nothing measures that on hardware.
+
+---
+
+## DEV-068 - A second self-profile answers 500 rather than a refusal
+
+- **Affected specification**: `13` (clients branch on codes; a refusal says which gate refused),
+  `18` (a refusal says what to do next), `04` Phase 1.2.
+- **Expected behaviour**: `POST /v1/profiles` with `isSelf`, for an account that already has a live
+  self-profile, is refused with a code a screen can act on.
+- **Implemented behaviour**: `profile_self_user_unique` raises, `insertOrRefusal` handles only the
+  row-level-security refusal (`42501`), and the unique violation reaches the error handler as
+  `INTERNAL` - `{"code":"INTERNAL","message":"Something went wrong.","retryable":false}` - with
+  `api.unhandled_error` in the log and no reason in it.
+- **How it was found**: `verify:device:delete` seeds a profile through the real route, and the
+  second run against the same account got a 500 where the first had succeeded.
+- **Reason it is open**: the constraint is right and the refusal is missing. Mapping `23505` to a
+  domain refusal is small, but which code it should carry is a decision about the vocabulary -
+  `VALIDATION_FAILED` with a reason code, or a new `CONFLICT` - and the same question applies to
+  every other unique index a route can hit. The item and household idempotency indexes already
+  answer it differently, by reading the stored row back instead of refusing. Doing one and not the
+  others would leave the shape inconsistent in exactly the way `13` is about.
+- **Workaround in place**: the deletion scenario no longer asks for `isSelf`. What `DEL-5` needs is
+  a profile, not this account's own.
+- **Risk**: low, and not a safety boundary. Nothing is written that should not be - the constraint
+  holds - and the caller is told the write failed. What they are not told is why, so a screen
+  cannot offer a next step, and an operator reading the log sees only that something threw.
+- **Required future work**: decide the refusal vocabulary for a unique violation, then map it in
+  `insertOrRefusal` so every route inherits it.
+- **Status**: OPEN.
+
+---
+
+## DEV-069 - An account cannot be created through the app's own form without a mailbox
+
+- **Affected specification**: `04` Phase 1.1 (sign-up), `19` scenario 14 (`SIGN-2`, `SIGN-10`),
+  `BLK-010`.
+- **Expected behaviour**: the fourteenth device scenario creates an account through the app's own
+  sign-up form, and shows that an address nobody has confirmed cannot be signed in to.
+- **Implemented behaviour**: the app asks, and the provider refuses the **address**:
+
+      400 email_address_invalid   Email address "kynviora-signin-...@kynviora.test" is invalid
+
+  carrying an `auth_event` of `user_confirmation_requested` - so GoTrue got as far as sending the
+  confirmation, could not, and rolled the user back. No account exists, and `SIGN-10` has nothing
+  to be refused.
+
+- **Reason**: `kynviora.test` has **no MX record**, and `example.com` and `example.org` publish a
+  **null MX** (RFC 7505), which is a domain saying in the DNS that it accepts no mail. This project
+  will not create an account it cannot send a confirmation to.
+- **What this corrects**: four runs recorded these two checks as blocked by the built-in mailer's
+  quota - two messages an hour, spent by an attempt rather than by a delivery. The quota is real
+  and it never fired: there is no `over_email_send_rate_limit` anywhere in the provider's log for
+  any of those runs, and a refusal for an undeliverable address costs none of it, because nothing
+  is sent. The diagnosis was wrong, and wrong in the direction that wastes an hour at a time.
+- **Workaround in place**: `KYNVIORA_SIGNIN_SIGNUP_DOMAIN` selects the domain the app signs up
+  with. The default is unchanged, so nothing moves silently, and the run reports honestly that the
+  provider refused the address.
+- **Risk**: none to the product. What the app does on this path is measured as far as it can be -
+  `SIGN-1` and `SIGN-3` show the form and its refusals - and what is not measured is said.
+- **Required future work**: a domain whose mail somebody can receive. That is `BLK-010` and not a
+  separate blocker, which is the useful half of this finding.
+- **Status**: OPEN, blocked on `BLK-010`.

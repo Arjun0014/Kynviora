@@ -5264,3 +5264,184 @@ granting a platform role access to health data.
 Section 19's device coverage is therefore **not** 14/14. The fourteenth scenario exists, runs
 against the real stack, and proves six of its eleven checks; it is not green, and an inconclusive
 check is not a pass.
+
+---
+
+## 2026-09-06 - The renewal was never measured, and four other things nobody could see
+
+### What the last session concluded, and why it could not have been right
+
+`SIGN-8` failed and `SIGN-9` failed in the mirror image on one run, and the note left behind named
+refresh token rotation as the first suspect: Supabase invalidates the previous refresh token on
+each renewal, two renewals racing one answer `refresh_token_already_used`, and that maps to
+`SESSION_EXPIRED`, which signs somebody out.
+
+It is measured now, against `kynviora-dev` itself, and it is not that. A refresh token that has
+already been exchanged answers **`200`** on this project - immediately, and again fifteen seconds
+later, past any reuse interval. `refresh_token_already_used` is not reachable here. The suspect
+had an alibi.
+
+Two other things the same probe settled:
+
+- a refresh token the provider will not parse answers `400 validation_failed`, "Refresh token is
+  not valid" - and the shared code table maps `validation_failed` to `EMAIL_INVALID`, because on a
+  sign-up that is what it means;
+- a session revoked by a global sign-out answers `400 refresh_token_not_found`, which does map to
+  `SESSION_EXPIRED`. So `SIGN-9`'s premise was sound and its failure was not about the mapping.
+
+### The one fault, and it was in the harness
+
+`advanceDeviceClock` calls `adb root`, because `date` is not something an unprivileged shell may
+set. **`adb root` restarts adbd, and every `adb reverse` mapping dies with it.** Measured directly:
+`adb reverse --list` names both ports before it and is empty after.
+
+`SIGN-8` and `SIGN-9` are the only two checks that run after the clock moves. Both of them were
+therefore measuring an app that had no route to Metro and no route to the API - and neither said
+so. It is also why the API log had no `401`s in it for the whole run, which the previous session
+read as evidence that the refusal came from Supabase: no request reached the API to be refused.
+
+`verifyReminders.ts` has put both tunnels back after its own `adb root` since it was written. The
+lesson was in this directory and the newest harness in it did not have it (trap 208).
+
+### The API refused people silently
+
+`contextFor` answered `401` for a token that does not verify and **wrote nothing**. So "the API log
+has zero 401s" was true of every run there has ever been, including the ones where a phone was
+being refused, and a device scenario was diagnosed against that silence.
+
+`api.request.unauthenticated` now records the method and the route - never the token, and there is
+no verified subject to name. It found something within a minute of existing: a **signed-out** app
+still calls `GET /v1/profiles` and `PUT /v1/me/time-zone`, because `ProfileProvider` and
+`TimeZoneReporter` sit above `AuthGate` in the root layout and mount for a signed-out person
+(`DEV-067`).
+
+### Two real defects in the renewal, found by looking rather than by the device
+
+**A renewal that failed did nothing at all.** No retry, no reschedule: one dropped packet at the
+moment a token came due left the app holding an access token it would never replace, and it went on
+using it until the API refused it - and _that_ signed somebody out. A phone in a lift for ten
+seconds, an hour later, back at the sign-in screen. The old absolute-expiry code hid it, which is
+why it surfaced when that was corrected: a clock-skewed device renewed continuously, so every
+failure was retried a moment later by accident.
+
+**A renewal in flight could act on a session that was no longer there.** `adopt` after a sign-out
+writes the session back to disk and puts somebody back into the app - on a phone they may have
+signed out of because they were handing it to somebody else. `forget` after a new sign-in signs the
+new session out for the old one's sake. Both are one liveness flag, and both are pinned by tests.
+
+And `validation_failed` on a renewal now reads as `SESSION_EXPIRED` rather than `EMAIL_INVALID`,
+which was a screen telling somebody their email address was wrong about an address nobody typed -
+and, worse, one that did not sign them out, so the phone kept a session it could never renew.
+
+### `SIGN-10` was never about the mailer quota
+
+Four runs recorded "no account was created" and blamed a rate limit of two messages an hour spent
+by an attempt. The provider's own auth log says otherwise. The app's sign-up to
+`kynviora-signin-...@kynviora.test` answered:
+
+    400 email_address_invalid   Email address "..." is invalid
+
+carrying an `auth_event` of `user_confirmation_requested` - GoTrue got as far as sending the
+confirmation, could not, and rolled the user back. `kynviora.test` has **no MX record**;
+`example.com` and `example.org` publish a **null MX** (RFC 7505), which is a domain saying in the
+DNS that it accepts no mail. And there is no `over_email_send_rate_limit` anywhere in the log for
+any of those runs: the quota never fired.
+
+So creating an account through the app's own form needs an address at a domain that accepts mail,
+which is a mailbox - `BLK-010`, the same blocker as confirmation and recovery, rather than a
+separate one. `KYNVIORA_SIGNIN_SIGNUP_DOMAIN` is the knob; the default is left alone so nothing
+changes silently.
+
+### Three ways a run could stop and say nothing
+
+- **`withManagedClient` had no statement timeout.** The pooled path has had one since it was
+  written; this one bounded getting a connection and nothing after it. Two API processes left over
+  from earlier sessions were still holding pooler connections, and `verify:device:delete` blocked
+  on its first database read - thirty minutes of a device run for one line of output.
+- **`adb()` had no timeout at all.** Every device call is synchronous by design, so one wedged
+  `uiautomator dump` is a harness that never ends. 180 seconds now, and `adb install` carries its
+  own.
+- **`verifyDeleteAccount` printed two lines and then nothing** for the whole of the device work, so
+  a run that stalled looked exactly like one being thorough. Step markers with the clock on them.
+
+### The deletion
+
+`DeleteAccount.tsx` issued the deletion on the client captured in the callback's closure, which
+carries the **pre**-re-authentication token: `ApiProvider` memoises the client on the access token,
+so the new one arrives on the next render, which is after the callback has finished. The server
+read step-up from the old token's `amr`, found it stale, and refused - and the screen worded that
+as "that password was not right", about a password that was. It is built from the tokens
+`reauthenticate` returns now, which is why that function returns them.
+
+`verifyDeleteAccount` seeded nothing because it sent `idempotencyKey` in the body. The API reads
+`Idempotency-Key` as a **header**, validated as a UUID, and the body schemas are `.strict()` - so
+the request failed twice over. `POST /v1/profiles` also takes `householdId` and `isSelf`, and there
+is no `relationship` field.
+
+### What a run costs, and the three reasons it used to cost more
+
+Two device runs on 2026-09-06 produced one line of output each and sat for half an hour. Neither
+was stuck on anything to do with Kynviora.
+
+The first was the database: two API processes left over from earlier sessions were still holding
+pooler connections, `withManagedClient` bounded getting a connection and nothing after it, and the
+scenario's first read after the screen work waited for ever. The second was `scrollTo`, which does
+up to sixty `uiautomator` dumps per call - three seconds each on a healthy emulator and fifteen on
+one that has been up for hours, so a single `scrollToAndTap` took eight minutes and looked exactly
+like a hang. Restarting the emulator took a full scenario from fifty minutes to fifteen.
+
+And `adb()` had no timeout at all, which is the one that could have gone on for ever rather than
+merely long. Every device call is synchronous by design; one wedged `uiautomator dump` is a harness
+that never ends.
+
+The deletion scenario now says where it is, with the clock on each step. It used to print two lines
+and then nothing for the whole of its device work, so a run that stalled and a run being thorough
+looked identical.
+
+### The thing that made the fourteenth scenario green
+
+`SIGN-7` - a session surviving the app being killed - failed on a freshly restarted emulator and
+had passed on a warm one. That is a race, and it was a real one.
+
+`ProfileProvider` and `TimeZoneReporter` sit under `AccountGate` and above `AuthGate`, and each
+asks the API something on mount. On a cold start the stored session has not been read yet: it lives
+in an encrypted database and opening one is a keystore round trip. So two requests went out with no
+credential on them, the API refused them, and the transport read that `401` as the session having
+been lost - and `sessionLost` deletes the session **from disk**. The app signed a returning person
+out on its own cold start, and the faster their phone answered the more reliably it happened.
+`SIGN-8` and `SIGN-6` failed downstream of it, because there was nothing left to renew or revoke.
+
+Two changes, and the first would be right without the second (DEC-128). Only a request that carried
+a session may report one lost. And nothing under the gate asks anything until it is known who is
+asking - which is the argument the top of `AccountGate` already made about registration, one state
+earlier, and had not been applied to the session itself.
+
+### Result
+
+`npm run verify` exit **0**. **4,764 passed / 182 files**, up from 4,747 / 180. Migrations
+unchanged at `0030`.
+
+On hardware, against the real provider and the real managed database:
+
+| Scenario                               | Result                                                     |
+| -------------------------------------- | ---------------------------------------------------------- |
+| `verify:device:delete`                 | **6/6 PASS** - `DEV-062` closed                            |
+| `verify:device:signin`                 | **10 PASS, 1 INCONCLUSIVE** - only `SIGN-10`, on `BLK-010` |
+| `verify:device:signin` (session phase) | **8/8 PASS** - the whole session half on one run           |
+
+`SIGN-8` and `SIGN-9` pass together, which is what makes either of them worth anything: under the
+same conditions - the clock moved past the token's lifetime, the app restarted - a live session is
+renewed and a revoked one signs the phone out.
+
+### What is not proven
+
+- **No account has been created through the app's own sign-up form.** `SIGN-10` is inconclusive and
+  Section 19 therefore stays at **13/14**: an inconclusive check is not a pass. What blocks it is a
+  mailbox (`BLK-010`, `DEV-069`) rather than anything about the app.
+- **The email round trip** is unchanged: no confirmation link and no recovery link has been
+  followed, because nothing here can receive one.
+- **A unique-constraint violation still answers 500** rather than a refusal (`DEV-068`), found by
+  the deletion scenario seeding a second self-profile.
+- **A device whose keystore refuses** is still untested. The gate now holds while the store opens,
+  and `LocalStoreProvider` settles either way, so it resolves - but nothing measures that on
+  hardware.

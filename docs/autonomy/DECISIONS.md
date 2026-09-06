@@ -4666,3 +4666,89 @@ does not have. `DEV-066`.
 **Sources.** `14` (secrets server-side; re-authentication for high-impact actions); `13` (identity
 from a verified session; clients branch on codes); `16`; `12`; DEC-117; DEC-118; DEC-120; DEC-124;
 DEC-125; `DEV-062`; `DEV-066`; `BLK-010`.
+
+## DEC-127 - A renewal asks again, and never acts on a session that is no longer there
+
+**Context.** `19`'s fourteenth device scenario reported a session that signed itself out when its
+access token came due (`SIGN-8`) and, in the mirror image, a revoked session that went on working
+(`SIGN-9`). The note left behind named refresh token rotation: Supabase invalidates the previous
+refresh token on each renewal, two renewals racing one answer `refresh_token_already_used`, and
+that maps to `SESSION_EXPIRED`, which signs somebody out.
+
+**That was measured and it is not what happens on this project.** A refresh token that has already
+been exchanged answers `200` on `kynviora-dev` - immediately, and again fifteen seconds later, past
+any reuse interval - so `refresh_token_already_used` is not reachable here at all. Two more answers
+came out of the same probe and both mattered: a refresh token the provider will not parse answers
+`400 validation_failed`, and a session ended by a global sign-out answers
+`400 refresh_token_not_found`.
+
+**Decision, in three parts.**
+
+**A renewal that fails is asked again.** It used to do nothing at all - no retry, no reschedule -
+so one dropped packet at the moment a token came due left the app holding an access token it would
+never replace, and it went on using it until the API refused it. _That_ is what signed somebody
+out: not a clock, not the provider, a phone in a lift for ten seconds. Four attempts, two seconds
+doubling to sixteen, and then it stops: a phone with no network does not need to be asked every
+minute, and the `401` path exists for everything local reasoning cannot predict. The old
+absolute-expiry code hid this completely, because a clock-skewed device renewed continuously and
+therefore retried every failure by accident - which is why correcting the expiry made the symptom
+appear rather than causing it.
+
+**A renewal acts only on the session it was asked about.** It is a network round trip and the
+session can be gone before the answer lands, and neither thing a renewal does is safe to apply to a
+different one. Adopting after a sign-out writes the session **back to disk** and puts somebody into
+an app they may have signed out of because they were handing the phone over. Forgetting after a new
+sign-in signs the new session out for the old one's sake. One liveness flag closes both, and the
+timer is a local rather than a ref, so one run's cleanup cannot cancel another run's timer.
+
+**A provider code means what it means for the request that was made.** `validation_failed` on a
+sign-up is a malformed address; on a renewal it is GoTrue's answer to a refresh token it will not
+parse, and mapping that to `EMAIL_INVALID` told somebody their email address was wrong about an
+address nobody typed - and did not sign them out, so the phone kept a session it could never renew
+until an API call was refused hours later. The table is per request kind now, and only as
+**overrides**, so the shared mapping stays the one place a code is named and fixing a renewal
+cannot quietly change what a sign-up form says. The status-only fallback follows the same rule: a
+`400` on a renewal is not `WRONG_CREDENTIALS`, because nothing a person typed was sent.
+
+**What this does not claim.** Nothing here proves the provider's rotation behaviour will stay as it
+is; `refresh_token_already_used` is still mapped, and still means the session is over.
+
+---
+
+## DEC-128 - Only a request that carried a session may report one lost, and nothing asks until it is known who is asking
+
+**Context.** `SIGN-7` - a session surviving the app being killed - failed on a freshly booted
+emulator and passed on a warm one. That is what a race looks like from outside, and the race was
+real.
+
+`ProfileProvider` and `TimeZoneReporter` sit under `AccountGate` and above `AuthGate`, and each
+asks the API something on mount. On a cold start the stored session has not been read yet: it lives
+in an encrypted database, and opening one is a keystore round trip. So `GET /v1/profiles` and
+`PUT /v1/me/time-zone` went out with no credential on them, the API refused them, and one wrapper
+on the transport read that `401` as the session having been lost.
+
+**`sessionLost` does not only forget the session on screen. It deletes it from disk.** So the app
+signed a returning person out on its own cold start and erased their session, and the faster the
+phone answered the more reliably it happened.
+
+**Decision, and the first half would be right without the second.**
+
+**A `401` reports a session lost only where a session was sent.** A refusal for a request that
+carried no credential does not say a session ended - it says there was not one, which is true on
+every cold start and is not news. The watcher is wired for a `BEARER` session and for nothing else;
+a development identity's refusal is a configuration fact (DEC-038), and an anonymous one is the
+absence the gate exists to resolve.
+
+**Nothing under the gate asks anything until it is known who is asking.** `LOADING` is not "signed
+out" and it is not "nobody" either - it is a database being opened - so `AccountGate` holds the
+subtree there. That is exactly the argument the top of that file already makes about registration,
+one state earlier: a screen that asked for a shelf while registration was in flight would be signed
+out one second after signing in, and registering first with nothing mounted behind it is what makes
+the race impossible rather than unlikely. The same sentence applies to the session itself, and it
+had not been applied.
+
+**Why both, when either would do.** The gate stops the requests being made; the watcher stops the
+next provider added above `AuthGate` from reintroducing it. The invariant is the durable half - it
+is a statement about what a refusal means - and the gate is the one that also stops the noise: a
+signed-out app was making two authenticated calls per launch and being refused, which nothing had
+noticed because the API recorded no refusals at all until the same day.
