@@ -27,18 +27,19 @@
 
 import { View, Text, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   LENS_COPY,
   undescribedStatusNote,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import type { LensJurisdictionCardView, LensView } from '@kynviora/contracts';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import { StatusChip } from '@/components/StatusChip';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface RegulatoryLensProps {
   readonly substanceKey: string;
@@ -48,6 +49,7 @@ export interface RegulatoryLensProps {
 }
 
 export function RegulatoryLens({ substanceKey, view, state, onClose }: RegulatoryLensProps) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.container}>
       <Text accessibilityRole="header" style={styles.heading}>
@@ -77,6 +79,7 @@ export function RegulatoryLens({ substanceKey, view, state, onClose }: Regulator
 }
 
 function JurisdictionCard({ card }: { readonly card: LensJurisdictionCardView }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.card}>
       <Text accessibilityRole="header" style={styles.jurisdiction}>
@@ -165,39 +168,40 @@ function JurisdictionCard({ card }: { readonly card: LensJurisdictionCardView })
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  card: {
-    gap: SPACING.sm,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  jurisdiction: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  label: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  limitation: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    card: {
+      gap: SPACING.sm,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    jurisdiction: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    label: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    limitation: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

@@ -22,13 +22,13 @@
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   MIN_TOUCH_TARGET_DP,
   RECONCILIATION_COPY,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import type { DifferenceKind, ReconciliationResolution } from '@kynviora/domain';
 import {
@@ -46,6 +46,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import { ReconciliationReview } from './ReconciliationReview';
 import { ResolutionPrompt } from './ResolutionPrompt';
+import { useTheme, useThemedStyles } from '@/theme/ThemeProvider';
 
 /** One typed row of the list the person is holding. */
 interface DraftLine {
@@ -73,6 +74,8 @@ const emptyLine = (index: number): DraftLine => ({
 });
 
 export function ReconciliationFlow({ onClose }: { readonly onClose: () => void }) {
+  const theme = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const { client } = useApi();
   const { activeProfileId } = useProfiles();
 
@@ -353,11 +356,9 @@ export function ReconciliationFlow({ onClose }: { readonly onClose: () => void }
                       styles.match,
                       {
                         backgroundColor: chosen
-                          ? LIGHT_THEME.informational.background
-                          : LIGHT_THEME.surface.background,
-                        borderColor: chosen
-                          ? LIGHT_THEME.informational.border
-                          : LIGHT_THEME.surface.border,
+                          ? theme.informational.background
+                          : theme.surface.background,
+                        borderColor: chosen ? theme.informational.border : theme.surface.border,
                       },
                     ]}
                   >
@@ -390,67 +391,68 @@ export function ReconciliationFlow({ onClose }: { readonly onClose: () => void }
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    gap: SPACING.md,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  label: {
-    fontSize: FONT_SIZE.caption,
-    fontWeight: '600',
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  line: {
-    gap: SPACING.xs,
-    padding: SPACING.sm,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-  },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    paddingHorizontal: SPACING.md,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  multiline: {
-    minHeight: MIN_TOUCH_TARGET_DP * 1.5,
-    paddingVertical: SPACING.sm,
-    textAlignVertical: 'top',
-  },
-  match: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-  },
-  matchLabel: {
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  actions: { gap: SPACING.sm },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: {
+      gap: SPACING.md,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    label: {
+      fontSize: FONT_SIZE.caption,
+      fontWeight: '600',
+      color: theme.surfaceMuted.foreground,
+    },
+    line: {
+      gap: SPACING.xs,
+      padding: SPACING.sm,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+    },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      paddingHorizontal: SPACING.md,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    multiline: {
+      minHeight: MIN_TOUCH_TARGET_DP * 1.5,
+      paddingVertical: SPACING.sm,
+      textAlignVertical: 'top',
+    },
+    match: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+    },
+    matchLabel: {
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    actions: { gap: SPACING.sm },
+  });

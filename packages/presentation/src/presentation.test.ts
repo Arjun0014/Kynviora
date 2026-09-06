@@ -5,11 +5,14 @@ import {
   MIN_BODY_CONTRAST_RATIO,
   MIN_LARGE_TEXT_CONTRAST_RATIO,
   FONT_SIZE,
-  LIGHT_THEME,
+  DARK_THEME,
+  THEMES,
+  THEME_PAIR_TOKENS,
+  THEME_TONE_TOKENS,
   contrastRatio,
   relativeLuminance,
   scaledFontSize,
-  type ThemeToneToken,
+  type ThemeName,
 } from './tokens.js';
 import {
   presentSafetyState,
@@ -95,22 +98,95 @@ describe('colour contrast (spec 18)', () => {
     expect(() => relativeLuminance('#FFF')).toThrow(TypeError);
   });
 
-  const tones = Object.keys(LIGHT_THEME) as ThemeToneToken[];
+  /**
+   * Every colour pair, in every theme (DEC-130).
+   *
+   * Both themes rather than the light one: a tone readable in one and not the other is a tone
+   * nobody can read on half the phones this ships to, and the dark theme arrived after these
+   * assertions did.
+   */
+  const everyPair = (Object.keys(THEMES) as readonly ThemeName[]).flatMap((name) =>
+    THEME_PAIR_TOKENS.map((token) => [name, token] as const),
+  );
 
-  it.each(tones)('tone %s meets AA body contrast', (tone) => {
+  it.each(everyPair)('%s pair %s meets AA body contrast', (name, token) => {
     // A semantic tone failing contrast would make safety copy unreadable exactly where it
     // matters most.
-    const pair = LIGHT_THEME[tone];
+    const pair = THEMES[name][token];
     expect(contrastRatio(pair.background, pair.foreground)).toBeGreaterThanOrEqual(
       MIN_BODY_CONTRAST_RATIO,
     );
   });
 
-  it.each(tones)('tone %s has a border distinguishable from its background', (tone) => {
-    // Spec 18 requires the interface to work in high-contrast and greyscale modes, where a
-    // surface with no discernible border can disappear entirely.
-    const pair = LIGHT_THEME[tone];
-    expect(contrastRatio(pair.background, pair.border)).toBeGreaterThan(1.2);
+  const everyTone = (Object.keys(THEMES) as readonly ThemeName[]).flatMap((name) =>
+    THEME_TONE_TOKENS.map((token) => [name, token] as const),
+  );
+
+  it.each(everyTone)(
+    '%s tone %s has a border distinguishable from its background',
+    (name, tone) => {
+      // Spec 18 requires the interface to work in high-contrast and greyscale modes, where a
+      // surface with no discernible border can disappear entirely.
+      //
+      // The seven semantic tones only. `accent` is a solid whose border **is** its background on
+      // purpose - it is a filled button rather than a bordered surface, and giving it an outline
+      // to satisfy a rule about surfaces would draw a line around the one control that does not
+      // need one.
+      const pair = THEMES[name][tone];
+      expect(contrastRatio(pair.background, pair.border)).toBeGreaterThan(1.2);
+    },
+  );
+
+  it.each(Object.keys(THEMES) as readonly ThemeName[])(
+    '%s draws a real boundary and a focus ring at 3:1 on both its grounds',
+    (name) => {
+      // WCAG 1.4.11: a non-text part of a control needs 3:1. `line.strong` is a boundary somebody
+      // is meant to see rather than a decorative hairline, and a focus ring that fails this is a
+      // ring only sighted keyboard users with good contrast vision can follow.
+      const theme = THEMES[name];
+      for (const ground of [theme.canvas.background, theme.surface.background]) {
+        expect(contrastRatio(ground, theme.line.strong)).toBeGreaterThanOrEqual(3);
+        expect(contrastRatio(ground, theme.line.focus)).toBeGreaterThanOrEqual(3);
+      }
+    },
+  );
+
+  it.each(Object.keys(THEMES) as readonly ThemeName[])(
+    '%s keeps every step of its elevation ladder distinguishable from the one below it',
+    (name) => {
+      // Four levels, and adjacent ones must differ in **background or border**, not necessarily
+      // in background. That distinction is the design rule rather than a loosened assertion:
+      //
+      //  - On light, a sheet and a card are both white and a shadow separates them. That is what
+      //    a shadow is for and it is legible on a pale ground.
+      //  - On dark, a shadow on a near-black ground is invisible, so the ladder has to be the
+      //    colours themselves - which is why `canvas`, `surface` and `raised` are three different
+      //    near-blacks there and not one lifted three times.
+      //
+      // Written as one assertion over both, so a future edit that flattened the dark ladder to
+      // save a colour would fail here rather than ship a screen with no depth on half the phones.
+      const theme = THEMES[name];
+      const ladder = [theme.sunken, theme.canvas, theme.surface, theme.raised];
+      for (let i = 1; i < ladder.length; i += 1) {
+        const below = ladder[i - 1];
+        const above = ladder[i];
+        expect(below).toBeDefined();
+        expect(above).toBeDefined();
+        const separated =
+          below?.background !== above?.background || below?.border !== above?.border;
+        expect(separated).toBe(true);
+      }
+    },
+  );
+
+  it('separates the dark ladder by colour alone, because a shadow there is invisible', () => {
+    const levels = [
+      DARK_THEME.sunken.background,
+      DARK_THEME.canvas.background,
+      DARK_THEME.surface.background,
+      DARK_THEME.raised.background,
+    ];
+    expect(new Set(levels).size).toBe(levels.length);
   });
 
   it('keeps large-text threshold below the body threshold', () => {

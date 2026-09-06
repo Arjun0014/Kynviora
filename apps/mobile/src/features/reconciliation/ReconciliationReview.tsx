@@ -19,7 +19,6 @@
 
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -27,11 +26,13 @@ import {
   RESOLUTION_OPTIONS,
   completionMessage,
   summarizeComparison,
+  type Theme,
 } from '@kynviora/presentation';
 import type { DifferenceKind, ReconciliationResolution } from '@kynviora/domain';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface ReconciliationDifferenceView {
   readonly differenceId: string;
@@ -58,6 +59,7 @@ export function ReconciliationReview({
   onChooseResolution,
   onRetry,
 }: ReconciliationReviewProps) {
+  const styles = useThemedStyles(makeStyles);
   if (state !== 'READY') {
     return <ScreenState state={state} {...(onRetry ? { onRetry } : {})} />;
   }
@@ -132,84 +134,85 @@ export function ReconciliationReview({
   );
 }
 
-const styles = StyleSheet.create({
-  content: { padding: SPACING.lg, gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.heading,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  intro: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  statement: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.informational.foreground,
-    backgroundColor: LIGHT_THEME.informational.background,
-    borderWidth: 1,
-    borderColor: LIGHT_THEME.informational.border,
-    borderRadius: SPACING.sm,
-    padding: SPACING.md,
-  },
-  difference: {
-    gap: SPACING.xs,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    // The neutral surface border. A tone-coloured edge would make a list difference read as a
-    // safety finding, which it is not.
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  medicine: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  kindHeading: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  meaning: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  fieldLabel: {
-    fontSize: FONT_SIZE.caption,
-    fontWeight: '600',
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  // One style for both sides. Neither is bold, neither is dimmed, neither comes first in
-  // anything but reading order.
-  side: {
-    gap: SPACING.xs,
-    padding: SPACING.sm,
-    borderWidth: 1,
-    borderColor: LIGHT_THEME.neutral.border,
-    borderRadius: SPACING.xs,
-    backgroundColor: LIGHT_THEME.neutral.background,
-  },
-  sideLabel: {
-    fontSize: FONT_SIZE.caption,
-    color: LIGHT_THEME.neutral.foreground,
-  },
-  sideValue: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.neutral.foreground,
-  },
-  recorded: {
-    fontSize: FONT_SIZE.caption,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  limitation: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    content: { padding: SPACING.lg, gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.heading,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    intro: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+    },
+    statement: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.informational.foreground,
+      backgroundColor: theme.informational.background,
+      borderWidth: 1,
+      borderColor: theme.informational.border,
+      borderRadius: SPACING.sm,
+      padding: SPACING.md,
+    },
+    difference: {
+      gap: SPACING.xs,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      // The neutral surface border. A tone-coloured edge would make a list difference read as a
+      // safety finding, which it is not.
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    medicine: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    kindHeading: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    meaning: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    fieldLabel: {
+      fontSize: FONT_SIZE.caption,
+      fontWeight: '600',
+      color: theme.surfaceMuted.foreground,
+    },
+    // One style for both sides. Neither is bold, neither is dimmed, neither comes first in
+    // anything but reading order.
+    side: {
+      gap: SPACING.xs,
+      padding: SPACING.sm,
+      borderWidth: 1,
+      borderColor: theme.neutral.border,
+      borderRadius: SPACING.xs,
+      backgroundColor: theme.neutral.background,
+    },
+    sideLabel: {
+      fontSize: FONT_SIZE.caption,
+      color: theme.neutral.foreground,
+    },
+    sideValue: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.neutral.foreground,
+    },
+    recorded: {
+      fontSize: FONT_SIZE.caption,
+      color: theme.surfaceMuted.foreground,
+    },
+    limitation: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

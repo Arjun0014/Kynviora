@@ -23,7 +23,8 @@
 
 import { Tabs } from 'expo-router';
 import { Text, useWindowDimensions, type ColorValue } from 'react-native';
-import { LIGHT_THEME, FONT_SIZE, MAX_SUPPORTED_FONT_SCALE, SPACING } from '@kynviora/presentation';
+import { useTheme } from '@/theme/ThemeProvider';
+import { FONT_SIZE, MAX_SUPPORTED_FONT_SCALE, SPACING } from '@kynviora/presentation';
 
 /** `06` fixes five primary destinations, so the bar has five slots and cannot have four. */
 const TAB_COUNT = 5;
@@ -85,12 +86,13 @@ function TabLabel({ label, color }: { label: string; color: ColorValue }) {
 }
 
 export default function TabLayout() {
+  const theme = useTheme();
   return (
     <Tabs
       screenOptions={{
         headerShown: true,
-        tabBarActiveTintColor: LIGHT_THEME.informational.foreground,
-        tabBarInactiveTintColor: LIGHT_THEME.surfaceMuted.foreground,
+        tabBarActiveTintColor: theme.informational.foreground,
+        tabBarInactiveTintColor: theme.surfaceMuted.foreground,
         // Labels are always shown. An icon-only tab bar communicates by shape alone, which the
         // primary audience should not have to decode.
         tabBarShowLabel: true,

@@ -186,3 +186,59 @@ export type AppStateStatus = AppStateStatusValue;
 export type ViewStyle = Record<string, unknown>;
 export type TextStyle = Record<string, unknown>;
 export type ColorValue = string;
+
+// ---------------------------------------------------------------------------
+// Appearance and reduce-motion
+// ---------------------------------------------------------------------------
+
+/**
+ * What the platform says the colour scheme is.
+ *
+ * A stub of a **setting**, not of rendering: it can answer "the phone is in dark mode", and it
+ * establishes nothing about whether the resulting screen is legible. That is a contrast question,
+ * which the token tests answer arithmetically, and a layout question, which only a device can.
+ */
+type ColorScheme = 'light' | 'dark' | null;
+let colorScheme: ColorScheme = 'light';
+
+export function setColorScheme(next: ColorScheme): void {
+  colorScheme = next;
+}
+
+export function resetColorScheme(): void {
+  colorScheme = 'light';
+}
+
+export function useColorScheme(): ColorScheme {
+  return colorScheme;
+}
+
+type ReduceMotionListener = (enabled: boolean) => void;
+const reduceMotionListeners = new Set<ReduceMotionListener>();
+let reduceMotionEnabled = false;
+
+export function setReduceMotion(enabled: boolean): void {
+  reduceMotionEnabled = enabled;
+  for (const listener of reduceMotionListeners) listener(enabled);
+}
+
+export function resetReduceMotion(): void {
+  reduceMotionEnabled = false;
+  reduceMotionListeners.clear();
+}
+
+export const AccessibilityInfo = {
+  isReduceMotionEnabled(): Promise<boolean> {
+    return Promise.resolve(reduceMotionEnabled);
+  },
+  addEventListener(event: string, listener: ReduceMotionListener) {
+    if (event === 'reduceMotionChanged') reduceMotionListeners.add(listener);
+    return {
+      remove: () => {
+        reduceMotionListeners.delete(listener);
+      },
+    };
+  },
+};
+
+export type ColorSchemeName = ColorScheme | 'unspecified';

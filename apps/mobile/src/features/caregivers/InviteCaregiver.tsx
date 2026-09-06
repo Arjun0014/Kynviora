@@ -27,7 +27,6 @@
 import { useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -37,6 +36,7 @@ import {
   invitationExpiryNote,
   summarizeAccess,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import type { CaregiverCapability } from '@kynviora/domain';
 import {
@@ -47,6 +47,7 @@ import {
 } from '@kynviora/contracts';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { useTheme, useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface InviteCaregiverProps {
   readonly profileId: string;
@@ -75,6 +76,8 @@ export function InviteCaregiver({
   state,
   stateMessage,
 }: InviteCaregiverProps) {
+  const theme = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [email, setEmail] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -182,10 +185,8 @@ export function InviteCaregiver({
             style={[
               styles.capability,
               {
-                backgroundColor: chosen
-                  ? LIGHT_THEME.informational.background
-                  : LIGHT_THEME.surface.background,
-                borderColor: chosen ? LIGHT_THEME.informational.border : LIGHT_THEME.surface.border,
+                backgroundColor: chosen ? theme.informational.background : theme.surface.background,
+                borderColor: chosen ? theme.informational.border : theme.surface.border,
               },
             ]}
           >
@@ -245,6 +246,7 @@ function InvitationLink({
   readonly created: InvitationCreated;
   readonly onClose: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.container}>
       <Text accessibilityRole="header" style={styles.heading}>
@@ -264,70 +266,71 @@ function InvitationLink({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    gap: SPACING.md,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  label: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  warning: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.attention.foreground,
-  },
-  capability: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    gap: SPACING.xxs,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-  },
-  capabilityLabel: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    paddingHorizontal: SPACING.md,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  token: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-    backgroundColor: LIGHT_THEME.surfaceMuted.background,
-    borderWidth: 1,
-    borderColor: LIGHT_THEME.surfaceMuted.border,
-    borderRadius: SPACING.sm,
-    padding: SPACING.md,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: {
+      gap: SPACING.md,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    label: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    warning: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.attention.foreground,
+    },
+    capability: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      gap: SPACING.xxs,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+    },
+    capabilityLabel: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      paddingHorizontal: SPACING.md,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    token: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+      backgroundColor: theme.surfaceMuted.background,
+      borderWidth: 1,
+      borderColor: theme.surfaceMuted.border,
+      borderRadius: SPACING.sm,
+      padding: SPACING.md,
+    },
+  });

@@ -24,6 +24,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Projection } from './projection';
 import type { PendingOperationStore } from './pendingOperations';
+import type { PreferenceStore } from './preferences';
 import type { SessionStore } from '../auth/sessionStore';
 import { openLocalStore } from './localStore';
 
@@ -32,6 +33,7 @@ export interface LocalStoreContextValue {
   readonly projection: Projection | null;
   readonly pending: PendingOperationStore | null;
   readonly session: SessionStore | null;
+  readonly preferences: PreferenceStore | null;
   /** Whether the attempt has finished, either way. */
   readonly settled: boolean;
   /** Why there is no local store, in words a developer can act on. Never shown to a user. */
@@ -42,6 +44,7 @@ const EMPTY: LocalStoreContextValue = {
   projection: null,
   pending: null,
   session: null,
+  preferences: null,
   settled: false,
   error: null,
 };
@@ -68,6 +71,7 @@ export function LocalStoreProvider({ children, value }: LocalStoreProviderProps)
           projection: store.projection,
           pending: store.pending,
           session: store.session,
+          preferences: store.preferences,
           settled: true,
           error: null,
         });
@@ -78,6 +82,7 @@ export function LocalStoreProvider({ children, value }: LocalStoreProviderProps)
           projection: null,
           pending: null,
           session: null,
+          preferences: null,
           // Settled, and that matters: without it the app would wait forever for a store that is
           // never going to open, showing a spinner instead of a sign-in screen.
           settled: true,

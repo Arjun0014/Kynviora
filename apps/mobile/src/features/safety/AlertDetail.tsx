@@ -28,16 +28,17 @@
 
 import { View, Text, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import type { AlertDetailScreenView } from '@kynviora/contracts';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import { StatusChip } from '@/components/StatusChip';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface AlertDetailProps {
   readonly view: AlertDetailScreenView | null;
@@ -60,6 +61,7 @@ export function AlertDetail({
   onOpenReceipt,
   onClose,
 }: AlertDetailProps) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.container}>
       <Text accessibilityRole="header" style={styles.heading}>
@@ -218,51 +220,52 @@ export function AlertDetail({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  subheading: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  block: {
-    gap: SPACING.xs,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  chips: { gap: SPACING.sm },
-  fact: { gap: 2, paddingVertical: SPACING.xs },
-  factLabel: {
-    fontSize: FONT_SIZE.caption,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  caption: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  notice: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.informational.border,
-    backgroundColor: LIGHT_THEME.informational.background,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    subheading: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    block: {
+      gap: SPACING.xs,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    chips: { gap: SPACING.sm },
+    fact: { gap: 2, paddingVertical: SPACING.xs },
+    factLabel: {
+      fontSize: FONT_SIZE.caption,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+    },
+    caption: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    notice: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.informational.border,
+      backgroundColor: theme.informational.background,
+    },
+  });

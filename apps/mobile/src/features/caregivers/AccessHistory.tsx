@@ -19,21 +19,23 @@
 
 import { View, Text, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   CAREGIVER_COPY,
   REVOCATION_COPY,
   unreadableHistoryNote,
+  type Theme,
 } from '@kynviora/presentation';
 import type { AccessHistoryView } from '@kynviora/contracts';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface AccessHistoryProps {
   readonly history: AccessHistoryView;
 }
 
 export function AccessHistory({ history }: AccessHistoryProps) {
+  const styles = useThemedStyles(makeStyles);
   if (history.lines.length === 0 && history.unreadableCount === 0) return null;
 
   return (
@@ -62,33 +64,34 @@ export function AccessHistory({ history }: AccessHistoryProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    gap: SPACING.sm,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  intro: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  line: { gap: SPACING.xxs },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  when: {
-    fontSize: FONT_SIZE.caption,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: {
+      gap: SPACING.sm,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    intro: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    line: { gap: SPACING.xxs },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    when: {
+      fontSize: FONT_SIZE.caption,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

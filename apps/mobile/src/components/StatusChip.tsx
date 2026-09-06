@@ -11,12 +11,13 @@
 
 import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
 import type { StatusPresentation } from '@kynviora/presentation';
+import { useTheme } from '@/theme/ThemeProvider';
 import {
-  LIGHT_THEME,
   SPACING,
+  RADIUS,
   FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
   MAX_SUPPORTED_FONT_SCALE,
+  typeStyle,
 } from '@kynviora/presentation';
 
 export interface StatusChipProps {
@@ -47,11 +48,12 @@ const ICON_GLYPH: Record<StatusPresentation['iconName'], string> = {
 };
 
 export function StatusChip({ presentation, showDescription = false }: StatusChipProps) {
+  const theme = useTheme();
   const { fontScale } = useWindowDimensions();
   // Clamped for the same reason as `scaledFontSize`: beyond the tested range a chip can clip its
   // own label, and spec 18 makes clipped content in a critical journey a release gate.
   const scale = Math.max(1, Math.min(fontScale, MAX_SUPPORTED_FONT_SCALE));
-  const tone = LIGHT_THEME[presentation.tone];
+  const tone = theme[presentation.tone];
 
   return (
     <View
@@ -73,16 +75,7 @@ export function StatusChip({ presentation, showDescription = false }: StatusChip
           {ICON_GLYPH[presentation.iconName]}
         </Text>
 
-        <Text
-          style={[
-            styles.label,
-            {
-              color: tone.foreground,
-              fontSize: FONT_SIZE.body * scale,
-              lineHeight: FONT_SIZE.body * scale * LINE_HEIGHT_MULTIPLIER.normal,
-            },
-          ]}
-        >
+        <Text style={[typeStyle('label', scale), styles.label, { color: tone.foreground }]}>
           {presentation.label}
         </Text>
       </View>
@@ -91,14 +84,7 @@ export function StatusChip({ presentation, showDescription = false }: StatusChip
         <Text
           accessibilityElementsHidden
           importantForAccessibility="no"
-          style={[
-            styles.description,
-            {
-              color: tone.foreground,
-              fontSize: FONT_SIZE.caption * scale,
-              lineHeight: FONT_SIZE.caption * scale * LINE_HEIGHT_MULTIPLIER.relaxed,
-            },
-          ]}
+          style={[typeStyle('caption', scale), styles.description, { color: tone.foreground }]}
         >
           {presentation.description}
         </Text>
@@ -110,7 +96,7 @@ export function StatusChip({ presentation, showDescription = false }: StatusChip
 const styles = StyleSheet.create({
   container: {
     borderWidth: 1,
-    borderRadius: SPACING.sm,
+    borderRadius: RADIUS.pill,
     paddingVertical: SPACING.sm,
     paddingHorizontal: SPACING.md,
     // No fixed height: the chip must grow with the system font scale rather than clipping.
@@ -127,7 +113,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   label: {
-    fontWeight: '600',
     flexShrink: 1,
   },
   description: {

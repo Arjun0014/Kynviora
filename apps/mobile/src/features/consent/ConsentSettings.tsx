@@ -43,12 +43,12 @@
 import { useCallback, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   CONSENT_COPY,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import {
   messageForFailure,
@@ -59,6 +59,7 @@ import {
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import { useApi } from '@/api/ApiProvider';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface ConsentSettingsProps {
   readonly view: ConsentView;
@@ -95,6 +96,7 @@ export function ConsentSettings({
   exportReady,
   exportIncomplete,
 }: ConsentSettingsProps) {
+  const styles = useThemedStyles(makeStyles);
   const { client } = useApi();
 
   const [state, setState] = useState<ScreenStateKind | null>(null);
@@ -239,67 +241,68 @@ export function ConsentSettings({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  // The sentence somebody has to read before pressing. `informational` rather than `attention`:
-  // withdrawing consent is a right being exercised, not a warning about a medicine, and styling
-  // it as an alarm would be friction placed on one side of a choice (`02`).
-  limitation: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.informational.foreground,
-    backgroundColor: LIGHT_THEME.informational.background,
-    borderColor: LIGHT_THEME.informational.border,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    padding: SPACING.sm,
-  },
-  row: {
-    gap: SPACING.xs,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  // The two sections below the purposes. Same surface as a consent row, because they are the same
-  // kind of thing to the person reading them: something they may do with their own record.
-  block: {
-    gap: SPACING.sm,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  subheading: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  rowLabel: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  statusLabel: {
-    fontSize: FONT_SIZE.caption,
-    fontWeight: '600',
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    // The sentence somebody has to read before pressing. `informational` rather than `attention`:
+    // withdrawing consent is a right being exercised, not a warning about a medicine, and styling
+    // it as an alarm would be friction placed on one side of a choice (`02`).
+    limitation: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.informational.foreground,
+      backgroundColor: theme.informational.background,
+      borderColor: theme.informational.border,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      padding: SPACING.sm,
+    },
+    row: {
+      gap: SPACING.xs,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    // The two sections below the purposes. Same surface as a consent row, because they are the same
+    // kind of thing to the person reading them: something they may do with their own record.
+    block: {
+      gap: SPACING.sm,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    subheading: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    rowLabel: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    statusLabel: {
+      fontSize: FONT_SIZE.caption,
+      fontWeight: '600',
+      color: theme.surfaceMuted.foreground,
+    },
+  });

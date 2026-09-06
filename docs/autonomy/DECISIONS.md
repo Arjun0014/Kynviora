@@ -4807,3 +4807,94 @@ could, the indistinguishable answer is the safe one.
 
 **Sources.** `13` (stable machine-readable codes; clients branch on codes, never on message text),
 `14` (errors leak nothing), `19` (no enumeration oracle), `DEV-068`.
+
+---
+
+## DEC-130 - Two themes at equal rank, the system's answer as the default, and hue reserved for state
+
+**Context.** The app committed to light (DEC-101) because there was no `DARK_THEME` and thirty-four
+files imported `LIGHT_THEME` directly. The product direction now asks for a premium consumer-grade
+surface, of which a real dark theme is part - and the audience `01` and `18` name first is older
+adults, for whom a dark-only product would be a worse product.
+
+**Options.** (a) Stay light. (b) Ship dark as the app's look. (c) Ship both, defaulting to the
+system, with an explicit override. (d) Ship both but convert only the redesigned screens.
+
+**Decision.** (c). Three appearance states - `FOLLOW_SYSTEM` (default), `LIGHT`, `DARK` - offered
+under You. Every one of the 43 files that reached for a palette now reads it from a context, so the
+app is coherent in both. Hue is reserved for state: the **primary action is contrast, not colour**,
+and one teal - `selection` - is the only colour in the app that is about the interface rather than
+about a product.
+
+**Rationale.**
+
+_Why not dark-only, however premium it looks._ Pure white on pure black is the highest-glare
+pairing a screen can produce, and halation is worse with the lens changes and astigmatism that are
+ordinary after sixty. The dark ground is `#0E1116` rather than black for that reason and for one
+more: an elevation ladder needs somewhere below the first step, and on black a card can only ever
+be lighter, so "further away" stops being expressible at all.
+
+_Why not (d)._ A half-converted app is worse than either theme. A screen still importing the light
+palette inside a dark app is white text on white, and the person who finds it is the person who
+turned dark mode on because they needed it.
+
+_Why the accent has no hue._ `18` reserves colour for meaning. An accent that happened to be green
+or amber would be a fourth thing on a screen already using green and amber to say something about a
+medicine, and a person would have to learn which greens mean nothing. Near-black on light and
+near-white on dark is unmistakable without spending a hue - so every hue on a Kynviora screen means
+something.
+
+_Why `FOLLOW_SYSTEM` is a state and not a value._ Somebody following the system in September is
+still following it in October when their phone switches itself at dusk. Storing "dark" for somebody
+who opened the setting and closed it again would silently un-follow them.
+
+**Consequences.** `Theme` gains `canvas`, `raised`, `sunken`, `accent`, `selection` and a `line`
+group beside the seven tone pairs, which keep their names because `status.ts` and `screenState.ts`
+map states onto them - a tone renamed here would be a safety statement rendered in the wrong colour,
+decided in a file that has never heard of safety. Contrast is asserted at 4.5:1 for every pair in
+**both** themes, `line.strong` and `line.focus` at 3:1 against both grounds, and the dark elevation
+ladder as four distinct colours - because a shadow on a near-black ground is invisible and colour is
+the only mechanism left there.
+
+A module-scope `StyleSheet.create` captures its colours at import time, so it cannot change theme.
+Every screen builds styles through `useThemedStyles(makeStyles)`, memoised on the theme's identity -
+which is why the provider hands out the frozen token objects rather than copies.
+
+`screenStateColors(state, theme)` takes a theme. It could only ever answer for the light one before,
+which in a dark app is a dark-mode screen painted in light-mode colours.
+
+The appearance choice is kept in its own table in the encrypted store rather than in the projection:
+the projection is cleared on sign-out and on an identity change, and somebody who chose the light
+theme has not un-chosen it by signing out.
+
+**Sources.** `18`, `02`, `06`, `01`, DEC-101 (superseded in its "commits to light" half), DEC-103
+(unchanged - the tab bar still sizes its own label).
+
+---
+
+## DEC-131 - Motion collapses to zero, and a haptic is never the report of anything
+
+**Context.** The design system needed a position on motion and haptics before either was used
+anywhere, because both are the kind of thing that arrives one screen at a time and then cannot be
+governed.
+
+**Decision.** Four durations (`instant 0, quick 120, standard 200, deliberate 320`), every animation
+routed through `motionDuration(token, reduceMotion)`, and four haptic **intents** (`selection`,
+`confirm`, `warn`, `failure`) behind an adapter with a recording no-op implementation.
+
+**Rationale.** Reduce-motion collapses to **zero** rather than to something short: `18` treats
+motion sensitivity as an accessibility setting rather than a preference, and a reduced animation
+that still moves still triggers. Routing every duration through one function makes honouring it one
+decision instead of one per screen.
+
+Haptics are named by intent so a component cannot ask for a motor pattern, which is `12`'s adapter
+rule applied to touch. There is deliberately **no `error` intent**: a buzz that is the only report
+of a refusal is a report nobody who cannot feel it receives, which is `18`'s single-channel rule.
+Every haptic accompanies a sentence; none of them is the sentence.
+
+**Consequences.** Nothing in the app animates a safety statement into view. No engine is wired
+(`DEV-070`): the default implementation records what it was asked for and does nothing, which is the
+`recordingTransport` shape `BLK-009` already uses - the call sites are real and testable, and
+nothing claims a phone buzzed.
+
+**Sources.** `18`, `12`, `02`.

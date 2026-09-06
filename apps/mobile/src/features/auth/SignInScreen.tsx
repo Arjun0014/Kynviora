@@ -24,7 +24,6 @@
 import { useCallback, useState } from 'react';
 import { View, Text, TextInput, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -36,15 +35,18 @@ import {
   SIGN_UP_COPY,
   authRefusal,
   type AuthRefusal,
+  type Theme,
 } from '@kynviora/presentation';
 import { Screen } from '@/components/Screen';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/auth/AuthProvider';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 type Mode = 'SIGN_IN' | 'SIGN_UP' | 'RECOVER';
 type Done = 'CONFIRM_EMAIL' | 'RECOVERY_SENT';
 
 export function SignInScreen() {
+  const styles = useThemedStyles(makeStyles);
   const auth = useAuth();
   const [mode, setMode] = useState<Mode>('SIGN_IN');
   const [email, setEmail] = useState('');
@@ -228,54 +230,55 @@ export function SignInScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  field: { marginBottom: SPACING.lg },
-  label: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-    marginBottom: SPACING.xs,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-    marginBottom: SPACING.sm,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-    marginBottom: SPACING.md,
-  },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    borderWidth: 1,
-    borderColor: LIGHT_THEME.surface.border,
-    borderRadius: SPACING.xs,
-    paddingHorizontal: SPACING.sm,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-    backgroundColor: LIGHT_THEME.surfaceMuted.background,
-  },
-  refusal: {
-    borderWidth: 1,
-    borderColor: LIGHT_THEME.attention.border,
-    backgroundColor: LIGHT_THEME.attention.background,
-    borderRadius: SPACING.xs,
-    padding: SPACING.sm,
-    marginBottom: SPACING.md,
-  },
-  refusalHeading: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    fontWeight: '600',
-    color: LIGHT_THEME.attention.foreground,
-    marginBottom: SPACING.xs,
-  },
-  refusalText: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.attention.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    field: { marginBottom: SPACING.lg },
+    label: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+      marginBottom: SPACING.xs,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+      marginBottom: SPACING.sm,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+      marginBottom: SPACING.md,
+    },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      borderWidth: 1,
+      borderColor: theme.surface.border,
+      borderRadius: SPACING.xs,
+      paddingHorizontal: SPACING.sm,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+      backgroundColor: theme.surfaceMuted.background,
+    },
+    refusal: {
+      borderWidth: 1,
+      borderColor: theme.attention.border,
+      backgroundColor: theme.attention.background,
+      borderRadius: SPACING.xs,
+      padding: SPACING.sm,
+      marginBottom: SPACING.md,
+    },
+    refusalHeading: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      fontWeight: '600',
+      color: theme.attention.foreground,
+      marginBottom: SPACING.xs,
+    },
+    refusalText: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.attention.foreground,
+    },
+  });

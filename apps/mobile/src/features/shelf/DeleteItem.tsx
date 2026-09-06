@@ -27,17 +27,18 @@
 
 import { View, Text, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   ITEM_DELETION_COPY,
   describeItemDeletion,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import type { ItemKind } from '@kynviora/domain';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface DeleteItemProps {
   readonly displayName: string;
@@ -69,6 +70,7 @@ export function DeleteItem({
   deleted,
   onArchiveInstead,
 }: DeleteItemProps) {
+  const styles = useThemedStyles(makeStyles);
   const words = describeItemDeletion(itemKind);
 
   if (deleted === true) {
@@ -159,44 +161,45 @@ export function DeleteItem({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    gap: SPACING.md,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  name: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  label: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  // Informational rather than attention-toned. What is kept is a fact about how the product
-  // works, not a warning, and styling it as a warning would make the honest sentence read as a
-  // reason to hesitate.
-  kept: {
-    gap: SPACING.xs,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.informational.border,
-    backgroundColor: LIGHT_THEME.informational.background,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: {
+      gap: SPACING.md,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    name: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    label: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    // Informational rather than attention-toned. What is kept is a fact about how the product
+    // works, not a warning, and styling it as a warning would make the honest sentence read as a
+    // reason to hesitate.
+    kept: {
+      gap: SPACING.xs,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.informational.border,
+      backgroundColor: theme.informational.background,
+    },
+  });

@@ -35,13 +35,13 @@ import { useCallback, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   SCAN_COPY,
   describeScanPermission,
   scanRejectionNote,
+  type Theme,
 } from '@kynviora/presentation';
 import {
   PRODUCT_BARCODE_SYMBOLOGIES,
@@ -51,6 +51,7 @@ import {
   type ScanOutcome,
 } from '@kynviora/domain';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface ScanBarcodeProps {
   /**
@@ -72,6 +73,7 @@ export interface ScanBarcodeProps {
 }
 
 export function ScanBarcode({ onConfirmed, onEnterManually, onCancel }: ScanBarcodeProps) {
+  const styles = useThemedStyles(makeStyles);
   const [permission, requestPermission] = useCameraPermissions();
   const [outcome, setOutcome] = useState<ScanOutcome | null>(null);
   /**
@@ -193,47 +195,48 @@ export function ScanBarcode({ onConfirmed, onEnterManually, onCancel }: ScanBarc
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  // The number, large enough to check against a pack without picking the phone up. That is the
-  // whole job of this line: somebody has been asked to confirm it.
-  digits: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    letterSpacing: 2,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  // Informational rather than attention-toned. "Kynviora has not checked this" is a fact about
-  // what the product knows, not a warning about the medicine - and `02` will not let a screen
-  // borrow alarm from one to make the other feel important.
-  limitation: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.informational.foreground,
-    backgroundColor: LIGHT_THEME.informational.background,
-    borderColor: LIGHT_THEME.informational.border,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    padding: SPACING.sm,
-  },
-  preview: {
-    height: 260,
-    borderRadius: SPACING.sm,
-    overflow: 'hidden',
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+    },
+    // The number, large enough to check against a pack without picking the phone up. That is the
+    // whole job of this line: somebody has been asked to confirm it.
+    digits: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      letterSpacing: 2,
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    // Informational rather than attention-toned. "Kynviora has not checked this" is a fact about
+    // what the product knows, not a warning about the medicine - and `02` will not let a screen
+    // borrow alarm from one to make the other feel important.
+    limitation: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.informational.foreground,
+      backgroundColor: theme.informational.background,
+      borderColor: theme.informational.border,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      padding: SPACING.sm,
+    },
+    preview: {
+      height: 260,
+      borderRadius: SPACING.sm,
+      overflow: 'hidden',
+    },
+  });

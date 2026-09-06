@@ -19,16 +19,18 @@
 import { useCallback, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   SIGN_OUT_COPY,
+  type Theme,
 } from '@kynviora/presentation';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/auth/AuthProvider';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export function SignOutControl() {
+  const styles = useThemedStyles(makeStyles);
   const auth = useAuth();
   const [busy, setBusy] = useState(false);
 
@@ -62,11 +64,12 @@ export function SignOutControl() {
   );
 }
 
-const styles = StyleSheet.create({
-  block: { gap: SPACING.sm, marginTop: SPACING.lg },
-  hint: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    block: { gap: SPACING.sm, marginTop: SPACING.lg },
+    hint: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

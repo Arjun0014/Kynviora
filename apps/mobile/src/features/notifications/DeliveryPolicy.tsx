@@ -34,7 +34,6 @@
 import { useCallback, useState } from 'react';
 import { View, Text, TextInput, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -43,11 +42,13 @@ import {
   URGENCY_CHANNEL_COPY,
   presentUrgency,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import { quietHoursFromClock, type QuietHours } from '@kynviora/domain';
 import type { NotificationPolicyView } from '@kynviora/contracts';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface DeliveryPolicyProps {
   readonly view: NotificationPolicyView;
@@ -73,6 +74,7 @@ export function DeliveryPolicy({
   stateMessage,
   savedNote,
 }: DeliveryPolicyProps) {
+  const styles = useThemedStyles(makeStyles);
   const [start, setStart] = useState(
     view.quietHours === null ? '' : clockText(view.quietHours.startMinute),
   );
@@ -226,76 +228,77 @@ export function DeliveryPolicy({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  // The one sentence a person must read before relying on quiet hours, given its own weight.
-  exception: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.informational.foreground,
-    backgroundColor: LIGHT_THEME.informational.background,
-    borderColor: LIGHT_THEME.informational.border,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    padding: SPACING.md,
-  },
-  limitation: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  saved: {
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.positive.foreground,
-  },
-  refusal: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.attention.foreground,
-  },
-  row: {
-    gap: 2,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  rowLabel: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  field: { gap: SPACING.xs },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.sm,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surfaceMuted.background,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  // `attention`, not `action`. A mistyped time is something to fix, not a recall.
-  inputRefused: {
-    borderColor: LIGHT_THEME.attention.border,
-    backgroundColor: LIGHT_THEME.attention.background,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    // The one sentence a person must read before relying on quiet hours, given its own weight.
+    exception: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.informational.foreground,
+      backgroundColor: theme.informational.background,
+      borderColor: theme.informational.border,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      padding: SPACING.md,
+    },
+    limitation: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    saved: {
+      fontSize: FONT_SIZE.body,
+      color: theme.positive.foreground,
+    },
+    refusal: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.attention.foreground,
+    },
+    row: {
+      gap: 2,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    rowLabel: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    field: { gap: SPACING.xs },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      paddingHorizontal: SPACING.sm,
+      paddingVertical: SPACING.sm,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surfaceMuted.background,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    // `attention`, not `action`. A mistyped time is something to fix, not a recall.
+    inputRefused: {
+      borderColor: theme.attention.border,
+      backgroundColor: theme.attention.background,
+    },
+  });

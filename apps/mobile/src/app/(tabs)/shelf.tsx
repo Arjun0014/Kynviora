@@ -36,13 +36,14 @@
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
+  RADIUS,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   MIN_TOUCH_TARGET_DP,
   manualEntryForm,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import {
   DEFAULT_NOTIFICATION_DETAIL,
@@ -70,6 +71,8 @@ import { Screen } from '@/components/Screen';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ResourceState } from '@/components/ScreenState';
 import { StatusChip } from '@/components/StatusChip';
+import { Card } from '@/components/Card';
+import { Typography } from '@/components/Typography';
 import { RecordDose } from '@/features/doses/RecordDose';
 import { AddItem } from '@/features/shelf/AddItem';
 import { ScanBarcode } from '@/features/shelf/ScanBarcode';
@@ -80,12 +83,14 @@ import { MedicineSchedules } from '@/features/schedules/MedicineSchedules';
 import { useReminders } from '@/reminders/ReminderProvider';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
 import { newIdempotencyKey } from '@/platform/ids';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
 
 export default function ShelfScreen() {
+  const styles = useThemedStyles(makeStyles);
   const { client, elevate } = useApi();
-  const { activeProfileId } = useProfiles();
+  const { activeProfile, activeProfileId } = useProfiles();
   // Read rather than inferred: whether a reminder will actually arrive is the platform's answer,
   // and a screen that offered a schedule without saying notifications are off would promise
   // something the phone has already refused.
@@ -729,6 +734,7 @@ export default function ShelfScreen() {
   return (
     <Screen
       title="Shelf"
+      eyebrow={activeProfile?.displayName ?? null}
       intro="Medicines and personal-care products, with how well Kynviora knows each one."
       onRefresh={onRetry}
       refreshing={refreshing}
@@ -736,22 +742,29 @@ export default function ShelfScreen() {
       <ResourceState resource={resource} onRetry={onRetry} />
 
       {/* Above the filters and above the list, so it is reachable from the empty shelf as well -
-          which is the state every new household starts in and the one where it matters most. */}
-      {activeProfileId === null
-        ? null
-        : ITEM_KINDS.map((kind) => (
+          which is the state every new household starts in and the one where it matters most.
+          Side by side: they are two halves of one choice, and stacking them made the second read
+          as an afterthought. They wrap at a large font scale rather than clipping. */}
+      {activeProfileId === null ? null : (
+        <View style={styles.addRow}>
+          {ITEM_KINDS.map((kind) => (
             <PrimaryButton
               key={kind}
               label={manualEntryForm(kind).heading}
               variant="secondary"
+              style={styles.addButton}
               onPress={() => {
                 setAdding(kind);
               }}
             />
           ))}
+        </View>
+      )}
 
       {/* Two filters, each named as the question it asks. They narrow and they do not rank -
-          which of two people's medicines matters more is not a judgement this screen makes. */}
+          which of two people's medicines matters more is not a judgement this screen makes.
+          A chosen filter carries `selection`, which is the one hue in this app that is about the
+          interface rather than about a product. */}
       <View style={styles.filters}>
         {(
           [
@@ -775,7 +788,9 @@ export default function ShelfScreen() {
             >
               {/* The state is in the label as well as in the styling. `18` forbids meaning
                   carried by colour alone. */}
-              <Text style={styles.filterLabel}>{active ? `${label} - on` : label}</Text>
+              <Text style={[styles.filterLabel, active ? styles.filterLabelOn : null]}>
+                {active ? `${label} - on` : label}
+              </Text>
             </Pressable>
           );
         })}
@@ -842,12 +857,23 @@ export function ShelfRow({
   readonly onRecord: () => void;
   readonly onSchedule: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
+  const medicine = item.itemKind === 'MEDICINE';
+
   return (
-    <View style={styles.item}>
-      <Text accessibilityRole="header" style={styles.name}>
-        {item.displayName}
-      </Text>
-      {item.brand === null ? null : <Text style={styles.brand}>{item.brand}</Text>}
+    <Card>
+      {/* The name and the brand are one idea, so they sit tight against each other and the rest
+          of the card is spaced away from them. */}
+      <View style={styles.identity}>
+        <Typography role="title" heading>
+          {item.displayName}
+        </Typography>
+        {item.brand === null ? null : (
+          <Typography role="caption" colour="secondary">
+            {item.brand}
+          </Typography>
+        )}
+      </View>
 
       {/* Three chips, never one. `18`: "Product identity confirmed", "Formula confirmed from
           this label" and "Batch not entered" are different statements. */}
@@ -859,82 +885,104 @@ export function ShelfRow({
 
       {/* `04` Phase 2.1's second exit criterion, on the row. A person has to be able to see
           which items need something without knowing to filter for it, so the reasons are here
-          rather than only behind the control above. No count and no badge (`02`). */}
+          rather than only behind the control above. No count and no badge (`02`).
+
+          Inside a sunken well, which is the design system saying "this is about the record" -
+          the same treatment a read-only block gets everywhere else, rather than a tone, because
+          a tone here would be a colour claiming something about the medicine. */}
       {item.attention.length === 0 ? null : (
         <View style={styles.attention}>
           {item.attention.map((line, index) => (
-            <Text key={`attention-${String(index)}`} style={styles.note}>
+            <Typography key={`attention-${String(index)}`} role="caption" colour="secondary">
               {line}
-            </Text>
+            </Typography>
           ))}
         </View>
       )}
 
-      <PrimaryButton label="Open this item" variant="secondary" onPress={onOpen} />
+      {/* One primary action per card - opening the item - and the two shortcuts beside it.
+          `18` wants one obvious next step, and "open" is the one that always exists. */}
+      <View style={styles.actions}>
+        <PrimaryButton label="Open this item" onPress={onOpen} />
 
-      {/* Medicines only, and absent rather than disabled for everything else - a greyed-out
-          control here would say a dose of shampoo is a thing Kynviora expects you to record. */}
-      {item.itemKind === 'MEDICINE' ? (
-        <>
-          {/* And absent again for a caregiver who was not granted `RECORD_DOSES`, which is a
-              different absence for a different reason: the first says a dose of shampoo is not a
-              thing, this one says the write would be refused (migration 0021). Both are withheld
-              rather than drawn and disabled (DEC-045) - a greyed-out control on somebody else's
-              medicine tells a caregiver what they are not trusted with, which is a fact about the
-              permission model they did not need. */}
-          {mayRecordDoses ? (
-            <PrimaryButton label="Record what happened" variant="secondary" onPress={onRecord} />
-          ) : null}
-          {/* `04` Phase 4.1. Medicines only, for the same reason and one more: migration 0020
-              refuses a schedule on a personal-care item outright. */}
-          <PrimaryButton label="When do you take this?" variant="secondary" onPress={onSchedule} />
-        </>
-      ) : null}
-    </View>
+        {/* Medicines only, and absent rather than disabled for everything else - a greyed-out
+            control here would say a dose of shampoo is a thing Kynviora expects you to record. */}
+        {medicine ? (
+          <View style={styles.shortcuts}>
+            {/* And absent again for a caregiver who was not granted `RECORD_DOSES`, which is a
+                different absence for a different reason: the first says a dose of shampoo is not
+                a thing, this one says the write would be refused (migration 0021). Both are
+                withheld rather than drawn and disabled (DEC-045) - a greyed-out control on
+                somebody else's medicine tells a caregiver what they are not trusted with, which
+                is a fact about the permission model they did not need. */}
+            {mayRecordDoses ? (
+              <PrimaryButton
+                label="Record what happened"
+                variant="secondary"
+                style={styles.shortcut}
+                onPress={onRecord}
+              />
+            ) : null}
+            {/* `04` Phase 4.1. Medicines only, for the same reason and one more: migration 0020
+                refuses a schedule on a personal-care item outright. */}
+            <PrimaryButton
+              label="When do you take this?"
+              variant="secondary"
+              style={styles.shortcut}
+              onPress={onSchedule}
+            />
+          </View>
+        ) : null}
+      </View>
+    </Card>
   );
 }
 
-const styles = StyleSheet.create({
-  item: {
-    gap: SPACING.sm,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  name: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  brand: {
-    fontSize: FONT_SIZE.caption,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  chips: { gap: SPACING.xs },
-  attention: { gap: 2 },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
-  filter: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    justifyContent: 'center',
-    paddingHorizontal: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  filterOn: {
-    borderColor: LIGHT_THEME.informational.border,
-    backgroundColor: LIGHT_THEME.informational.background,
-  },
-  filterLabel: {
-    fontSize: FONT_SIZE.caption,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  note: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    addRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+    addButton: { flexGrow: 1, flexBasis: 150 },
+    identity: { gap: SPACING.xxs },
+    chips: { gap: SPACING.xs, alignItems: 'flex-start' },
+    // A sunken well: "this is about the record". Deliberately not a tone - a coloured panel here
+    // would be a colour claiming something about the medicine rather than about the row.
+    attention: {
+      gap: SPACING.xxs,
+      padding: SPACING.md,
+      borderRadius: RADIUS.md,
+      backgroundColor: theme.sunken.background,
+    },
+    actions: { gap: SPACING.sm, marginTop: SPACING.xs },
+    // Side by side where they fit and wrapped where they do not, which at a large font scale is
+    // most of the time. `flexBasis` rather than a fixed width so a long label takes the row it
+    // needs instead of clipping (`18`).
+    shortcuts: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+    shortcut: { flexGrow: 1, flexBasis: 150 },
+    filters: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
+    filter: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      justifyContent: 'center',
+      paddingHorizontal: SPACING.lg,
+      borderWidth: 1,
+      borderRadius: RADIUS.pill,
+      borderColor: theme.line.strong,
+      backgroundColor: theme.surface.background,
+    },
+    filterOn: {
+      borderColor: theme.selection.border,
+      backgroundColor: theme.selection.background,
+    },
+    filterLabel: {
+      fontSize: FONT_SIZE.caption,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    filterLabelOn: {
+      color: theme.selection.foreground,
+    },
+    note: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

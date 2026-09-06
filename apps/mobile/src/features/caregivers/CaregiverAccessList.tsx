@@ -16,7 +16,6 @@
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import {
   CAREGIVER_COPY,
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -24,6 +23,7 @@ import {
   presentCaregiverAccess,
   summarizeAccess,
   type CaregiverAccessState,
+  type Theme,
 } from '@kynviora/presentation';
 import type { CaregiverCapability } from '@kynviora/domain';
 import { isRemovable, type AccessHistoryView } from '@kynviora/contracts';
@@ -32,6 +32,7 @@ import { StatusChip } from '@/components/StatusChip';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 /** One row, as the API returns it. */
 export interface CaregiverAccessRow {
@@ -83,6 +84,7 @@ export function CaregiverAccessList({
   onRetry,
   history,
 }: CaregiverAccessListProps) {
+  const styles = useThemedStyles(makeStyles);
   if (state !== 'READY') {
     // Every non-success state is rendered explicitly. `06` treats a screen with only a success
     // path as incomplete, and this one can genuinely be offline, stale or newly unauthorized.
@@ -118,6 +120,7 @@ function CaregiverRow({
   readonly row: CaregiverAccessRow;
   readonly onRevoke: (id: string) => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const presentation = presentCaregiverAccess(row.state);
   const summary = summarizeAccess(row.capabilities);
   // The same predicate the confirmation uses. Two independent conditions is how a control
@@ -171,43 +174,44 @@ function CaregiverRow({
   );
 }
 
-const styles = StyleSheet.create({
-  content: { padding: SPACING.lg, gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.heading,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  intro: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  row: {
-    gap: SPACING.sm,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  name: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  capabilities: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
-  capability: {
-    fontSize: FONT_SIZE.caption,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-    backgroundColor: LIGHT_THEME.surfaceMuted.background,
-    borderRadius: SPACING.xs,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-  },
-  limitation: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    content: { padding: SPACING.lg, gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.heading,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    intro: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    row: {
+      gap: SPACING.sm,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    name: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    capabilities: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
+    capability: {
+      fontSize: FONT_SIZE.caption,
+      color: theme.surfaceMuted.foreground,
+      backgroundColor: theme.surfaceMuted.background,
+      borderRadius: SPACING.xs,
+      paddingHorizontal: SPACING.sm,
+      paddingVertical: SPACING.xs,
+    },
+    limitation: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

@@ -30,7 +30,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -40,6 +39,7 @@ import {
   manualEntryForm,
   type ManualField,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import type { ItemLifecycleState } from '@kynviora/domain';
 import {
@@ -52,6 +52,7 @@ import { useApi } from '@/api/ApiProvider';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface EditItemProps {
   readonly view: ItemDetailScreenView;
@@ -61,6 +62,7 @@ export interface EditItemProps {
 }
 
 export function EditItem({ view, onChanged, onClose }: EditItemProps) {
+  const styles = useThemedStyles(makeStyles);
   const { client } = useApi();
   const { queue: queueEdit } = usePendingSync();
 
@@ -346,6 +348,7 @@ function Field({
   readonly refused: boolean;
   readonly onChange: (next: string) => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const suffix = field.required ? '' : ' (optional)';
 
   if (field.input === 'CHOICE') {
@@ -400,90 +403,91 @@ function Field({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.md },
-  block: { gap: SPACING.xs },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  subheading: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  stops: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.attention.foreground,
-  },
-  saved: {
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.positive.foreground,
-  },
-  conflict: {
-    gap: SPACING.xs,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.attention.border,
-    backgroundColor: LIGHT_THEME.attention.background,
-  },
-  field: {
-    gap: SPACING.xs,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  fieldRefused: {
-    borderColor: LIGHT_THEME.attention.border,
-    backgroundColor: LIGHT_THEME.attention.background,
-  },
-  label: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.sm,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surfaceMuted.background,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  multiline: { minHeight: MIN_TOUCH_TARGET_DP * 2, textAlignVertical: 'top' },
-  choice: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    justifyContent: 'center',
-    paddingHorizontal: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  choiceOn: {
-    borderColor: LIGHT_THEME.informational.border,
-    backgroundColor: LIGHT_THEME.informational.background,
-  },
-  choiceLabel: {
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.md },
+    block: { gap: SPACING.xs },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    subheading: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    stops: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.attention.foreground,
+    },
+    saved: {
+      fontSize: FONT_SIZE.body,
+      color: theme.positive.foreground,
+    },
+    conflict: {
+      gap: SPACING.xs,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.attention.border,
+      backgroundColor: theme.attention.background,
+    },
+    field: {
+      gap: SPACING.xs,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    fieldRefused: {
+      borderColor: theme.attention.border,
+      backgroundColor: theme.attention.background,
+    },
+    label: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      paddingHorizontal: SPACING.sm,
+      paddingVertical: SPACING.sm,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surfaceMuted.background,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    multiline: { minHeight: MIN_TOUCH_TARGET_DP * 2, textAlignVertical: 'top' },
+    choice: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      justifyContent: 'center',
+      paddingHorizontal: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    choiceOn: {
+      borderColor: theme.informational.border,
+      backgroundColor: theme.informational.background,
+    },
+    choiceLabel: {
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+  });

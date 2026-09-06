@@ -22,6 +22,7 @@
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { LocalStoreProvider } from '@/storage/LocalStoreProvider';
+import { ThemeProvider } from '@/theme/ThemeProvider';
 import { AuthProvider } from '@/auth/AuthProvider';
 import { AuthGate } from '@/auth/AuthGate';
 import { AccountGate } from '@/auth/AccountGate';
@@ -41,53 +42,60 @@ export default function RootLayout() {
           be two connections racing one SQLCipher file - which is the failure
           `ProjectionProvider` has warned about since it was written. */}
       <LocalStoreProvider>
-        {/* Above the API client because the client is built from the session (DEC-118). */}
-        <AuthProvider>
-          <ApiProvider>
-            {/* Directly inside the API provider and outside everything else: it needs a client and
+        {/* Inside the store because the appearance choice is kept in it, and outside everything
+            that draws because every screen reads its colours from here (DEC-130). It renders
+            while the store is still opening: the system's own light/dark answer is available
+            immediately, so the first frame is already the right theme and the stored override,
+            when there is one, arrives without a flash of the other. */}
+        <ThemeProvider>
+          {/* Above the API client because the client is built from the session (DEC-118). */}
+          <AuthProvider>
+            <ApiProvider>
+              {/* Directly inside the API provider and outside everything else: it needs a client and
             nothing else, it renders nothing, and where a person is does not depend on which
             profile they are looking at (DEC-119). */}
-            {/* Between signing in and anything asking for data. A verified subject reaches nothing
+              {/* Between signing in and anything asking for data. A verified subject reaches nothing
               until its `app_user` row exists (DEC-124), and a screen that asked first would get a
               401 - which the transport reports as the session being lost, signing somebody out one
               second after they signed in. */}
-            <AccountGate>
-              <TimeZoneReporter>
-                {/* Inside the API provider because the store is scoped to the identity that filled it,
+              <AccountGate>
+                <TimeZoneReporter>
+                  {/* Inside the API provider because the store is scoped to the identity that filled it,
             and outside the profile provider because the profile list is one of the things kept
             (`03` group J). */}
-                <ProjectionProvider>
-                  <ProfileProvider>
-                    {/* Inside the profile provider because reminders are planned for the profile being
+                  <ProjectionProvider>
+                    <ProfileProvider>
+                      {/* Inside the profile provider because reminders are planned for the profile being
                 looked at, and inside the projection provider because a device with no signal
                 still has to be reminded - it re-plans from the last response the store kept
                 (`03` group J, `04` Phase 4.2). */}
-                    {/* Inside the projection provider because the journal is a table in the same
+                      {/* Inside the projection provider because the journal is a table in the same
                 encrypted store, and outside the reminder provider because a queued schedule edit
                 has to be sendable whether or not reminders could be planned (`12`, `DEV-038`). */}
-                    <PendingSyncProvider>
-                      {/* Inside the sync provider and outside every screen, for the reason the reminder
+                      <PendingSyncProvider>
+                        {/* Inside the sync provider and outside every screen, for the reason the reminder
                   engine is not on a screen either: what can be sent must not depend on which tab
                   somebody last opened (`DEV-044`). */}
-                      <PendingSenders />
-                      <ReminderProvider>
-                        {/* The gate, inside every provider rather than outside them. A signed-out
+                        <PendingSenders />
+                        <ReminderProvider>
+                          {/* The gate, inside every provider rather than outside them. A signed-out
                       person still needs the store open - it is where the session is read from -
                       and the providers below it all handle "nobody is signed in" already,
                       because that is the state on first run. */}
-                        <AuthGate>
-                          <Stack screenOptions={{ headerShown: false }}>
-                            <Stack.Screen name="(tabs)" />
-                          </Stack>
-                        </AuthGate>
-                      </ReminderProvider>
-                    </PendingSyncProvider>
-                  </ProfileProvider>
-                </ProjectionProvider>
-              </TimeZoneReporter>
-            </AccountGate>
-          </ApiProvider>
-        </AuthProvider>
+                          <AuthGate>
+                            <Stack screenOptions={{ headerShown: false }}>
+                              <Stack.Screen name="(tabs)" />
+                            </Stack>
+                          </AuthGate>
+                        </ReminderProvider>
+                      </PendingSyncProvider>
+                    </ProfileProvider>
+                  </ProjectionProvider>
+                </TimeZoneReporter>
+              </AccountGate>
+            </ApiProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </LocalStoreProvider>
     </SafeAreaProvider>
   );

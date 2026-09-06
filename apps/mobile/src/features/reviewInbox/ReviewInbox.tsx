@@ -18,17 +18,18 @@
 
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   REVIEW_INBOX_COPY,
   summarizeInbox,
+  type Theme,
 } from '@kynviora/presentation';
 import type { ReviewTaskKind } from '@kynviora/domain';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface ReviewInboxTask {
   readonly taskId: string;
@@ -44,6 +45,7 @@ export interface ReviewInboxProps {
 }
 
 export function ReviewInbox({ state, tasks, onStartTask, onRetry }: ReviewInboxProps) {
+  const styles = useThemedStyles(makeStyles);
   if (state !== 'READY') {
     return <ScreenState state={state} {...(onRetry ? { onRetry } : {})} />;
   }
@@ -91,45 +93,46 @@ export function ReviewInbox({ state, tasks, onStartTask, onRetry }: ReviewInboxP
   );
 }
 
-const styles = StyleSheet.create({
-  content: { padding: SPACING.lg, gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.heading,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  intro: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  task: {
-    gap: SPACING.xs,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    // The neutral surface border, deliberately: no tone-coloured edge, which is the visual cue
-    // that would make this read as an alert card.
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  taskLabel: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  subject: {
-    fontSize: FONT_SIZE.caption,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  meaning: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  limitation: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    content: { padding: SPACING.lg, gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.heading,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    intro: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+    },
+    task: {
+      gap: SPACING.xs,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      // The neutral surface border, deliberately: no tone-coloured edge, which is the visual cue
+      // that would make this read as an alert card.
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    taskLabel: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    subject: {
+      fontSize: FONT_SIZE.caption,
+      color: theme.surfaceMuted.foreground,
+    },
+    meaning: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    limitation: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

@@ -24,7 +24,6 @@ import { useCallback, useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -32,6 +31,7 @@ import {
   VISIT_PACK_COPY,
   describeSection,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import type { VisitPackSection } from '@kynviora/domain';
 import {
@@ -48,6 +48,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import { VisitPackReview, type ReviewEntry } from './VisitPackReview';
 import { newIdempotencyKey } from '@/platform/ids';
+import { useTheme, useThemedStyles } from '@/theme/ThemeProvider';
 
 /**
  * SHA-256, from the platform.
@@ -65,6 +66,7 @@ type Step = 'CHOOSE' | 'REVIEW' | 'DONE';
 const NO_CANDIDATES: readonly VisitPackCandidate[] = Object.freeze([]);
 
 export function VisitPackFlow({ onClose }: { readonly onClose: () => void }) {
+  const styles = useThemedStyles(makeStyles);
   const { client, elevate } = useApi();
   const { activeProfileId } = useProfiles();
 
@@ -300,6 +302,8 @@ function CandidateRow({
   readonly chosen: boolean;
   readonly onToggle: () => void;
 }) {
+  const theme = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const section = describeSection(candidate.section as VisitPackSection);
   return (
     <Pressable
@@ -311,10 +315,8 @@ function CandidateRow({
       style={[
         styles.candidate,
         {
-          backgroundColor: chosen
-            ? LIGHT_THEME.informational.background
-            : LIGHT_THEME.surface.background,
-          borderColor: chosen ? LIGHT_THEME.informational.border : LIGHT_THEME.surface.border,
+          backgroundColor: chosen ? theme.informational.background : theme.surface.background,
+          borderColor: chosen ? theme.informational.border : theme.surface.border,
         },
       ]}
     >
@@ -334,62 +336,63 @@ function CandidateRow({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    gap: SPACING.md,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  label: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  warning: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.attention.foreground,
-  },
-  candidate: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    gap: SPACING.xxs,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-  },
-  sectionLabel: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP * 2,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-    textAlignVertical: 'top',
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: {
+      gap: SPACING.md,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    label: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    warning: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.attention.foreground,
+    },
+    candidate: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      gap: SPACING.xxs,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+    },
+    sectionLabel: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP * 2,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+      textAlignVertical: 'top',
+    },
+  });

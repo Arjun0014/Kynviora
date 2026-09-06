@@ -14,7 +14,6 @@
 import { useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -22,12 +21,14 @@ import {
   describeReviewTask,
   taskForm,
   type EditableField,
+  type Theme,
 } from '@kynviora/presentation';
 import type { ReviewTaskKind } from '@kynviora/domain';
 import { buildCompletion, type FormValues, type ReviewTaskCompletion } from '@kynviora/contracts';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
+import { useTheme, useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface ReviewTaskEditorProps {
   readonly kind: ReviewTaskKind;
@@ -54,6 +55,7 @@ export function ReviewTaskEditor({
   stateMessage,
   onRetry,
 }: ReviewTaskEditorProps) {
+  const styles = useThemedStyles(makeStyles);
   const [values, setValues] = useState<FormValues>({});
   const form = useMemo(() => taskForm(kind), [kind]);
   const description = describeReviewTask(kind);
@@ -145,6 +147,8 @@ function FieldControl({
   readonly value: string | null | undefined;
   readonly onChange: (value: string | null | undefined) => void;
 }) {
+  const theme = useTheme();
+  const styles = useThemedStyles(makeStyles);
   // A confirmation, not an entry: the device already knows the date, and asking someone to type
   // today's is asking for something for no reason.
   if (field.input === 'TIMESTAMP_NOW') {
@@ -163,10 +167,8 @@ function FieldControl({
           style={[
             styles.confirm,
             {
-              backgroundColor: confirmed
-                ? LIGHT_THEME.positive.background
-                : LIGHT_THEME.surface.background,
-              borderColor: confirmed ? LIGHT_THEME.positive.border : LIGHT_THEME.surface.border,
+              backgroundColor: confirmed ? theme.positive.background : theme.surface.background,
+              borderColor: confirmed ? theme.positive.border : theme.surface.border,
             },
           ]}
         >
@@ -201,11 +203,9 @@ function FieldControl({
                 styles.choice,
                 {
                   backgroundColor: selected
-                    ? LIGHT_THEME.informational.background
-                    : LIGHT_THEME.surface.background,
-                  borderColor: selected
-                    ? LIGHT_THEME.informational.border
-                    : LIGHT_THEME.surface.border,
+                    ? theme.informational.background
+                    : theme.surface.background,
+                  borderColor: selected ? theme.informational.border : theme.surface.border,
                 },
               ]}
             >
@@ -238,80 +238,81 @@ function FieldControl({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    gap: SPACING.md,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  subject: { fontSize: FONT_SIZE.caption, color: LIGHT_THEME.surfaceMuted.foreground },
-  meaning: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  field: { gap: SPACING.xs },
-  label: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    paddingHorizontal: SPACING.md,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  choice: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-  },
-  choiceLabel: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  confirm: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-  },
-  confirmLabel: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  note: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  blocked: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.attention.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: {
+      gap: SPACING.md,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    subject: { fontSize: FONT_SIZE.caption, color: theme.surfaceMuted.foreground },
+    meaning: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    field: { gap: SPACING.xs },
+    label: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      paddingHorizontal: SPACING.md,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    choice: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+    },
+    choiceLabel: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    confirm: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+    },
+    confirmLabel: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    note: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    blocked: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.attention.foreground,
+    },
+  });

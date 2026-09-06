@@ -27,7 +27,6 @@ import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   FONT_SIZE,
-  LIGHT_THEME,
   LINE_HEIGHT_MULTIPLIER,
   MIN_TOUCH_TARGET_DP,
   REMINDER_DISCLOSURE_COPY,
@@ -37,6 +36,7 @@ import {
   scheduleKindOptions,
   weekdayOptions,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import {
   emptyScheduleForm,
@@ -57,6 +57,7 @@ import {
 import type { IsoWeekday, NotificationDetailLevel, ScheduleKind } from '@kynviora/domain';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface MedicineSchedulesProps {
   readonly displayName: string;
@@ -94,6 +95,7 @@ export function MedicineSchedules({
   state,
   stateMessage,
 }: MedicineSchedulesProps) {
+  const styles = useThemedStyles(makeStyles);
   /** The schedule being edited, or `'NEW'`, or nothing. */
   const [editing, setEditing] = useState<Schedule | 'NEW' | null>(null);
   const [values, setValues] = useState<ScheduleFormValues>(() => emptyScheduleForm(deviceTimeZone));
@@ -365,6 +367,7 @@ function ChoiceRow({
   readonly selected: boolean;
   readonly onPress: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
       accessibilityRole="radio"
@@ -381,103 +384,104 @@ function ChoiceRow({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    gap: SPACING.md,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  name: { fontSize: FONT_SIZE.body, fontWeight: '600', color: LIGHT_THEME.surface.foreground },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  label: { fontSize: FONT_SIZE.body, fontWeight: '600', color: LIGHT_THEME.surface.foreground },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  absent: { fontSize: FONT_SIZE.body, color: LIGHT_THEME.surfaceMuted.foreground },
-  quotation: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    fontStyle: 'italic',
-    paddingLeft: SPACING.md,
-    borderLeftWidth: 2,
-    borderLeftColor: LIGHT_THEME.surface.border,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  warning: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.attention.foreground,
-  },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    paddingHorizontal: SPACING.md,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  timeRow: { flexDirection: 'row', gap: SPACING.sm, alignItems: 'center' },
-  timeInput: {
-    flex: 1,
-    minHeight: MIN_TOUCH_TARGET_DP,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    paddingHorizontal: SPACING.md,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  removeTime: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    minWidth: MIN_TOUCH_TARGET_DP * 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.sm,
-  },
-  removeTimeLabel: { fontSize: FONT_SIZE.body, color: LIGHT_THEME.surface.foreground },
-  days: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
-  day: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    minWidth: MIN_TOUCH_TARGET_DP,
-    paddingHorizontal: SPACING.sm,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-  },
-  daySelected: { borderColor: LIGHT_THEME.surface.foreground, borderWidth: 2 },
-  dayLabel: { fontSize: FONT_SIZE.body, color: LIGHT_THEME.surface.foreground },
-  choice: {
-    gap: SPACING.xxs,
-    minHeight: MIN_TOUCH_TARGET_DP,
-    padding: SPACING.sm,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-  },
-  choiceSelected: { borderColor: LIGHT_THEME.surface.foreground, borderWidth: 2 },
-  choiceLabel: { fontSize: FONT_SIZE.body, color: LIGHT_THEME.surface.foreground },
-  line: {
-    gap: SPACING.xxs,
-    paddingVertical: SPACING.sm,
-    borderTopWidth: 1,
-    borderTopColor: LIGHT_THEME.surface.border,
-  },
-  when: { fontSize: FONT_SIZE.caption, color: LIGHT_THEME.surfaceMuted.foreground },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: {
+      gap: SPACING.md,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    name: { fontSize: FONT_SIZE.body, fontWeight: '600', color: theme.surface.foreground },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    label: { fontSize: FONT_SIZE.body, fontWeight: '600', color: theme.surface.foreground },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    absent: { fontSize: FONT_SIZE.body, color: theme.surfaceMuted.foreground },
+    quotation: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      fontStyle: 'italic',
+      paddingLeft: SPACING.md,
+      borderLeftWidth: 2,
+      borderLeftColor: theme.surface.border,
+      color: theme.surface.foreground,
+    },
+    warning: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.attention.foreground,
+    },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      paddingHorizontal: SPACING.md,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    timeRow: { flexDirection: 'row', gap: SPACING.sm, alignItems: 'center' },
+    timeInput: {
+      flex: 1,
+      minHeight: MIN_TOUCH_TARGET_DP,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      paddingHorizontal: SPACING.md,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    removeTime: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      minWidth: MIN_TOUCH_TARGET_DP * 2,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: SPACING.sm,
+    },
+    removeTimeLabel: { fontSize: FONT_SIZE.body, color: theme.surface.foreground },
+    days: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+    day: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      minWidth: MIN_TOUCH_TARGET_DP,
+      paddingHorizontal: SPACING.sm,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+    },
+    daySelected: { borderColor: theme.surface.foreground, borderWidth: 2 },
+    dayLabel: { fontSize: FONT_SIZE.body, color: theme.surface.foreground },
+    choice: {
+      gap: SPACING.xxs,
+      minHeight: MIN_TOUCH_TARGET_DP,
+      padding: SPACING.sm,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+    },
+    choiceSelected: { borderColor: theme.surface.foreground, borderWidth: 2 },
+    choiceLabel: { fontSize: FONT_SIZE.body, color: theme.surface.foreground },
+    line: {
+      gap: SPACING.xxs,
+      paddingVertical: SPACING.sm,
+      borderTopWidth: 1,
+      borderTopColor: theme.surface.border,
+    },
+    when: { fontSize: FONT_SIZE.caption, color: theme.surfaceMuted.foreground },
+  });

@@ -23,15 +23,16 @@
 
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   MIN_TOUCH_TARGET_DP,
   PROFILE_COPY,
+  type Theme,
 } from '@kynviora/presentation';
 import type { ProfileSwitcherView } from '@kynviora/contracts';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface ProfileSwitcherProps {
   readonly view: ProfileSwitcherView;
@@ -41,6 +42,7 @@ export interface ProfileSwitcherProps {
 }
 
 export function ProfileSwitcher({ view, onSelect, onAddPerson }: ProfileSwitcherProps) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.container}>
       <Text accessibilityRole="header" style={styles.heading}>
@@ -97,49 +99,50 @@ function accessibilityLabelFor(line: ProfileSwitcherView['lines'][number]): stri
   return `${line.displayName}. ${relationship}${age}`;
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.sm },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  active: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  note: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.attention.foreground,
-    backgroundColor: LIGHT_THEME.attention.background,
-    borderColor: LIGHT_THEME.attention.border,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    padding: SPACING.md,
-  },
-  row: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    gap: 2,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  rowActive: {
-    borderColor: LIGHT_THEME.informational.border,
-    backgroundColor: LIGHT_THEME.informational.background,
-  },
-  rowLabel: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.sm },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    active: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    note: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.attention.foreground,
+      backgroundColor: theme.attention.background,
+      borderColor: theme.attention.border,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      padding: SPACING.md,
+    },
+    row: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      gap: 2,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    rowActive: {
+      borderColor: theme.informational.border,
+      backgroundColor: theme.informational.background,
+    },
+    rowLabel: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+  });

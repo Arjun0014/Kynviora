@@ -18,17 +18,18 @@
 
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   VISIT_PACK_COPY,
   summarizeSelection,
+  type Theme,
 } from '@kynviora/presentation';
 import type { VisitPackSection } from '@kynviora/domain';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 /** An entry as the review screen needs it: enough to summarise, enough to show. */
 export interface ReviewEntry {
@@ -57,6 +58,7 @@ export function VisitPackReview({
   onBack,
   onRetry,
 }: VisitPackReviewProps) {
+  const styles = useThemedStyles(makeStyles);
   if (state !== 'READY') {
     return <ScreenState state={state} {...(onRetry ? { onRetry } : {})} />;
   }
@@ -135,60 +137,61 @@ export function VisitPackReview({
   );
 }
 
-const styles = StyleSheet.create({
-  content: { padding: SPACING.lg, gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.heading,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  changed: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.attention.foreground,
-    backgroundColor: LIGHT_THEME.attention.background,
-    borderColor: LIGHT_THEME.attention.border,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    padding: SPACING.md,
-  },
-  section: {
-    gap: SPACING.xs,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-  },
-  sectionHeading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  count: { fontSize: FONT_SIZE.caption, color: LIGHT_THEME.surfaceMuted.foreground },
-  entry: { marginTop: SPACING.sm, gap: SPACING.xxs },
-  entryLine: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  caveat: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  warning: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.informational.foreground,
-    backgroundColor: LIGHT_THEME.informational.background,
-    borderColor: LIGHT_THEME.informational.border,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    padding: SPACING.md,
-  },
-  limitation: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    content: { padding: SPACING.lg, gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.heading,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    changed: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.attention.foreground,
+      backgroundColor: theme.attention.background,
+      borderColor: theme.attention.border,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      padding: SPACING.md,
+    },
+    section: {
+      gap: SPACING.xs,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+    },
+    sectionHeading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    count: { fontSize: FONT_SIZE.caption, color: theme.surfaceMuted.foreground },
+    entry: { marginTop: SPACING.sm, gap: SPACING.xxs },
+    entryLine: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    caveat: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    warning: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.informational.foreground,
+      backgroundColor: theme.informational.background,
+      borderColor: theme.informational.border,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      padding: SPACING.md,
+    },
+    limitation: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

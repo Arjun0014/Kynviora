@@ -13,7 +13,6 @@
 
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -23,6 +22,7 @@ import {
 } from '@kynviora/presentation';
 import type { Resource } from '@kynviora/contracts';
 import { PrimaryButton } from './PrimaryButton';
+import { useTheme } from '@/theme/ThemeProvider';
 
 export interface ScreenStateProps {
   readonly state: ScreenStateKind;
@@ -37,8 +37,9 @@ export interface ScreenStateProps {
 }
 
 export function ScreenState({ state, message, onRetry }: ScreenStateProps) {
+  const theme = useTheme();
   const presentation = presentScreenState(state);
-  const tone = LIGHT_THEME[presentation.tone];
+  const tone = theme[presentation.tone];
   const description = message ?? presentation.description;
 
   return (

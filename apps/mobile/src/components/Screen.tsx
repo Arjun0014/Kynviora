@@ -2,20 +2,35 @@
  * The frame every primary destination shares.
  *
  * Spec references: `06` (five primary destinations, each defining its states), `18` (one heading
- * per screen, announced as a header; type scale and spacing from the tokens).
+ * per screen, announced as a header; type scale and spacing from the tokens), DEC-130.
  *
  * Exists so the heading, the introduction and the safe-area handling are written once. Repeated
  * per screen they drift, and the thing that drifts first is the accessibility role on the
  * heading - which is invisible until somebody is navigating by headings.
+ *
+ * WHY THE GROUND IS `canvas` AND A CARD IS `surface`
+ * So that a card reads as a card rather than as more page. On light that is one shade of
+ * separation; on dark it is the whole mechanism, because a shadow on a near-black ground is
+ * invisible (`docs/design/DESIGN_SYSTEM.md`, section 5).
+ *
+ * WHAT `eyebrow` IS FOR
+ * `06` requires any screen showing medicine, product, alert or care information to make the
+ * current person clear. It sits **above** the heading rather than below it, because that is where
+ * a person looks for whose screen this is, and it is announced as part of the heading so a screen
+ * reader lands on "Shelf, for Anita" rather than on two unrelated fragments.
  */
 
-import { Text, StyleSheet, ScrollView, RefreshControl, type ViewStyle } from 'react-native';
+import { StyleSheet, ScrollView, RefreshControl, View, type ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LIGHT_THEME, SPACING, FONT_SIZE, LINE_HEIGHT_MULTIPLIER } from '@kynviora/presentation';
+import { SPACING, type Theme } from '@kynviora/presentation';
 import type { ReactNode } from 'react';
+import { useThemedStyles } from '@/theme/ThemeProvider';
+import { Typography } from './Typography';
 
 export interface ScreenProps {
   readonly title: string;
+  /** Whose screen this is. `06`: the current person is clear on every screen that shows care data. */
+  readonly eyebrow?: string | null;
   /** One or two sentences saying what this screen is for. `18`: familiar words first. */
   readonly intro?: string;
   readonly children: ReactNode;
@@ -27,12 +42,16 @@ export interface ScreenProps {
 
 export function Screen({
   title,
+  eyebrow,
   intro,
   children,
   onRefresh,
   refreshing = false,
   contentStyle,
 }: ScreenProps) {
+  const styles = useThemedStyles(makeStyles);
+  const named = eyebrow !== undefined && eyebrow !== null && eyebrow.trim() !== '';
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
       <ScrollView
@@ -43,27 +62,35 @@ export function Screen({
           )
         }
       >
-        <Text accessibilityRole="header" style={styles.heading}>
-          {title}
-        </Text>
-        {intro === undefined ? null : <Text style={styles.intro}>{intro}</Text>}
+        <View style={styles.header}>
+          {named ? (
+            <Typography role="overline" colour="secondary" decorative>
+              {eyebrow}
+            </Typography>
+          ) : null}
+          <Typography
+            role="heading"
+            heading
+            {...(named ? { accessibilityLabel: `${title}, for ${eyebrow}` } : {})}
+          >
+            {title}
+          </Typography>
+          {intro === undefined ? null : (
+            <Typography role="body" colour="secondary">
+              {intro}
+            </Typography>
+          )}
+        </View>
         {children}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: LIGHT_THEME.surface.background },
-  content: { padding: SPACING.lg, gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.heading,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  intro: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    safeArea: { flex: 1, backgroundColor: theme.canvas.background },
+    content: { padding: SPACING.lg, gap: SPACING.lg, paddingBottom: SPACING.xxl },
+    // The heading block is one idea, so its parts sit closer to each other than to what follows.
+    header: { gap: SPACING.xxs, marginBottom: SPACING.xs },
+  });

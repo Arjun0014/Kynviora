@@ -26,7 +26,7 @@
  * is the exact failure that rule exists to prevent.
  */
 
-import { LIGHT_THEME, type ThemeToneToken } from './tokens.js';
+import { LIGHT_THEME, type ColorPair, type Theme, type ThemeToneToken } from './tokens.js';
 import type { IconName } from './status.js';
 
 /**
@@ -204,9 +204,16 @@ export function presentScreenState(state: ScreenState): ScreenStatePresentation 
   return SCREEN_STATE_PRESENTATION[state];
 }
 
-/** The colour pair for a state's tone. Support for the label, never a replacement for it. */
-export function screenStateColors(state: ScreenState): (typeof LIGHT_THEME)[ThemeToneToken] {
-  return LIGHT_THEME[SCREEN_STATE_PRESENTATION[state].tone];
+/**
+ * The colour pair for a state's tone, in a given theme. Support for the label, never a
+ * replacement for it.
+ *
+ * The theme is a parameter rather than a global since DEC-130: the same state is a different pair
+ * of colours in the two themes, and a function that could only answer for one of them was a
+ * dark-mode screen painted in light-mode colours.
+ */
+export function screenStateColors(state: ScreenState, theme: Theme = LIGHT_THEME): ColorPair {
+  return theme[SCREEN_STATE_PRESENTATION[state].tone];
 }
 
 /**

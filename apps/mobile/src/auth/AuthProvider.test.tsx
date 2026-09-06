@@ -65,7 +65,14 @@ function sessionStore(initial: AuthTokens | null): {
 }
 
 function storeValue(session: SessionStore): LocalStoreContextValue {
-  return { projection: null, pending: null, session, settled: true, error: null };
+  return {
+    projection: null,
+    pending: null,
+    preferences: null,
+    session,
+    settled: true,
+    error: null,
+  };
 }
 
 const ISSUER = 'https://project.supabase.co/auth/v1';

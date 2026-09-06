@@ -27,19 +27,21 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import {
   FONT_SIZE,
-  LIGHT_THEME,
   LINE_HEIGHT_MULTIPLIER,
   QUEUE_COPY,
   SPACING,
   pendingQueueView,
   type QueueInput,
   type QueueRow,
+  type Theme,
 } from '@kynviora/presentation';
 import { MAX_UPLOAD_ATTEMPTS, unsafeId, type OperationId } from '@kynviora/domain';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export function PendingQueue() {
+  const styles = useThemedStyles(makeStyles);
   const { list, retry, discard, waiting, needsAttention } = usePendingSync();
   const [inputs, setInputs] = useState<readonly QueueInput[]>([]);
 
@@ -114,6 +116,7 @@ function QueueRowView({
   readonly onRetry: (operationId: string) => void;
   readonly onDiscard: (operationId: string) => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={row.needsDecision ? styles.rowNeedsDecision : styles.row}>
       <Text style={styles.what}>{row.what}</Text>
@@ -150,50 +153,51 @@ function QueueRowView({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.heading,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  intro: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  summary: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  row: {
-    gap: SPACING.sm,
-    padding: SPACING.md,
-    borderRadius: SPACING.sm,
-    backgroundColor: LIGHT_THEME.surfaceMuted.background,
-  },
-  rowNeedsDecision: {
-    gap: SPACING.sm,
-    padding: SPACING.md,
-    borderRadius: SPACING.sm,
-    backgroundColor: LIGHT_THEME.surfaceMuted.background,
-    borderLeftWidth: SPACING.xs,
-    borderLeftColor: LIGHT_THEME.surface.foreground,
-  },
-  what: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  why: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  warning: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.heading,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    intro: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    summary: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    row: {
+      gap: SPACING.sm,
+      padding: SPACING.md,
+      borderRadius: SPACING.sm,
+      backgroundColor: theme.surfaceMuted.background,
+    },
+    rowNeedsDecision: {
+      gap: SPACING.sm,
+      padding: SPACING.md,
+      borderRadius: SPACING.sm,
+      backgroundColor: theme.surfaceMuted.background,
+      borderLeftWidth: SPACING.xs,
+      borderLeftColor: theme.surface.foreground,
+    },
+    what: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    why: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    warning: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

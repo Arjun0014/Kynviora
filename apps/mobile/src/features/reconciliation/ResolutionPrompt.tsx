@@ -20,7 +20,6 @@
 import { useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -28,10 +27,12 @@ import {
   RECONCILIATION_COPY,
   presentSide,
   resolutionOption,
+  type Theme,
 } from '@kynviora/presentation';
 import type { AdoptableSide, ReconciliationResolution } from '@kynviora/domain';
 import { buildResolution, type DifferenceResolution } from '@kynviora/contracts';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { useTheme, useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface ResolutionPromptProps {
   readonly resolution: ReconciliationResolution;
@@ -50,6 +51,8 @@ export function ResolutionPrompt({
   onRecord,
   onCancel,
 }: ResolutionPromptProps) {
+  const theme = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const option = resolutionOption(resolution);
   const [side, setSide] = useState<AdoptableSide | null>(option.fixedSide);
   const [confirmedBy, setConfirmedBy] = useState('');
@@ -96,11 +99,9 @@ export function ResolutionPrompt({
                   styles.side,
                   {
                     backgroundColor: chosen
-                      ? LIGHT_THEME.informational.background
-                      : LIGHT_THEME[view.tone].background,
-                    borderColor: chosen
-                      ? LIGHT_THEME.informational.border
-                      : LIGHT_THEME[view.tone].border,
+                      ? theme.informational.background
+                      : theme[view.tone].background,
+                    borderColor: chosen ? theme.informational.border : theme[view.tone].border,
                   },
                 ]}
               >
@@ -161,75 +162,76 @@ export function ResolutionPrompt({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    gap: SPACING.md,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  statement: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  label: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  side: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    gap: SPACING.xxs,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-  },
-  sideLabel: {
-    fontSize: FONT_SIZE.caption,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  sideValue: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    paddingHorizontal: SPACING.md,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  noteInput: {
-    minHeight: MIN_TOUCH_TARGET_DP * 2,
-    paddingVertical: SPACING.sm,
-    textAlignVertical: 'top',
-  },
-  blocked: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.attention.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: {
+      gap: SPACING.md,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    statement: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    label: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    side: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      gap: SPACING.xxs,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+    },
+    sideLabel: {
+      fontSize: FONT_SIZE.caption,
+      color: theme.surfaceMuted.foreground,
+    },
+    sideValue: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
+      color: theme.surface.foreground,
+    },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      paddingHorizontal: SPACING.md,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    noteInput: {
+      minHeight: MIN_TOUCH_TARGET_DP * 2,
+      paddingVertical: SPACING.sm,
+      textAlignVertical: 'top',
+    },
+    blocked: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.attention.foreground,
+    },
+  });

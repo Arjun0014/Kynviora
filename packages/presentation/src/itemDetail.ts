@@ -155,12 +155,23 @@ export interface ItemField {
   readonly quoted: boolean;
 }
 
+/**
+ * What a field says when nobody entered one.
+ *
+ * Exported because a screen has to render the same sentence for a field composed by a build that
+ * did not send one - `absentNote` is `null` exactly when there **is** a value, but nothing in the
+ * type says so, and a client that met the impossible case would otherwise print a blank. A blank
+ * beside "Batch" reads as "no batch", which reads as "nothing to worry about"; this reads as what
+ * is true.
+ */
+export const FIELD_ABSENT_NOTE = 'Not recorded';
+
 function field(label: string, value: string | null, quoted = false): ItemField {
   const missing = value === null || value.trim() === '';
   return {
     label,
     value: missing ? null : value,
-    absentNote: missing ? 'Not recorded' : null,
+    absentNote: missing ? FIELD_ABSENT_NOTE : null,
     quoted,
   };
 }

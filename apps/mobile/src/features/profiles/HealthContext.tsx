@@ -31,7 +31,6 @@
 import { useCallback, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -40,6 +39,7 @@ import {
   certaintyOptions,
   healthFactKindOptions,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import {
   messageForFailure,
@@ -52,6 +52,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import { useApi } from '@/api/ApiProvider';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface HealthContextProps {
   readonly view: HealthContextView;
@@ -61,6 +62,7 @@ export interface HealthContextProps {
 }
 
 export function HealthContext({ view, profileId, onChanged }: HealthContextProps) {
+  const styles = useThemedStyles(makeStyles);
   const { client } = useApi();
   const { queue: queueEdit } = usePendingSync();
 
@@ -314,6 +316,7 @@ function Choice({
   readonly refused: boolean;
   readonly onPress: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
       accessibilityRole="radio"
@@ -335,88 +338,89 @@ function Choice({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  // The sentence a person has to read before relying on a record. Given its own weight, and
-  // `informational` rather than `attention`: an unmatched term is not a warning about a medicine.
-  limitation: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.informational.foreground,
-    backgroundColor: LIGHT_THEME.informational.background,
-    borderColor: LIGHT_THEME.informational.border,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    padding: SPACING.sm,
-  },
-  label: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  field: { gap: SPACING.xs },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.sm,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surfaceMuted.background,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  inputRefused: {
-    borderColor: LIGHT_THEME.attention.border,
-    backgroundColor: LIGHT_THEME.attention.background,
-  },
-  row: {
-    gap: SPACING.xs,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  rowTerm: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  choice: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    gap: 2,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  choiceSelected: {
-    borderColor: LIGHT_THEME.informational.border,
-    backgroundColor: LIGHT_THEME.informational.background,
-  },
-  choiceRefused: {
-    borderColor: LIGHT_THEME.attention.border,
-  },
-  choiceLabel: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    // The sentence a person has to read before relying on a record. Given its own weight, and
+    // `informational` rather than `attention`: an unmatched term is not a warning about a medicine.
+    limitation: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.informational.foreground,
+      backgroundColor: theme.informational.background,
+      borderColor: theme.informational.border,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      padding: SPACING.sm,
+    },
+    label: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    field: { gap: SPACING.xs },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      paddingHorizontal: SPACING.sm,
+      paddingVertical: SPACING.sm,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surfaceMuted.background,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    inputRefused: {
+      borderColor: theme.attention.border,
+      backgroundColor: theme.attention.background,
+    },
+    row: {
+      gap: SPACING.xs,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    rowTerm: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    choice: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      gap: 2,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    choiceSelected: {
+      borderColor: theme.informational.border,
+      backgroundColor: theme.informational.background,
+    },
+    choiceRefused: {
+      borderColor: theme.attention.border,
+    },
+    choiceLabel: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+  });

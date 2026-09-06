@@ -31,10 +31,10 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Text, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import {
   reviewInboxView,
@@ -52,8 +52,12 @@ import { ReviewTaskEditor } from '@/features/reviewInbox/ReviewTaskEditor';
 import { VisitPackFlow } from '@/features/visitPack/VisitPackFlow';
 import { ReconciliationFlow } from '@/features/reconciliation/ReconciliationFlow';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { Card } from '@/components/Card';
+import { SectionHeader } from '@/components/SectionHeader';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export default function TodayScreen() {
+  const styles = useThemedStyles(makeStyles);
   const { client } = useApi();
   const { activeProfile, activeProfileId } = useProfiles();
 
@@ -143,12 +147,20 @@ export default function TodayScreen() {
     setSavingMessage(null);
   }, []);
 
-  return (
-    <Screen title="Today" onRefresh={onRetry} refreshing={refreshing}>
-      {activeProfile === null ? null : (
-        <Text style={styles.profile}>{activeProfile.displayName}</Text>
-      )}
+  // A flow takes the whole screen. The two are exclusive by construction rather than by
+  // convention: the screen is either its list or one flow, and never both.
+  const inFlow = preparingPack || reconciling || editing !== null;
 
+  return (
+    <Screen
+      title="Today"
+      eyebrow={activeProfile?.displayName ?? null}
+      {...(inFlow
+        ? {}
+        : { intro: 'What would make what Kynviora can say about your shelf more exact.' })}
+      onRefresh={onRetry}
+      refreshing={refreshing}
+    >
       {preparingPack ? (
         <VisitPackFlow
           onClose={() => {
@@ -183,47 +195,53 @@ export default function TodayScreen() {
         <ResourceState resource={resource} onRetry={onRetry} />
       )}
 
-      {preparingPack || reconciling || editing !== null ? null : (
-        <>
-          <PrimaryButton
-            label="Prepare a summary for an appointment"
-            variant="secondary"
-            accessibilityHint="Choose what to share with a health professional. Nothing is included until you choose it."
-            onPress={() => {
-              setPreparingPack(true);
-            }}
-          />
-          <PrimaryButton
-            label="Check a list against my shelf"
-            variant="secondary"
-            accessibilityHint="Compare a list you were given with what Kynviora has. It shows both and chooses neither."
-            onPress={() => {
-              setReconciling(true);
-            }}
-          />
-        </>
-      )}
-
       {/* `06` requires a partial result to be visible as one. A silently shorter list is the
-          failure that state exists to prevent. */}
-      {inbox.unrecognisedCount > 0 ? (
+          failure that state exists to prevent. Beside the list it qualifies, not at the foot of
+          the screen under two unrelated controls. */}
+      {!inFlow && inbox.unrecognisedCount > 0 ? (
         <Text style={styles.partial}>
           Some entries could not be shown. This app may be older than the information it received.
         </Text>
       ) : null}
+
+      {/* `06` Journey 8 and `04` Phase 8.5, under their own heading rather than loose at the
+          bottom. Neither is a review task, and rendering them as two more buttons under the list
+          made them read as the last two rows of it. */}
+      {inFlow ? null : (
+        <>
+          <SectionHeader
+            title="Prepare something"
+            explanation="Neither of these changes anything on your shelf."
+          />
+          <Card>
+            <PrimaryButton
+              label="Prepare a summary for an appointment"
+              variant="secondary"
+              accessibilityHint="Choose what to share with a health professional. Nothing is included until you choose it."
+              onPress={() => {
+                setPreparingPack(true);
+              }}
+            />
+            <PrimaryButton
+              label="Check a list against my shelf"
+              variant="secondary"
+              accessibilityHint="Compare a list you were given with what Kynviora has. It shows both and chooses neither."
+              onPress={() => {
+                setReconciling(true);
+              }}
+            />
+          </Card>
+        </>
+      )}
     </Screen>
   );
 }
 
-const styles = StyleSheet.create({
-  profile: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  partial: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    partial: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

@@ -11,7 +11,7 @@ import {
 } from './screenState.js';
 import { findForbiddenClaims } from './copy.js';
 import { ICON_NAMES } from './status.js';
-import { LIGHT_THEME, contrastRatio } from './tokens.js';
+import { LIGHT_THEME, THEMES, contrastRatio, type ThemeName } from './tokens.js';
 
 /**
  * The states a screen can be in, and the words a user reads in each.
@@ -160,10 +160,15 @@ describe('tone', () => {
 
   it('meets the contrast floor in every state', () => {
     for (const state of SCREEN_STATES) {
-      const colors = screenStateColors(state);
-      // 4.5:1, the WCAG AA floor for body text, at the sizes this copy is actually rendered.
-      expect(contrastRatio(colors.foreground, colors.background)).toBeGreaterThanOrEqual(4.5);
-      expect(Object.values(LIGHT_THEME)).toContain(colors);
+      // Both themes. A state readable in one and not the other is a state nobody can read on
+      // half the phones this ships to.
+      for (const name of Object.keys(THEMES) as readonly ThemeName[]) {
+        const colors = screenStateColors(state, THEMES[name]);
+        // 4.5:1, the WCAG AA floor for body text, at the sizes this copy is actually rendered.
+        expect(contrastRatio(colors.foreground, colors.background)).toBeGreaterThanOrEqual(4.5);
+        expect(Object.values(THEMES[name])).toContain(colors);
+      }
+      expect(Object.values(LIGHT_THEME)).toContain(screenStateColors(state));
     }
   });
 });

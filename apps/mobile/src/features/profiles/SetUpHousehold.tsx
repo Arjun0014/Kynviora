@@ -37,7 +37,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
@@ -47,6 +46,7 @@ import {
   PROFILE_LIMITS_COPY,
   ageBandOptions,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
 import { bandMatchesBirthYear, isAgeBand } from '@kynviora/domain';
 import {
@@ -61,6 +61,7 @@ import { useApi } from '@/api/ApiProvider';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
 import { newIdempotencyKey } from '@/platform/ids';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface SetUpHouseholdProps {
   /**
@@ -85,6 +86,7 @@ export function SetUpHousehold({
   onCreated,
   onClose,
 }: SetUpHouseholdProps) {
+  const styles = useThemedStyles(makeStyles);
   const { client } = useApi();
 
   const [householdId, setHouseholdId] = useState<string | null>(existingHousehold);
@@ -388,6 +390,7 @@ function Choice({
   readonly selected: boolean;
   readonly onPress: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
       accessibilityRole="radio"
@@ -406,76 +409,77 @@ function Choice({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  label: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  field: { gap: SPACING.xs },
-  input: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.sm,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surfaceMuted.background,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  // `attention`, not `action`. A mistyped year is something to fix, not a recall.
-  inputRefused: {
-    borderColor: LIGHT_THEME.attention.border,
-    backgroundColor: LIGHT_THEME.attention.background,
-  },
-  choice: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    gap: 2,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  choiceSelected: {
-    borderColor: LIGHT_THEME.informational.border,
-    backgroundColor: LIGHT_THEME.informational.background,
-  },
-  choiceLabel: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  note: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.informational.foreground,
-    backgroundColor: LIGHT_THEME.informational.background,
-    borderColor: LIGHT_THEME.informational.border,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    padding: SPACING.md,
-  },
-  refusal: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.attention.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.md },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    label: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    field: { gap: SPACING.xs },
+    input: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      paddingHorizontal: SPACING.sm,
+      paddingVertical: SPACING.sm,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surfaceMuted.background,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+    },
+    // `attention`, not `action`. A mistyped year is something to fix, not a recall.
+    inputRefused: {
+      borderColor: theme.attention.border,
+      backgroundColor: theme.attention.background,
+    },
+    choice: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      gap: 2,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    choiceSelected: {
+      borderColor: theme.informational.border,
+      backgroundColor: theme.informational.background,
+    },
+    choiceLabel: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    note: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.informational.foreground,
+      backgroundColor: theme.informational.background,
+      borderColor: theme.informational.border,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      padding: SPACING.md,
+    },
+    refusal: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.attention.foreground,
+    },
+  });

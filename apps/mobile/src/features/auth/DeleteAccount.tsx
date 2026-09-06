@@ -40,16 +40,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   DELETE_ACCOUNT_COPY,
+  type Theme,
 } from '@kynviora/presentation';
 import { bearerSession } from '@kynviora/contracts';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useApi } from '@/api/ApiProvider';
 import { useAuth } from '@/auth/AuthProvider';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 type Stage =
   | { readonly kind: 'CLOSED' }
@@ -59,6 +60,7 @@ type Stage =
   | { readonly kind: 'DONE' };
 
 export function DeleteAccount() {
+  const styles = useThemedStyles(makeStyles);
   const { client, session } = useApi();
   const auth = useAuth();
   const [stage, setStage] = useState<Stage>({ kind: 'CLOSED' });
@@ -241,59 +243,60 @@ export function DeleteAccount() {
   );
 }
 
-const styles = StyleSheet.create({
-  block: { gap: SPACING.sm, marginTop: SPACING.lg },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  subheading: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-    marginTop: SPACING.sm,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  item: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-    paddingLeft: SPACING.sm,
-  },
-  label: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-    marginTop: SPACING.sm,
-  },
-  help: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: LIGHT_THEME.surfaceMuted.foreground,
-    borderRadius: 8,
-    padding: SPACING.sm,
-    fontSize: FONT_SIZE.body,
-    color: LIGHT_THEME.surface.foreground,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  refusal: {
-    gap: SPACING.xs,
-    padding: SPACING.sm,
-    borderRadius: 8,
-    backgroundColor: LIGHT_THEME.surfaceMuted.background,
-  },
-  refusalHeading: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    block: { gap: SPACING.sm, marginTop: SPACING.lg },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    subheading: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+      marginTop: SPACING.sm,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+    },
+    item: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+      paddingLeft: SPACING.sm,
+    },
+    label: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+      marginTop: SPACING.sm,
+    },
+    help: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: theme.surfaceMuted.foreground,
+      borderRadius: 8,
+      padding: SPACING.sm,
+      fontSize: FONT_SIZE.body,
+      color: theme.surface.foreground,
+      backgroundColor: theme.surface.background,
+    },
+    refusal: {
+      gap: SPACING.xs,
+      padding: SPACING.sm,
+      borderRadius: 8,
+      backgroundColor: theme.surfaceMuted.background,
+    },
+    refusalHeading: {
+      fontSize: FONT_SIZE.body,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+  });

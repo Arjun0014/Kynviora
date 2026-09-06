@@ -20,11 +20,13 @@
 
 import type { ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { LIGHT_THEME } from '@kynviora/presentation';
+import { type Theme } from '@kynviora/presentation';
 import { useAuth } from './AuthProvider';
 import { SignInScreen } from '@/features/auth/SignInScreen';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export function AuthGate({ children }: { readonly children: ReactNode }) {
+  const styles = useThemedStyles(makeStyles);
   const { state } = useAuth();
 
   if (state === 'LOADING') {
@@ -43,11 +45,12 @@ export function AuthGate({ children }: { readonly children: ReactNode }) {
   return <>{children}</>;
 }
 
-const styles = StyleSheet.create({
-  waiting: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    waiting: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.surface.background,
+    },
+  });

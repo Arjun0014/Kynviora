@@ -5,7 +5,7 @@
  * without either being reduced to a generic note"; "a user can understand which items need
  * verification or review"), `08` (the Product Trust Passport keeps three axes separate), `02` (no
  * aggregate score), `18` (a label is always present; meaning never carried by colour), `09`,
- * `11` and DEC-010 (composition is server-side).
+ * `11` and DEC-010 (composition is server-side), DEC-130.
  *
  * THIS SCREEN COMPOSES NOTHING
  * Every label, every sentence and every "not recorded" arrived composed. The component lays out
@@ -17,25 +17,34 @@
  * which items need verification or review, and a list of outstanding things at the foot of a
  * screen is one most people never reach.
  *
- * QUOTED TEXT IS RENDERED AS A QUOTATION
- * Written directions and a household's own notes are somebody else's words. `09` forbids Kynviora
- * telling anybody how to take a medicine, and rendering prescribed directions in the same voice
- * as Kynviora's own copy is how that rule quietly fails on a screen.
+ * WHY THE THREE CHIPS SIT IN THE HEADER CARD RATHER THAN IN THEIR OWN SECTION
+ * They qualify the name, and a qualification that travels with the fact it qualifies is the one
+ * rule progressive disclosure must not break (`docs/design/DESIGN_SYSTEM.md`, section 10). The
+ * longer descriptions still live in their own card lower down, which is the disclosure; what is
+ * beside the name is the part somebody must not be able to read past.
+ *
+ * ONE PRIMARY ACTION
+ * `18`. "Change what is recorded" is it. Deleting is a `destructive` variant below it, and
+ * "Back to the shelf" is a plain secondary - three controls that look like three different
+ * degrees of consequence rather than three identical buttons.
  */
 
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
-  FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
   ITEM_DELETION_COPY,
   type ScreenState as ScreenStateKind,
+  type Theme,
 } from '@kynviora/presentation';
-import type { ItemDetailScreenView, ItemFieldResponse } from '@kynviora/contracts';
+import type { ItemDetailScreenView } from '@kynviora/contracts';
+import { Card } from '@/components/Card';
+import { FieldRow } from '@/components/FieldRow';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { SectionHeader } from '@/components/SectionHeader';
 import { StatusChip } from '@/components/StatusChip';
+import { Typography } from '@/components/Typography';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface ItemDetailProps {
   readonly view: ItemDetailScreenView | null;
@@ -60,67 +69,73 @@ export interface ItemDetailProps {
   readonly onDelete?: () => void;
 }
 
-function FieldRow({ field }: { readonly field: ItemFieldResponse }) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{field.label}</Text>
-      {field.value === null ? (
-        // Kept as a row rather than dropped. A dropped row reads as "not relevant to this item";
-        // this one says nobody has entered it, which is what is true.
-        <Text style={styles.absent}>{field.absentNote}</Text>
-      ) : (
-        <Text style={field.quoted ? styles.quoted : styles.body}>{field.value}</Text>
-      )}
-    </View>
-  );
-}
-
 export function ItemDetail({ view, state, onClose, onEdit, onDelete }: ItemDetailProps) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.container}>
       <ScreenState state={state} />
 
       {view === null ? null : (
         <>
-          <Text accessibilityRole="header" style={styles.heading}>
-            {view.displayName}
-          </Text>
-          {view.brand === null ? null : <Text style={styles.brand}>{view.brand}</Text>}
+          <Card>
+            <Typography role="title" heading>
+              {view.displayName}
+            </Typography>
+            {view.brand === null ? null : (
+              <Typography role="caption" colour="secondary">
+                {view.brand}
+              </Typography>
+            )}
+
+            {/* Three chips, never one. `02` forbids the aggregate and `08` keeps the axes apart.
+                Here they are the short form, beside the name they qualify. */}
+            <View style={styles.chips}>
+              {/* A presentation this build could not read is absent rather than a blank chip,
+                  which on this screen would read as a state nobody assigned. */}
+              {view.identity === null ? null : <StatusChip presentation={view.identity} />}
+              {view.formulation === null ? null : <StatusChip presentation={view.formulation} />}
+              {view.batch === null ? null : <StatusChip presentation={view.batch} />}
+            </View>
+          </Card>
 
           {/* An item somebody has finished with says so, and says Kynviora will stop asking. */}
           {view.lifecycleNote === null ? null : (
-            <Text style={styles.notice}>{view.lifecycleNote}</Text>
+            <Card tone="informational">
+              <Typography role="body" colour="informational">
+                {view.lifecycleNote}
+              </Typography>
+            </Card>
           )}
 
           {/* Exit criterion 2, above the details rather than under them. */}
-          <View style={styles.block}>
-            <Text accessibilityRole="header" style={styles.subheading}>
-              What is not settled
-            </Text>
+          <SectionHeader
+            title="What is not settled"
+            explanation="Things that would make what Kynviora can say about this more exact."
+          />
+          <Card>
             {view.attention.reasons.length === 0 ? (
-              <Text style={styles.body}>{view.attention.settledNote}</Text>
+              <Typography role="body">{view.attention.settledNote}</Typography>
             ) : (
               view.attention.reasons.map((reason) => (
-                <View key={reason.reason} style={styles.field}>
-                  <Text style={styles.body}>{reason.label}</Text>
+                <View key={reason.reason} style={styles.reason}>
+                  <Typography role="body">{reason.label}</Typography>
                   {/* What would settle it. Always about the record, never about the medicine. */}
-                  <Text style={styles.caption}>{reason.nextStep}</Text>
+                  <Typography role="caption" colour="secondary">
+                    {reason.nextStep}
+                  </Typography>
                 </View>
               ))
             )}
             {view.attention.undescribedNote === null ? null : (
-              <Text style={styles.caption}>{view.attention.undescribedNote}</Text>
+              <Typography role="caption" colour="secondary">
+                {view.attention.undescribedNote}
+              </Typography>
             )}
-          </View>
+          </Card>
 
-          {/* Three chips, never one. `02` forbids the aggregate and `08` keeps the axes apart. */}
-          <View style={styles.block}>
-            <Text accessibilityRole="header" style={styles.subheading}>
-              How well Kynviora knows this
-            </Text>
-            <View style={styles.chips}>
-              {/* A presentation this build could not read is absent rather than a blank chip,
-                  which on this screen would read as a state nobody assigned. */}
+          <SectionHeader title="How well Kynviora knows this" />
+          <Card>
+            <View style={styles.chipColumn}>
               {view.identity === null ? null : (
                 <StatusChip presentation={view.identity} showDescription />
               )}
@@ -131,118 +146,75 @@ export function ItemDetail({ view, state, onClose, onEdit, onDelete }: ItemDetai
                 <StatusChip presentation={view.batch} showDescription />
               )}
             </View>
-            <Text style={styles.caption}>{view.verificationNote}</Text>
-          </View>
+            <Typography role="caption" colour="secondary">
+              {view.verificationNote}
+            </Typography>
+          </Card>
 
           {/* The category's own fields. Which ones exist is the server's answer, and it is the
               whole of exit criterion 1 on this screen. */}
-          <View style={styles.block}>
-            <Text accessibilityRole="header" style={styles.subheading}>
-              {view.categoryHeading}
-            </Text>
+          <SectionHeader title={view.categoryHeading} />
+          <Card>
             {view.categoryFields.map((field) => (
-              <FieldRow key={field.label} field={field} />
+              <FieldRow
+                key={field.label}
+                label={field.label}
+                value={field.value}
+                absent={field.absentNote}
+                quoted={field.quoted}
+              />
             ))}
-          </View>
+          </Card>
 
-          <View style={styles.block}>
-            <Text accessibilityRole="header" style={styles.subheading}>
-              On the record
-            </Text>
+          <SectionHeader title="On the record" />
+          <Card>
             {view.sharedFields.map((field) => (
-              <FieldRow key={field.label} field={field} />
+              <FieldRow
+                key={field.label}
+                label={field.label}
+                value={field.value}
+                absent={field.absentNote}
+                quoted={field.quoted}
+              />
             ))}
-          </View>
+          </Card>
         </>
       )}
 
-      {/* Absent where the caller may not change the item, and absent where the detail did not
-          arrive - a control offered over nothing would open a form with no version to send. */}
-      {view !== null && view.mayEdit && onEdit !== undefined ? (
-        <PrimaryButton label="Change what is recorded" variant="secondary" onPress={onEdit} />
-      ) : null}
+      <View style={styles.actions}>
+        {/* Absent where the caller may not change the item, and absent where the detail did not
+            arrive - a control offered over nothing would open a form with no version to send. */}
+        {view !== null && view.mayEdit && onEdit !== undefined ? (
+          <PrimaryButton label="Change what is recorded" onPress={onEdit} />
+        ) : null}
 
-      {/* Below the edit control, and last before Back. `18` puts the destructive action where it
-          is hardest to reach by accident on a screen somebody is scrolling. Withheld rather than
-          disabled where the caller does not own the profile (DEC-045), which for this control is
-          every caregiver however much else they may do. */}
-      {view !== null && view.mayDelete && onDelete !== undefined ? (
-        <PrimaryButton
-          label={ITEM_DELETION_COPY.openLabel}
-          variant="secondary"
-          onPress={onDelete}
-        />
-      ) : null}
+        <PrimaryButton label="Back to the shelf" variant="secondary" onPress={onClose} />
 
-      <PrimaryButton label="Back to the shelf" variant="secondary" onPress={onClose} />
+        {/* Below Back, and last on the screen. `18` puts the destructive action where it is
+            hardest to reach by accident on a screen somebody is scrolling, and the `destructive`
+            variant is the one place a semantic tone is on a control - because what it does is
+            what that tone means. Withheld rather than disabled where the caller does not own the
+            profile (DEC-045), which for this control is every caregiver however much else they
+            may do. */}
+        {view !== null && view.mayDelete && onDelete !== undefined ? (
+          <PrimaryButton
+            label={ITEM_DELETION_COPY.openLabel}
+            variant="destructive"
+            onPress={onDelete}
+          />
+        ) : null}
+      </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: SPACING.md },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  subheading: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  brand: {
-    fontSize: FONT_SIZE.caption,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  block: {
-    gap: SPACING.xs,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  chips: { gap: SPACING.xs },
-  field: { gap: 2, paddingVertical: SPACING.xs },
-  fieldLabel: {
-    fontSize: FONT_SIZE.caption,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-  },
-  // Somebody else's words. Set apart so a prescription instruction never reads as Kynviora's.
-  quoted: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-    fontStyle: 'italic',
-    paddingLeft: SPACING.sm,
-    borderLeftWidth: 2,
-    borderLeftColor: LIGHT_THEME.surface.border,
-  },
-  absent: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  caption: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-  notice: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.informational.border,
-    backgroundColor: LIGHT_THEME.informational.background,
-  },
-});
+const makeStyles = (_theme: Theme) =>
+  StyleSheet.create({
+    container: { gap: SPACING.md },
+    chips: { gap: SPACING.xs, marginTop: SPACING.xs },
+    chipColumn: { gap: SPACING.sm },
+    reason: { gap: SPACING.xxs, paddingVertical: SPACING.xs },
+    // The actions are one group with a little air above them, so the last card does not read as
+    // the thing the first button is about.
+    actions: { gap: SPACING.sm, marginTop: SPACING.sm },
+  });

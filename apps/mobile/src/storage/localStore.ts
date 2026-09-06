@@ -15,6 +15,7 @@
 import { openProjectionOn, type Projection } from './projection';
 import { openSessionStore, type SessionStore } from '../auth/sessionStore';
 import { openPendingOperations, type PendingOperationStore } from './pendingOperations';
+import { openPreferencesOn, type PreferenceStore } from './preferences';
 import { openSecureDatabase } from './secureDatabase';
 
 export interface LocalStore {
@@ -31,6 +32,13 @@ export interface LocalStore {
    * protecting everything else and share its failure modes.
    */
   readonly session: SessionStore;
+  /**
+   * Device preferences that are nobody's health data and survive a sign-out (DEC-130).
+   *
+   * Separate from the projection because the projection is cleared when an identity changes, and
+   * somebody who chose the light theme has not un-chosen it by signing out.
+   */
+  readonly preferences: PreferenceStore;
 }
 
 export async function openLocalStore(): Promise<LocalStore> {
@@ -38,5 +46,6 @@ export async function openLocalStore(): Promise<LocalStore> {
   const projection = await openProjectionOn(database);
   const pending = await openPendingOperations(database);
   const session = await openSessionStore(database);
-  return { projection, pending, session };
+  const preferences = await openPreferencesOn(database);
+  return { projection, pending, session, preferences };
 }

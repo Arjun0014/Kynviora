@@ -31,7 +31,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LIGHT_THEME, SPACING, type ScreenState as ScreenStateKind } from '@kynviora/presentation';
+import { SPACING, type ScreenState as ScreenStateKind, type Theme } from '@kynviora/presentation';
 import {
   ALREADY_ACCEPTED_CODE,
   accessHistory,
@@ -53,11 +53,13 @@ import { CaregiverAccessList } from '@/features/caregivers/CaregiverAccessList';
 import { InviteCaregiver } from '@/features/caregivers/InviteCaregiver';
 import { RemoveCaregiverAccess } from '@/features/caregivers/RemoveCaregiverAccess';
 import { newIdempotencyKey } from '@/platform/ids';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 /** Matches `DEFAULT_INVITATION_TTL_DAYS` on the server. Shown, not sent. */
 const INVITATION_TTL_DAYS = 7;
 
 export default function CareScreen() {
+  const styles = useThemedStyles(makeStyles);
   const { client, elevate } = useApi();
   const { activeProfileId, activeProfile } = useProfiles();
 
@@ -390,7 +392,8 @@ export default function CareScreen() {
  * heading and this tab has never had one - adding it is a design change, and this is a screen that
  * could not be finished.
  */
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: LIGHT_THEME.surface.background },
-  sheet: { padding: SPACING.lg, gap: SPACING.md },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    safeArea: { flex: 1, backgroundColor: theme.surface.background },
+    sheet: { padding: SPACING.lg, gap: SPACING.md },
+  });

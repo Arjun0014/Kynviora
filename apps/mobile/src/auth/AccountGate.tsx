@@ -25,15 +25,16 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   ACCOUNT_SETUP_COPY,
+  type Theme,
 } from '@kynviora/presentation';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useApi } from '@/api/ApiProvider';
 import { useAuth } from './AuthProvider';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 type Progress =
   | { readonly kind: 'WORKING' }
@@ -42,6 +43,7 @@ type Progress =
   | { readonly kind: 'REFUSED'; readonly message: string; readonly canRetry: boolean };
 
 export function AccountGate({ children }: { readonly children: ReactNode }) {
+  const styles = useThemedStyles(makeStyles);
   const { client, session } = useApi();
   const auth = useAuth();
   const [progress, setProgress] = useState<Progress>({ kind: 'WORKING' });
@@ -149,24 +151,25 @@ export function AccountGate({ children }: { readonly children: ReactNode }) {
   );
 }
 
-const styles = StyleSheet.create({
-  centred: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.md,
-    padding: SPACING.lg,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  heading: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '700',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  body: {
-    fontSize: FONT_SIZE.body,
-    lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surface.foreground,
-    textAlign: 'center',
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    centred: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: SPACING.md,
+      padding: SPACING.lg,
+      backgroundColor: theme.surface.background,
+    },
+    heading: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '700',
+      color: theme.surface.foreground,
+    },
+    body: {
+      fontSize: FONT_SIZE.body,
+      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surface.foreground,
+      textAlign: 'center',
+    },
+  });

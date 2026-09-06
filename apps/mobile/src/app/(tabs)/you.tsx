@@ -24,11 +24,11 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Text, StyleSheet, Share } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   CONSENT_COPY,
+  type Theme,
 } from '@kynviora/presentation';
 import type { NotificationDetailLevel, QuietHours } from '@kynviora/domain';
 import {
@@ -50,6 +50,7 @@ import { ResourceState } from '@/components/ScreenState';
 import { DeliveryPolicy } from '@/features/notifications/DeliveryPolicy';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
 import { ConsentSettings } from '@/features/consent/ConsentSettings';
+import { AppearanceSettings } from '@/features/settings/AppearanceSettings';
 import { SignOutControl } from '@/features/auth/SignOutControl';
 import { DeleteAccount } from '@/features/auth/DeleteAccount';
 import { HealthContext } from '@/features/profiles/HealthContext';
@@ -57,8 +58,10 @@ import { ProfileSwitcher } from '@/features/profiles/ProfileSwitcher';
 import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
 import { PendingQueue } from '@/features/sync/PendingQueue';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export default function YouScreen() {
+  const styles = useThemedStyles(makeStyles);
   const { client, session, configurationError, elevate } = useApi();
   // Read here rather than inside `PendingQueue`, so the section is absent when the journal is empty
   // rather than rendering a heading over nothing.
@@ -308,6 +311,11 @@ export default function YouScreen() {
         </Text>
       )}
 
+      {/* Above everything that needs a network answer, because it needs none: appearance is a
+          device setting, and a person on a phone that cannot reach the server should still be
+          able to make the screen readable (`18`, DEC-130). */}
+      <AppearanceSettings />
+
       {/* Near the top, and only when there is something in it. `12` requires a **resolvable**
           failure state, and a change the server refused is the one thing on this screen that is
           waiting on the person rather than describing a setting. It renders nothing when the
@@ -420,11 +428,12 @@ export default function YouScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  identity: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-    paddingBottom: SPACING.xs,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    identity: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+      paddingBottom: SPACING.xs,
+    },
+  });

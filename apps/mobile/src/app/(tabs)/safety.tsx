@@ -37,12 +37,12 @@
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import {
-  LIGHT_THEME,
   SPACING,
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   MIN_TOUCH_TARGET_DP,
   presentSafetyState,
+  type Theme,
 } from '@kynviora/presentation';
 import { PRODUCT_SAFETY_STATES, type ProductSafetyState } from '@kynviora/domain';
 import {
@@ -66,10 +66,13 @@ import { StatusChip } from '@/components/StatusChip';
 import { RegulatoryLens } from '@/features/lens/RegulatoryLens';
 import { AlertDetail } from '@/features/safety/AlertDetail';
 import { SafetyReceipt } from '@/features/safety/SafetyReceipt';
+import { useTheme, useThemedStyles } from '@/theme/ThemeProvider';
 
 const EMPTY = { lines: [], totalItems: 0 } as const;
 
 export default function SafetyScreen() {
+  const theme = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const { client } = useApi();
   const { activeProfileId } = useProfiles();
 
@@ -346,11 +349,9 @@ export default function SafetyScreen() {
                 styles.filter,
                 {
                   backgroundColor: chosen
-                    ? LIGHT_THEME.informational.background
-                    : LIGHT_THEME.surface.background,
-                  borderColor: chosen
-                    ? LIGHT_THEME.informational.border
-                    : LIGHT_THEME.surface.border,
+                    ? theme.informational.background
+                    : theme.surface.background,
+                  borderColor: chosen ? theme.informational.border : theme.surface.border,
                 },
               ]}
             >
@@ -399,6 +400,7 @@ function SafetyRow({
   }) => void;
   readonly onOpenAlert: (alertPublicationId: string) => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.alert}>
       <Text accessibilityRole="header" style={styles.name}>
@@ -453,37 +455,38 @@ function SafetyRow({
   );
 }
 
-const styles = StyleSheet.create({
-  alert: {
-    gap: SPACING.sm,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    borderColor: LIGHT_THEME.surface.border,
-    backgroundColor: LIGHT_THEME.surface.background,
-  },
-  name: {
-    fontSize: FONT_SIZE.title,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
-  filter: {
-    minHeight: MIN_TOUCH_TARGET_DP,
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-  },
-  filterLabel: {
-    fontSize: FONT_SIZE.caption,
-    fontWeight: '600',
-    color: LIGHT_THEME.surface.foreground,
-  },
-  coverage: {
-    fontSize: FONT_SIZE.caption,
-    lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-    color: LIGHT_THEME.surfaceMuted.foreground,
-  },
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    alert: {
+      gap: SPACING.sm,
+      padding: SPACING.md,
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      borderColor: theme.surface.border,
+      backgroundColor: theme.surface.background,
+    },
+    name: {
+      fontSize: FONT_SIZE.title,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    filters: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
+    filter: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderRadius: SPACING.sm,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+    },
+    filterLabel: {
+      fontSize: FONT_SIZE.caption,
+      fontWeight: '600',
+      color: theme.surface.foreground,
+    },
+    coverage: {
+      fontSize: FONT_SIZE.caption,
+      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
+      color: theme.surfaceMuted.foreground,
+    },
+  });

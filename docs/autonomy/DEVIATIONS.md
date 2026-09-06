@@ -2786,3 +2786,28 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Required future work**: a domain whose mail somebody can receive. That is `BLK-010` and not a
   separate blocker, which is the useful half of this finding.
 - **Status**: OPEN, blocked on `BLK-010`.
+
+---
+
+## DEV-070 - Haptics are designed, wired and not felt
+
+- **Affected specification**: `18` (feedback channels), `12` (platform behaviour behind an
+  adapter), DEC-131.
+- **Expected behaviour**: pressing a control, confirming a dose and being refused each produce the
+  platform's own haptic.
+- **Implemented behaviour**: the intent vocabulary, the adapter and every call site are real. The
+  installed engine records what it was asked for and does nothing, so no phone vibrates.
+- **Reason**: there is no haptic engine in this build's dependency set and adding one is not a
+  design decision. React Native's own `Vibration` needs `android.permission.VIBRATE` in the merged
+  manifest, and `expo-haptics` is a native module needing `expo prebuild` and a fresh development
+  build. A newly declared permission appears on the Play listing and in the Data-safety form, which
+  is a product decision rather than a side effect of a styling pass - and `verify:device:camera`
+  exists precisely because a permission can arrive in a merged manifest with no screen changing.
+- **Workaround in place**: `createRecordingHapticEngine` is installed by default and
+  `installHapticEngine` takes a real one in a single call at the root. The call sites are asserted
+  by test, so the half that can be measured without hardware is measured.
+- **Risk**: none. Nothing in this app reports anything through touch alone (DEC-131), so an absent
+  haptic costs a small amount of polish and no information.
+- **Required future work**: choose an engine, accept the manifest change, install it at the root,
+  and re-run `verify:device:camera` to confirm nothing else arrived in the manifest with it.
+- **Status**: OPEN.
