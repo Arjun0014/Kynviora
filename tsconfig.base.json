@@ -30,6 +30,8 @@
       "@kynviora/domain/*": ["packages/domain/src/*"],
       "@kynviora/contracts": ["packages/contracts/src/index.ts"],
       "@kynviora/contracts/*": ["packages/contracts/src/*"],
+      "@kynviora/agent": ["packages/agent/src/index.ts"],
+      "@kynviora/agent/*": ["packages/agent/src/*"],
       "@kynviora/catalog": ["packages/catalog/src/index.ts"],
       "@kynviora/catalog/*": ["packages/catalog/src/*"],
       "@kynviora/regulatory": ["packages/regulatory/src/index.ts"],

@@ -33,6 +33,8 @@ import { ProjectionProvider } from '@/storage/ProjectionProvider';
 import { ReminderProvider } from '@/reminders/ReminderProvider';
 import { PendingSyncProvider } from '@/sync/PendingSyncProvider';
 import { PendingSenders } from '@/sync/PendingSenders';
+import { VoiceProvider } from '@/voice/VoiceProvider';
+import { VoiceHost } from '@/voice/VoiceHost';
 
 export default function RootLayout() {
   return (
@@ -83,9 +85,18 @@ export default function RootLayout() {
                       and the providers below it all handle "nobody is signed in" already,
                       because that is the state on first run. */}
                           <AuthGate>
-                            <Stack screenOptions={{ headerShown: false }}>
-                              <Stack.Screen name="(tabs)" />
-                            </Stack>
+                            {/* Inside the gate, because a conversation is about somebody's own
+                                records and there is nobody until they have signed in. Outside the
+                                navigator, because Voice Mode is drawn over the whole app rather
+                                than inside one destination - `06` fixes the five and will not
+                                give one up (DEC-136). */}
+                            <VoiceProvider>
+                              <VoiceHost>
+                                <Stack screenOptions={{ headerShown: false }}>
+                                  <Stack.Screen name="(tabs)" />
+                                </Stack>
+                              </VoiceHost>
+                            </VoiceProvider>
                           </AuthGate>
                         </ReminderProvider>
                       </PendingSyncProvider>

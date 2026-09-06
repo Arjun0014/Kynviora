@@ -67,6 +67,7 @@ import { RegulatoryLens } from '@/features/lens/RegulatoryLens';
 import { AlertDetail } from '@/features/safety/AlertDetail';
 import { SafetyReceipt } from '@/features/safety/SafetyReceipt';
 import { useTheme, useThemedStyles } from '@/theme/ThemeProvider';
+import { VoiceBar } from '@/voice/VoiceHost';
 
 const EMPTY = { lines: [], totalItems: 0 } as const;
 
@@ -325,6 +326,8 @@ export default function SafetyScreen() {
       onRefresh={onRetry}
       refreshing={refreshing}
     >
+      <VoiceBar />
+
       <ResourceState resource={resource} onRetry={onRetry} />
 
       {/* Filters, offered as the five states rather than as "show me the bad ones". Each is a

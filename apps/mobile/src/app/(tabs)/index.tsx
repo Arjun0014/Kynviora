@@ -55,6 +55,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { Card } from '@/components/Card';
 import { SectionHeader } from '@/components/SectionHeader';
 import { useThemedStyles } from '@/theme/ThemeProvider';
+import { VoiceBar } from '@/voice/VoiceHost';
 
 export default function TodayScreen() {
   const styles = useThemedStyles(makeStyles);
@@ -161,6 +162,8 @@ export default function TodayScreen() {
       onRefresh={onRetry}
       refreshing={refreshing}
     >
+      <VoiceBar />
+
       {preparingPack ? (
         <VisitPackFlow
           onClose={() => {

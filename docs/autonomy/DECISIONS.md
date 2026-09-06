@@ -4898,3 +4898,171 @@ Every haptic accompanies a sentence; none of them is the sentence.
 nothing claims a phone buzzed.
 
 **Sources.** `18`, `12`, `02`.
+
+---
+
+## DEC-132 - The agent gets tools, never data, and its reach is the app's reach
+
+**Context.** Voice Mode has to be able to operate most of Kynviora for somebody who finds a
+touchscreen difficult. `17` is unambiguous that a model gets no publish or write tools and that its
+output is a proposal rather than a fact. The question was how to give a conversational agent broad
+reach without giving it any authority.
+
+**Options.** (a) The agent calls the API directly with the person's token. (b) The agent gets a
+server-side runner with its own credential. (c) The agent proposes typed calls against a registry,
+and the **app** executes them through its own client.
+
+**Decision.** (c). `packages/agent` defines a closed vocabulary of tool names; the dispatcher takes
+a `ToolExecutor` whose functions are supplied by the app and each of which calls the same
+`KynvioraClient` method a screen calls.
+
+**Rationale.** (a) hands a model a bearer token, which is the one thing `14` says never leaves the
+places it is needed - and a prompt-injected model with a token is an authenticated attacker. (b) is
+worse: a service credential is authority nobody's session limits, and `11` puts the caregiver and
+safety decisions on the server precisely so no client can be them.
+
+(c) has a property neither of the others can have: **there is nothing to leak, because the agent
+never holds anything.** It returns a name and an argument bag. Row-level security, caregiver
+capabilities, step-up and the offline journal all apply unchanged, because it is the app's own code
+doing the reaching - which is why a revoked caregiver's next voice request returns nothing for
+exactly the reason `CAR-4` measures on a device.
+
+The dispatcher is the only thing that can run a tool, and it re-checks at execution time rather
+than trusting an earlier check. The two are separated by a person deciding something, which takes
+seconds during which a session expires, a network drops, or a grant is revoked.
+
+**Consequences.** An agent that hallucinates a tool name gets a lookup miss. One that invents an
+argument is refused rather than having it dropped - dropping it would run a call the confirmation
+summary also dropped it from. A tool with no executor is refused as `BLOCKED`, never a crash inside
+a conversation, which is what the extraction tools are today.
+
+**Sources.** `17`, `13`, `14`, `11`, `15`.
+
+---
+
+## DEC-133 - Six answers per tool, none of them defaulted
+
+**Context.** A capability reachable by speech needs conditions attached: who may do it, does it need
+confirming, does it need fresh identity, may voice reach it, does it work with no signal, what does
+it put on the screen. Any of the six left implicit is one somebody forgets.
+
+**Decision.** Every field of `ToolDefinition` is required. A new tool cannot compile without an
+answer to all six, and class invariants are asserted by test: every `WRITE` confirms, no `READ` or
+`NAVIGATE` confirms, and every `stepUp` tool is `TOUCH_ONLY`.
+
+**Rationale.** A default is what somebody forgets to change, and the safe default differs per field
+
+- `confirmation` wants `EXPLICIT`, `voice` wants `TOUCH_ONLY`, `offline` wants `ONLINE_ONLY` - so a
+  single "safe default" is not available even in principle. Requiring all six makes adding a tool an
+  act of deciding rather than of copying.
+
+Three groups are `TOUCH_ONLY`, each for its own reason. **Fresh identity** (`14`): the Visit Pack,
+the export, caregiver administration, closing the account - nothing here can re-authenticate by
+voice, and a spoken "yes" is a far weaker act than a typed password in the room a voice interface
+is usually used in. **Removing a health record**: `delete_item`, recoverable only within the
+retention window. **A legal act** (`16`): a consent receipt records that somebody read a specific
+versioned text, and a voice interface cannot show anybody a text.
+
+They stay **in** the registry rather than being omitted, so the agent can say where the control is
+rather than claiming the capability does not exist.
+
+**Consequences.** The prohibited list from `17` is enforced as an **absence in the vocabulary**
+rather than as a filter over output: there is no tool for prescribing, changing a dose, stopping,
+splitting, replacing or recommending, because no such capability exists in Kynviora for a tool to
+name. `registry.test.ts` asserts the absence by word, so adding one fails a test rather than passing
+a review.
+
+**Sources.** `17`, `14`, `16`, `11`, DEC-116, `docs/RETENTION.md`.
+
+---
+
+## DEC-134 - A confirmation is for one proposal, it expires, and anything else cancels it
+
+**Context.** A spoken "yes" is ambiguous in a way a tap is not. Every failure this machine prevents
+has shipped in a real voice assistant.
+
+**Decision.** `packages/agent/src/session.ts` is a state machine with at most one armed proposal.
+`confirm` takes the proposal's own id; a confirmation naming a different one is refused **and
+disarms**; a proposal expires after ninety seconds measured against a caller-supplied clock; and
+starting to speak again disarms whatever was armed. Releasing and disarming happen in one step.
+
+**Rationale.** Written as a flag, the failure is a "yes" meant for something else executing
+something the person never heard described. Naming the proposal makes that unrepresentable.
+Disarming on disagreement rather than merely refusing is the safe reading of "the two sides think
+different things are on the table". The clock is a parameter because two device harnesses move the
+device's own clock and so could anybody else - a confirmation window measured against it is one
+somebody can widen. Releasing and disarming together means a repeated word records one dose.
+
+The summary is stored **with** the proposal, so what was agreed to is the sentence that was heard
+rather than one regenerated at execution time - and the summary is composed by
+`packages/agent/src/summary.ts` rather than by the model, because "shall I record that you took it"
+is one word from "shall I record that you skipped it" and both are fluent.
+
+**Sources.** `18`, `14`, `12`.
+
+---
+
+## DEC-135 - The Speech Gate: nothing is spoken that this repository did not compose
+
+**Context.** A conversational agent's appeal is that it phrases things itself. About somebody's
+medicine that is the failure `17` exists to prevent: a model asked "what are these tablets for?"
+will answer fluently, from its own weights, and nothing in the answer came from a source, a rule or
+a reviewer.
+
+**Decision.** Every fact Kynviora speaks came out of a tool result; every other word came from a
+closed set of about fifteen fixed utterances in `speech.ts`. A response is a list of parts, each
+either an utterance **key** or text that appears **exactly** in the tool result it cites. The
+assembled sentence is then scanned by `findForbiddenClaims`.
+
+**Rationale.** The Citation Gate's argument applied to speech: the model proposes, and something
+that is not the model decides what may be said. Exact matching rather than substring, because
+substring would let "no matched rule was found within coverage" become "no rule found" and the
+missing words are the ones doing the work. The whole-sentence scan is not redundant with the
+per-part ones: a **combination** can say something neither half said, and this is the only place the
+whole sentence exists.
+
+An agent proposing speech names a key rather than supplying prose, so there is no `AgentTurn` shape
+carrying a sentence a model wrote.
+
+**Consequences.** It costs fluency. Kynviora sounds composed rather than chatty and cannot answer a
+question no tool answers - it says so, from the closed set. What it buys is that there is no path,
+including a jailbroken or prompt-injected one, by which a sentence about somebody's medicine reaches
+their ears without having been composed here. `17` already treats an uploaded package, a webpage and
+a regulatory PDF as untrusted input that may carry instructions; a model completion is the same
+class of thing and gets the same treatment.
+
+**Sources.** `17`, `18`, `09`, `02`, `15`.
+
+---
+
+## DEC-136 - Voice Mode is an overlay with a transcript, and it says what it cannot do
+
+**Context.** `06` fixes five destinations and will not give one up. Voice Mode needed somewhere to
+live, an entry control an older adult can find, and an honest account of a build with no speech
+providers.
+
+**Decision.** An overlay over the whole app, opened by a full-width labelled bar rendered in the
+same place on all five destinations. It keeps its transcript when closed. With no provider it offers
+the identical conversation by typing, and says on the screen that it cannot listen.
+
+**Rationale.** An overlay for the reason every sheet in this app is one: a sixth destination would
+take a slot `06` will not free. Drawn over the app rather than layered on it, because a transparent
+overlay leaves the app underneath reachable by a screen reader - somebody navigating by swipe would
+walk out of the conversation into a screen they cannot see. Full-width and labelled rather than an
+icon in a header, because `18`'s audience should not have to find a small unlabelled control in the
+corner furthest from a thumb.
+
+**The transcript is not a nicety.** It is the whole interface for somebody hard of hearing, it is
+what a screen reader can read, and it is how a person recovers a sentence they missed. It survives
+the conversation ending for that last reason.
+
+The confirmation controls are 88dp rather than 48, stacked rather than side by side, and named for
+what they do - "Yes, do that" and "No, leave it" rather than "OK" and "Cancel", which are the same
+word to somebody who did not hear the question.
+
+**Consequences.** The build ships a usable simplified interface today: large targets, a transcript,
+the same six gates, and typed input taking the identical path a spoken sentence would. What it does
+not ship is listening or speaking, which is `BLK-012`, and the screen says so rather than pretending
+to listen.
+
+**Sources.** `06`, `18`, `12`, `BLK-012`.

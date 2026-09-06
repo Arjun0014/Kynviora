@@ -84,6 +84,7 @@ import { useReminders } from '@/reminders/ReminderProvider';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
 import { newIdempotencyKey } from '@/platform/ids';
 import { useThemedStyles } from '@/theme/ThemeProvider';
+import { VoiceBar } from '@/voice/VoiceHost';
 
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
 
@@ -739,6 +740,8 @@ export default function ShelfScreen() {
       onRefresh={onRetry}
       refreshing={refreshing}
     >
+      <VoiceBar />
+
       <ResourceState resource={resource} onRetry={onRetry} />
 
       {/* Above the filters and above the list, so it is reachable from the empty shelf as well -

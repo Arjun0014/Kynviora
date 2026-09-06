@@ -25,7 +25,8 @@
       "@kynviora/domain": ["../../packages/domain/src/index.ts"],
       "@kynviora/contracts": ["../../packages/contracts/src/index.ts"],
       "@kynviora/presentation": ["../../packages/presentation/src/index.ts"],
-      "@kynviora/catalog": ["../../packages/catalog/src/index.ts"]
+      "@kynviora/catalog": ["../../packages/catalog/src/index.ts"],
+      "@kynviora/agent": ["../../packages/agent/src/index.ts"]
     }
   },
   // `test/**` is included so the harness is typechecked too. It is not app code and Metro never

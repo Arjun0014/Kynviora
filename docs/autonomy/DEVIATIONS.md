@@ -2811,3 +2811,51 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Required future work**: choose an engine, accept the manifest change, install it at the root,
   and re-run `verify:device:camera` to confirm nothing else arrived in the manifest with it.
 - **Status**: OPEN.
+
+---
+
+## DEV-071 - A dose recorded by voice with no signal is not queued
+
+- **Affected specification**: `12` (a queued change is visible rather than assumed), `03` group J,
+  DEC-111, DEC-132.
+- **Expected behaviour**: recording a dose through Voice Mode with no network writes it into the
+  offline journal under the key the attempt minted, exactly as the dose sheet does.
+- **Implemented behaviour**: the request is made, it fails, and Voice Mode says the phone has no
+  connection. Nothing is queued, so the dose is lost rather than delayed.
+- **Reason**: the journal is reached through `usePendingSync`, which the dose sheet holds and the
+  voice executor does not. Wiring it is small; what it needs first is a decision about **what the
+  queue does to a conversation** - a queued dose is a promise about a later moment, and the
+  confirmation a person just gave was for "record this", not for "keep this here and send it when
+  you can". Making that change without saying it in the summary would be confirming one sentence
+  and performing another, which is the failure DEC-134 exists to prevent.
+- **Workaround in place**: the honest sentence. Voice Mode says the phone has no connection and
+  says nothing about having kept anything - the same distinction the dose sheet draws between
+  "Recorded." and the queued wording, which `OFF-6` measures on a device.
+- **Risk**: low, and in the safe direction. A person is told the record was not made, which is
+  true. The opposite failure - saying it was kept when nothing was - is the one `OFF-6` exists for.
+- **Required future work**: decide the wording for a proposal whose outcome may be a queued write,
+  then wire `usePendingSync` into the voice executor and cover it the way `OFF-6` and `OFF-7` cover
+  the dose sheet.
+- **Status**: OPEN.
+
+---
+
+## DEV-072 - Fifty suites boot a database in parallel, and 60 seconds stopped covering it
+
+- **Affected specification**: `19` (a test that could not run is not a pass), `21`.
+- **Expected behaviour**: `npm run verify` fails only when something is wrong.
+- **Implemented behaviour (before the fix)**: two files timed out in `beforeAll` on one run and a
+  different one on the next, each passing in seconds when run alone. `Hook timed out in 60000ms`,
+  with nothing wrong in any of them.
+- **Reason**: fifty test files open their own PGlite instance in `beforeAll`, each costing an engine
+  plus every migration, and they run in parallel - so the cost of one is a function of how many
+  others are booting at the same moment. The suite grew past the point where 60s covered it: this
+  session added 8 files and 165 tests, and the failures started.
+- **How it resolved**: the server project's `hookTimeout` is 180s. `main.test.ts` and
+  `clientIntegration.test.ts` had already reached that number and set it per file; this is the same
+  decision applied where the cause actually is. These tests are not slow by accident - they boot a
+  real database on purpose - and a timeout that fires on load rather than on a hang teaches people
+  to re-run rather than to look.
+- **Risk**: a genuinely hung `beforeAll` now takes three minutes to report instead of one. Accepted:
+  a hang is rare and loud, and a flake is common and quiet.
+- **Status**: **RESOLVED 2026-09-07**.

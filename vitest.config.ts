@@ -42,7 +42,19 @@ export default defineConfig({
           ],
           exclude: ['**/node_modules/**', '**/dist/**', 'apps/**'],
           testTimeout: 30_000,
-          hookTimeout: 60_000,
+          // 180s, raised from 60s on 2026-09-07 (`DEV-072`).
+          //
+          // **Fifty test files open their own PGlite instance in `beforeAll`**, each of which
+          // costs an engine plus every migration. They run in parallel, so the cost of one is a
+          // function of how many others are booting at the same moment - and the suite has grown
+          // past the point where 60s covers it. Two files timed out on one run of `npm run verify`
+          // and a different one on the next, each passing in seconds on its own.
+          //
+          // `main.test.ts` and `clientIntegration.test.ts` reached the same number first and set
+          // it per file; this is that decision applied where the cause actually is. The tests are
+          // not slow by accident - they boot a real database on purpose - and a timeout that fires
+          // on load rather than on a hang teaches people to re-run rather than to look.
+          hookTimeout: 180_000,
         },
       },
       {

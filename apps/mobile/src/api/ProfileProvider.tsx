@@ -58,11 +58,29 @@ const NO_PROFILES: readonly ProfileSummary[] = Object.freeze([]);
 
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 
-export function ProfileProvider({ children }: { readonly children: ReactNode }) {
+export interface ProfileProviderProps {
+  readonly children: ReactNode;
+  /**
+   * Injected by tests, the same way `ApiProvider` and `LocalStoreProvider` accept one.
+   *
+   * A test about a screen that needs a chosen profile should not have to stand up a network
+   * client and wait two microtask turns to get one - that would be measuring `useResource`
+   * again, and it is measured where it lives.
+   */
+  readonly value?: ProfileContextValue;
+}
+
+export function ProfileProvider({ children, value }: ProfileProviderProps) {
   const { client } = useApi();
   const [selected, setSelected] = useState<string | null>(null);
 
-  const load = useMemo(() => (client === null ? null : () => client.listProfiles()), [client]);
+  // Nothing is loaded when a context was injected. Otherwise a test supplying a profile would
+  // still fire the request it supplied the profile to avoid, and the assertion "the client was
+  // asked nothing" would be false for a reason nothing to do with what it is measuring.
+  const load = useMemo(
+    () => (client === null || value !== undefined ? null : () => client.listProfiles()),
+    [client, value],
+  );
 
   const { resource, reload } = useResource(load, {
     isEmpty: (value) => value.profiles.length === 0,
@@ -96,19 +114,20 @@ export function ProfileProvider({ children }: { readonly children: ReactNode }) 
     setSelected(profileId);
   }, []);
 
-  const value = useMemo<ProfileContextValue>(
-    () => ({
-      resource,
-      profiles,
-      activeProfileId: selected,
-      activeProfile: profiles.find((profile) => profile.id === selected) ?? null,
-      select,
-      reload,
-    }),
-    [resource, profiles, selected, select, reload],
+  const resolved = useMemo<ProfileContextValue>(
+    () =>
+      value ?? {
+        resource,
+        profiles,
+        activeProfileId: selected,
+        activeProfile: profiles.find((profile) => profile.id === selected) ?? null,
+        select,
+        reload,
+      },
+    [value, resource, profiles, selected, select, reload],
   );
 
-  return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;
+  return <ProfileContext.Provider value={resolved}>{children}</ProfileContext.Provider>;
 }
 
 export function useProfiles(): ProfileContextValue {

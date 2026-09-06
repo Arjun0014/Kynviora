@@ -59,6 +59,7 @@ import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
 import { PendingQueue } from '@/features/sync/PendingQueue';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
 import { useThemedStyles } from '@/theme/ThemeProvider';
+import { VoiceBar } from '@/voice/VoiceHost';
 
 export default function YouScreen() {
   const styles = useThemedStyles(makeStyles);
@@ -296,6 +297,8 @@ export default function YouScreen() {
       onRefresh={onRetry}
       refreshing={refreshing}
     >
+      <VoiceBar />
+
       {/* Who the app is acting as. Never a token, a header value or an email address (`14`). */}
       <Text style={styles.identity}>
         {session.kind === 'ANONYMOUS'

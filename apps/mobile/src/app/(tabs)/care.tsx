@@ -54,6 +54,7 @@ import { InviteCaregiver } from '@/features/caregivers/InviteCaregiver';
 import { RemoveCaregiverAccess } from '@/features/caregivers/RemoveCaregiverAccess';
 import { newIdempotencyKey } from '@/platform/ids';
 import { useThemedStyles } from '@/theme/ThemeProvider';
+import { VoiceBar } from '@/voice/VoiceHost';
 
 /** Matches `DEFAULT_INVITATION_TTL_DAYS` on the server. Shown, not sent. */
 const INVITATION_TTL_DAYS = 7;
@@ -343,6 +344,9 @@ export default function CareScreen() {
         </ScrollView>
       ) : (
         <ScrollView contentContainerStyle={styles.sheet}>
+          {/* Only on the list, not over a sheet. A conversation started from inside a half-filled
+              invitation form would lose the form; Voice Mode has no way to put it back. */}
+          <VoiceBar />
           <CaregiverAccessList
             // EMPTY is passed through as READY so the list renders its own empty copy, which says
             // something specific - "no one else has access to this profile" - rather than the

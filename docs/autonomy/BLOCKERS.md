@@ -316,6 +316,49 @@ implemented, the exact configuration required is documented, and independent wor
   development authenticator is refused when the issuer is set, so there is no configuration where
   both are live.
 
+## BLK-012 - No speech, language-model or speech-synthesis provider
+
+- **Class**: `EXTERNAL_CREDENTIAL` + `LEGAL_REVIEW` (the `16` model and data privacy review)
+- **Status**: OPEN - worked around
+- **Blocks**: anything in Voice Mode actually listening or speaking; any claim that a real model
+  routes a real sentence to the right tool; `17`'s AI evaluation suite for a conversational agent.
+- **Detail**: Voice Mode needs three separate providers, and each of them would receive **health
+  content spoken in somebody's home**:
+
+  | Port                | What it would receive                        |
+  | ------------------- | -------------------------------------------- |
+  | `SpeechRecognizer`  | Audio of somebody naming their medicine      |
+  | `ConversationAgent` | A transcript and the callable tool list      |
+  | `SpeechSynthesizer` | Text that has already passed the Speech Gate |
+
+  `16` requires a model and data privacy review before any provider sees health content, and `23`
+  lists provider strategy among the decisions that are recorded rather than arrived at. Choosing
+  one here to make progress would be exactly the fabrication the operating brief forbids.
+
+- **Workaround in place**: everything that does not need a provider is built and tested. The tool
+  registry, the six gates, the confirmation machine, the Speech Gate, the executor, the navigation
+  and camera bridge and the screen are all real; `createScriptedAgent` is a **phrase matcher**,
+  named for what it is, and it exercises the whole pipeline end to end in CI on a machine with no
+  microphone. `NO_PROVIDERS` is the shipped configuration, and the screen says on itself that it
+  cannot listen rather than appearing to.
+
+- **What the fake establishes, and what it does not**: it establishes that a proposal for tool X
+  with arguments Y is validated, confirmed, executed and reported correctly - including when the
+  proposal is hostile, which several of its scripts are. It establishes **nothing** about whether a
+  real model would propose that tool for that sentence. That half is unmeasured because there is no
+  provider rather than because nobody looked.
+
+- **What an implementation must promise** (`packages/agent/src/ports.ts` states it in the code):
+  the agent gets tools and never data - `AgentTurnRequest` carries what was said, the conversation
+  as plain lines, and the tool list, and there is no field on it for a session, a token, a profile
+  or any record content. Its output is untrusted (`15`) and is validated against the registry
+  regardless of which provider produced it.
+
+- **To resolve**: complete the `16` model and data privacy review per provider, record the decision
+  per `23`, obtain credentials, and implement the three adapters behind the existing ports. Nothing
+  else about Voice Mode changes: the shell, the gates and the gate on speech are provider-independent
+  by construction.
+
 ## BLK-011 - Which caregiver capability may record a dose has not been decided
 
 - **Class**: `LEGAL_REVIEW` (product/consent scope, not law) - recorded here because it blocked a
