@@ -72,11 +72,11 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5186 tests passing**, 0 failing, across 197 files.
+- **5201 tests passing**, 0 failing, across 197 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
-  everything that runs on Node or in Postgres. `mobile` is `apps/mobile` - 205 tests across 17
+  everything that runs on Node or in Postgres. `mobile` is `apps/mobile` - 217 tests across 17
   files that render real components, with `react-native` and the Expo modules resolved to stubs,
   because React Native's source is Flow-annotated JavaScript esbuild cannot parse and expects a
   native bridge Node does not have. What each stub substitutes and what it therefore cannot
@@ -678,62 +678,62 @@ the API will not distinguish them.
 
 ## What is genuinely built and tested
 
-| Area                                                           | State                                                            |
-| -------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Domain vocabularies, IDs, provenance, untrusted quarantine     | Complete, 94 tests                                               |
-| Database schema, 31 migrations, full RLS                       | Complete, 321 tests incl. threats A1/A2/A3                       |
-| Catalog engine, capture pipeline, Trust Passport               | Complete, 178 tests                                              |
-| Regulatory registry, Citation Gate, Lens                       | Complete, 72 tests                                               |
-| Safety rule engine with replay; schedule and refill            | Complete, 88 tests                                               |
-| Ingestion pipeline with hostile-source defences                | Complete, 37 tests                                               |
-| Presentation layer, accessibility tokens, safety copy          | Complete, 436 tests                                              |
-| API boundary (Fastify), RLS-scoped context                     | Complete, 37 tests                                               |
-| Offline sync protocol, per-entity conflict policy              | Complete, 43 tests                                               |
-| Caregiver invitation, acceptance, revocation, audit            | Complete, 214 tests                                              |
-| Visit Pack export, reviewed-content gate, expiry               | Complete, 100 tests                                              |
-| Caregiver alert delivery, notification privacy                 | Complete, 140 tests; channel recorded per row; **not sent**      |
-| Household Review Inbox, record-writing completion              | Complete, 95 tests                                               |
-| Medicine Reconciliation, two lists and no chosen answer        | Complete, 109 tests                                              |
-| Reviewer console: roles, two-person approval, withdrawal       | Complete, 116 tests; **publishes nothing** (BLK-006)             |
-| Staff surface split, console package, console process          | Complete, 172 tests; AAL2 modelled, no project (BLK-010)         |
-| Alert detail, explainability, report-incorrect                 | Complete, 89 tests; **no alert to open** (BLK-006)               |
-| Notification delivery policy, quiet hours, revalidation        | Complete, 161 tests; **holds, recipient-locally** (DEC-119)      |
-| Household and profile creation, the profile switcher           | Complete, 90 tests; no emergency contact (`DEV-034`)             |
-| Allergy and sensitivity records, provenance, review date       | Complete, 86 tests; no conditions (`DEV-035`)                    |
-| Consent state, withdrawal, and what withdrawing stops          | Complete, 96 tests; export built, account deletion not           |
-| Typed term mapped to a canonical substance                     | Complete, 27 tests; no review queue (`DEV-037`)                  |
-| Regulatory version diff and change attribution                 | Complete, 27 tests; **no route yet** (BLK-004)                   |
-| Shadow runs, before/after comparison, assessment replay        | Complete, 74 tests; substance rules now measurable               |
-| Manual entry: the write path, the form and the screen          | Complete, 105 tests; the only surface that creates an item       |
-| Item update, the three lifecycle states, mark-as-checked       | Complete, 105 tests; deletion built (DEC-117)                    |
-| End-to-end vertical slice, 7 required scenarios                | Complete, 36 tests                                               |
-| Mobile app shell, encrypted store, accessible primitives       | **Runs on Android 16; storage and 48dp verified on device**      |
-| The encrypted read projection, offline shelf and profiles      | Complete, 11 tests; no offline writes (`DEV-038`)                |
-| Medicine schedules: the write path, the editor, the reads      | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)       |
-| Local reminders: plan, reconcile, exact alarms, lock screen    | Complete, 52 tests; **measured on a device** (`DEV-041`)         |
-| Device harnesses: seventeen, storage to Voice Mode             | Complete, 542 tests; 13 of `19`'s 14 scenarios (`DEV-040`)       |
-| The mobile app itself: rendering, hooks, providers             | 205 tests, and `apps/**` linted at last (`DEV-043` closed)       |
-| Recording a dose: `RECORD_DOSES`, its own capability           | Complete, 47 tests; 7/7 on a device (DEC-116)                    |
-| Caregiver, export, inbox, reconciliation, add-an-item UI       | Wired; **not device-verified** (`DEV-007`)                       |
-| Retention: the matrix, the roles, the doors, the sweep         | Complete, 67 tests; deadlines measured to the microsecond        |
-| The retention worker: schedule, lease, run history             | Complete, 81 tests; **runs**, in-process or its own (DEC-121)    |
-| Retention health on the operations snapshot                    | Complete, 14 tests; five aggregates, no read on a run row        |
-| Closed vocabularies checked against their CHECK constraints    | Complete, 6 tests; TypeScript and SQL cannot drift silently      |
-| The digest: cadence, revalidation, and what it dropped         | Complete, 52 tests; assembled, **not sent** (`DEV-064`)          |
-| Deleting an item and a profile, end to end                     | Complete, 48 tests; account deletion open (`DEV-062`)            |
-| Portable export: fourteen sections, sources referenced         | Complete, 26 tests; no artifact and no link, by choice           |
-| Scanning a barcode: permission, check digit, confirmation      | Complete, 45 tests; **5/5 on a device**; no OCR (BLK-007)        |
-| Supabase Auth behind the existing port, reviewer AAL2          | Complete, 34 tests; **no project** (BLK-010)                     |
-| Recipient-local quiet hours, and the zone ICU would accept     | Complete, 22 tests; a device reports its own zone                |
-| Design system: two themes, roles, elevation, motion, haptics   | Complete, 44 tests; every pair at AA in **both** themes          |
-| The theme layer on a device: provider, preference, override    | Complete, 11 tests; `FOLLOW_SYSTEM` reaches dark now (`DEV-077`) |
-| Haptics: four intents, an adapter, and an engine behind it     | Complete, 7 tests; **Android only** by choice (DEC-139)          |
-| Safety, Care and You on the design system                      | Complete; Safety **7/7** on a device (DEC-138, 142, 143)         |
-| Agent Tool Registry: 30 tools, eight answers each, no defaults | Complete, 111 tests; what `17` forbids has no name to be called  |
-| Voice Mode: gates, confirmation, Speech Gate, the shell        | Complete; **9/9 on a device**; no provider (`BLK-012`)           |
-| Voice Mode's offline dose, through the app's own journal       | Complete, 5 tests; same entity, same key, same drain (DEC-140)   |
-| What a caller may do on a profile, reported by the server      | Complete, 7 tests; voice offers what a grant carries (DEC-141)   |
-| CI pipeline                                                    | Written; not yet run on a real runner                            |
+| Area                                                           | State                                                                     |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Domain vocabularies, IDs, provenance, untrusted quarantine     | Complete, 94 tests                                                        |
+| Database schema, 31 migrations, full RLS                       | Complete, 321 tests incl. threats A1/A2/A3                                |
+| Catalog engine, capture pipeline, Trust Passport               | Complete, 178 tests                                                       |
+| Regulatory registry, Citation Gate, Lens                       | Complete, 72 tests                                                        |
+| Safety rule engine with replay; schedule and refill            | Complete, 88 tests                                                        |
+| Ingestion pipeline with hostile-source defences                | Complete, 37 tests                                                        |
+| Presentation layer, accessibility tokens, safety copy          | Complete, 436 tests                                                       |
+| API boundary (Fastify), RLS-scoped context                     | Complete, 37 tests                                                        |
+| Offline sync protocol, per-entity conflict policy              | Complete, 43 tests                                                        |
+| Caregiver invitation, acceptance, revocation, audit            | Complete, 214 tests                                                       |
+| Visit Pack export, reviewed-content gate, expiry               | Complete, 100 tests                                                       |
+| Caregiver alert delivery, notification privacy                 | Complete, 140 tests; channel recorded per row; **not sent**               |
+| Household Review Inbox, record-writing completion              | Complete, 95 tests                                                        |
+| Medicine Reconciliation, two lists and no chosen answer        | Complete, 109 tests                                                       |
+| Reviewer console: roles, two-person approval, withdrawal       | Complete, 116 tests; **publishes nothing** (BLK-006)                      |
+| Staff surface split, console package, console process          | Complete, 172 tests; AAL2 modelled, no project (BLK-010)                  |
+| Alert detail, explainability, report-incorrect                 | Complete, 89 tests; **no alert to open** (BLK-006)                        |
+| Notification delivery policy, quiet hours, revalidation        | Complete, 161 tests; **holds, recipient-locally** (DEC-119)               |
+| Household and profile creation, the profile switcher           | Complete, 90 tests; no emergency contact (`DEV-034`)                      |
+| Allergy and sensitivity records, provenance, review date       | Complete, 86 tests; no conditions (`DEV-035`)                             |
+| Consent state, withdrawal, and what withdrawing stops          | Complete, 96 tests; export built, account deletion not                    |
+| Typed term mapped to a canonical substance                     | Complete, 27 tests; no review queue (`DEV-037`)                           |
+| Regulatory version diff and change attribution                 | Complete, 27 tests; **no route yet** (BLK-004)                            |
+| Shadow runs, before/after comparison, assessment replay        | Complete, 74 tests; substance rules now measurable                        |
+| Manual entry: the write path, the form and the screen          | Complete, 105 tests; the only surface that creates an item                |
+| Item update, the three lifecycle states, mark-as-checked       | Complete, 105 tests; deletion built (DEC-117)                             |
+| End-to-end vertical slice, 7 required scenarios                | Complete, 36 tests                                                        |
+| Mobile app shell, encrypted store, accessible primitives       | **Runs on Android 16; storage and 48dp verified on device**               |
+| The encrypted read projection, offline shelf and profiles      | Complete, 11 tests; no offline writes (`DEV-038`)                         |
+| Medicine schedules: the write path, the editor, the reads      | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)                |
+| Local reminders: plan, reconcile, exact alarms, lock screen    | Complete, 52 tests; **measured on a device** (`DEV-041`)                  |
+| Device harnesses: seventeen, storage to Voice Mode             | Complete, 542 tests; 13 of `19`'s 14 scenarios (`DEV-040`)                |
+| The mobile app itself: rendering, hooks, providers             | 217 tests, and `apps/**` linted at last (`DEV-043` closed)                |
+| Recording a dose: `RECORD_DOSES`, its own capability           | Complete, 47 tests; 7/7 on a device (DEC-116)                             |
+| Caregiver, export, inbox, reconciliation, add-an-item UI       | Wired; **not device-verified** (`DEV-007`)                                |
+| Retention: the matrix, the roles, the doors, the sweep         | Complete, 67 tests; deadlines measured to the microsecond                 |
+| The retention worker: schedule, lease, run history             | Complete, 81 tests; **runs**, in-process or its own (DEC-121)             |
+| Retention health on the operations snapshot                    | Complete, 14 tests; five aggregates, no read on a run row                 |
+| Closed vocabularies checked against their CHECK constraints    | Complete, 6 tests; TypeScript and SQL cannot drift silently               |
+| The digest: cadence, revalidation, and what it dropped         | Complete, 52 tests; assembled, **not sent** (`DEV-064`)                   |
+| Deleting an item and a profile, end to end                     | Complete, 48 tests; account deletion open (`DEV-062`)                     |
+| Portable export: fourteen sections, sources referenced         | Complete, 26 tests; no artifact and no link, by choice                    |
+| Scanning a barcode: permission, check digit, confirmation      | Complete, 45 tests; **5/5 on a device**; no OCR (BLK-007)                 |
+| Supabase Auth behind the existing port, reviewer AAL2          | Complete, 34 tests; **no project** (BLK-010)                              |
+| Recipient-local quiet hours, and the zone ICU would accept     | Complete, 22 tests; a device reports its own zone                         |
+| Design system: two themes, roles, elevation, motion, haptics   | Complete, 44 tests; every pair at AA in **both** themes                   |
+| The theme layer on a device: provider, preference, override    | Complete, 11 tests; `FOLLOW_SYSTEM` reaches dark now (`DEV-077`)          |
+| Haptics: four intents, an adapter, and an engine behind it     | Complete, 7 tests; **Android only** by choice (DEC-139)                   |
+| Safety, Care and You on the design system                      | Complete; Safety **7/7** on a device (DEC-138, 142, 143)                  |
+| Agent Tool Registry: 30 tools, eight answers each, no defaults | Complete, 111 tests; what `17` forbids has no name to be called           |
+| Voice Mode: gates, confirmation, Speech Gate, the shell        | Complete; **9/9 on a device**; all 30 tools runnable or refused by design |
+| Voice Mode's offline dose, through the app's own journal       | Complete, 5 tests; same entity, same key, same drain (DEC-140)            |
+| What a caller may do on a profile, reported by the server      | Complete, 7 tests; voice offers what a grant carries (DEC-141)            |
+| CI pipeline                                                    | Written; not yet run on a real runner                                     |
 
 Rows are areas, not a partition, and they do not sum to the total. The caregiver, Visit Pack,
 alert-delivery, Review Inbox, reconciliation and reviewer-console rows each count tests that
@@ -780,26 +780,21 @@ deliver to (`DEV-069`). One mailbox closes all three.
 
 ## Immediate next task
 
-**Wire the six Voice Mode tools that are offered and cannot run** (`DEV-084`). The registry
-declares thirty tools and `createToolExecutor` defines fifteen. Seven of the absences are correct
-(`TOUCH_ONLY`, refused at gate 2) and two are correct (`BLK-007`). Six are offered, unblocked and
-unrunnable: `list_safety_state`, `describe_alert`, `list_caregiver_access`, `list_pending_changes`,
-`update_item` and `update_schedule`. The agent is told they exist, proposes one, and `dispatch`
-refuses it as `BLOCKED` with no blocker identifier - so a person asking "is there anything I should
-know about my medicines" is told that part of Kynviora is not finished, which is a journey Voice
-Mode exists for.
+**Give a queued schedule change a way home** (`DEV-084`'s remainder). `create_schedule` and
+`update_schedule` are `ONLINE_ONLY` now because that is what the build does, and the touch path
+queues schedules perfectly well - `OFF-1` to `OFF-5` measure three creates under one key leaving
+one schedule. So the mechanism exists and voice does not reach it, and the honest registry value
+made that visible rather than closing it.
 
-It is not a capability gap. `profileAlerts`, `alertDetail`, `listCaregiverGrants`, `updateItem` and
-`updateSchedule` all exist on the client. Do the four reads first - no confirmation, no offline
-decision - then the two writes, which need a summary sentence each and an answer to whether they
-queue. `apps/mobile/src/voice/executor.test.ts` fails the day one of them is wired without being
-taken off its list, so the list is the worklist.
+What it needs is not more wiring. `record_dose` queues because a dose is `MERGE_BY_ID` and its
+idempotency key makes a replay land once; a schedule **update** is conditional on
+`expectedVersion`, and a replay minted while the row was at version 3 must not silently win
+against a row that has since moved to 4. That is a decision about what a stale queued edit means -
+`13`'s `ASK_USER` policy already says the answer for `medicine_schedule` is to ask - and then
+`PendingSenders` needs a sender for the update, not just the create.
 
-**While doing it, settle the `QUEUES` claim.** The registry says `create_schedule` and
-`update_schedule` queue, and only `record_dose` reaches the journal. The touch path does queue
-schedules - `OFF-1` to `OFF-5` measure it - so the mechanism exists and voice does not use it.
-Until it does, the registry is describing an intention rather than the build. `DEV-085` made the
-app tell the truth about it at the moment it happens; that is not the same as making it true.
+Worth doing because it is the one place where voice is narrower than touch for a reason nobody
+chose: `14`'s touch-only group is deliberate and recorded, and this is not.
 
 **Then a mailbox** (`BLK-010`), which is still the whole of what stands between the fourteenth
 device scenario and every one of its eleven checks passing.

@@ -81,8 +81,8 @@ of the eight has a default: a new tool cannot compile without all of them.
 | `list_schedules`             | READ     | VIEW_MEDICINES | -       | allowed    | projection | Schedule sheet |
 | `read_dose_history`          | READ     | VIEW_MEDICINES | -       | allowed    | projection | Dose sheet     |
 | `record_dose`                | WRITE    | RECORD_DOSES   | yes     | allowed    | **queues** | Dose sheet     |
-| `create_schedule`            | WRITE    | MANAGE_MEDS    | yes     | allowed    | queues     | Schedule sheet |
-| `update_schedule`            | WRITE    | MANAGE_MEDS    | yes     | allowed    | queues     | Schedule sheet |
+| `create_schedule`            | WRITE    | MANAGE_MEDS    | yes     | allowed    | online     | Schedule sheet |
+| `update_schedule`            | WRITE    | MANAGE_MEDS    | yes     | allowed    | online     | Schedule sheet |
 | `add_medicine`               | WRITE    | MANAGE_MEDS    | yes     | allowed    | online     | Add sheet      |
 | `add_personal_care_item`     | WRITE    | MANAGE_PC      | yes     | allowed    | online     | Add sheet      |
 | `update_item`                | WRITE    | MANAGE_MEDS    | yes     | allowed    | online     | Item detail    |
@@ -394,3 +394,64 @@ Before any of them is wired: the model and data privacy review in `16`, and a re
 ```bash
 npm test -- packages/agent
 ```
+
+---
+
+## 9. What the registry says and what the executor does
+
+`docs/design/VOICE_MODE.md` has always claimed that "the agent's reach is the app's reach". For as
+long as both existed, that was not true: `createToolExecutor` defined **15 of the 30** tools, and
+nothing compared the two lists. `everyToolNameIsDefined()` asserts the registry is complete against
+itself, which is a different question.
+
+Seven of the fifteen absences were correct - `TOUCH_ONLY`, refused at gate 2 before an executor is
+ever consulted - and two were correct, blocked on `BLK-007`. Six were offered, unblocked and
+unrunnable, so `dispatch` reached its last step, found no executor and refused with `BLOCKED` and
+**no blocker identifier**: the agent said "that part of Kynviora is not finished yet" for
+capabilities this document presented as working. `list_safety_state` was among them, and "is there
+anything I should know about my medicines" is a journey Voice Mode exists for (`DEV-084`).
+
+All six are wired. `apps/mobile/src/voice/executor.test.ts` compares the two lists now, in both
+directions, and its known-gap list is empty:
+
+| It asserts                                           | So that                                         |
+| ---------------------------------------------------- | ----------------------------------------------- |
+| Every offered, unblocked tool has an executor        | The registry cannot over-claim                  |
+| Nothing on the known-gap list has quietly been wired | The list cannot become a list of old bugs       |
+| The executor declares nothing the registry does not  | No capability escapes the eight answers         |
+| No `TOUCH_ONLY` tool has an executor at all          | The third path neither enforcement point covers |
+
+### Two things this settled rather than typed
+
+**`update_schedule` takes an item as well as a schedule.** `ScheduleChangeBody` is whole-document
+and conditional on `expectedVersion`, and no client method reads one schedule by its own ID - so
+the row is found through `schedules(itemId)`. The agent has the item already: a `scheduleId` can
+only have come from `list_schedules`, which takes one.
+
+**`create_schedule` and `update_schedule` are `ONLINE_ONLY`.** Both said `QUEUES`. Only
+`record_dose` reaches the offline journal (DEC-140), and a write conditional on a version is not
+something a replay carries unchanged - a key makes a dose land once, and a stale
+`expectedVersion` is a different problem with a different answer. The registry describes the build
+now. Making it true rather than honest is recorded as the next task in `STATUS.md`.
+
+### What a read may say out loud
+
+The four reads go through the same view functions their screens use, so every spoken line is
+composed by `@kynviora/presentation` and passes the Speech Gate unchanged. Three of them needed a
+decision that a screen does not:
+
+- **`list_safety_state` says the coverage statement first.** `09` requires it to accompany the
+  result and `23` D-014 is that an absence of a matched rule must never read as approval. A screen
+  keeps the statement visible while somebody reads the list (DEC-138); a sentence is gone once it
+  is said, so five "Nothing matched" lines read out and then silence is precisely the
+  shelf-has-been-cleared reading. It also speaks no total and no ranking: `02` forbids the
+  aggregate, and a sorted list is that aggregate with the number left off.
+- **`describe_alert` keeps urgency and evidence as separate lines.** `23` D-005 forbids merging
+  them into one visual, and out loud that means never one phrase.
+- **`list_caregiver_access` will not read a bare user ID aloud.** `caregiverAccessRows` falls back
+  to the grantee's ID where the server sent no name, which is right beside a control on a screen
+  and wrong in a room. A row with no name is announced by its state and what it carries instead.
+
+`list_pending_changes` reads the offline journal rather than the server, through the same
+`PendingSyncProvider.list` the queue screen calls - "did my change go through" is a question about
+this phone, and asking the server would answer a different one.

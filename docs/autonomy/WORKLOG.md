@@ -6029,3 +6029,70 @@ field: capitalisation is part of what the person typed and they can backspace it
 assuming otherwise, and it only surfaced because the emulator had been reprovisioned and came back
 with the platform default. A nonce that already starts with a capital has nothing left to disagree
 about.
+
+---
+
+## 2026-09-07 (third) - the six tools, and the warning nobody had read
+
+### DEV-084 closed
+
+`createToolExecutor` defined 15 of 30 tools. Seven absences were correct (`TOUCH_ONLY`, refused at
+gate 2) and two were correct (`BLK-007`); six were offered, unblocked and unrunnable, so `dispatch`
+refused them with `BLOCKED` and no blocker identifier. All six are wired and `KNOWN_UNWIRED` is
+empty. The test is kept rather than deleted with the gap - an empty allowlist is the strongest form
+of the claim, and the four assertions are what stop the next tool being added without an executor.
+
+The reads went through the same view functions their screens use, so nothing new reaches the Speech
+Gate. Three needed a decision a screen does not have to make:
+
+`list_safety_state` says the **coverage statement first**. On a screen it is a card that stays
+visible while somebody reads (DEC-138); a sentence is gone once said, so five "Nothing matched"
+lines read out and then silence is exactly the shelf-has-been-cleared reading `23` D-014 is about.
+It speaks no total and no ranking either.
+
+`describe_alert` keeps urgency and evidence as separate lines. `list_caregiver_access` will not
+read a bare user ID aloud, which `caregiverAccessRows` falls back to when the server sent no name -
+right beside a control, wrong in a room.
+
+Two things were settled rather than typed. `update_schedule` gained an `itemId`, because
+`ScheduleChangeBody` is whole-document and conditional on `expectedVersion` and no client method
+reads a schedule by its own ID. And `create_schedule` and `update_schedule` are `ONLINE_ONLY`
+rather than `QUEUES`: only `record_dose` reaches the journal, and a write conditional on a version
+is not something a replay carries unchanged. The registry describes the build now, which makes the
+remaining gap visible rather than closing it - it is the next task.
+
+`update_item` reads the version before writing and maps its field with a `switch` rather than
+`{ [field]: value }`. The field name is a string off a model completion and computing a property
+name from one is DEC-146 exactly.
+
+### A defect the new tests found
+
+`alertDetailScreenView` declares four fields `| null` and passed them straight through from the
+response, so a server that omits one returned `undefined` from a type that says it cannot - and
+`AlertDetail.tsx:112` guards `=== null` before reading `.heading`. An omitted `unexplainable` was a
+crash on the alert screen. Not reachable today because `BLK-006` publishes nothing, which is a
+reason to fix it now rather than at the first real publication (`DEV-087`).
+
+Same class as DEC-147, from the other direction: `ownEntry` stops an inherited value arriving where
+a type promised none; `?? null` stops an absent one doing the same.
+
+### The warning behind LogBox, identified
+
+`DEV-086` left this open: LogBox appears only once something logs a warning, and nobody had read
+the warning. It is **Expo's dev client**, reproduced by killing Metro while the app was running:
+
+```
+W/ReactNativeJS: Cannot connect to Expo CLI.
+W/ReactNativeJS: URL: 10.0.2.2:8081
+```
+
+Ruled out first, each by measurement: a full sheet survey at font scale 2 on a healthy stack
+produces no JS warning and no banner (20/20 PASS, zero `ReactNativeJS` warnings in a captured
+logcat); so does visiting all five destinations; so does opening Voice Mode; and so does making the
+**API** unreachable, because the app has offline states and uses them. Only the dev server dying
+produced it.
+
+Nothing was changed in the app, because there is nothing in the app to fix and suppressing a
+dev-tooling warning would remove the one visible signal that a run was degraded. `SHEET-1` and
+`A11Y-1` name the cause now, so the next person reading a survey with the banner in it knows to
+check the dev server before believing the rest of the report (`DEV-088`).
