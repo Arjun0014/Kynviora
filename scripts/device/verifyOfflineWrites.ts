@@ -98,7 +98,21 @@ const ITEM_NAME = 'Synthetic Tablet A';
  * recorded is still there. A fixed note would let last week's run answer this week's question
  * about how many exist.
  */
-const RUN_C_NOTE = `offline dose ${Date.now().toString(36).slice(-4).toUpperCase()}`;
+/*
+ * Capitalised on purpose. The note field is an ordinary `TextInput` with no `autoCapitalize`, so
+ * React Native's default of `"sentences"` applies and Android capitalises the first letter of what
+ * is typed into it. The harness then read back `"Offline dose WCRR"` where it had typed
+ * `"offline dose WCRR"`, could not confirm its own precondition, and reported `OFF-6` and `OFF-7`
+ * as `INCONCLUSIVE` - a run lost to the keyboard rather than to the app.
+ *
+ * That is not a defect in the field. "Rendered exactly as it was typed" is a promise about what
+ * the app does with the text afterwards, and a keyboard's capitalisation is part of what the
+ * person typed - they can backspace it. The fragility was the harness assuming otherwise, and a
+ * nonce that already starts with a capital has nothing left to disagree about. It survives a
+ * device whose keyboard preferences differ, which is how this surfaced: the emulator was
+ * reprovisioned and came back with the platform default.
+ */
+const RUN_C_NOTE = `Offline dose ${Date.now().toString(36).slice(-4).toUpperCase()}`;
 
 interface ServerSchedule {
   readonly id: string;
