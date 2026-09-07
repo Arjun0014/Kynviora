@@ -5710,3 +5710,63 @@ the executor's own `spoken` array as `composedFrom` - so a string written in the
 itself and passed. Every one of them happened to come from the presentation layer and nothing was
 enforcing it. A key cannot cite itself: `gateSpeech` resolves it against `UTTERANCES` and refuses
 one this build does not have.
+
+### The device round, and the one red result
+
+Safety **7/7**, Voice Mode **9/9**, dose access **7/7**, caregiver access **5/5**, camera **5/5** -
+and `CAM-3` still finds none of the eight permissions granted or declared, which is the check most
+likely to start failing by accident and the one that matters after wiring a haptic engine.
+
+The accessibility survey came back **70 PASS, 1 FAIL, 1 INCONCLUSIVE**, and the FAIL is the part
+worth writing down. All five destinations passed at both font scales, including the three redesigned
+ones - so the redesign cost nothing `18` asks for. What failed was `SHEET-2/Add a medicine@2`:
+"Save" never fully on screen at any scroll position.
+
+**The first two readings were both wrong.** That a redesign had cost something - but nothing in this
+session touched `AddItem.tsx` or `Screen`. That the tab bar was covering the button - plausible, and
+false. Measuring it took two minutes: `Save` at y1633, `Cancel` at y1863, tab bar starting at y2209.
+Four hundred pixels of clearance. **The control was reachable and the survey said it was not.**
+
+The cause is `SCROLL_ANCHOR_Y`, a fixed 1900. At font scale 2 the manual-entry form is almost
+entirely `TextInput`s drawn tall, so the drag began inside an `EditText` - which takes it as text
+selection and passes nothing to the list. The swipe happened, nothing moved, the dump matched the
+last one, and `surveySheet`'s "an unchanged screen means the sheet has stopped" ended the survey
+three fields from the bottom (`DEV-079`, DEC-145).
+
+An unchanged dump now buys one retry from an anchor no text field occupies, and only a dump
+unchanged after **that** ends a survey. `dragAnchorAvoidingFields` lives in `accessibility.ts` with
+five tests, so it runs in CI with nothing attached (DEC-102).
+
+**This is `DEV-046` mirrored.** That one was a false PASS - 34/34 over a form nobody could finish -
+and the fix was to measure reachability rather than visibility. This one is a false FAIL: a
+traversal that stopped early and reported the gap as a defect in the thing it was measuring. Both
+make a report untrustworthy, and the second also teaches people to disbelieve a red result, which is
+the more expensive habit.
+
+The INCONCLUSIVE is `A11Y-1/talkback`: with TalkBack on, the first dump held no enabled, laid-out
+clickable node. That is a check that could not look, which DEC-102 makes a fail rather than a pass -
+correctly. It is not investigated here and is named rather than explained away.
+
+### And a refusal that was saying the wrong thing
+
+Wiring `DEV-071` produced a first draft that mapped a `404` to "You do not have access to that."
+`13` makes absence and refused access **deliberately** indistinguishable, and the screen renders the
+same outcome as "Kynviora has nothing to show here" - so the spoken sentence was committing to the
+reading the server declined to give. A voice interface saying out loud what the API refuses to put
+in a body is the same disclosure through a different channel.
+
+Two more sentences in the closed set (DEC-144): `notAvailable` for a `404`, and `didNotGoThrough`
+for everything else that reached a server and did not land. The second half of that one -
+"Kynviora has not kept it. Nothing has changed." - is the part that matters, because a person using
+Voice Mode is often not looking at the screen, and one who is not told nothing was kept stops
+thinking about a record that does not exist.
+
+`notAllowed` stays for the case it was written for: the dispatcher's own capability gate, which is
+this app's statement about itself rather than an inference about a server's silence.
+
+### The dark theme, measured rather than argued
+
+`adb shell cmd uimode night yes`, relaunch, screencap, read the pixel: `#0E1116`, which is
+`DARK_THEME.canvas.background`, with the appearance setting left at its default. Before today the
+same phone drew `#F7F9FB`, because `app.json` said `light` and Expo turns that into
+`AppCompatDelegate.setDefaultNightMode(MODE_NIGHT_NO)` (`DEV-077`).

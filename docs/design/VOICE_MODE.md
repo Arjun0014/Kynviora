@@ -307,6 +307,33 @@ it. A key cannot cite itself - `gateSpeech` resolves it against `UTTERANCES` and
 build does not have - so the conversation's own sentences go through there, and only facts about
 somebody's records go through `spoken`.
 
+### What a failed write is allowed to say (DEC-144)
+
+A write that reached the server and did not land has one sentence per outcome kind, and **none of
+them is `notAllowed`**:
+
+| Outcome                                 | Said                   |
+| --------------------------------------- | ---------------------- |
+| `OFFLINE`                               | `queued`, or `offline` |
+| `STEP_UP_REQUIRED`                      | `needsIdentity`        |
+| `UNAVAILABLE`                           | `notAvailable`         |
+| `UNAUTHENTICATED`, `AUTHORIZATION_LOST` | `didNotGoThrough`      |
+| `REFUSED`, `SERVER_ERROR`               | `didNotGoThrough`      |
+
+`UNAVAILABLE` is the one to be careful about. It is a `404`, and `13` makes absence and refused
+access **deliberately** indistinguishable - the screen renders it as "Kynviora has nothing to show
+here", which commits to neither. "You do not have access to that" commits to the reading the server
+declined to give, and a voice interface saying out loud what the API refuses to put in a body is
+the same disclosure through a different channel.
+
+`notAllowed` still exists and is still used - by the **dispatcher's** capability gate, where this
+app's own report says the caller does not hold the capability. That is the app's statement about
+itself rather than an inference about a server's silence.
+
+`didNotGoThrough` is "That did not go through, and Kynviora has not kept it. Nothing has changed."
+The second half is doing the work: a person using Voice Mode is often not looking at the screen,
+and one who is not told nothing was kept stops thinking about a record that does not exist.
+
 **What is not there:** speech recognition, a conversational model, and speech synthesis. All three
 are `BLK-012`. Nothing listens and nothing speaks, and the screen says so rather than pretending.
 

@@ -594,11 +594,11 @@ describe('a dose recorded with no signal (DEV-071, DEC-140)', () => {
     expect(lastSpoken(rendered)).not.toContain('kept it here');
   });
 
-  it('does not queue a dose the server answered and refused', async () => {
+  it('does not queue a dose the server answered and did not write', async () => {
     // The other half of `DEV-071`, and the one that was quietly wrong: every failure was reported
     // as "no connection", so a caregiver whose grant had been revoked was told to try again later
-    // - and a retry would be refused identically. A refusal is not a transport problem and must
-    // never enter a journal that will replay it.
+    // - and a retry would fail identically. A refusal is not a transport problem and must never
+    // enter a journal that will replay it.
     const queued: string[] = [];
     const rendered = mount({
       script: 'i took it',
@@ -612,8 +612,47 @@ describe('a dose recorded with no signal (DEV-071, DEC-140)', () => {
     await recordAndConfirm(rendered);
 
     expect(queued).toEqual([]);
-    expect(lastSpoken(rendered)).toContain('do not have access');
     expect(lastSpoken(rendered)).not.toContain('no connection');
+  });
+
+  it('never says a 404 was a refusal, because the server declined to say which it was', async () => {
+    // `13` makes absence and refused access deliberately indistinguishable, and the screen renders
+    // the same answer as "Kynviora has nothing to show here". A spoken "you do not have access to
+    // that" would assert the reading the server withheld - and would tell a caregiver something
+    // about the permission model from a response written not to.
+    const rendered = mount({
+      script: 'i took it',
+      rules: RULES,
+      calls: [],
+      moves: [],
+      doseOutcome: { kind: 'UNAVAILABLE' },
+      journal: recordingJournal([]),
+    });
+
+    await recordAndConfirm(rendered);
+
+    expect(lastSpoken(rendered)).toContain('nothing to show for that');
+    expect(lastSpoken(rendered)).not.toContain('access');
+  });
+
+  it('says nothing was kept when the server failed', async () => {
+    // The half a person who is not looking at the screen has to hear. Without it they stop
+    // thinking about a record that does not exist, and there is no later moment at which they
+    // find out (`DEV-055`).
+    const queued: string[] = [];
+    const rendered = mount({
+      script: 'i took it',
+      rules: RULES,
+      calls: [],
+      moves: [],
+      doseOutcome: { kind: 'SERVER_ERROR', retryable: true, correlationId: null },
+      journal: recordingJournal(queued),
+    });
+
+    await recordAndConfirm(rendered);
+
+    expect(queued).toEqual([]);
+    expect(lastSpoken(rendered)).toContain('has not kept it');
   });
 
   it('still says "Done." when the server took it', async () => {

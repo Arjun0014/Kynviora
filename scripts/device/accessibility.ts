@@ -50,6 +50,42 @@ export interface UiNode {
   readonly bounds: Rect;
 }
 
+/**
+ * Class names of nodes that eat a vertical drag instead of passing it to the list.
+ *
+ * A React Native `TextInput` is an `EditText`, and a drag that begins inside one is taken as text
+ * selection rather than as a scroll - so the swipe happens, the list does not move, and a survey
+ * that treats "the screen did not change" as "the screen has reached its end" stops in the middle
+ * of a form (`DEV-079`). `AutoCompleteTextView` is the same widget under another name.
+ */
+const SWALLOWS_A_DRAG: readonly string[] = ['android.widget.EditText'];
+
+/**
+ * A y coordinate a drag can start at without a text field taking it, or `null`.
+ *
+ * Searched from the bottom of the candidate band upwards, because a drag started low travels
+ * furthest before running out of screen. `null` means every candidate row is inside a field - a
+ * genuinely possible screen, and one the caller has to answer for rather than guess at.
+ *
+ * `bounds` from `uiautomator` are already clipped to what is visible, so a field scrolled half off
+ * the top is avoided over the half that is still there, which is the half a drag would land in.
+ */
+export function dragAnchorAvoidingFields(
+  nodes: readonly UiNode[],
+  packageName: string,
+  band: { readonly top: number; readonly bottom: number },
+  step = 60,
+): number | null {
+  const fields = nodes.filter(
+    (node) => node.packageName === packageName && SWALLOWS_A_DRAG.includes(node.className),
+  );
+  for (let y = band.bottom; y >= band.top; y -= step) {
+    const inside = fields.some((field) => y >= field.bounds.top && y <= field.bounds.bottom);
+    if (!inside) return y;
+  }
+  return null;
+}
+
 const NODE = /<node\b([^>]*)\/?>/g;
 const ATTRIBUTE = /([a-zA-Z-]+)="([^"]*)"/g;
 const BOUNDS = /^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$/;

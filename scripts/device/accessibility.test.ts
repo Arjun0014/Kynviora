@@ -7,6 +7,7 @@ import {
   clipRectsOf,
   crashedApp,
   isFullyVisible,
+  dragAnchorAvoidingFields,
   parseUiHierarchy,
   sizeInDp,
   type UiNode,
@@ -365,5 +366,63 @@ describe('whose crash it was', () => {
   it('does not match a package that merely starts the same', () => {
     const other = OWN_CRASH.replace('com.kynviora.app', 'com.kynviora.apples');
     expect(crashedApp(other, PACKAGE)).toBe(false);
+  });
+});
+
+describe('where a drag may safely begin', () => {
+  /**
+   * Spec references: `19`, DEC-102, `DEV-079`.
+   *
+   * The failure this exists to prevent is a **false FAIL**, which is the mirror of the one
+   * `DEV-046` was about and is just as bad in its own direction: a drag begun inside a text field
+   * is taken as text selection, the list does not move, and a survey that reads "the screen did
+   * not change" as "the screen has ended" reports every control below that point as unreachable -
+   * on a form whose Save button sits 400px above the tab bar.
+   */
+  const BAND = { top: 700, bottom: 1_900 };
+
+  function field(topPx: number, bottomPx: number, packageName = PACKAGE): string {
+    return node({
+      class: 'android.widget.EditText',
+      package: packageName,
+      bounds: `[40,${String(topPx)}][1040,${String(bottomPx)}]`,
+    });
+  }
+
+  it('answers the bottom of the band where nothing is in the way', () => {
+    const nodes = parseUiHierarchy(hierarchy(node({ bounds: '[40,200][300,300]' })));
+    expect(dragAnchorAvoidingFields(nodes, PACKAGE, BAND)).toBe(BAND.bottom);
+  });
+
+  it('moves above a field that covers the bottom of the band', () => {
+    const nodes = parseUiHierarchy(hierarchy(field(1_500, 2_000)));
+    const anchor = dragAnchorAvoidingFields(nodes, PACKAGE, BAND);
+    expect(anchor).not.toBeNull();
+    expect(anchor as number).toBeLessThan(1_500);
+    expect(anchor as number).toBeGreaterThanOrEqual(BAND.top);
+  });
+
+  it('finds the gap between two fields', () => {
+    // The case a form at a large font scale actually produces: tall fields with a little air
+    // between them, and the air is where a drag has to start.
+    const nodes = parseUiHierarchy(hierarchy(field(700, 1_180), field(1_320, 1_900)));
+    const anchor = dragAnchorAvoidingFields(nodes, PACKAGE, BAND);
+    expect(anchor).not.toBeNull();
+    expect(anchor as number).toBeGreaterThan(1_180);
+    expect(anchor as number).toBeLessThan(1_320);
+  });
+
+  it('answers null rather than a row inside a field', () => {
+    // A genuinely possible screen, and the caller has to answer for it rather than guess. Returning
+    // the band's bottom anyway would be the same swipe again dressed as a retry.
+    const nodes = parseUiHierarchy(hierarchy(field(600, 2_000)));
+    expect(dragAnchorAvoidingFields(nodes, PACKAGE, BAND)).toBeNull();
+  });
+
+  it('ignores a field belonging to another app', () => {
+    // A system dialog's own text box is not this app's list, and avoiding it would move the anchor
+    // for no reason - the same reasoning `checkScreen` applies to every other measurement.
+    const nodes = parseUiHierarchy(hierarchy(field(1_500, 2_000, 'com.android.systemui')));
+    expect(dragAnchorAvoidingFields(nodes, PACKAGE, BAND)).toBe(BAND.bottom);
   });
 });

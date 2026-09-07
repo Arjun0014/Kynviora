@@ -3072,3 +3072,35 @@ its own limit on pending local notifications, which is lower than Android's and 
   `notAllowed`; everything else says `cannotDoThat`. None of them invents a reason - `13` keeps the
   reason out of the authorization responses on purpose and this respects that.
 - **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-079 - The accessibility survey reported a reachable control as unreachable (resolved)
+
+- **Affected specification**: `18` (a control below the fold with no way to reach it is a control
+  nobody can use), `19` (a check that could not look is not a finding), DEC-102, DEC-145.
+- **Expected behaviour**: `SHEET-2/Add a medicine@2` passes, because "Save" can be scrolled to.
+- **Implemented behaviour**: it failed - "1 control(s) were never fully on screen at any scroll
+  position: ["Save"]".
+- **What was actually true**: driving the same sheet by hand put `Save` at y1633 and `Cancel` at
+  y1863, with the tab bar starting at y2209. Four hundred pixels of clearance. The control was
+  reachable and the survey said it was not.
+- **Reason**: `surveySheet` ends when a dump is identical to the previous one, on the reasoning
+  that a screen that did not change has stopped moving. `SCROLL_ANCHOR_Y` is a fixed 1900, and at
+  font scale 2 the manual-entry form is almost entirely `TextInput`s drawn tall - so the drag began
+  inside an `EditText`, which took it as text selection and passed nothing to the list. The swipe
+  happened, nothing moved, the dump matched, and the survey stopped three fields from the bottom.
+- **How it was found**: by not believing the FAIL. The first reading was that a redesign had cost
+  something, and the second was that the tab bar was covering the button. Both were wrong, and
+  measuring the actual bounds took two minutes - which is the whole lesson here. A red result is
+  evidence about the **measurement and the product together**, and this project has an entry
+  (`DEV-046`) about exactly the same mistake in the other direction.
+- **How it resolved**: DEC-145. An unchanged dump now triggers one retry from an anchor no text
+  field occupies (`dragAnchorAvoidingFields`), and only a dump unchanged after **that** ends the
+  survey. Five tests in `accessibility.test.ts`, so the judgement runs in `npm run verify` with
+  nothing attached.
+- **What it says about the coverage**: the harness had a fixed drag anchor and no way to notice
+  when a drag was consumed rather than applied. The same anchor is used by `scrollDown` everywhere,
+  so any other long form of text fields could have produced the same false FAIL - and none had,
+  because until this session no sheet survey had ever met a form that tall at 2x.
+- **Status**: **RESOLVED 2026-09-07**.

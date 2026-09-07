@@ -28,6 +28,7 @@ import {
   doseHistory,
   itemDetailScreenView,
   shelfView,
+  type ApiOutcome,
   type DoseEventBody,
   type KynvioraClient,
   type ScheduleBody,
@@ -61,6 +62,30 @@ export interface ToolResult {
 function argument(call: ToolCall, name: string): string {
   const value = call.arguments[name];
   return typeof value === 'string' ? value : '';
+}
+
+/**
+ * What to say when a write reached the server and did not land.
+ *
+ * A total function over the failure kinds, so a kind added to `ApiOutcome` later is a compile
+ * error here rather than a write silently acquiring somebody else's sentence. `OFFLINE` is absent
+ * because it is not a failure of this kind at all - it is the one outcome that queues.
+ */
+function utteranceForWriteFailure(
+  kind: Exclude<ApiOutcome<unknown>['kind'], 'OK' | 'OFFLINE'>,
+): UtteranceKey {
+  switch (kind) {
+    case 'STEP_UP_REQUIRED':
+      return 'needsIdentity';
+    case 'UNAVAILABLE':
+      // Never `notAllowed`. `13` makes absence and refused access indistinguishable on purpose.
+      return 'notAvailable';
+    case 'UNAUTHENTICATED':
+    case 'AUTHORIZATION_LOST':
+    case 'REFUSED':
+    case 'SERVER_ERROR':
+      return 'didNotGoThrough';
+  }
 }
 
 /**
@@ -217,11 +242,17 @@ export function createToolExecutor(
      * first request arrived and lost its answer, and on a dose history that is a false record of
      * what somebody did (DEC-111).
      *
-     * Everything else is a server that answered and declined. Saying "no connection" to that is
-     * telling somebody to retry something that will be refused identically, so it is reported as a
-     * refusal - `notAllowed` where the answer was about permission, which is the sentence the
-     * screen's own refusal path uses, and `cannotDoThat` otherwise. Neither invents a reason: `13`
-     * keeps the reason out of the authorization responses on purpose and this respects that.
+     * Everything else is a server that answered and did not write. Saying "no connection" to that
+     * is telling somebody to retry something that will fail identically, so each kind gets the
+     * sentence that is true of it - and **none of them is `notAllowed`**. A `404` is the one to be
+     * careful about: `13` makes absence and refused access deliberately indistinguishable, so
+     * "you do not have access to that" would assert the reading the server declined to give. The
+     * screen says "Kynviora has nothing to show here" for the same answer, and `notAvailable` is
+     * that sentence in the conversation's register.
+     *
+     * `STEP_UP_REQUIRED` keeps its own sentence, which points at the screen where a password can
+     * be typed. Everything else - a lost session, a refusal with a code, a server that failed -
+     * says `didNotGoThrough`, whose second half is the half that matters: nothing was kept.
      */
     record_dose: async (call) => {
       // Minted once, here, for this intent. If the send fails the journal keeps **this** key, so
@@ -239,17 +270,7 @@ export function createToolExecutor(
       if (outcome.kind === 'OK') return { spoken: [] } satisfies ToolResult;
 
       if (outcome.kind !== 'OFFLINE') {
-        return {
-          spoken: [],
-          utterances: [
-            outcome.kind === 'UNAUTHENTICATED' ||
-            outcome.kind === 'AUTHORIZATION_LOST' ||
-            outcome.kind === 'STEP_UP_REQUIRED' ||
-            outcome.kind === 'UNAVAILABLE'
-              ? 'notAllowed'
-              : 'cannotDoThat',
-          ],
-        } satisfies ToolResult;
+        return { spoken: [], utterances: [utteranceForWriteFailure(outcome.kind)] };
       }
 
       // Not "Recorded." and not "Done." - those are promises about a server that has the record.

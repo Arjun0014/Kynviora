@@ -36,6 +36,7 @@ import {
   accessibleNameOf,
   clipRectsOf,
   crashedApp,
+  dragAnchorAvoidingFields,
   isInteractiveTarget,
   parseUiHierarchy,
   sizeInDp,
@@ -43,7 +44,7 @@ import {
   type UiNode,
 } from './accessibility.js';
 import { foldDump, sheetChecks, type SheetSurvey, type SurveyedControl } from './sheets.js';
-import { scrollDown, scrollUp } from './ui.js';
+import { scrollDown, scrollDownFrom, scrollUp } from './ui.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
 
 /** TalkBack's own package, which has its own runtime permission to ask for. */
@@ -92,6 +93,15 @@ const SHEETS: readonly {
 
 /** How many scroll steps a survey will take before deciding it has seen the whole sheet. */
 const MAX_SURVEY_STEPS = 12;
+
+/**
+ * Where a retry drag may begin, as screen pixels.
+ *
+ * Above the tab bar, which is not part of the sheet, and below the heading, which does not scroll
+ * with the content on every screen. The band is searched from its bottom upwards because a drag
+ * started low travels furthest before running out of screen.
+ */
+const SHEET_DRAG_BAND = Object.freeze({ top: 700, bottom: 1_900 });
 
 /**
  * The safety net on scrolling to find a control, not the budget.
@@ -250,6 +260,8 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
   let controls: readonly SurveyedControl[] = [];
   let positions = 0;
   let previous = '';
+  /** Whether the standard anchor has already failed to move this position. See the note below. */
+  let retried = false;
 
   for (let step = 0; step <= MAX_SURVEY_STEPS; step += 1) {
     const xml = dumpUiHierarchy();
@@ -266,11 +278,31 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
     // A dump identical to the last one means the sheet has stopped moving, which is the honest end
     // of a survey - a fixed number of swipes would either stop early on a long form or waste a
     // minute on a short one.
+    //
+    // It means that **only if the swipe was actually applied**. A drag beginning inside a text
+    // field is taken as text selection and the list does not move at all, so on a form at font
+    // scale 2 - which is mostly fields, drawn tall - an unchanged dump was evidence the swipe had
+    // been eaten rather than evidence the form had ended. That is how a survey reported "Save" as
+    // never reachable on a sheet whose Save button sits 400px above the tab bar (`DEV-079`), which
+    // is a false FAIL and the exact mirror of the false PASS `DEV-046` was about.
+    //
+    // So an unchanged dump is now a reason to swipe from somewhere else, once, before believing
+    // it: `dragAnchorAvoidingFields` picks the lowest row on screen that no field occupies, and a
+    // dump unchanged after **that** is a sheet that has genuinely stopped.
     const signature = nodes
       .map((node) => `${accessibleNameOf(node)}@${String(node.bounds.top)}`)
       .join('|');
-    if (signature === previous) break;
+    if (signature === previous) {
+      if (retried) break;
+      retried = true;
+      const anchor = dragAnchorAvoidingFields(nodes, PACKAGE, SHEET_DRAG_BAND);
+      if (anchor === null) break;
+      scrollDownFrom(anchor);
+      sleep(1_200);
+      continue;
+    }
     previous = signature;
+    retried = false;
 
     scrollDown();
     sleep(1_200);

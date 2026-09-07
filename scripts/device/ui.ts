@@ -214,6 +214,18 @@ export function scrollUp(): void {
   swipe(SCROLL_ANCHOR_Y - SCROLL_STEP_PX, SCROLL_ANCHOR_Y);
 }
 
+/**
+ * Scroll down with the drag starting at a chosen y rather than at the standard anchor.
+ *
+ * For a screen that is mostly text fields. `SCROLL_ANCHOR_Y` is a fixed point, and on a form at a
+ * large font scale it lands inside an `EditText` - which takes the drag as text selection and
+ * leaves the list exactly where it was (`DEV-079`). The caller picks a row no field occupies;
+ * `dragAnchorAvoidingFields` is how.
+ */
+export function scrollDownFrom(anchorY: number): void {
+  swipe(anchorY, Math.max(MIN_SCROLL_PX, anchorY - SCROLL_STEP_PX));
+}
+
 /** Scroll up by a chosen distance. The mirror of {@link scrollDownBy}. */
 export function scrollUpBy(pixels: number): void {
   const distance = Math.max(MIN_SCROLL_PX, Math.min(pixels, MAX_SCROLL_PX));

@@ -5355,3 +5355,99 @@ what its placement did not.
 all five destinations at both font scales and is what says the extra markers cost nothing.
 
 **Sources.** `06`, `18`, DEC-130, `apps/mobile/src/app/(tabs)/you.tsx`.
+
+---
+
+## DEC-144 - A `404` is never spoken as a refusal, and a failed write always says nothing was kept
+
+**Context.** DEC-140 gave `record_dose` three answers instead of two. The first draft of the middle
+one mapped `UNAUTHENTICATED`, `AUTHORIZATION_LOST`, `STEP_UP_REQUIRED` and `UNAVAILABLE` to
+`notAllowed` - "You do not have access to that." - and everything else to `cannotDoThat`.
+
+Both halves were wrong.
+
+**`UNAVAILABLE` is a `404`, and `13` makes absence and refused access deliberately
+indistinguishable.** The screen renders it as "Not available. Kynviora has nothing to show here",
+which commits to neither reading. "You do not have access to that" commits to one of them - and it
+is the one the server declined to give, which on a caregiver's phone is a fact about the permission
+model that the response was written not to disclose. A voice interface saying out loud what the API
+refuses to say in a body is the same leak through a different channel.
+
+**`cannotDoThat` is "I cannot do that by voice. You can do it on the screen, and I can take you
+there."** For a `500` that is false twice: voice can do it, and the screen will fail the same way.
+It sends somebody to a control that is about to disappoint them.
+
+**Decision.** Two more members of the closed set, and a total function mapping every failure kind
+to one of them.
+
+- `notAvailable: 'Kynviora has nothing to show for that.'` - the screen's own answer, in the
+  conversation's register. Commits to nothing about why.
+- `didNotGoThrough: 'That did not go through, and Kynviora has not kept it. Nothing has changed.'`
+  - for a lost session, a refusal with a code, and a server that failed.
+- `STEP_UP_REQUIRED` keeps `needsIdentity`, which points at the screen where a password can be
+  typed - the one case where pointing at the screen is the right advice.
+
+`notAllowed` stays, and stays for the case it was written for: the **dispatcher's** capability
+gate, where this app's own report says the caller does not hold the capability. That is a different
+statement from a `404` and is the app's to make.
+
+**Rationale for the second half of `didNotGoThrough`.** "Nothing has changed" is not padding. A
+person using Voice Mode is, by construction, often not looking at the screen; if they are not told
+that nothing was kept they stop thinking about a record that does not exist, and there is no later
+moment at which they find out. That is the failure `LOW-2` exists for on the touch path, arriving
+by ear.
+
+**Consequences.** `utteranceForWriteFailure` is a `switch` over
+`Exclude<ApiOutcome['kind'], 'OK' | 'OFFLINE'>` with no default, so a kind added to the union later
+is a compile error rather than a write silently acquiring somebody else's sentence. `OFFLINE` is
+excluded from the type because it is not a failure of this kind at all - it is the one outcome that
+queues.
+
+**Sources.** `13`, `18`, DEC-135, DEC-140, `packages/agent/src/speech.ts`,
+`apps/mobile/src/voice/executor.ts`.
+
+---
+
+## DEC-145 - An unchanged screen is only the end of a form if the swipe was actually applied
+
+**Context.** `verify:device:a11y` surveys a sheet by scrolling top to bottom and asking whether each
+control was **ever** fully visible. It ends the survey when a dump is identical to the previous one,
+on the reasoning that a screen that did not change has stopped moving - which is better than a fixed
+number of swipes, because a fixed count either stops early on a long form or wastes a minute on a
+short one.
+
+On 2026-09-07 it reported `SHEET-2/Add a medicine@2` as FAIL: "Save" never fully on screen at any
+scroll position. Driving the same sheet by hand put `Save` at y1633 with the tab bar at y2209 - 400
+pixels of clearance. **The control was reachable and the survey said it was not.**
+
+`SCROLL_ANCHOR_Y` is 1900, a fixed point. At font scale 2 the manual-entry form is almost entirely
+`TextInput`s drawn tall, so y1900 lands inside one - and a drag beginning inside an `EditText` is
+taken as text selection rather than passed to the list. The swipe happened; nothing moved; the dump
+was identical; the survey concluded the form had ended, three fields from the bottom.
+
+**Options.** (a) A bigger step. (b) More steps. (c) Fling instead of drag. (d) Retry from an anchor
+no field occupies before believing an unchanged dump.
+
+**Decision.** (d).
+
+**Rationale.** (a) and (b) treat a swipe that was **eaten** as a swipe that was too small, so they
+fail on a longer form for the same reason. (c) makes the distance moved unpredictable, which is why
+`ui.ts` uses a timed drag in the first place. (d) addresses what actually happened:
+`dragAnchorAvoidingFields` searches the drag band from its bottom upwards for a row no `EditText`
+covers, and a dump unchanged after a drag from **there** is a sheet that has genuinely stopped.
+
+`null` - every candidate row inside a field - ends the survey rather than retrying at the same
+anchor, because a retry from the same place is the same swipe wearing a different name.
+
+**Consequences.** A survey costs at most one extra swipe per position where the standard anchor
+fails. The judgement lives in `accessibility.ts` with five tests, so it runs in `npm run verify`
+with nothing attached (DEC-102).
+
+**Why this is worth a decision entry rather than a one-line fix.** It is a **false FAIL**, and this
+project has spent real effort on the other kind. `DEV-046` was a false PASS - 34/34 over a form
+nobody could finish - and the lesson taken from it was to measure reachability rather than
+visibility. This is the mirror: a measurement that traverses incompletely and reports the gap as a
+defect in the thing it is measuring. Both make the report untrustworthy, and the second one also
+teaches people to disbelieve a red result, which is the more expensive habit.
+
+**Sources.** `18`, `19`, DEC-102, `DEV-046`, `DEV-079`, `scripts/device/accessibility.ts`.

@@ -52,7 +52,30 @@ export const UTTERANCES = Object.freeze({
   offline: 'This phone has no connection at the moment, so I cannot ask the server about that.',
   queued: 'This phone has no connection, so I have kept it here and it will be sent when there is.',
   blocked: 'That part of Kynviora is not finished yet, so there is nothing for me to read you.',
+  /**
+   * Said when **this app** knows the caller does not hold the capability.
+   *
+   * Not for a `404`. The API answers absence and refused access identically on purpose (`13`), so
+   * a sentence naming a refusal would assert the one reading the server declined to give - see
+   * `notAvailable`.
+   */
   notAllowed: 'You do not have access to that.',
+  /**
+   * Said for a `404`, in the words the screen uses for the same answer.
+   *
+   * "Not available. Kynviora has nothing to show here." is what `presentScreenState` renders, and
+   * this is that sentence in the conversation's register. It commits to nothing about why, which
+   * is the whole reason the API makes absence and refusal indistinguishable.
+   */
+  notAvailable: 'Kynviora has nothing to show for that.',
+  /**
+   * Said when a request reached the server and did not succeed for any other reason.
+   *
+   * The second half is doing the work. A person who is not looking at the screen has to hear that
+   * nothing was kept - otherwise they stop thinking about a record that does not exist, and there
+   * is no later moment at which they find out (`DEV-055`, `LOW-2`).
+   */
+  didNotGoThrough: 'That did not go through, and Kynviora has not kept it. Nothing has changed.',
   // Confirmation.
   confirmPrompt: 'Shall I do that? Say yes, or press the large button.',
   confirmationExpired:
