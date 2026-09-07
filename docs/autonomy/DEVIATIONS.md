@@ -3868,3 +3868,48 @@ reverse` tunnel produces none either - the app has offline states and uses them.
   string argument. The `CONFIRM` and `CANCEL` rules survive a script stripped of everything else,
   because a script that cannot answer a confirmation cannot drive anything.
 - **Status**: **RESOLVED 2026-09-08**.
+
+---
+
+## DEV-096 - `npm run verify` fails a transform, at random, on about one run in two
+
+- **Affected specification**: `04` Phase 0.3 (one CI gate over the whole graph), `24` (a gate whose
+  red results are not acted on is not a gate), DEC-102.
+- **Expected behaviour**: `npm run verify` is the single gate, and a red run means a defect.
+- **Implemented behaviour**: at the default worker count - one per core, twelve here - the run fails
+  one to four suites with a **transform** error rather than an assertion:
+
+  ```
+  Error: Tsconfig not found C:/Web UI/KYNVIORA/packages/contracts/src/consent.ts\tsconfig.json
+  [TSCONFIG_ERROR] Failed to load tsconfig 'packages/contracts/src/pendingUpload.ts/tsconfig.json'
+  ```
+
+  The path is the **source file treated as a directory**, which is oxc walking up from a file and
+  finding nothing - and `C:/Web UI/KYNVIORA/tsconfig.json`, four levels above, plainly exists and is
+  found on every other run.
+
+- **The failure**: three runs this session, three different files, every one green when run alone -
+  `pendingUpload.test.ts` and `drain.test.ts` in 839ms, `clientIntegration.test.ts` with 145 tests.
+  At `--maxWorkers=4` the whole suite is green. So the gate reports a defect that is not there, and
+  a person who has learned that re-running fixes it has learned to ignore a red `verify`, which is
+  the failure `24` is about.
+- **How it was found**: the session's baseline run. It was first read as memory pressure - the
+  machine had 1.5GB free with an emulator resident, and a second run died with
+  `Fatal process out of memory: Zone` - but it recurred later with the emulator idle and nothing
+  else running, which rules that out as the whole story.
+- **Where the fault is**: not in this repository. `resolveTsconfig` is called through a
+  `TsconfigCache` that Vite creates per config and hands to oxc, and the failure is a race in it
+  that twelve workers contend and four do not.
+- **Risk**: none to the product. It costs a re-run and, worse, it costs the gate its authority.
+- **Candidate fix, and why it is not applied yet**: `transformWithOxc` calls `resolveTsconfig`
+  **only when `tsconfigRaw` is not a string** - so supplying a literal one in the Vite config skips
+  the lookup entirely and the race with it. It is a real fix rather than a workaround. It is also
+  not a tail-end edit: a string `tsconfigRaw` **replaces** the resolved compiler options rather than
+  merging with them, so `target: "ES2023"`, `verbatimModuleSyntax: true` and the
+  `useDefineForClassFields` default have to be reproduced exactly against `tsconfig.base.json` or
+  five thousand tests quietly change semantics. It deserves its own unit, with the transform output
+  diffed before and after on a file that uses each of those features.
+- **Interim**: trap 208 says to confirm a red `verify` with `npx vitest run --maxWorkers=4` before
+  believing it, and to re-run a **transform** error narrowed before investigating it at all. Every
+  count reported this session is from a four-worker run.
+- **Status**: **OPEN**.

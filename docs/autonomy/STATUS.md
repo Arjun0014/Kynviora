@@ -72,7 +72,7 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5201 tests passing**, 0 failing, across 197 files.
+- **5246 tests passing**, 0 failing, across 197 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -88,6 +88,11 @@ made a notification failure hide it (DEC-143).
 ```bash
 npm run verify
 ```
+
+**Confirm a red run at four workers before believing it** (`DEV-096`, trap 208). At the default
+worker count this suite fails one to four suites with a _transform_ error - a tsconfig lookup that
+treats a source file as a directory - about one run in two, and every affected file passes alone.
+Every count in this document is from `npx vitest run --maxWorkers=4`.
 
 - Database tests execute against real PostgreSQL 18.3 via PGlite as a non-superuser role.
 - **The retention worker has been run as a real process, twice, not only in tests.** Standalone
@@ -767,7 +772,8 @@ their own general suites, not the per-feature ones. Per-file counts are reproduc
 
 ## Known failing tests
 
-None.
+None. `npm run verify` at its default worker count fails a **transform** at random and that is not
+a failing test - see `DEV-096` and trap 208, and confirm at `--maxWorkers=4`.
 
 ## Active blockers
 
@@ -803,7 +809,16 @@ deliver to (`DEV-069`). One mailbox closes all three.
 
 ## Immediate next task
 
-**Let somebody keep a change the server refused** (`DEV-092`'s remainder). The control that could
+**Make `npm run verify` a gate again** (`DEV-096`). It fails a transform at random, about one run in
+two, on a different file each time - and a person who has learned that re-running fixes it has
+learned to ignore a red gate, which is the one failure a gate cannot survive. The fix follows from
+the mechanism rather than from guesswork: `transformWithOxc` skips the tsconfig lookup entirely when
+`tsconfigRaw` is a string, so supplying a literal one removes the race. It needs its own unit
+because a literal replaces the resolved compiler options rather than merging with them - `target`,
+`verbatimModuleSyntax` and `useDefineForClassFields` have to be reproduced exactly against
+`tsconfig.base.json`, and the transform output diffed before and after on a file using each.
+
+**Then let somebody keep a change the server refused** (`DEV-092`'s remainder). The control that could
 not work is gone - a conflicted row offers `DISCARD` only, and the copy says the change was not
 saved and to make it again against what is there now. What is missing is the half that lets them
 keep it: the record as it stands, beside the queued change, and a choice made while looking at
@@ -2162,6 +2177,20 @@ files`, exit 0. Re-run narrowed before believing a transform error, and re-run t
      `vitest.config.ts`, because the right worker count is a property of the machine and a low one
      would slow a CI runner that has the memory - but a green `npm run verify` on a busy
      workstation is worth one confirming pass at four workers.
+
+     **It recurred with memory free, so it is not only pressure.** A later run - emulator idle,
+     nothing else on the machine - failed one suite with
+     `Error: Tsconfig not found C:/Web UI/KYNVIORA/packages/contracts/src/consent.ts	sconfig.json`,
+     a different file from the first two, and that file passed alone with 145 tests. Three runs,
+     three different files, always a **transform** failure and never an assertion: it is a race in
+     the tsconfig resolution cache Vite hands to oxc, which the twelve-worker default contends and
+     four workers do not. The mechanism is worth carrying because the fix follows from it -
+     `transformWithOxc` calls `resolveTsconfig` only when `tsconfigRaw` is not a **string**, so
+     supplying one in the Vite config skips the lookup entirely. That is a real fix and not a
+     tail-end edit: a literal `tsconfigRaw` replaces the resolved compiler options rather than
+     merging with them, so `target`, `useDefineForClassFields` and `verbatimModuleSyntax` have to be
+     reproduced exactly or five thousand tests change semantics quietly (`DEV-096`).
+
 209. A screen carries sentences nobody spoke, and a check that searches all of it will find them.
      `verify:device:offline`'s `OFF-8` looks for `Done.` - the sentence the voice shell speaks when
      a tool answers with nothing at all - and `collectScreenText` returns the whole screen. Voice
