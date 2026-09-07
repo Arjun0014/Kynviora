@@ -9,14 +9,14 @@ Last updated: 2026-09-08
 
 ## Current position
 
-|                    |                                                                       |
-| ------------------ | --------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; the design layer carried past the golden path       |
-| **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work                |
-| **Last completed** | The registry's offline claims audited, and the "Done." it was costing |
-| **Branch**         | `master`                                                              |
-| **Latest commit**  | `fix(voice,agent): the registry's eighth answer, audited...`          |
-| **Baseline tag**   | `baseline-spec-only`                                                  |
+|                    |                                                                   |
+| ------------------ | ----------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; the design layer carried past the golden path   |
+| **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work            |
+| **Last completed** | A conflict no longer offers a retry that could never succeed      |
+| **Branch**         | `master`                                                          |
+| **Latest commit**  | `fix(presentation): the button on a conflict that could not work` |
+| **Baseline tag**   | `baseline-spec-only`                                              |
 
 **The full accessibility survey is green for the first time: 74 PASS, 0 FAIL, 0 INCONCLUSIVE.**
 The intermittent failure that had survived three sessions was captured and turned out to be React
@@ -783,16 +783,17 @@ deliver to (`DEV-069`). One mailbox closes all three.
 
 ## Immediate next task
 
-**Give a conflicted queued change a resolution that can succeed** (`DEV-092`). `pendingQueue.ts`
-offers `RETRY` on a `CONFLICTED` row and `PendingSyncProvider.retry` re-sends the payload
-unchanged - including the `expectedVersion` the server has just refused. Every conflict this build
-can produce is a conditional write, so the control is structurally futile; and because retry resets
-the attempt budget it can be pressed for ever, unlike the `REJECTED` case the same file explicitly
-guards against for exactly this reason. `13` resolves `medicine_schedule` and `allergy_record`
-`ASK_USER`, and the question that screen asks has to be a real one.
+**Let somebody keep a change the server refused** (`DEV-092`'s remainder). The control that could
+not work is gone - a conflicted row offers `DISCARD` only, and the copy says the change was not
+saved and to make it again against what is there now. What is missing is the half that lets them
+keep it: the record as it stands, beside the queued change, and a choice made while looking at
+both. Rebasing without showing the content is the silent overwrite `13` resolves this type
+`ASK_USER` to prevent, so the resolution needs the record on screen.
 
-It matters more since DEC-148, because a conflicted schedule change is now reachable from two
-surfaces rather than one.
+That is a two-version comparison surface rather than a control on an existing row, and it is the
+same question `DEV-093` asks about a spoken sentence - how this app says "what you are looking at
+is not the current state". **Both are good candidates for the Claude Design implementation pass**
+rather than for an aesthetic nobody has chosen yet.
 
 **Then a mailbox** (`BLK-010`), which is still the whole of what stands between the fourteenth
 device scenario and every one of its eleven checks passing.

@@ -79,13 +79,58 @@ describe('what a row offers', () => {
     expect(row?.actions).toEqual([]);
   });
 
-  it('offers both on a conflict, because the person decides', () => {
-    // `13`'s per-entity policy exists so that one person's change is not silently overwritten by
-    // another's. Offering only "remove" here would do exactly that, with an extra tap.
+  /**
+   * This used to assert `['RETRY', 'DISCARD']`, on the reasoning that offering only "remove" would
+   * discard somebody's change with an extra tap. The intent was right and the mechanism was not.
+   *
+   * `RETRY` does not preserve the change either. `PendingSyncProvider.retry` puts the operation
+   * back as `PENDING` with the payload **unchanged**, and every conflict this build can produce is
+   * a conditional write: `VERSION_CONFLICT` is answered by comparing the stored version against
+   * the `expectedVersion` the payload carries, so the identical request gets the identical 409. It
+   * delayed the loss rather than avoiding it - and because retry resets the attempt count, there
+   * was no cap to end the loop (`DEV-092`).
+   *
+   * Rebasing onto whatever version stands now is not the answer either: that applies a change on
+   * top of content the person has not seen, which for a medicine schedule is the overwrite `13`
+   * resolves this type `ASK_USER` to prevent. So the change stays in the journal until the person
+   * acts, the copy says the record moved and to make the change again where the record is, and the
+   * only control offered is the one that does what it says.
+   */
+  it('never offers to retry a conflict, because the precondition is what was refused', () => {
     const [row] = pendingQueueView([input({ state: 'CONFLICTED' })]).rows;
     expect(row?.kind).toBe('CONFLICTED');
-    expect(row?.actions).toEqual(['RETRY', 'DISCARD']);
+    expect(row?.actions).toEqual(['DISCARD']);
+    // Still a decision. It is not resolved, and the badge must go on saying so.
     expect(row?.needsDecision).toBe(true);
+    expect(row?.why).toBe(QUEUE_COPY.conflictHelp);
+  });
+
+  it('says a conflicted change was not saved, and where to make it again', () => {
+    // `18`: the person has to know two things and the old copy said neither. Their change is not
+    // on the server - "Kynviora will not choose between the two" left that open - and the way to
+    // apply it is to make it again against what is there now.
+    expect(QUEUE_COPY.conflictHelp).toContain('was not saved');
+    expect(QUEUE_COPY.conflictHelp).toContain('again');
+    // Never blame, never a code, never a correlation ID.
+    expect(QUEUE_COPY.conflictHelp).not.toMatch(/error|failed|invalid/i);
+  });
+
+  /**
+   * The rule the two arms above share, stated over the whole vocabulary rather than one member.
+   *
+   * `RETRY` may only be offered where the same bytes could produce a different answer. That is
+   * true of a run of retries that gave up - a connection may have come back - and false of both
+   * states where the server has already read the change and answered about its content.
+   */
+  it('offers a retry only where the identical request could succeed later', () => {
+    for (const state of ['CONFLICTED', 'REJECTED'] as const) {
+      const [row] = pendingQueueView([input({ state })]).rows;
+      expect(row?.actions, `${state} offers a retry that cannot succeed`).not.toContain('RETRY');
+    }
+    const [gaveUp] = pendingQueueView([
+      input({ state: 'FAILED_RETRYABLE', attemptCount: MAX_UPLOAD_ATTEMPTS }),
+    ]).rows;
+    expect(gaveUp?.actions).toContain('RETRY');
   });
 
   it('never offers to retry a rejection', () => {

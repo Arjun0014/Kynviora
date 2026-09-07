@@ -3690,16 +3690,38 @@ reverse` tunnel produces none either - the app has offline states and uses them.
 - **Risk**: low in the safe direction - nothing is overwritten and nothing is merged, which are the
   two failures `13` is protecting against. What it costs is the second half of `12`'s sentence: the
   change is kept and visible and **not** resolvable.
-- **Required future work**: a conflicted conditional write should offer a review rather than a
-  retry - the record as it now stands, beside what the person asked for, and a choice made while
-  looking at both. Rebasing onto a remembered `currentVersion` without showing the content is the
-  same silent overwrite one step later, so the resolution needs the record, which means the queue
-  screen needs a way to reach it. Never auto-merge: `13` resolves `medicine_schedule` `ASK_USER`
-  precisely because merging medication times is not something software may do.
-- **Interim**: nothing has been changed, and the risk is bounded by the server rather than by this
-  screen - a stale replay is refused, the authoritative state stands, and
-  `services/api/src/schedule.test.ts` asserts both.
-- **Status**: **OPEN**. The immediate next task.
+- **How the futile half resolved**: `actionsFor('CONFLICTED')` offers `DISCARD` only, and the copy
+  says the two things the person actually needs - that their change was **not saved**, which
+  "Kynviora will not choose between the two" left open, and that the way to apply it is to make it
+  again against what is there now.
+
+  The rule is stated over the vocabulary rather than over one member: `RETRY` may only be offered
+  where the identical request could produce a different answer. That is true of a run of retries
+  that gave up, because what stopped it may have gone, and false of both states where the server
+  has already read the change and answered about its content.
+
+  **Rebasing was considered and refused.** Re-sending under whatever version now stands applies
+  somebody's change on top of content they have not seen - hours later, with nobody watching -
+  which is the silent overwrite `13` resolves `medicine_schedule` `ASK_USER` to prevent. A
+  precondition only means anything if it names a state somebody actually had.
+
+  The change is not discarded on anybody's behalf either: it stays in the journal, the row stays
+  under "needs you to decide", and the badge goes on counting it until the person acts.
+
+- **What is still open, and it is the half worth having**: the person is told to make the change
+  again and is shown neither what they asked for nor what the record now says. The full resolution
+  is a review - the record as it stands, beside the queued change, and a choice made while looking
+  at both - and that is a two-version comparison surface rather than a control on an existing row.
+  **It is a good candidate for the Claude Design implementation pass**, because it is the same
+  question the `STALE` badge answers on a screen and the one `DEV-093` asks about a spoken sentence:
+  how does this app say "what you are looking at is not the current state"?
+- **Risk now**: lower than before and in the same direction. Nothing is overwritten, nothing is
+  merged, nothing is discarded unasked, and no control claims to do something it cannot. What it
+  costs is that re-making the change is done from memory.
+- **Tests**: 3 in `packages/presentation/src/pendingQueue.test.ts`, including the rule over the
+  whole state vocabulary rather than the two members it happens to catch today.
+- **Status**: **PARTIALLY RESOLVED 2026-09-08**. The control that could not work is gone; the
+  review that would let somebody keep their change is open.
 
 ---
 

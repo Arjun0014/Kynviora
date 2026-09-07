@@ -105,7 +105,7 @@ export const QUEUE_COPY = Object.freeze({
   empty: 'Everything you have changed has been saved.',
   /** `18`: what a person can do about it, before they wonder. */
   conflictHelp:
-    'Somebody else changed this after you did. Kynviora will not choose between the two, so this one is yours to decide.',
+    'Somebody else changed this after you did, so your change was not saved. Kynviora will not put it on top of a version nobody has looked at. Open the record and make the change again against what is there now.',
   rejectedHelp:
     'Kynviora could not save this as it was written. Trying again would give the same answer, so the only thing to do is remove it and make the change again.',
   gaveUpHelp: 'Kynviora stopped trying after several attempts. You can try again now.',
@@ -147,15 +147,33 @@ function kindOf(input: QueueInput): QueueRowKind {
 /**
  * What a row may offer, given what happened to it.
  *
- * The asymmetry is the point. A conflict and an exhausted retry can both be sent again - one
- * because the person decided to, the other because a connection may have come back. A rejection
- * cannot: the server has already read the change and will not take it, so a "try again" there is a
- * button that produces the same refusal and teaches a person to distrust every other one.
+ * The asymmetry is the point, and it used to be drawn in the wrong place. An **exhausted retry**
+ * can be sent again, because what stopped it may have gone - a connection, a burst of load. A
+ * **rejection** cannot: the server has already read the change and will not take it, so a "try
+ * again" there is a button that produces the same refusal and teaches a person to distrust every
+ * other one.
+ *
+ * A **conflict** was on the first side of that line and belongs on the second. Every conflict this
+ * build produces is a conditional write whose precondition the server has just refused, and
+ * re-sending it unchanged asks the same question and gets the same answer - for ever, because
+ * unlike a rejection there is no attempt cap to stop it (`DEV-092`).
  */
 function actionsFor(kind: QueueRowKind): readonly QueueAction[] {
   switch (kind) {
+    // No `RETRY`, and it used to have one. Every conflict this build can produce is a **conditional
+    // write** - `VERSION_CONFLICT` is answered by comparing the stored version against the
+    // `expectedVersion` the operation carries - and retrying re-sends that same number, so the
+    // answer is the same 409 for ever. Worse than the rejection case below, because retrying a
+    // conflict resets the attempt budget: there is no cap to end it, and the row sits under "needs
+    // you to decide" while the only control that looks like a decision does nothing (`DEV-092`).
+    //
+    // Rebasing onto whatever version now stands is not the fix. That applies somebody's change on
+    // top of content they have not seen, which for a medicine schedule is the silent overwrite
+    // `13` resolves this type `ASK_USER` to prevent. The resolution is a person looking at the
+    // record - so the copy says that, and the only action here is the one that costs nothing to
+    // offer.
     case 'CONFLICTED':
-      return ['RETRY', 'DISCARD'];
+      return ['DISCARD'];
     case 'GAVE_UP':
       return ['RETRY', 'DISCARD'];
     case 'REJECTED':

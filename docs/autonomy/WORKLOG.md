@@ -6303,3 +6303,51 @@ reaching the journal is a change that vanishes.
 `packages/agent/src/speech.ts`, `packages/agent/src/registry.ts`,
 `packages/agent/src/registry.test.ts`, `apps/mobile/src/voice/executor.ts`,
 `apps/mobile/src/voice/executor.test.ts`, `apps/mobile/src/voice/VoiceProvider.test.tsx`.
+
+---
+
+## 2026-09-08 (continued) - The button on a conflict that could not work
+
+**Starting commit** `1c08eb1`.
+
+`12` asks for a **resolvable** failure state, and the queue screen offered a control that resolved
+nothing. `actionsFor('CONFLICTED')` returned `['RETRY', 'DISCARD']` and
+`PendingSyncProvider.retry` puts the operation back as `PENDING` with the payload **unchanged** -
+including the `expectedVersion` the server has just refused.
+
+Every conflict this build can produce is a conditional write. `VERSION_CONFLICT` is answered by
+comparing the stored version against the one the payload carries, and the other two members of
+`CONFLICT_REFUSAL_CODES` are not raised by any route. So the identical request got the identical
+409, for ever - and unlike the rejection case the same file explicitly guards against, retrying a
+conflict **resets the attempt count**, so there was no cap to end the loop (`DEV-092`).
+
+`pendingQueue.ts` had already written the argument, about rejections: "a 'try again' there is a
+button that produces the same refusal and teaches a person to distrust every other one." A conflict
+was on the wrong side of that line.
+
+**What the old test was asserting, and why it was wrong.** "Offering only 'remove' here would
+discard somebody's change with an extra tap." The intent was right; the mechanism was not. `RETRY`
+did not preserve the change either - it delayed the loss rather than avoiding it, and left the row
+sitting under "needs you to decide" while the only control that looked like a decision did nothing.
+
+**Rebasing was considered and refused.** Re-sending under whatever version now stands applies
+somebody's change on top of content they have not seen, hours later, with nobody watching - which
+is the silent overwrite `13` resolves `medicine_schedule` `ASK_USER` to prevent. A precondition
+only means anything if it names a state somebody actually had.
+
+So: `DISCARD` only, and copy that says the two things the person needs - that their change was
+**not saved**, which "Kynviora will not choose between the two" left open, and that the way to
+apply it is to make it again against what is there now. The change is not dropped on anybody's
+behalf: it stays in the journal and the badge goes on counting it until they act.
+
+The rule is now stated over the state vocabulary rather than over the member that failed:
+`RETRY` may only be offered where the identical request could produce a different answer.
+
+**What is still open** is the half worth having: the person is shown neither what they asked for
+nor what the record now says. That is a two-version comparison surface rather than a control on a
+row, and it is the same question `DEV-093` asks about a spoken sentence - how this app says "what
+you are looking at is not the current state". Flagged for the Claude Design implementation pass.
+
+### Files
+
+`packages/presentation/src/pendingQueue.ts`, `packages/presentation/src/pendingQueue.test.ts`.
