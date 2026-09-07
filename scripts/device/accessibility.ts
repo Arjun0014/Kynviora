@@ -33,7 +33,26 @@ export interface UiNode {
   readonly packageName: string;
   readonly text: string;
   readonly contentDescription: string;
+  /**
+   * The view's id, where anything gave it one, and `''` where nothing did.
+   *
+   * The single most identifying attribute a dump carries, and the reason it is read at all: React
+   * Native gives its views no ids, so a node with `android:id/...` on it is **the platform's own**
+   * - a selection handle, an insertion handle, a magnifier, a popup background - drawn into the
+   * app's window and therefore reported under the app's package. A finding against a node with a
+   * platform id is a finding about the harness or about Android, not about a control anybody wrote.
+   */
+  readonly resourceId: string;
   readonly clickable: boolean;
+  /**
+   * Whether a long press does something separate.
+   *
+   * Diagnostic in the same way `focusable` is: the app's controls are `Pressable`s, which are
+   * focusable and not long-clickable, and the platform's decorations are neither.
+   */
+  readonly longClickable: boolean;
+  readonly focusable: boolean;
+  readonly focused: boolean;
   readonly enabled: boolean;
   readonly scrollable: boolean;
   /**
@@ -48,6 +67,23 @@ export interface UiNode {
   readonly selected: boolean;
   /** Screen pixels, as `uiautomator` reports them - clipped to what is actually visible. */
   readonly bounds: Rect;
+  /** How deeply the element was nested. The outermost `<node>` is 0; `<hierarchy>` is not a node. */
+  readonly depth: number;
+  /**
+   * Where this node's nearest enclosing node sits in the array it was parsed into, or `-1`.
+   *
+   * An index rather than a reference, so a `UiNode` stays a plain readonly record that a test can
+   * write down and `JSON.stringify` can print. It is only meaningful against the array
+   * `parseUiHierarchy` returned it in, which is what {@link ancestryOf} takes.
+   */
+  readonly parent: number;
+  /**
+   * The element's attributes exactly as the dump wrote them, minus the closing slash.
+   *
+   * Kept because every attribute this file chose not to model is still in here, and the point of
+   * capturing an unexpected node is that nobody knew in advance which attribute would identify it.
+   */
+  readonly raw: string;
 }
 
 /**
@@ -86,43 +122,170 @@ export function dragAnchorAvoidingFields(
   return null;
 }
 
-const NODE = /<node\b([^>]*)\/?>/g;
+/** An opening `<node ...>` (self-closing or not) or a closing `</node>`. */
+const ELEMENT = /<node\b([^>]*)>|<\/node\s*>/g;
 const ATTRIBUTE = /([a-zA-Z-]+)="([^"]*)"/g;
 const BOUNDS = /^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$/;
 
 /**
  * Read the nodes out of a `uiautomator dump`.
  *
- * Attribute-driven rather than structural: the hierarchy's nesting says which view contains which,
- * and every question here is about one node's own geometry and labelling.
+ * Mostly attribute-driven: every judgement in this file is about one node's own geometry and
+ * labelling, and a flat list is what the callers want to filter.
+ *
+ * WHY IT TRACKS NESTING AT ALL
+ * Because a flat list cannot answer "what is that?". The full accessibility survey reported an
+ * unnamed 20x20dp clickable node on the invitation form and the report could say nothing else
+ * about it - `foldDump` keys controls by accessible name and discards node identity, so by the
+ * time the check ran the node was three scroll positions gone. A node's class and its id say what
+ * it is; **what it sits inside** says whose it is, and that is a structural question. A view drawn
+ * into a `PopupWindow` over a form is not a control of the form's, however its package reads.
+ *
+ * The nesting is tracked with a stack that holds an entry for **every** opening element, including
+ * ones with no readable bounds, so a skipped node does not put every closing tag after it out of
+ * step and misparent the rest of the screen. `parent` is the nearest enclosing element that was
+ * itself kept.
  */
 export function parseUiHierarchy(xml: string): readonly UiNode[] {
   const nodes: UiNode[] = [];
-  for (const match of xml.matchAll(NODE)) {
+  /** One entry per open element: the index it was kept at, or `-1` where it was skipped. */
+  const open: number[] = [];
+
+  for (const match of xml.matchAll(ELEMENT)) {
+    const attributeText = match[1];
+    if (attributeText === undefined) {
+      open.pop();
+      continue;
+    }
+    const selfClosing = attributeText.trimEnd().endsWith('/');
+
     const attributes = new Map<string, string>();
-    for (const attribute of (match[1] ?? '').matchAll(ATTRIBUTE)) {
+    for (const attribute of attributeText.matchAll(ATTRIBUTE)) {
       attributes.set(attribute[1] ?? '', attribute[2] ?? '');
     }
     const rawBounds = BOUNDS.exec(attributes.get('bounds') ?? '');
-    if (rawBounds === null) continue;
-    nodes.push({
-      className: attributes.get('class') ?? '',
-      packageName: attributes.get('package') ?? '',
-      text: attributes.get('text') ?? '',
-      contentDescription: attributes.get('content-desc') ?? '',
-      clickable: attributes.get('clickable') === 'true',
-      enabled: attributes.get('enabled') !== 'false',
-      scrollable: attributes.get('scrollable') === 'true',
-      selected: attributes.get('selected') === 'true',
-      bounds: {
-        left: Number(rawBounds[1]),
-        top: Number(rawBounds[2]),
-        right: Number(rawBounds[3]),
-        bottom: Number(rawBounds[4]),
-      },
-    });
+
+    let kept = -1;
+    if (rawBounds !== null) {
+      kept = nodes.length;
+      nodes.push({
+        className: attributes.get('class') ?? '',
+        packageName: attributes.get('package') ?? '',
+        text: attributes.get('text') ?? '',
+        contentDescription: attributes.get('content-desc') ?? '',
+        resourceId: attributes.get('resource-id') ?? '',
+        clickable: attributes.get('clickable') === 'true',
+        longClickable: attributes.get('long-clickable') === 'true',
+        focusable: attributes.get('focusable') === 'true',
+        focused: attributes.get('focused') === 'true',
+        enabled: attributes.get('enabled') !== 'false',
+        scrollable: attributes.get('scrollable') === 'true',
+        selected: attributes.get('selected') === 'true',
+        bounds: {
+          left: Number(rawBounds[1]),
+          top: Number(rawBounds[2]),
+          right: Number(rawBounds[3]),
+          bottom: Number(rawBounds[4]),
+        },
+        depth: open.length,
+        parent: open.findLast((entry) => entry >= 0) ?? -1,
+        raw: attributeText.trim().replace(/\/$/, '').trim(),
+      });
+    }
+    if (!selfClosing) open.push(kept);
   }
   return nodes;
+}
+
+/**
+ * The nodes a node sits inside, outermost first.
+ *
+ * Guarded against a cycle it cannot have - `parent` is always an earlier index - because a walk
+ * over parsed input should end whatever the input was, and a harness that hangs on a malformed
+ * dump is worse than one that reports a short ancestry.
+ */
+export function ancestryOf(nodes: readonly UiNode[], index: number): readonly UiNode[] {
+  const chain: UiNode[] = [];
+  const seen = new Set<number>();
+  let at = nodes[index]?.parent ?? -1;
+  while (at >= 0 && !seen.has(at)) {
+    seen.add(at);
+    const parent = nodes[at];
+    if (parent === undefined) break;
+    chain.push(parent);
+    at = parent.parent;
+  }
+  return chain.reverse();
+}
+
+/**
+ * React Native's LogBox notification, which is drawn into this app's window and is not this app.
+ *
+ * WHAT THIS IS AND WHY IT IS NOT AN ALLOWLIST
+ * The full survey failed `SHEET-3` and `SHEET-4` on an unnamed 20x20dp clickable node, three
+ * narrowed re-runs of the same sheet passed, and the standing hypothesis was an Android
+ * text-selection handle raised by a drag beginning inside a field. It was captured on
+ * 2026-09-07 and it is neither: it is the **dismiss button of the LogBox warning banner**, and
+ * Android's own dump marks it `NAF="true"`.
+ *
+ * ```
+ * content-desc="!, Open debugger to view warnings."   <- the banner
+ *   ...
+ *   <node NAF="true" class="android.view.ViewGroup" clickable="true" focusable="true"
+ *         content-desc="" bounds="[970,2183][1022,2235]" />   <- the dismiss control
+ * ```
+ *
+ * That explains every property of the failure that made it look like noise. LogBox appears only
+ * once something has logged a warning, so **whether** it is on screen depends on what the run did
+ * before - which is the state-dependence - and **which** sheet it lands on is simply whichever one
+ * was being surveyed at the time. It was reported against `Invite someone@2` once and
+ * `Voice Mode@1` the next time, and it was never a property of either sheet.
+ *
+ * It is excluded because it is not part of the product: LogBox does not exist in a release build,
+ * so a survey that failed on it would be reporting a defect nobody can ship and nobody can fix on
+ * the screen it was blamed on. It is **not** excluded by being small, or unnamed, or intermittent
+ * - each of those would hide the real defects these two checks exist to find. It is excluded by
+ * identity, and its presence is **reported** rather than swallowed (`SHEET-1`, `A11Y-1`), because
+ * a warning firing during a survey is a fact about the build worth knowing.
+ */
+const DEVELOPMENT_OVERLAY = /open debugger to view|logbox/i;
+
+/**
+ * Whether a node is part of a development-only overlay drawn over the app.
+ *
+ * Answered structurally rather than by the node's own attributes, because the node that gives the
+ * overlay away is the container and the node that fails a check is a descendant of it with no
+ * attributes at all.
+ */
+export function isDevelopmentOverlay(nodes: readonly UiNode[], index: number): boolean {
+  const node = nodes[index];
+  if (node === undefined) return false;
+  if (DEVELOPMENT_OVERLAY.test(node.contentDescription)) return true;
+  return ancestryOf(nodes, index).some((ancestor) =>
+    DEVELOPMENT_OVERLAY.test(ancestor.contentDescription),
+  );
+}
+
+/** Whether any development-only overlay is on screen at all, for a report to say so. */
+export function hasDevelopmentOverlay(nodes: readonly UiNode[]): boolean {
+  return nodes.some((node) => DEVELOPMENT_OVERLAY.test(node.contentDescription));
+}
+
+/**
+ * A node's ancestry as one line, nearest containers last.
+ *
+ * Only the innermost few, and each named by its id where it has one. A dump on this device is
+ * fifteen levels of `FrameLayout` before anything interesting, and an ancestry that printed all of
+ * them would bury the one container that answers the question - which is the innermost.
+ */
+export function describeAncestry(nodes: readonly UiNode[], index: number, depth = 4): string {
+  const chain = ancestryOf(nodes, index).slice(-depth);
+  if (chain.length === 0) return '(no enclosing node)';
+  return chain
+    .map((node) =>
+      node.resourceId === '' ? node.className : `${node.className}#${node.resourceId}`,
+    )
+    .join(' > ');
 }
 
 /** Density-independent size of a node, given the device's reported density bucket. */
@@ -219,8 +382,15 @@ export function checkScreen(evidence: ScreenEvidence): readonly Check[] {
 
   const all = parseUiHierarchy(evidence.xml);
   const clips = clipRectsOf(all);
+  // The same exclusion the sheet survey makes, for the same reason: LogBox is drawn into this
+  // app's window, so the package filter does not remove it, and it is not part of the product.
+  // A destination is as able to have it drawn over it as a sheet is.
+  const overlaySeen = hasDevelopmentOverlay(all);
   const nodes = all.filter(
-    (node) => node.packageName === evidence.packageName && isInteractiveTarget(node),
+    (node, index) =>
+      node.packageName === evidence.packageName &&
+      isInteractiveTarget(node) &&
+      !isDevelopmentOverlay(all, index),
   );
   if (nodes.length === 0) {
     return [
@@ -255,7 +425,13 @@ export function checkScreen(evidence: ScreenEvidence): readonly Check[] {
       id: 'A11Y-1',
       title: 'The screen could be read for inspection',
       status: 'PASS',
-      detail: `${String(nodes.length)} interactive node(s) in ${suffix}.`,
+      detail:
+        `${String(nodes.length)} interactive node(s) in ${suffix}.` +
+        (overlaySeen
+          ? ' A development-only overlay (LogBox) was on screen and its controls were excluded:' +
+            ' it is not part of the product and does not exist in a release build. Its presence' +
+            ' means the build logged a warning.'
+          : ''),
     },
     {
       id: 'A11Y-2',

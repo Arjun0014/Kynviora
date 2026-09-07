@@ -25,11 +25,18 @@ function node(overrides: Partial<UiNode> = {}): UiNode {
     packageName: PACKAGE,
     text: '',
     contentDescription: '',
+    resourceId: '',
     clickable: false,
+    longClickable: false,
+    focusable: false,
+    focused: false,
     enabled: true,
     scrollable: false,
     selected: false,
     bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+    depth: 1,
+    parent: -1,
+    raw: '',
     ...overrides,
   };
 }

@@ -21,6 +21,8 @@
  * The scale is restored afterwards whatever happens, and so is TalkBack.
  */
 
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { MIN_TOUCH_TARGET_DP, MAX_SUPPORTED_FONT_SCALE } from '@kynviora/presentation';
 import {
   PACKAGE,
@@ -37,14 +39,23 @@ import {
   clipRectsOf,
   crashedApp,
   dragAnchorAvoidingFields,
+  hasDevelopmentOverlay,
   isInteractiveTarget,
   parseUiHierarchy,
   sizeInDp,
   checkScreen,
   type UiNode,
 } from './accessibility.js';
-import { foldDump, sheetChecks, type SheetSurvey, type SurveyedControl } from './sheets.js';
-import { scrollDown, scrollDownFrom, scrollUp, waitForAppReady } from './ui.js';
+import {
+  describeOffender,
+  foldDump,
+  offendingNodes,
+  sheetChecks,
+  type OffendingNode,
+  type SheetSurvey,
+  type SurveyedControl,
+} from './sheets.js';
+import { captureFailure, scrollDown, scrollDownFrom, scrollUp, waitForAppReady } from './ui.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
 
 /** TalkBack's own package, which has its own runtime permission to ask for. */
@@ -111,6 +122,99 @@ const SHEET_DRAG_BAND = Object.freeze({ top: 700, bottom: 1_900 });
  * grant per caregiver run and each row is tall at twice the font size.
  */
 const MAX_SCROLL_TO_FIND = 60;
+
+// ---------------------------------------------------------------------------
+// Capturing an offending node while it is still on screen
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a capture goes. The same place `captureFailure` writes, which is where every other device
+ * harness leaves its evidence.
+ */
+const CAPTURE_DIRECTORY = 'scratchpad';
+
+/**
+ * How many captures a whole run may take.
+ *
+ * A cap rather than a switch, because a survey that found a genuinely unnamed control on every
+ * sheet at every scroll position would otherwise write a hundred screenshots - and the run this
+ * exists for is one that finds a single node once. Eight is more than enough to characterise
+ * something intermittent and small enough that a bad run costs a few megabytes.
+ */
+const MAX_OFFENDER_CAPTURES = 8;
+
+let capturesTaken = 0;
+
+/**
+ * The kinds already captured, so a control that offends at every scroll position costs one capture.
+ *
+ * Keyed by what identifies a node rather than by where it was: a real control of the app's scrolls,
+ * so its bounds differ in every dump while it is the same finding, and keying on bounds would spend
+ * the whole budget on one control before a second kind was ever seen.
+ */
+const capturedKinds = new Set<string>();
+
+function fileSafe(text: string): string {
+  return text.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Write down an offending node at the moment it is on screen, and say so on stdout.
+ *
+ * WHY AT THIS MOMENT AND NOT WHEN THE CHECK FAILS
+ * Because there is nothing left to look at by then. A survey folds every dump into a set of
+ * controls keyed by name, scrolls on, closes the sheet and relaunches the app before `SHEET-3` and
+ * `SHEET-4` are ever evaluated - so the run that reported an unnamed 20x20dp node on the
+ * invitation form could say only that it had counted one. It was re-run three times and passed
+ * three times, which is precisely how an intermittent red result becomes a red result nobody acts
+ * on.
+ *
+ * A screenshot, the raw hierarchy for that exact scroll position, and the node's own attributes on
+ * stdout. The screenshot comes first inside `captureFailure`, which matters if the thing on screen
+ * is a platform decoration that hides itself after a few seconds.
+ */
+function recordOffender(
+  sheet: string,
+  scale: number,
+  step: number,
+  nodes: readonly UiNode[],
+  offender: OffendingNode,
+  xml: string,
+  density: number,
+): void {
+  const kind =
+    `${offender.node.className}|${offender.node.resourceId}|` +
+    `${accessibleNameOf(offender.node)}|${offender.offences.join(',')}`;
+  if (capturedKinds.has(kind)) return;
+  if (capturesTaken >= MAX_OFFENDER_CAPTURES) return;
+  capturedKinds.add(kind);
+  capturesTaken += 1;
+
+  const label = `a11y-offender-${fileSafe(sheet)}-scale${String(scale)}-step${String(step)}`;
+  const written = [...captureFailure(label, CAPTURE_DIRECTORY)];
+
+  // The hierarchy exactly as it was read, rather than a fresh dump: a second dump is a second
+  // moment, and a node that appears once in four runs is not guaranteed to still be there.
+  const screenshot = written.find((path) => path.endsWith('.png'));
+  const xmlPath =
+    screenshot === undefined
+      ? join(CAPTURE_DIRECTORY, `${label}-${String(Date.now())}.xml`)
+      : `${screenshot.slice(0, -'.png'.length)}.xml`;
+  try {
+    writeFileSync(xmlPath, xml, 'utf8');
+    written.push(xmlPath);
+  } catch {
+    // A capture that cannot be written is not a reason to stop surveying. The stdout block below
+    // still carries the node's attributes, which is the part that answers what it was.
+  }
+
+  process.stdout.write(
+    `\nA node that will fail a check was on screen during the "${sheet}" survey at font scale ` +
+      `${String(scale)}, scroll position ${String(step)}:\n` +
+      `${describeOffender(nodes, offender, density)}\n` +
+      `  written:   ${written.join(', ')}\n\n`,
+  );
+}
 
 /**
  * Start the app from dead and wait until it is drawing, rather than for a fixed time.
@@ -266,12 +370,26 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
   // `INCONCLUSIVE` - which is the right status and the wrong sentence. Reported as unopened here
   // because that is all this function can honestly say; what it could not do is start.
   if (!relaunch()) {
-    return { label, fontScale: scale, opened: false, positions: 0, controls: [] };
+    return {
+      label,
+      fontScale: scale,
+      opened: false,
+      positions: 0,
+      controls: [],
+      developmentOverlaySeen: false,
+    };
   }
 
   for (const control of path) {
     if (!pressNamed(control)) {
-      return { label, fontScale: scale, opened: false, positions: 0, controls: [] };
+      return {
+        label,
+        fontScale: scale,
+        opened: false,
+        positions: 0,
+        controls: [],
+        developmentOverlaySeen: false,
+      };
     }
   }
 
@@ -282,6 +400,8 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
   let controls: readonly SurveyedControl[] = [];
   let positions = 0;
   let previous = '';
+  /** Whether LogBox was drawn over the sheet at any point. Reported on `SHEET-1`. */
+  let developmentOverlaySeen = false;
   /** Whether the standard anchor has already failed to move this position. See the note below. */
   let retried = false;
 
@@ -292,10 +412,26 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
       continue;
     }
     const nodes = parseUiHierarchy(xml);
+    const clips = clipRectsOf(nodes);
     // The five destinations are excluded: they are drawn over every sheet, they are not part of
     // one, and `checkScreen` measures them at both scales already.
-    controls = foldDump(controls, nodes, clipRectsOf(nodes), PACKAGE, density, TABS);
+    controls = foldDump(controls, nodes, clips, PACKAGE, density, TABS, step);
+    if (hasDevelopmentOverlay(nodes)) developmentOverlaySeen = true;
     positions += 1;
+
+    // Before scrolling on. Anything here would fail `SHEET-3` or `SHEET-4`, and this is the last
+    // moment it can be looked at: the checks run after the sheet has been closed and the app
+    // relaunched, so a finding they report has nothing behind it unless it was captured now.
+    for (const offender of offendingNodes(
+      nodes,
+      clips,
+      PACKAGE,
+      density,
+      MIN_TOUCH_TARGET_DP,
+      TABS,
+    )) {
+      recordOffender(label, scale, step, nodes, offender, xml, density);
+    }
 
     // A dump identical to the last one means the sheet has stopped moving, which is the honest end
     // of a survey - a fixed number of swipes would either stop early on a long form or waste a
@@ -330,7 +466,7 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
     sleep(1_200);
   }
 
-  return { label, fontScale: scale, opened: true, positions, controls };
+  return { label, fontScale: scale, opened: true, positions, controls, developmentOverlaySeen };
 }
 
 function sheetsAt(scale: number): readonly Check[] {

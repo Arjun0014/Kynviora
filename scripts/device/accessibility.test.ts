@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { MIN_TOUCH_TARGET_DP } from '@kynviora/presentation';
 import {
   accessibleNameOf,
+  ancestryOf,
   checkScreen,
+  describeAncestry,
+  hasDevelopmentOverlay,
+  isDevelopmentOverlay,
   isInteractiveTarget,
   clipRectsOf,
   crashedApp,
@@ -424,5 +428,230 @@ describe('where a drag may safely begin', () => {
     // for no reason - the same reasoning `checkScreen` applies to every other measurement.
     const nodes = parseUiHierarchy(hierarchy(field(1_500, 2_000, 'com.android.systemui')));
     expect(dragAnchorAvoidingFields(nodes, PACKAGE, BAND)).toBe(BAND.bottom);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Identifying a node, rather than only measuring it
+// ---------------------------------------------------------------------------
+
+/**
+ * The attributes added so a finding can say *what* it found.
+ *
+ * The full survey reported an unnamed 20x20dp clickable node on the invitation form and could say
+ * nothing else about it, because the parser read only geometry and labelling and the survey threw
+ * the node away as soon as it had folded it into a name. Three narrowed re-runs of that sheet found
+ * nothing, which is exactly how an intermittent red result turns into one nobody acts on.
+ *
+ * `resource-id` is the attribute that decides. React Native gives its views no ids, so a node with
+ * `android:id/...` on it is the platform's own decoration drawn into the app's window - and it
+ * arrives under the app's package, which is why a package filter alone cannot tell the two apart.
+ */
+describe('what a node is, not just how big it is', () => {
+  it('reads the attributes that identify a node rather than measure it', () => {
+    const parsed = subject(
+      hierarchy(
+        node({
+          class: 'android.widget.ImageView',
+          'resource-id': 'android:id/insertion_handle',
+          'long-clickable': 'true',
+          focusable: 'false',
+          focused: 'false',
+          bounds: boundsFor(20, 20),
+        }),
+      ),
+    );
+    expect(parsed?.resourceId).toBe('android:id/insertion_handle');
+    expect(parsed?.longClickable).toBe(true);
+    expect(parsed?.focusable).toBe(false);
+    expect(parsed?.focused).toBe(false);
+  });
+
+  it('keeps the element’s attributes exactly as the dump wrote them', () => {
+    // Because the point of capturing something unexpected is that nobody knew in advance which
+    // attribute would name it. Every attribute this file chose not to model is still in here.
+    const parsed = subject(
+      hierarchy(node({ class: 'android.view.View', index: '7', bounds: boundsFor(20, 20) })),
+    );
+    expect(parsed?.raw).toContain('index="7"');
+    expect(parsed?.raw).not.toMatch(/\/$/);
+  });
+
+  it('defaults every identifying attribute rather than inventing one', () => {
+    const parsed = subject(hierarchy(node({ bounds: boundsFor(48, 48) })));
+    expect(parsed?.resourceId).toBe('');
+    expect(parsed?.longClickable).toBe(false);
+    expect(parsed?.focused).toBe(false);
+  });
+});
+
+describe('where a node sits', () => {
+  /** A container that holds its children, as a real dump writes one. */
+  function container(attributes: Record<string, string>, ...children: string[]): string {
+    const opening = node({ clickable: 'false', ...attributes }).replace(/\s*\/>$/, '>');
+    return `${opening}${children.join('')}</node>`;
+  }
+
+  const dump =
+    `<?xml version='1.0'?><hierarchy rotation="0">` +
+    container(
+      { class: 'android.widget.FrameLayout', bounds: '[0,0][1080,2400]' },
+      container(
+        {
+          class: 'android.widget.PopupWindow$PopupBackgroundView',
+          'resource-id': 'android:id/popup',
+          bounds: '[500,1000][600,1100]',
+        },
+        node({
+          class: 'android.widget.ImageView',
+          'resource-id': 'android:id/insertion_handle',
+          bounds: '[516,1040][568,1092]',
+        }),
+      ),
+      node({ class: 'android.widget.Button', text: 'Cancel', bounds: '[76,400][1004,530]' }),
+    ) +
+    `</hierarchy>`;
+
+  const nodes = parseUiHierarchy(dump);
+
+  it('reads the nesting, not just the rectangles', () => {
+    expect(nodes).toHaveLength(4);
+    expect(nodes.map((entry) => entry.depth)).toEqual([0, 1, 2, 1]);
+  });
+
+  it('names what a node sits inside, innermost last', () => {
+    // The question the survey could not answer: a 20x20dp unnamed clickable node is a defect if it
+    // is a control of the app's and an artefact if it is a view inside a platform popup. Only its
+    // ancestry distinguishes them, and ancestry is structural - a flat list of rectangles cannot
+    // say it.
+    const handle = nodes.findIndex((entry) => entry.resourceId.endsWith('insertion_handle'));
+    expect(ancestryOf(nodes, handle).map((entry) => entry.className)).toEqual([
+      'android.widget.FrameLayout',
+      'android.widget.PopupWindow$PopupBackgroundView',
+    ]);
+    expect(describeAncestry(nodes, handle)).toBe(
+      'android.widget.FrameLayout > android.widget.PopupWindow$PopupBackgroundView#android:id/popup',
+    );
+  });
+
+  it('does not put a node inside its own elder sibling', () => {
+    // The bug a stack gets wrong if it forgets that a self-closing element never closes. "Cancel"
+    // is a child of the frame, not of the popup that preceded it.
+    const cancel = nodes.findIndex((entry) => entry.text === 'Cancel');
+    expect(ancestryOf(nodes, cancel).map((entry) => entry.className)).toEqual([
+      'android.widget.FrameLayout',
+    ]);
+  });
+
+  it('says so plainly when a node has no enclosing node', () => {
+    expect(describeAncestry(nodes, 0)).toBe('(no enclosing node)');
+  });
+
+  it('keeps the stack in step when an element has no readable bounds', () => {
+    // A node with no bounds is skipped, and it still has a closing tag. A parser that pushed only
+    // what it kept would pop somebody else's frame and misparent the whole rest of the screen.
+    const withBoundless =
+      `<?xml version='1.0'?><hierarchy rotation="0">` +
+      container(
+        { class: 'android.widget.FrameLayout', bounds: '[0,0][1080,2400]' },
+        `<node class="android.view.View" package="${PACKAGE}">` +
+          node({ class: 'android.widget.TextView', text: 'Inside', bounds: '[0,0][10,10]' }) +
+          `</node>`,
+        node({ class: 'android.widget.Button', text: 'After', bounds: '[76,400][1004,530]' }),
+      ) +
+      `</hierarchy>`;
+    const parsed = parseUiHierarchy(withBoundless);
+    const after = parsed.findIndex((entry) => entry.text === 'After');
+    expect(ancestryOf(parsed, after).map((entry) => entry.className)).toEqual([
+      'android.widget.FrameLayout',
+    ]);
+  });
+
+  it('is unmoved by markup it does not recognise', () => {
+    expect(ancestryOf(parseUiHierarchy(''), 0)).toEqual([]);
+    expect(describeAncestry(parseUiHierarchy(''), 0)).toBe('(no enclosing node)');
+  });
+});
+
+/**
+ * The node that failed the full survey on 2026-09-07, verbatim from the dump that caught it.
+ *
+ * Trimmed to the chain that matters - the LogBox banner, its unnamed dismiss control, and one
+ * ordinary app control beside them so the tests can show the exclusion is not simply dropping
+ * everything. The `NAF="true"` attribute is Android's own, and is exactly what it says: not
+ * accessibility friendly.
+ */
+const LOGBOX_DUMP = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.kynviora.app" content-desc="" clickable="false" enabled="true" focusable="false" scrollable="false" long-clickable="false" selected="false" bounds="[0,0][1080,2400]">
+    <node index="0" text="" resource-id="" class="android.widget.Button" package="com.kynviora.app" content-desc="Done" clickable="true" enabled="true" focusable="true" scrollable="false" long-clickable="false" selected="false" bounds="[42,1936][1038,2062]" />
+    <node index="1" text="" resource-id="" class="android.view.ViewGroup" package="com.kynviora.app" content-desc="!, Open debugger to view warnings." clickable="true" enabled="true" focusable="true" scrollable="false" long-clickable="false" selected="false" bounds="[26,2146][1054,2271]">
+      <node NAF="true" index="5" text="" resource-id="" class="android.view.ViewGroup" package="com.kynviora.app" content-desc="" clickable="true" enabled="true" focusable="true" scrollable="false" long-clickable="false" selected="false" bounds="[970,2183][1022,2235]" />
+    </node>
+  </node>
+</hierarchy>`;
+
+describe('the LogBox overlay, which is not the product', () => {
+  const nodes = parseUiHierarchy(LOGBOX_DUMP);
+
+  it('finds the banner, its dismiss control and the app control beside them', () => {
+    expect(nodes).toHaveLength(4);
+  });
+
+  it('recognises the banner itself', () => {
+    const banner = nodes.findIndex((node) => node.contentDescription.includes('Open debugger'));
+    expect(banner).toBeGreaterThan(-1);
+    expect(isDevelopmentOverlay(nodes, banner)).toBe(true);
+  });
+
+  /** The one that failed `SHEET-3` and `SHEET-4`. It carries nothing of its own to be known by. */
+  it('recognises the unnamed dismiss control by what it sits inside', () => {
+    const dismiss = nodes.findIndex((node) => node.bounds.left === 970 && node.bounds.top === 2183);
+    expect(dismiss).toBeGreaterThan(-1);
+    expect(nodes[dismiss]?.contentDescription).toBe('');
+    expect(nodes[dismiss]?.text).toBe('');
+    expect(accessibleNameOf(nodes[dismiss] as UiNode)).toBe('');
+    expect(isInteractiveTarget(nodes[dismiss] as UiNode)).toBe(true);
+    expect(isDevelopmentOverlay(nodes, dismiss)).toBe(true);
+  });
+
+  /**
+   * The control this must not swallow. An exclusion that answered `true` for anything unnamed, or
+   * anything small, or anything intermittent would hide the defects these checks exist to find -
+   * `DEV-046` was a real unreachable control on a real sheet.
+   */
+  it('does not exclude an ordinary app control', () => {
+    const done = nodes.findIndex((node) => node.contentDescription === 'Done');
+    expect(done).toBeGreaterThan(-1);
+    expect(isDevelopmentOverlay(nodes, done)).toBe(false);
+  });
+
+  it('reports that the overlay was present at all', () => {
+    expect(hasDevelopmentOverlay(nodes)).toBe(true);
+  });
+
+  it('and says so of a screen that has none', () => {
+    const clean = parseUiHierarchy(
+      `<hierarchy rotation="0"><node index="0" text="" resource-id="" class="android.widget.Button" package="com.kynviora.app" content-desc="Done" clickable="true" enabled="true" focusable="true" scrollable="false" long-clickable="false" selected="false" bounds="[42,1936][1038,2062]" /></hierarchy>`,
+    );
+    expect(hasDevelopmentOverlay(clean)).toBe(false);
+    expect(isDevelopmentOverlay(clean, 0)).toBe(false);
+  });
+
+  it('checkScreen no longer fails on it, and says it was there', () => {
+    const checks = checkScreen({
+      label: 'Voice Mode',
+      xml: LOGBOX_DUMP,
+      packageName: 'com.kynviora.app',
+      densityDpi: 420,
+      fontScale: 1,
+      minimumTouchTargetDp: 48,
+    });
+    const named = checks.find((check) => check.id === 'A11Y-3');
+    const sized = checks.find((check) => check.id === 'A11Y-2');
+    expect(named?.status).toBe('PASS');
+    expect(sized?.status).toBe('PASS');
+    const read = checks.find((check) => check.id === 'A11Y-1');
+    expect(read?.detail).toContain('LogBox');
   });
 });
