@@ -3288,7 +3288,23 @@ its own limit on pending local notifications, which is lower than Android's and 
   named as a known gap. It fails the day a seventh appears, and it fails if one of the six is
   wired without being taken off the list - so the allowlist cannot quietly become a list of things
   that used to be broken.
-- **Status**: OPEN, not blocked.
+- **How it resolved**: all six are wired, and `KNOWN_UNWIRED` in that test is now empty. The four
+  reads go through the same view functions their screens use, so every spoken line is still
+  composed by the presentation layer and still passes the Speech Gate. Two things needed deciding
+  rather than typing:
+
+  **`update_schedule` gained an `itemId`.** `ScheduleChangeBody` is whole-document and conditional
+  on `expectedVersion`, and no client method reads one schedule by its own ID - so the row has to
+  be found through `schedules(itemId)`. The agent has it already: a `scheduleId` can only have come
+  from `list_schedules`, which takes an `itemId`.
+
+  **`create_schedule` and `update_schedule` are `ONLINE_ONLY` now**, and both said `QUEUES`. Only
+  `record_dose` reaches the journal (DEC-140), and a change conditional on a version is not
+  something a replay can carry unchanged anyway. Declaring `QUEUES` meant gate 5 let them through
+  with no connection so the write could fail and be reported - honest since `DEV-085`, but a round
+  trip to say what the gate already knew. The registry now describes the build.
+
+- **Status**: **RESOLVED 2026-09-07**.
 
 ---
 
@@ -3387,3 +3403,73 @@ its own limit on pending local notifications, which is lower than Android's and 
   was a false FAIL, which is the more expensive kind - `DEV-079` cost a session, and an intermittent
   red result is what teaches people to ignore red results.
 - **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-087 - A field the server omitted came back `undefined` from a type that says `null`
+
+- **Affected specification**: `11` (safety composition is server-side; a client must not rebuild
+  it), `13`, `18`.
+- **Expected behaviour**: `alertDetailScreenView` returns what its type declares.
+- **Implemented behaviour**: four of its fields - `withdrawnNotice`, `message`, `unexplainable`
+  and `withheldNotice` - are declared `| null` and were **passed straight through** from the
+  response. A response that omits one therefore yielded `undefined` from a function whose type
+  says it cannot.
+- **The failure**: every consumer written against the declared type tests `=== null`.
+  `AlertDetail.tsx:112` does exactly that and then reads `.heading`, so an omitted `unexplainable`
+  is a **crash on the alert screen** rather than an absent block. The Voice Mode `describe_alert`
+  tool wired in the same session had the identical guard and the identical exposure.
+- **How it was found**: writing the `describe_alert` executor test. The fixture omitted fields a
+  real response carries, which is exactly what an older or newer server does.
+- **Reachable today**: no. `BLK-006` means nothing is publishable, so there is no alert to open.
+  That is a reason to fix it now rather than to leave it - the first real publication is a bad
+  moment to find out.
+- **How it resolved**: `?? null` at the boundary, so the declared type is true for every reader.
+  The alternative is each consumer remembering that these four are really `| null | undefined`,
+  which is the kind of thing one of them will forget.
+- **The general shape**: the same class as DEC-147 - a value that crossed a trust boundary wearing
+  a type that was decided locally. `?? null` is the narrowing equivalent of `ownEntry`: it makes
+  the declaration true rather than asking every caller to distrust it.
+- **Tests**: three in `packages/contracts/src/views.test.ts`, run against the old code first and
+  failing there - including one written in the exact shape of `AlertDetail.tsx`'s guard.
+- **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-088 - The warning behind the LogBox banner was Expo's dev client, not Kynviora
+
+- **Affected specification**: none. This is a finding about the harness environment.
+- **Background**: `DEV-086` established that the intermittent `SHEET-3`/`SHEET-4` failure was
+  React Native's LogBox notification, and that LogBox only appears once something has logged a
+  warning. Nobody had read the warning: the logcat buffer had rolled over by the time it was
+  looked for, and it does not fire at launch.
+- **What it is**, reproduced on 2026-09-07 by killing Metro while the app was running and driving
+  the tabs:
+
+  ```
+  W/ReactNativeJS: Cannot connect to Expo CLI.
+  W/ReactNativeJS: URL: 10.0.2.2:8081
+  ```
+
+  Expo's **dev client** reporting that it has lost the dev server. Not Kynviora code, and not a
+  defect in the app.
+
+- **What was ruled out first**, each by measurement rather than by argument: a full sheet survey at
+  font scale 2 with the stack healthy produces **no** JS warning and no banner (20/20 PASS, zero
+  `ReactNativeJS` warnings in a captured logcat); visiting all five destinations produces none;
+  opening Voice Mode produces none; and making the **API** unreachable by removing its `adb
+reverse` tunnel produces none either - the app has offline states and uses them. Only the dev
+  server dying produced it.
+- **Why it cannot ship**: `expo-dev-client` is not in `apps/mobile/package.json`'s dependencies,
+  and LogBox is compiled out when `__DEV__` is false. There is no release build in which this
+  banner or this warning exists.
+- **What this explains**: the run that first showed the banner was measuring an app whose dev
+  server had died underneath it - which is what was found afterwards, along with a dead API and a
+  hung emulator. It is also why it never reproduced: every narrowed re-run was made on a healthy
+  stack.
+- **What was done about it**: nothing in the app, because there is nothing in the app to fix, and
+  suppressing a dev-tooling warning would remove the one visible signal that a run was degraded.
+  `SHEET-1` and `A11Y-1` now name this as the usual cause when they report the overlay, so the
+  next person reading a survey with the banner in it knows to check the dev server before
+  believing anything else in the report.
+- **Status**: **RESOLVED 2026-09-07** - identified, and correctly not fixed in the app.

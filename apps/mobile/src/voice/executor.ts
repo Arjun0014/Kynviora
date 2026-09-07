@@ -25,15 +25,26 @@
  */
 
 import {
+  alertDetailScreenView,
+  caregiverAccessRows,
   doseHistory,
   itemDetailScreenView,
+  safetyInboxView,
   shelfView,
   type ApiOutcome,
   type DoseEventBody,
+  type ItemUpdateBody,
   type KynvioraClient,
   type ScheduleBody,
+  type ScheduleChangeBody,
 } from '@kynviora/contracts';
-import { isDoseEventKind, type DoseEventKind } from '@kynviora/domain';
+import {
+  MAX_UPLOAD_ATTEMPTS,
+  isDoseEventKind,
+  type DoseEventKind,
+  type PendingOperation,
+} from '@kynviora/domain';
+import { presentCaregiverAccess, pendingQueueView, summarizeAccess } from '@kynviora/presentation';
 import type { ToolCall, ToolExecutor, UtteranceKey } from '@kynviora/agent';
 import { newIdempotencyKey } from '@/platform/ids';
 
@@ -62,6 +73,47 @@ export interface ToolResult {
 function argument(call: ToolCall, name: string): string {
   const value = call.arguments[name];
   return typeof value === 'string' ? value : '';
+}
+
+/**
+ * A display name that is really an identifier.
+ *
+ * `caregiverAccessRows` falls back to the grantee's user ID where the server sent no name, which
+ * is right beside a control on a screen and wrong in a sentence somebody hears.
+ */
+const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * One corrected field, as a body the item route will accept - or `null`.
+ *
+ * A `switch` rather than `{ [field]: value }`, and the difference is the whole of DEC-146: the
+ * field name is a string off a model completion, and computing a property name from one puts
+ * whatever the model said into the request. Gate 3 has already refused anything outside the
+ * registry's `values` list, so this never actually rejects - it is the same defence in depth
+ * `summary.ts` carries, for the same reason. It also means a value added to the registry without
+ * a case here is a compile error rather than a write that silently changes nothing.
+ *
+ * `expiresOn` and `notes` are nullable on the body: an empty spoken value clears them, which is
+ * how somebody says "there is no expiry date on this one". The three text fields are not cleared
+ * by an empty string, because `validateArguments` already refuses an empty required string.
+ */
+function itemUpdateFor(version: number, field: string, value: string): ItemUpdateBody | null {
+  switch (field) {
+    case 'displayName':
+      return { expectedVersion: version, displayName: value };
+    case 'brand':
+      return { expectedVersion: version, brand: value };
+    case 'strengthText':
+      return { expectedVersion: version, strengthText: value };
+    case 'dosageForm':
+      return { expectedVersion: version, dosageForm: value };
+    case 'notes':
+      return { expectedVersion: version, notes: value };
+    case 'expiresOn':
+      return { expectedVersion: version, expiresOn: value };
+    default:
+      return null;
+  }
 }
 
 /**
@@ -142,6 +194,14 @@ export function createToolExecutor(
    * distinction `OFF-6` measures on a device for the touch path.
    */
   queueDose: (body: DoseEventBody, idempotencyKey: string) => Promise<boolean>,
+  /**
+   * Everything the offline journal is holding.
+   *
+   * The journal rather than the client, because `list_pending_changes` asks a question about this
+   * phone. `PendingSyncProvider.list` is the same function the queue screen calls, so voice and
+   * touch read one journal rather than two answers about it.
+   */
+  listPending: () => Promise<readonly PendingOperation[]>,
 ): ToolExecutor {
   return {
     list_medicines: async (call) => {
@@ -355,6 +415,230 @@ export function createToolExecutor(
       if (outcome.kind === 'OK') {
         return { spoken: outcome.value.limits, focusId: outcome.value.id } satisfies ToolResult;
       }
+      return {
+        spoken: [],
+        utterances: [
+          outcome.kind === 'OFFLINE' ? 'offline' : utteranceForWriteFailure(outcome.kind),
+        ],
+      } satisfies ToolResult;
+    },
+
+    /**
+     * The Safety shelf, read aloud.
+     *
+     * WHY THE COVERAGE STATEMENT IS NOT OPTIONAL HERE
+     * `09` requires the coverage statement to accompany the result rather than be inferred from
+     * its absence, and `23` D-014 is that an absence of a matched rule must never render as
+     * approval. On a screen the statement is a card at the top (DEC-138). Spoken, there is no
+     * "top" - a list read out as five "Nothing matched" lines and then stopping is exactly the
+     * shelf-has-been-cleared reading the statement exists to prevent, and it is worse out loud
+     * because nothing remains on screen to qualify it afterwards.
+     *
+     * So it is said **first**, before any line, and it comes out of `safetyInboxView` rather than
+     * being written here - which is also what lets the Speech Gate pass it.
+     */
+    list_safety_state: async (call) => {
+      // `safetyInbox`, which is what the Safety screen reads, and unfiltered: a filter is a thing
+      // somebody chose on a screen, and applying one nobody asked for would be answering a
+      // narrower question than the one that was spoken. `profileAlerts` is a different read with
+      // a different shape - it carries live alert rows rather than a line per shelf item, so it
+      // cannot answer "is there anything I should know", which is about every item.
+      const outcome = await client.safetyInbox(argument(call, 'profileId'));
+      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      const view = safetyInboxView(outcome.value);
+      return {
+        spoken: [
+          view.coverageStatement,
+          // Name and state together, never a count and never a ranking (`02`): "three need
+          // attention" is the aggregate score this app refuses to produce, and a sorted list is
+          // that score with the number left off.
+          ...view.lines.flatMap((line) => [line.displayName, line.state.label]),
+        ],
+      } satisfies ToolResult;
+    },
+
+    /**
+     * One alert, with its two dimensions kept apart.
+     *
+     * `23` D-005 forbids merging evidence level and action urgency, and Phase 7.1 requires them
+     * visibly separate. Spoken, "separate" means two sentences: they are read as their own labels
+     * rather than joined into one phrase, because a single "high priority, strong evidence" is
+     * the merged judgement the rule is about.
+     */
+    describe_alert: async (call) => {
+      const alertId = argument(call, 'alertId');
+      const outcome = await client.alertDetail(alertId);
+      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      const view = alertDetailScreenView(outcome.value);
+      return {
+        spoken: [
+          ...(view.withdrawnNotice === null ? [] : [view.withdrawnNotice]),
+          ...(view.message ?? []),
+          ...(view.unexplainable === null ? [] : [view.unexplainable.body]),
+          ...(view.urgency === null ? [] : [view.urgency.label]),
+          ...(view.evidence === null ? [] : [view.evidence.label]),
+          view.source.summary,
+          view.coverageStatement,
+          ...(view.withheldNotice === null ? [] : [view.withheldNotice]),
+        ],
+        focusId: alertId,
+      } satisfies ToolResult;
+    },
+
+    /**
+     * Who has access to this person, and what that access carries.
+     *
+     * `displayName` is the grantee as the server named them, and `caregiverAccessRows` falls back
+     * to their user ID when no name was supplied. That fallback is right on a screen, where the
+     * row is beside a control, and wrong out loud: reading a UUID aloud tells a person nothing and
+     * puts an identifier into a room. So a row with no name is announced by its **state and what
+     * it carries** instead, which is what the question is actually about.
+     */
+    list_caregiver_access: async (call) => {
+      const profileId = argument(call, 'profileId');
+      const outcome = await client.listCaregiverGrants({ profileId });
+      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      const rows = caregiverAccessRows(outcome.value.grants);
+      return {
+        spoken: rows.flatMap((row) => {
+          const named = row.displayName !== row.id && !UUID_LIKE.test(row.displayName);
+          const summary = summarizeAccess(row.capabilities);
+          return [
+            named ? row.displayName : presentCaregiverAccess(row.state).label,
+            ...(named ? [presentCaregiverAccess(row.state).label] : []),
+            // The three blocks the invitation review uses, in the same order and the same words:
+            // what they can see, what they can change, what is not shared (DEC-142).
+            ...summary.viewing,
+            ...summary.changing,
+          ];
+        }),
+      } satisfies ToolResult;
+    },
+
+    /**
+     * What this phone is still holding, in the words the queue screen uses.
+     *
+     * Reads the journal rather than the server, which is the whole point: the question "did my
+     * change go through" is about the phone, and asking the server would answer a different one.
+     * `12` requires a queued change to be visible rather than assumed.
+     */
+    list_pending_changes: async () => {
+      const operations = await listPending();
+      const view = pendingQueueView(
+        operations.map((operation) => ({
+          operationId: operation.operationId,
+          entityType: operation.entityType,
+          mutation: operation.mutation,
+          state: operation.state,
+          attemptCount: operation.attemptCount,
+          maxAttempts: MAX_UPLOAD_ATTEMPTS,
+        })),
+      );
+      return {
+        // The summary first, then each row's what and why. `why` is never a code or a
+        // correlation ID, which is the property that makes it safe to say out loud.
+        spoken: [view.summary, ...view.rows.flatMap((row) => [row.what, row.why])],
+      } satisfies ToolResult;
+    },
+
+    /**
+     * Correct one recorded field, on the version that was read.
+     *
+     * TWO CALLS, AND WHY THE FIRST ONE IS NOT A RACE
+     * `updateItem` is conditional on `expectedVersion` rather than carrying an idempotency key
+     * (`13`'s `ASK_USER` policy for an item), so the version has to be read before the write. If
+     * somebody else changes the item in between, the server refuses on the precondition and the
+     * person is told it did not go through - which is the outcome the precondition exists to
+     * produce, not a hole in it. A key would be a second answer to the same question.
+     *
+     * The field name comes off a model completion. It is `type: 'enum'` so gate 3 has already
+     * refused anything outside the list, and it is mapped by a `switch` rather than by indexing
+     * `ItemUpdateBody` with it - a plain index keyed by model output is DEC-146 exactly, and a
+     * `switch` also makes a field added to the registry a compile error here rather than a silent
+     * no-op write.
+     */
+    update_item: async (call) => {
+      const itemId = argument(call, 'itemId');
+      const current = await client.itemDetail(itemId);
+      if (current.kind !== 'OK') {
+        return {
+          spoken: [],
+          utterances: [
+            current.kind === 'OFFLINE' ? 'offline' : utteranceForWriteFailure(current.kind),
+          ],
+        } satisfies ToolResult;
+      }
+
+      const body = itemUpdateFor(
+        current.value.version,
+        argument(call, 'field'),
+        argument(call, 'value'),
+      );
+      if (body === null) return { spoken: [], utterances: ['notUnderstood'] } satisfies ToolResult;
+
+      const outcome = await client.updateItem(itemId, body);
+      if (outcome.kind === 'OK') return { spoken: [], focusId: itemId } satisfies ToolResult;
+      return {
+        spoken: [],
+        utterances: [
+          outcome.kind === 'OFFLINE' ? 'offline' : utteranceForWriteFailure(outcome.kind),
+        ],
+      } satisfies ToolResult;
+    },
+
+    /**
+     * Change when a medicine is taken, or stop the schedule without deleting it.
+     *
+     * WHY THIS TAKES AN ITEM AS WELL AS A SCHEDULE
+     * `ScheduleChangeBody` is whole-document - it repeats the kind, the times and the zone - and
+     * is conditional on `expectedVersion`, and no client method reads one schedule by its own ID.
+     * So the current row has to be found, and `schedules(itemId)` is the read that finds it. The
+     * agent has the item already: a `scheduleId` can only have come from `list_schedules`, which
+     * takes an `itemId`. Adding the parameter is what makes the tool executable rather than a
+     * declaration (`DEV-084`).
+     *
+     * Absent `timesOfDay` leaves the times alone, and absent `active` leaves it running. Nothing
+     * here deletes a row: `active: false` is how reminders stop, which is the distinction the
+     * registry's own description draws.
+     */
+    update_schedule: async (call) => {
+      const itemId = argument(call, 'itemId');
+      const scheduleId = argument(call, 'scheduleId');
+      const current = await client.schedules(itemId);
+      if (current.kind !== 'OK') {
+        return {
+          spoken: [],
+          utterances: [
+            current.kind === 'OFFLINE' ? 'offline' : utteranceForWriteFailure(current.kind),
+          ],
+        } satisfies ToolResult;
+      }
+
+      const schedule = current.value.schedules.find((row) => row.id === scheduleId);
+      // A schedule this item does not have. Not an error to report as a failure of the write -
+      // nothing was attempted - and `13` makes absence and refused access the same answer, so
+      // there is nothing to say beyond not having understood which schedule was meant.
+      if (schedule === undefined) {
+        return { spoken: [], utterances: ['notUnderstood'] } satisfies ToolResult;
+      }
+
+      const times = argument(call, 'timesOfDay')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry !== '');
+      const active = call.arguments['active'];
+
+      const body: ScheduleChangeBody = {
+        expectedVersion: schedule.version,
+        scheduleKind: schedule.scheduleKind,
+        timeZone: schedule.timeZone,
+        timesLocal: times.length === 0 ? schedule.timesLocal : times,
+        ...(schedule.daysOfWeek === null ? {} : { daysOfWeek: schedule.daysOfWeek }),
+        ...(typeof active === 'boolean' ? { active } : {}),
+      };
+
+      const outcome = await client.updateSchedule(scheduleId, body);
+      if (outcome.kind === 'OK') return { spoken: [], focusId: itemId } satisfies ToolResult;
       return {
         spoken: [],
         utterances: [

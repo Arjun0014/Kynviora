@@ -247,6 +247,24 @@ export function ancestryOf(nodes: readonly UiNode[], index: number): readonly Ui
  * - each of those would hide the real defects these two checks exist to find. It is excluded by
  * identity, and its presence is **reported** rather than swallowed (`SHEET-1`, `A11Y-1`), because
  * a warning firing during a survey is a fact about the build worth knowing.
+ *
+ * WHAT THE WARNING ACTUALLY WAS, MEASURED
+ * Reproduced on 2026-09-07 by killing Metro while the app was running and driving the tabs:
+ *
+ * ```
+ * W/ReactNativeJS: Cannot connect to Expo CLI.
+ * W/ReactNativeJS: URL: 10.0.2.2:8081
+ * ```
+ *
+ * Expo's **dev client** reporting that it has lost the dev server - not Kynviora code. The app's
+ * own source contains no `console.*` call, and a full sheet survey at font scale 2 with the stack
+ * healthy produces no JS warning at all and no banner. So the run that first showed this was
+ * measuring an app whose dev server had died underneath it, which is exactly what was found
+ * afterwards (`DEV-088`).
+ *
+ * That is worth more than an explanation. **A survey whose dev server has gone is not measuring
+ * the product**, and this banner is the one visible symptom of it - which is why its presence is
+ * printed on `SHEET-1` and `A11Y-1` rather than quietly dropped.
  */
 const DEVELOPMENT_OVERLAY = /open debugger to view|logbox/i;
 
@@ -430,7 +448,9 @@ export function checkScreen(evidence: ScreenEvidence): readonly Check[] {
         (overlaySeen
           ? ' A development-only overlay (LogBox) was on screen and its controls were excluded:' +
             ' it is not part of the product and does not exist in a release build. Its presence' +
-            ' means the build logged a warning.'
+            " means something logged a warning - most often Expo's dev client reporting that it" +
+            ' has lost the dev server, in which case this run was measuring a degraded app' +
+            ' (`DEV-088`).'
           : ''),
     },
     {

@@ -8,6 +8,7 @@ import {
   asReviewTaskKind,
   accessHistory,
   accessList,
+  alertDetailScreenView,
   caregiverAccessRows,
   invitationAccessRows,
   reviewInboxView,
@@ -499,5 +500,59 @@ describe('the Safety Watch inbox a person reads', () => {
         totalItems: 1,
       }).lines[0]?.lastAssessedAt,
     ).toBe('2026-09-01T09:00:00.000Z');
+  });
+});
+
+/**
+ * A field the server omitted is `null`, not `undefined` (`DEV-087`).
+ *
+ * `alertDetailScreenView` declares four of its fields `| null` and passes them straight through
+ * from the response (`11` puts safety composition server-side, so the client must not rebuild
+ * them). A response that omits one therefore produced `undefined` from a function whose type says
+ * it cannot - and `AlertDetail.tsx` guards with `=== null` before reading `.heading`, so an
+ * omitted `unexplainable` was a crash on the alert screen rather than an absent block.
+ *
+ * Not reachable today: `BLK-006` means nothing is publishable, so there is no alert to open. That
+ * is a reason to fix it now rather than to leave it - the first real publication is a bad moment
+ * to discover it.
+ */
+describe('alertDetailScreenView normalises what the server left out', () => {
+  const MINIMAL = {
+    alertPublicationId: 'a1',
+    ownedItemId: 'i1',
+    isLive: true,
+    facts: [],
+    reasons: [],
+    source: { summary: 'A regulator notice', reference: null, attribution: null },
+    coverageStatement: 'Kynviora checked the sources it monitors.',
+    actions: [],
+  };
+
+  it('answers null for every omitted pass-through', () => {
+    const view = alertDetailScreenView(MINIMAL as never);
+    expect(view.withdrawnNotice).toBeNull();
+    expect(view.message).toBeNull();
+    expect(view.unexplainable).toBeNull();
+    expect(view.withheldNotice).toBeNull();
+  });
+
+  it('a `=== null` guard is enough, which is what every consumer writes', () => {
+    const view = alertDetailScreenView(MINIMAL as never);
+    // The exact shape of `AlertDetail.tsx:112`. Before the fix this threw.
+    const rendered = view.unexplainable === null ? null : view.unexplainable.heading;
+    expect(rendered).toBeNull();
+  });
+
+  it('still carries what the server did send', () => {
+    const view = alertDetailScreenView({
+      ...MINIMAL,
+      message: ['A recall applies to this batch.'],
+      unexplainable: {
+        heading: 'Why this cannot be explained',
+        body: 'The rule is not published.',
+      },
+    } as never);
+    expect(view.message).toEqual(['A recall applies to this batch.']);
+    expect(view.unexplainable?.heading).toBe('Why this cannot be explained');
   });
 });

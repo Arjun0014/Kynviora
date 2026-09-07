@@ -185,7 +185,9 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'EXPLICIT',
     stepUp: false,
     voice: 'ALLOWED',
-    offline: 'QUEUES',
+    // See `update_schedule` below: only `record_dose` reaches the journal, so this is the value
+    // that describes the build rather than an intention (`DEV-084`).
+    offline: 'ONLINE_ONLY',
     surface: 'SCHEDULE_SHEET',
     parameters: [
       ITEM_ID,
@@ -213,9 +215,21 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'EXPLICIT',
     stepUp: false,
     voice: 'ALLOWED',
-    offline: 'QUEUES',
+    // `ONLINE_ONLY`, and it used to say `QUEUES`. Only `record_dose` reaches the offline journal
+    // (DEC-140); nothing queues a schedule change by voice, and a change conditional on
+    // `expectedVersion` is not something a replay can carry unchanged anyway. Declaring `QUEUES`
+    // meant gate 5 let it through with no connection, so the write failed and the person was told
+    // it had failed - honest since `DEV-085`, but a round trip to say what the gate already knew.
+    // Refusing early is the same answer, sooner, and the registry now describes the build
+    // (`DEV-084`).
+    offline: 'ONLINE_ONLY',
     surface: 'SCHEDULE_SHEET',
     parameters: [
+      // The item as well as the schedule. `ScheduleChangeBody` is whole-document and conditional
+      // on `expectedVersion`, and no client method reads one schedule by its own ID - so the row
+      // has to be found through `schedules(itemId)`. The agent has it: a `scheduleId` can only
+      // have come from `list_schedules`, which takes an `itemId`.
+      ITEM_ID,
       { name: 'scheduleId', type: 'string', required: true, description: 'Which schedule.' },
       {
         name: 'timesOfDay',

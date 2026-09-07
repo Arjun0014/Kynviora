@@ -333,9 +333,18 @@ describe('argument validation', () => {
 
   it('refuses a value of the wrong type, including one that would coerce', () => {
     const update = toolNamed('update_schedule');
-    expect(validateArguments(update!, { scheduleId: 's1', active: false }).ok).toBe(true);
+    // `itemId` as well as `scheduleId` since `DEV-084`: the change is whole-document and
+    // conditional on a version, and `schedules(itemId)` is the only read that finds the row.
+    expect(validateArguments(update!, { itemId: 'i1', scheduleId: 's1', active: false }).ok).toBe(
+      true,
+    );
     // `'false'` is truthy and would have turned off nothing.
-    expect(validateArguments(update!, { scheduleId: 's1', active: 'false' }).ok).toBe(false);
+    expect(validateArguments(update!, { itemId: 'i1', scheduleId: 's1', active: 'false' }).ok).toBe(
+      false,
+    );
+    // And the item is required rather than optional, so a call without it is refused here rather
+    // than reaching an executor that cannot resolve the schedule.
+    expect(validateArguments(update!, { scheduleId: 's1', active: false }).ok).toBe(false);
   });
 });
 

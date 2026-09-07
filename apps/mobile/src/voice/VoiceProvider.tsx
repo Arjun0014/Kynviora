@@ -237,7 +237,7 @@ export function VoiceProvider({
    * `queue` answers `false` where `13`'s policy refuses the type or the store could not take the
    * write, and the executor says the honest sentence for that rather than the queued one.
    */
-  const { queue } = usePendingSync();
+  const { queue, list: listPending } = usePendingSync();
   const queueDose = useCallback(
     async (body: DoseEventBody, key: string): Promise<boolean> =>
       queue({
@@ -256,8 +256,8 @@ export function VoiceProvider({
   );
 
   const executor = useMemo(
-    () => (client === null ? {} : createToolExecutor(client, bridge, queueDose)),
-    [client, bridge, queueDose],
+    () => (client === null ? {} : createToolExecutor(client, bridge, queueDose, listPending)),
+    [client, bridge, queueDose, listPending],
   );
 
   /** Add a line to the transcript, having put it through the Speech Gate first. */

@@ -756,10 +756,17 @@ export function alertDetailScreenView(response: AlertDetailResponse): AlertDetai
     alertPublicationId: response.alertPublicationId,
     ownedItemId: response.ownedItemId,
     isLive: response.isLive,
-    withdrawnNotice: response.withdrawnNotice,
-    message: response.message,
-    unexplainable: response.unexplainable,
-    withheldNotice: response.withheldNotice,
+    // `?? null` on all four, and not tidying. Each is declared `| null` here and each is a
+    // pass-through from the server, so a response that simply **omits** the field yields
+    // `undefined` - and every consumer written against the declared type tests `=== null`.
+    // `AlertDetail.tsx` does exactly that and then reads `.heading`, so an omitted
+    // `unexplainable` is a crash on the alert screen rather than an absent block. Normalising at
+    // the boundary is what makes the declared type true; the alternative is every reader
+    // remembering that this one is really `| null | undefined` (`DEV-087`).
+    withdrawnNotice: response.withdrawnNotice ?? null,
+    message: response.message ?? null,
+    unexplainable: response.unexplainable ?? null,
+    withheldNotice: response.withheldNotice ?? null,
     // Presented separately and never combined (`23` D-005). Narrowed rather than trusted: a
     // half-formed presentation would render as a chip with a blank label, which on a safety
     // screen reads as a state nobody assigned.

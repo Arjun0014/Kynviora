@@ -385,7 +385,9 @@ export function sheetOpenedCheck(survey: SheetSurvey): Check {
       (survey.developmentOverlaySeen
         ? ' A development-only overlay (LogBox) was on screen during this survey and its controls' +
           ' were excluded: it is not part of the product and does not exist in a release build.' +
-          ' Its presence means the build logged a warning while the run was under way.'
+          ' Its presence means something logged a warning while the run was under way - most' +
+          " often Expo's dev client reporting that it has lost the dev server, in which case this" +
+          ' survey was measuring a degraded app (`DEV-088`).'
         : ''),
   };
 }
