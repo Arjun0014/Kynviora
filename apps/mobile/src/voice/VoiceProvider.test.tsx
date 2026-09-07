@@ -18,12 +18,19 @@ import type { ApiOutcome, KynvioraClient } from '@kynviora/contracts';
 import { renderScreen, flush, allNodes, textOf, type Rendered } from '../../test/render';
 import { ApiProvider } from '@/api/ApiProvider';
 import { ProfileProvider, type ProfileContextValue } from '@/api/ProfileProvider';
-import { PendingSyncProvider, type PendingSyncContextValue } from '@/sync/PendingSyncProvider';
+import {
+  PendingSyncProvider,
+  type PendingSyncContextValue,
+  type QueueRequest,
+} from '@/sync/PendingSyncProvider';
 import { VoiceProvider, useVoice } from './VoiceProvider';
 import type { VoiceBridge } from './executor';
 
 const PROFILE = '00000000-0000-4000-8000-0000000000p1'.replace('p1', '0001');
 const ITEM = '00000000-0000-4000-8000-000000000i01'.replace('i01', '0002');
+const SCHEDULE = '00000000-0000-4000-8000-000000000s01'.replace('s01', '0003');
+/** The version `schedules` reports, so a queued change can be checked against a real read. */
+const SCHEDULE_VERSION = 4;
 
 /**
  * Every call the client was asked to make, in order. The heart of every assertion here.
@@ -35,6 +42,10 @@ const ITEM = '00000000-0000-4000-8000-000000000i01'.replace('i01', '0002');
 function recordingClient(
   calls: string[],
   doseOutcome?: ApiOutcome<{ readonly id: string; readonly serverTime: string }>,
+  /** What the two schedule writes answer with. Injected for the same reason `doseOutcome` is. */
+  scheduleOutcome?: ApiOutcome<unknown>,
+  /** What `schedules` answers with. The read is what decides whether a change can queue at all. */
+  readOutcome?: ApiOutcome<unknown>,
 ): KynvioraClient {
   const ok = <T,>(value: T): Promise<ApiOutcome<T>> =>
     Promise.resolve({ kind: 'OK', value, correlationId: null });
@@ -71,6 +82,48 @@ function recordingClient(
           ? ok({ id: 'dose-1', serverTime: '2026-09-07T08:00:00.000Z' })
           : Promise.resolve(doseOutcome)
       ) as Promise<ApiOutcome<{ readonly id: string; readonly serverTime: string }>>;
+    },
+    /**
+     * The schedules on one medicine, at a known version.
+     *
+     * `update_schedule` reads this before it writes, because `ScheduleChangeBody` is conditional
+     * on `expectedVersion` and schedules are not in the local projection - so what this answers
+     * decides whether a queued change is possible at all (DEC-148).
+     */
+    schedules: (itemId: string) => {
+      calls.push(`schedules:${itemId}`);
+      return readOutcome === undefined
+        ? ok({
+            serverTime: '2026-09-07T08:00:00.000Z',
+            schedules: [
+              {
+                id: SCHEDULE,
+                ownedItemId: ITEM,
+                scheduleKind: 'FIXED_TIMES',
+                timesLocal: ['08:00'],
+                daysOfWeek: null,
+                timeZone: 'Europe/London',
+                startsOn: null,
+                endsOn: null,
+                active: true,
+                version: SCHEDULE_VERSION,
+                updatedAt: null,
+              },
+            ],
+          })
+        : Promise.resolve(readOutcome);
+    },
+    createSchedule: (_itemId: string, _body: unknown, key: string) => {
+      calls.push(`createSchedule:${key.length > 0 ? 'keyed' : 'unkeyed'}`);
+      return scheduleOutcome === undefined
+        ? ok({ id: SCHEDULE })
+        : Promise.resolve(scheduleOutcome);
+    },
+    updateSchedule: () => {
+      calls.push('updateSchedule');
+      return scheduleOutcome === undefined
+        ? ok({ id: SCHEDULE })
+        : Promise.resolve(scheduleOutcome);
     },
     listProfiles: () => {
       calls.push('listProfiles');
@@ -173,7 +226,18 @@ function press(rendered: Rendered, label: string): void {
  * whether a failed write is offered to the queue at all, under which key, and what the person is
  * told about the answer.
  */
-function recordingJournal(queued: string[], accepts = true): PendingSyncContextValue {
+function recordingJournal(
+  queued: string[],
+  accepts = true,
+  /**
+   * The whole requests, for a caller asserting more than the shape of one.
+   *
+   * A schedule change carries a `baseVersion` and no key while a create carries a key and no
+   * version, and the summary string above cannot tell those apart - which is exactly the
+   * distinction `13` makes between a conditional write and an idempotent one (DEC-148).
+   */
+  requests?: QueueRequest[],
+): PendingSyncContextValue {
   return {
     queue: (request) => {
       queued.push(
@@ -181,6 +245,7 @@ function recordingJournal(queued: string[], accepts = true): PendingSyncContextV
           request.operationId === undefined ? 'no-key' : 'keyed'
         }`,
       );
+      requests?.push(request);
       return Promise.resolve(accepts);
     },
     waiting: 0,
@@ -201,12 +266,19 @@ function mount(options: {
   readonly capabilities?: ReadonlySet<string>;
   readonly online?: boolean;
   readonly doseOutcome?: ApiOutcome<{ readonly id: string; readonly serverTime: string }>;
+  readonly scheduleOutcome?: ApiOutcome<unknown>;
+  readonly readOutcome?: ApiOutcome<unknown>;
   readonly journal?: PendingSyncContextValue;
 }): Rendered {
   return renderScreen(
     <ApiProvider
       value={{
-        client: recordingClient(options.calls, options.doseOutcome),
+        client: recordingClient(
+          options.calls,
+          options.doseOutcome,
+          options.scheduleOutcome,
+          options.readOutcome,
+        ),
         session: { kind: 'ANONYMOUS' },
         configurationError: null,
         elevate: () => null,
@@ -671,5 +743,194 @@ describe('a dose recorded with no signal (DEV-071, DEC-140)', () => {
 
     expect(queued).toEqual([]);
     expect(lastSpoken(rendered)).toContain('Done.');
+  });
+});
+
+/**
+ * A schedule set or changed with no signal, through the journal the schedule sheet uses.
+ *
+ * Spec references: `12` (the pending-operation journal; a queued change is visible rather than
+ * assumed), `13` (the operation ID is the idempotency key; `medicine_schedule` resolves
+ * `ASK_USER`), `03` group J, DEC-111, DEC-148, `DEV-084`.
+ *
+ * WHAT THIS ADDS OVER `executor.test.ts`
+ * That file proves the executor hands the right values to a queue it was given. This proves the
+ * **wiring**: that the queue it is given is `usePendingSync().queue`, and that what arrives there
+ * is addressed the way `PendingSenders` and the shelf already address it - the same entity type,
+ * the same entity ID, the same mutation, the same key discipline. A voice path that queued under
+ * its own entity type would pass every assertion in the other file and would never be drained,
+ * because no sender is registered for a name nobody else uses.
+ */
+describe('a schedule set or changed with no signal', () => {
+  const CREATE_RULES: readonly ScriptedRule[] = [
+    {
+      whenSaid: /remind me/,
+      then: {
+        kind: 'CALL',
+        name: 'create_schedule',
+        arguments: { itemId: ITEM, timesOfDay: '08:00', timeZone: 'Europe/London' },
+      },
+    },
+  ];
+
+  const UPDATE_RULES: readonly ScriptedRule[] = [
+    {
+      whenSaid: /change/,
+      then: {
+        kind: 'CALL',
+        name: 'update_schedule',
+        arguments: { itemId: ITEM, scheduleId: SCHEDULE, timesOfDay: '09:00' },
+      },
+    },
+  ];
+
+  /** Both tools are `EXPLICIT`, so the summary is armed first and the button releases it. */
+  async function propose(rendered: Rendered): Promise<void> {
+    press(rendered, 'say');
+    await flush();
+    press(rendered, 'confirm');
+    await flush();
+  }
+
+  function mountSchedule(options: {
+    readonly script: string;
+    readonly rules: readonly ScriptedRule[];
+    readonly calls: string[];
+    readonly requests: QueueRequest[];
+    readonly accepts?: boolean;
+    readonly scheduleOutcome?: ApiOutcome<unknown>;
+    readonly readOutcome?: ApiOutcome<unknown>;
+  }): Rendered {
+    return mount({
+      script: options.script,
+      rules: options.rules,
+      calls: options.calls,
+      moves: [],
+      capabilities: new Set(['VIEW_MEDICINES', 'RECORD_DOSES', 'MANAGE_MEDICINES']),
+      ...(options.scheduleOutcome === undefined
+        ? {}
+        : { scheduleOutcome: options.scheduleOutcome }),
+      ...(options.readOutcome === undefined ? {} : { readOutcome: options.readOutcome }),
+      journal: recordingJournal([], options.accepts ?? true, options.requests),
+    });
+  }
+
+  it('queues a create under the medicine, with the key the attempt spent', async () => {
+    const calls: string[] = [];
+    const requests: QueueRequest[] = [];
+    const rendered = mountSchedule({
+      script: 'remind me at eight',
+      rules: CREATE_RULES,
+      calls,
+      requests,
+      scheduleOutcome: { kind: 'OFFLINE' },
+    });
+
+    await propose(rendered);
+
+    expect(calls).toEqual(['createSchedule:keyed']);
+    expect(requests).toHaveLength(1);
+    const queued = requests[0];
+    // `medicine_schedule`, because that is the type `PendingSenders` registers a sender for and
+    // the type `13` resolves `ASK_USER`. A type of its own would never be drained at all.
+    expect(queued?.entityType).toBe('medicine_schedule');
+    expect(queued?.entityId).toBe(ITEM);
+    expect(queued?.mutation).toBe('CREATE');
+    // A create has nothing to be conditional on, and carries the key instead.
+    expect(queued?.baseVersion).toBeNull();
+    expect(queued?.operationId).toBeDefined();
+    expect(lastSpoken(rendered)).toContain('kept it here');
+  });
+
+  it('queues a change under the schedule, conditional on the version it was read at', async () => {
+    const calls: string[] = [];
+    const requests: QueueRequest[] = [];
+    const rendered = mountSchedule({
+      script: 'change it to nine',
+      rules: UPDATE_RULES,
+      calls,
+      requests,
+      scheduleOutcome: { kind: 'OFFLINE' },
+    });
+
+    await propose(rendered);
+
+    // The read first, because the version is the only thing that makes the write conditional.
+    expect(calls).toEqual([`schedules:${ITEM}`, 'updateSchedule']);
+    expect(requests).toHaveLength(1);
+    const queued = requests[0];
+    expect(queued?.entityType).toBe('medicine_schedule');
+    // The schedule, because `PATCH /v1/schedules/:id` is addressed to it - the same value the
+    // shelf queues under, and the value `PendingSenders` passes to `updateSchedule`.
+    expect(queued?.entityId).toBe(SCHEDULE);
+    expect(queued?.mutation).toBe('UPDATE');
+    // The version the read returned. Not a key: a conditional write is already exactly-once.
+    expect(queued?.baseVersion).toBe(4);
+    expect(queued?.operationId).toBeUndefined();
+    expect(lastSpoken(rendered)).toContain('kept it here');
+  });
+
+  /**
+   * The half DEC-148 turns on, at the wiring level.
+   *
+   * With no connection the read fails as well, so there is no version. Nothing may be queued, and
+   * the sentence must promise nothing - a person told their reminder had moved would stop thinking
+   * about it, and the change does not exist.
+   */
+  it('queues nothing where the version could not be read', async () => {
+    const calls: string[] = [];
+    const requests: QueueRequest[] = [];
+    const rendered = mountSchedule({
+      script: 'change it to nine',
+      rules: UPDATE_RULES,
+      calls,
+      requests,
+      readOutcome: { kind: 'OFFLINE' },
+    });
+
+    await propose(rendered);
+
+    expect(calls).toEqual([`schedules:${ITEM}`]);
+    expect(requests).toEqual([]);
+    expect(lastSpoken(rendered)).toContain('no connection');
+    expect(lastSpoken(rendered)).not.toContain('kept it here');
+    expect(lastSpoken(rendered)).not.toContain('Done.');
+  });
+
+  /** A refusal the server gave is never queued, and never spoken as a transport problem. */
+  it('does not queue a schedule the server answered and did not write', async () => {
+    const calls: string[] = [];
+    const requests: QueueRequest[] = [];
+    const rendered = mountSchedule({
+      script: 'remind me at eight',
+      rules: CREATE_RULES,
+      calls,
+      requests,
+      scheduleOutcome: { kind: 'AUTHORIZATION_LOST' },
+    });
+
+    await propose(rendered);
+
+    expect(requests).toEqual([]);
+    expect(lastSpoken(rendered)).not.toContain('kept it here');
+    expect(lastSpoken(rendered)).not.toContain('Done.');
+    expect(lastSpoken(rendered)).toContain('has not kept it');
+  });
+
+  /** A journal that would not take the write is a change nothing kept, said as such (`LOW-2`). */
+  it('says only that there is no connection when nothing would keep it', async () => {
+    const rendered = mountSchedule({
+      script: 'remind me at eight',
+      rules: CREATE_RULES,
+      calls: [],
+      requests: [],
+      accepts: false,
+      scheduleOutcome: { kind: 'OFFLINE' },
+    });
+
+    await propose(rendered);
+
+    expect(lastSpoken(rendered)).toContain('no connection');
+    expect(lastSpoken(rendered)).not.toContain('kept it here');
   });
 });

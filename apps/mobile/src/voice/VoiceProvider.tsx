@@ -56,12 +56,17 @@ import {
   type VoiceProviders,
   type VoiceSession,
 } from '@kynviora/agent';
-import type { DoseEventBody } from '@kynviora/contracts';
+import type { DoseEventBody, ScheduleBody, ScheduleChangeBody } from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
 import { useProfiles } from '@/api/ProfileProvider';
 import { useResource } from '@/api/useResource';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
-import { createToolExecutor, type ToolResult, type VoiceBridge } from './executor';
+import {
+  createToolExecutor,
+  type QueuedWrites,
+  type ToolResult,
+  type VoiceBridge,
+} from './executor';
 import { resolveVoiceProviders } from './devScript';
 import { capabilitiesFor } from './capabilities';
 import { newIdempotencyKey } from '@/platform/ids';
@@ -224,40 +229,74 @@ export function VoiceProvider({
   );
 
   /**
-   * Keep a dose the server could not be told about, in the app's own journal (DEC-140).
+   * Keep a write the server could not be told about, in the app's own journal (DEC-140, DEC-148).
    *
    * THE SAME PATH AS TOUCH, NOT A SECOND ONE
-   * `usePendingSync().queue` is the identical call the dose sheet makes, under the identical entity
-   * type and the identical key, so the drain, the per-entity policy (`13`), the retry budget and
-   * `PendingSenders`' wire call are all the ones already exercised by `OFF-6` and `OFF-7` on
-   * hardware. Voice adds no sync mechanism; it reaches the one that exists. That is DEC-132 applied
-   * to the offline path - the agent's reach is the app's reach because it is the app's code doing
-   * the reaching.
+   * `usePendingSync().queue` is the identical call the dose sheet and the schedule sheet make,
+   * under the identical entity types, the identical keys and the identical preconditions - so the
+   * drain, the per-entity policy (`13`), the retry budget and `PendingSenders`' wire call are all
+   * the ones already exercised by `OFF-1` to `OFF-7` on hardware. Voice adds no sync mechanism; it
+   * reaches the one that exists. That is DEC-132 applied to the offline path - the agent's reach is
+   * the app's reach because it is the app's code doing the reaching.
    *
    * `queue` answers `false` where `13`'s policy refuses the type or the store could not take the
    * write, and the executor says the honest sentence for that rather than the queued one.
+   *
+   * Each of the three is written out rather than folded into one generic call, because each
+   * carries a different one of `13`'s guarantees and the differences are the point: a dose and a
+   * schedule create keep the key the attempt spent, and a schedule change keeps the version it was
+   * made against instead. A single call taking all three would have to decide which applies, which
+   * is the decision the entity type already makes.
    */
   const { queue, list: listPending } = usePendingSync();
-  const queueDose = useCallback(
-    async (body: DoseEventBody, key: string): Promise<boolean> =>
-      queue({
-        entityType: 'dose_event',
-        entityId: body.ownedItemId,
-        mutation: 'CREATE',
-        payload: body,
-        baseVersion: null,
-        // The key the failed attempt already spent. `OFFLINE` is inferred from a failed fetch,
-        // which is also what a request that arrived and lost its answer looks like - and `13`
-        // resolves this table `MERGE_BY_ID` precisely so the replay lands on the row that may
-        // already exist (DEC-111).
-        operationId: key,
-      }),
+  const queued = useMemo<QueuedWrites>(
+    () => ({
+      dose: (body: DoseEventBody, key: string): Promise<boolean> =>
+        queue({
+          entityType: 'dose_event',
+          entityId: body.ownedItemId,
+          mutation: 'CREATE',
+          payload: body,
+          baseVersion: null,
+          // The key the failed attempt already spent. `OFFLINE` is inferred from a failed fetch,
+          // which is also what a request that arrived and lost its answer looks like - and `13`
+          // resolves this table `MERGE_BY_ID` precisely so the replay lands on the row that may
+          // already exist (DEC-111).
+          operationId: key,
+        }),
+      scheduleCreate: (itemId: string, body: ScheduleBody, key: string): Promise<boolean> =>
+        queue({
+          entityType: 'medicine_schedule',
+          // The medicine, because that is what `POST /v1/items/:id/schedules` is addressed to and
+          // the schedule has no ID until the server has written one. The same value the shelf
+          // queues under.
+          entityId: itemId,
+          mutation: 'CREATE',
+          payload: body,
+          // A create has nothing to be conditional on (`13`'s precondition is for mutable records).
+          baseVersion: null,
+          operationId: key,
+        }),
+      scheduleUpdate: (scheduleId: string, body: ScheduleChangeBody): Promise<boolean> =>
+        queue({
+          entityType: 'medicine_schedule',
+          // The schedule, because `PATCH /v1/schedules/:id` is addressed to it. The same value the
+          // shelf queues under.
+          entityId: scheduleId,
+          mutation: 'UPDATE',
+          payload: body,
+          // The version the change was made against, freshly read moments ago. No idempotency key:
+          // a conditional write is already exactly-once for its intent, and a replay against a row
+          // that has moved is a `VERSION_CONFLICT` a person is asked about rather than a win.
+          baseVersion: body.expectedVersion,
+        }),
+    }),
     [queue],
   );
 
   const executor = useMemo(
-    () => (client === null ? {} : createToolExecutor(client, bridge, queueDose, listPending)),
-    [client, bridge, queueDose, listPending],
+    () => (client === null ? {} : createToolExecutor(client, bridge, queued, listPending)),
+    [client, bridge, queued, listPending],
   );
 
   /** Add a line to the transcript, having put it through the Speech Gate first. */

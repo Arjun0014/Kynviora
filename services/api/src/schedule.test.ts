@@ -40,6 +40,14 @@ const MEDICINE_MANAGER = testUuid(3);
 /** The shelf capabilities and neither medicine one. */
 const SHELF_MANAGER = testUuid(4);
 const STRANGER = testUuid(5);
+/**
+ * VIEW_MEDICINES + MANAGE_MEDICINES, and then revoked.
+ *
+ * Reachable only since a schedule became a thing a phone can queue by voice as well as by touch
+ * (DEC-148): an operation minted while a grant stood is replayed by a drain later, against
+ * whatever the grant says at the moment it lands.
+ */
+const REVOKED = testUuid(6);
 
 const HOUSEHOLD = testUuid(10);
 const PROFILE = testUuid(20);
@@ -67,6 +75,7 @@ beforeAll(async () => {
       [MEDICINE_MANAGER, 'meds@example.test'],
       [SHELF_MANAGER, 'shelf@example.test'],
       [STRANGER, 'stranger@example.test'],
+      [REVOKED, 'revoked@example.test'],
     ] as const) {
       await db.query(
         `INSERT INTO app_user (id, external_auth_id, email_normalized, email_verified_at)
@@ -98,6 +107,18 @@ beforeAll(async () => {
         [PROFILE, user, OWNER, capabilities],
       );
     }
+
+    // Granted everything a schedule needs and then revoked, which is the state a replayed queue
+    // meets. Written as `REVOKED` rather than deleted because that is what revocation does: the
+    // row stays, carrying the capabilities its owner once chose, and `has_capability` stops
+    // reading it.
+    await db.query(
+      `INSERT INTO caregiver_grant
+         (profile_id, grantee_user_id, granted_by_user_id, capabilities, status, accepted_at,
+          revoked_at)
+       VALUES ($1, $2, $3, $4::text[], 'REVOKED', now(), now())`,
+      [PROFILE, REVOKED, OWNER, ['VIEW_MEDICINES', 'VIEW_SHELF', 'MANAGE_MEDICINES']],
+    );
   });
 
   const pool: DatabasePool = {
@@ -686,5 +707,122 @@ describe('what the route stores is what the occurrence engine reads', () => {
     expect(
       occurrencesBetween(schedule, calendarDate('2026-09-02'), calendarDate('2026-09-09')),
     ).toEqual([]);
+  });
+});
+
+/**
+ * What a queued schedule change meets when it is finally sent.
+ *
+ * Spec references: `11` and `12` (access control is server-authoritative; authorization loss
+ * invalidates local access), `13` (the operation ID is the idempotency key; per-entity conflict
+ * policy), `03` group J, DEC-111, DEC-148.
+ *
+ * WHY THIS EXISTS NOW
+ * A schedule became a thing a phone keeps when it has no signal from **both** surfaces rather than
+ * one (DEC-148), so the shape these tests describe is no longer hypothetical: an operation written
+ * at eight in the evening is replayed by a drain the next morning, against whatever the grant and
+ * the row say then. The client stops its drain on authorization loss (DEC-109) and re-sends a
+ * conflict as a decision, and neither is where this may rest - `11` puts the decision on the
+ * server, so what has to be true is that the **route** refuses.
+ *
+ * Three shapes, and each is a different way for a replay to be wrong:
+ *
+ *   - **The grant ended between the change and the send.** The row must not move, and the answer
+ *     must be the same absence a stranger gets.
+ *   - **The row moved between the change and the send.** The queued precondition is stale, and the
+ *     refusal must be a conflict rather than a win - with what is stored unchanged, because the
+ *     alternative is somebody's reminder times replaced by an edit made against a state nobody
+ *     looked at.
+ *   - **The answer was lost and the create is sent again.** One schedule, not two, because on this
+ *     table a second row is being told twice at the same minute to take the same tablet.
+ */
+describe('a change queued on a phone and replayed later', () => {
+  it('refuses a create from a caregiver whose grant ended before the drain ran', async () => {
+    const response = await create(principalFor(REVOKED), MEDICINE);
+    // 404, the same answer a stranger and an unknown medicine get. `13` makes absence and refused
+    // access deliberately indistinguishable, so this says nothing about the medicine existing.
+    expect(response.statusCode).toBe(404);
+
+    const stored = await list(principalFor(OWNER), MEDICINE);
+    expect(stored.json<ListBody>().schedules).toEqual([]);
+  });
+
+  it('refuses a change from a caregiver whose grant ended, and leaves the times alone', async () => {
+    const schedule = await seeded();
+
+    const replay = await patch(principalFor(REVOKED), schedule.id, {
+      ...FIXED,
+      expectedVersion: schedule.version,
+      timesLocal: ['23:00'],
+    });
+    expect(replay.statusCode).toBe(404);
+
+    // The subtraction that makes the refusal mean something. A route that answered 404 after
+    // writing would pass the assertion above.
+    const after = await list(principalFor(OWNER), MEDICINE);
+    expect(after.json<ListBody>().schedules[0]?.timesLocal).toEqual(['08:00', '20:00']);
+    expect(after.json<ListBody>().schedules[0]?.version).toBe(schedule.version);
+  });
+
+  /**
+   * The replay a stale queued edit produces, end to end.
+   *
+   * The precondition is minted at version 1 and the row is moved to 2 by somebody else before the
+   * drain runs. What must come back is a conflict carrying the version that now stands - which is
+   * what lets the queue classify it as a decision for the person rather than as a failure to
+   * retry - and what must not happen is the queued times landing.
+   */
+  it('answers a stale replay with a conflict rather than applying it', async () => {
+    const schedule = await seeded();
+
+    // Somebody else moves it while the phone is in a pocket.
+    const moved = await patch(principalFor(MEDICINE_MANAGER), schedule.id, {
+      ...FIXED,
+      expectedVersion: schedule.version,
+      timesLocal: ['07:00'],
+    });
+    expect(moved.statusCode).toBe(200);
+
+    // The drain sends what was queued, still conditional on the version it was made against.
+    const replay = await patch(principalFor(OWNER), schedule.id, {
+      ...FIXED,
+      expectedVersion: schedule.version,
+      timesLocal: ['21:00'],
+    });
+    expect(replay.statusCode).toBe(409);
+    const body = replay.json<WireError>();
+    expect(body.error.code).toBe('VERSION_CONFLICT');
+    expect(body.error.detail?.currentVersion).toBe(schedule.version + 1);
+
+    // Neither silently overwritten nor merged. What stands is what the server had.
+    const after = await list(principalFor(OWNER), MEDICINE);
+    expect(after.json<ListBody>().schedules[0]?.timesLocal).toEqual(['07:00']);
+  });
+
+  /**
+   * The two mechanisms crossed, which is where a replay is most likely to be let through.
+   *
+   * The key was minted while the grant stood and the replay arrives after it ended. A route that
+   * looked the key up first would find the row it had already written and answer
+   * `idempotent-replay` with a schedule the caller may no longer see - so the authorization check
+   * has to come before the idempotency lookup, and the answer has to be the same absence a
+   * stranger gets. `doseAuthorization.test.ts` asks this of the dose route; a schedule is the
+   * other thing a phone can now queue from either surface (DEC-148).
+   */
+  it('refuses a revoked caregiver replaying a create they made while granted', async () => {
+    const key = testUuid(4242);
+
+    // Written while the grant stood, by somebody who still holds it.
+    const granted = await create(principalFor(MEDICINE_MANAGER), MEDICINE, FIXED, key);
+    expect(granted.statusCode).toBe(201);
+
+    const replay = await create(principalFor(REVOKED), MEDICINE, FIXED, key);
+    expect(replay.statusCode).toBe(404);
+    // Not the stored row wearing a replay header, which is what a key-first lookup would give.
+    expect(replay.headers['idempotent-replay']).toBeUndefined();
+
+    // And the schedule the granted caller made is untouched: the refusal removed nothing.
+    const stored = await list(principalFor(OWNER), MEDICINE);
+    expect(stored.json<ListBody>().schedules).toHaveLength(1);
   });
 });

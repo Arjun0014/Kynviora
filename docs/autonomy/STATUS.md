@@ -3,20 +3,20 @@
 **Resume checkpoint.** Read this first on any autonomous restart, then `git log`, then the tail
 of `WORKLOG.md`, then `BLOCKERS.md`.
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 ---
 
 ## Current position
 
-|                    |                                                                         |
-| ------------------ | ----------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; the design layer carried past the golden path         |
-| **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work                  |
-| **Last completed** | The accessibility survey all-green, and four writes that told the truth |
-| **Branch**         | `master`                                                                |
-| **Latest commit**  | `fix(device): the offline note the keyboard rewrote...`                 |
-| **Baseline tag**   | `baseline-spec-only`                                                    |
+|                    |                                                                       |
+| ------------------ | --------------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; the design layer carried past the golden path       |
+| **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work                |
+| **Last completed** | Voice queues a schedule change where touch does, under a read version |
+| **Branch**         | `master`                                                              |
+| **Latest commit**  | `feat(voice,api): a schedule change that survives the kitchen...`     |
+| **Baseline tag**   | `baseline-spec-only`                                                  |
 
 **The full accessibility survey is green for the first time: 74 PASS, 0 FAIL, 0 INCONCLUSIVE.**
 The intermittent failure that had survived three sessions was captured and turned out to be React
@@ -732,6 +732,7 @@ the API will not distinguish them.
 | Agent Tool Registry: 30 tools, eight answers each, no defaults | Complete, 111 tests; what `17` forbids has no name to be called           |
 | Voice Mode: gates, confirmation, Speech Gate, the shell        | Complete; **9/9 on a device**; all 30 tools runnable or refused by design |
 | Voice Mode's offline dose, through the app's own journal       | Complete, 5 tests; same entity, same key, same drain (DEC-140)            |
+| Voice Mode's offline schedule, created and changed             | Complete, 20 tests; a change queues on a **read** version (DEC-148)       |
 | What a caller may do on a profile, reported by the server      | Complete, 7 tests; voice offers what a grant carries (DEC-141)            |
 | CI pipeline                                                    | Written; not yet run on a real runner                                     |
 
@@ -780,21 +781,20 @@ deliver to (`DEV-069`). One mailbox closes all three.
 
 ## Immediate next task
 
-**Give a queued schedule change a way home** (`DEV-084`'s remainder). `create_schedule` and
-`update_schedule` are `ONLINE_ONLY` now because that is what the build does, and the touch path
-queues schedules perfectly well - `OFF-1` to `OFF-5` measure three creates under one key leaving
-one schedule. So the mechanism exists and voice does not reach it, and the honest registry value
-made that visible rather than closing it.
+**Give a conflicted queued change a resolution that can succeed** (`DEV-092`). `pendingQueue.ts`
+offers `RETRY` on a `CONFLICTED` row and `PendingSyncProvider.retry` re-sends the payload
+unchanged - including the `expectedVersion` the server has just refused. Every conflict this build
+can produce is a conditional write, so the control is structurally futile; and because retry resets
+the attempt budget it can be pressed for ever, unlike the `REJECTED` case the same file explicitly
+guards against for exactly this reason. `13` resolves `medicine_schedule` and `allergy_record`
+`ASK_USER`, and the question that screen asks has to be a real one.
 
-What it needs is not more wiring. `record_dose` queues because a dose is `MERGE_BY_ID` and its
-idempotency key makes a replay land once; a schedule **update** is conditional on
-`expectedVersion`, and a replay minted while the row was at version 3 must not silently win
-against a row that has since moved to 4. That is a decision about what a stale queued edit means -
-`13`'s `ASK_USER` policy already says the answer for `medicine_schedule` is to ask - and then
-`PendingSenders` needs a sender for the update, not just the create.
+It matters more since DEC-148, because a conflicted schedule change is now reachable from two
+surfaces rather than one.
 
-Worth doing because it is the one place where voice is narrower than touch for a reason nobody
-chose: `14`'s touch-only group is deliberate and recorded, and this is not.
+**And two Voice Mode defects found on the way there**, both about a sentence rather than a write:
+`DEV-090` (a read that could not read is spoken as "Done.") and `DEV-091` (nine tools declare
+`LOCAL_PROJECTION` and the executor never touches the projection).
 
 **Then a mailbox** (`BLK-010`), which is still the whole of what stands between the fourteenth
 device scenario and every one of its eleven checks passing.
@@ -870,6 +870,12 @@ deterministic phrase matcher. A person can already ask for what they are taking,
 set a reminder, add an item, open the camera, hear what is missing and get to a screen, and be
 refused - out loud and in writing - when they ask for something voice may not carry. What is
 missing is the three providers, and the screen says so on itself rather than pretending to listen.
+
+**Since 2026-09-08 it can also set and change a reminder with no signal**, into the journal the
+schedule sheet uses, under the key the attempt spent for a create and the version the read returned
+for a change (DEC-148). What it still cannot do offline is change a schedule it could not read one
+for - there is no `expectedVersion` to be conditional on, and the two ways to send an update
+without one are the two `13` refuses. That is a refusal rather than a gap, and it says so.
 
 Two things it could not do until 2026-09-07 and can now:
 
@@ -2114,3 +2120,19 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      and an unrelated dev server on 5173 belonging to somebody else's work. Free a port by its
      owning process: `Get-NetTCPConnection -LocalPort <n> -State Listen` then `Stop-Process` on
      `OwningProcess`, and refuse to continue if it is still held.
+208. `npm run verify` at default concurrency is not a reliable gate on a loaded machine, and it
+     fails in two ways that both look like findings about the code. Vitest runs one worker per
+     core - twelve here - and around fifty test files boot their own PGlite, so on a machine with
+     11.4GB and an emulator, a Playwright run and half a dozen MCP servers resident the suite
+     either dies with `Fatal process out of memory: Zone` before a single test reports, or comes
+     back with suites that failed to **transform**:
+     `[TSCONFIG_ERROR] Failed to load tsconfig 'packages/contracts/src/pendingUpload.ts/tsconfig.json'`.
+     That path is the source file treated as a directory, which is oxc walking up from a file and
+     finding nothing - and the root `tsconfig.json` three levels above it plainly exists, so it is
+     memory pressure surfacing as a resolution failure rather than a real one. The same two suites
+     ran alone in 839ms, green, and the whole suite at `--maxWorkers=4` was `5201 passed | 197
+files`, exit 0. Re-run narrowed before believing a transform error, and re-run the whole suite
+     with `npx vitest run --maxWorkers=4` before believing anything about the gate. Not pinned in
+     `vitest.config.ts`, because the right worker count is a property of the machine and a low one
+     would slow a CI runner that has the memory - but a green `npm run verify` on a busy
+     workstation is worth one confirming pass at four workers.

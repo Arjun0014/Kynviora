@@ -176,24 +176,66 @@ export interface VoiceBridge {
  * is the honest answer for a capability this build has not wired - and never a crash inside a
  * conversation.
  */
+/**
+ * The writes this app can keep on the phone, and nothing else.
+ *
+ * Spec references: `12` (the pending-operation journal), `13` (the operation ID is the idempotency
+ * key; per-entity conflict policy), DEC-140, DEC-148.
+ *
+ * WHY THESE TAKE THE BODY THAT WAS SENT
+ * The journal replays a **request**, not an intent. A queue rebuilt from the tool call's arguments
+ * would be a second reading of what somebody said, taken minutes later - and a different reading
+ * is a different dose or a different time of day. So each of these takes the exact body the failed
+ * attempt carried, and for a create the exact key it spent.
+ *
+ * WHY EACH ANSWERS A BOOLEAN
+ * `false` is a real answer and not a failure of the call: the store may not be open, or the device
+ * may have no room for the write (`19`'s low-storage scenario, `DEV-055`), or `13`'s per-entity
+ * policy may refuse the type. What must not happen is a person being told a change was kept when
+ * nothing kept it, which is the distinction `OFF-6` measures on a device for the touch path.
+ *
+ * WHY THERE IS NO `scheduleUpdate` THAT MINTS A VERSION
+ * Because there is no honest way to mint one. See `update_schedule` below.
+ */
+export interface QueuedWrites {
+  /**
+   * A dose recorded with no signal, under the key the attempt already spent.
+   *
+   * `13` resolves `dose_event` `MERGE_BY_ID`, so the replay under this key lands on the row the
+   * failed attempt may already have written (DEC-111).
+   */
+  dose(body: DoseEventBody, idempotencyKey: string): Promise<boolean>;
+  /**
+   * A schedule created with no signal, under the key the attempt already spent.
+   *
+   * The same reasoning as a dose and a sharper consequence: `OFFLINE` is inferred from a failed
+   * fetch, which is also what a request that arrived and lost its answer looks like, and under a
+   * fresh key the replay creates a **second schedule** - which on this table is somebody being
+   * told twice, at the same minute, to take the same tablet (DEC-111).
+   */
+  scheduleCreate(itemId: string, body: ScheduleBody, idempotencyKey: string): Promise<boolean>;
+  /**
+   * A schedule change with no signal, conditional on the version it was made against.
+   *
+   * No idempotency key, and that is not an omission: a conditional write is already exactly-once
+   * for its intent, so a replay either lands once or comes back as a `VERSION_CONFLICT` the person
+   * is asked about (`13`'s `ASK_USER` for `medicine_schedule`).
+   */
+  scheduleUpdate(scheduleId: string, body: ScheduleChangeBody): Promise<boolean>;
+}
+
 export function createToolExecutor(
   client: KynvioraClient,
   bridge: VoiceBridge,
   /**
-   * Keep a dose no server could be reached about, answering whether it was kept.
+   * How a write that reached no server is kept on this phone.
    *
-   * Takes the **body that was sent** and the key it was sent under rather than the call, because
-   * the journal replays a request and not an intent: a queue built from the arguments again would
-   * be a second reading of what the person said, taken minutes later, and a different reading is a
-   * different dose. `13` resolves `dose_event` `MERGE_BY_ID`, so the replay under this key lands on
-   * the row the failed attempt may already have written (DEC-111).
-   *
-   * `false` is a real answer and not a failure of this function: the store may not be open, or the
-   * device may have no room for the write (`19`'s low-storage scenario, `DEV-055`). What must not
-   * happen is a person being told their dose was kept when nothing kept it, which is the
-   * distinction `OFF-6` measures on a device for the touch path.
+   * The same journal the screens use, reached through the same `usePendingSync().queue` - so the
+   * drain, `13`'s per-entity policy, the retry budget and `PendingSenders`' wire call are all the
+   * ones `OFF-1` to `OFF-7` already measure on hardware. Voice adds no sync mechanism; it reaches
+   * the one that exists (DEC-132 applied to the offline path).
    */
-  queueDose: (body: DoseEventBody, idempotencyKey: string) => Promise<boolean>,
+  queued: QueuedWrites,
   /**
    * Everything the offline journal is holding.
    *
@@ -336,11 +378,31 @@ export function createToolExecutor(
       // Not "Recorded." and not "Done." - those are promises about a server that has the record.
       // `queued` is the promise this can actually keep, and it is the same distinction the dose
       // sheet draws between "Recorded." and its offline note, which `OFF-6` measures on hardware.
-      const kept = await queueDose(body, key);
+      const kept = await queued.dose(body, key);
       return { spoken: [], utterances: [kept ? 'queued' : 'offline'] } satisfies ToolResult;
     },
 
+    /**
+     * Set the times a medicine is taken, and keep it on the phone where no server was reached.
+     *
+     * The key is minted **once, here, for this intent**, exactly as `record_dose` mints its own -
+     * and the journal keeps that key rather than a fresh one. `OFFLINE` is inferred from a failed
+     * fetch, which is also what a request that arrived and lost its answer looks like, so a fresh
+     * key on the replay would create a second schedule: two reminders, at the same minute, for the
+     * same tablet (DEC-111). `OFF-4` measures exactly that on hardware for the touch path.
+     *
+     * Three answers, for the reason `record_dose` has three. `OFFLINE` is the only kind that means
+     * no server was reached and the only one that queues; everything else is a server that
+     * answered and did not write, and telling somebody with a revoked grant that their phone has
+     * no connection is telling them to retry something that will fail identically (`DEV-085`).
+     *
+     * No `focusId` on the queued branch, and that is deliberate rather than an omission. The
+     * schedule sheet reads from the server; opening it with no connection would put "No
+     * connection" in front of somebody who has just been told their change is safely kept.
+     */
     create_schedule: async (call) => {
+      const itemId = argument(call, 'itemId');
+      const key = newIdempotencyKey();
       const times = argument(call, 'timesOfDay')
         .split(',')
         .map((entry) => entry.trim())
@@ -350,25 +412,18 @@ export function createToolExecutor(
         timesLocal: times,
         timeZone: argument(call, 'timeZone'),
       };
-      const outcome = await client.createSchedule(
-        argument(call, 'itemId'),
-        body,
-        newIdempotencyKey(),
-      );
+      const outcome = await client.createSchedule(itemId, body, key);
       if (outcome.kind === 'OK') {
-        return { spoken: [], focusId: argument(call, 'itemId') } satisfies ToolResult;
+        return { spoken: [], focusId: itemId } satisfies ToolResult;
       }
-      // A write that failed says so. This used to return an empty result for every outcome, and
-      // `run` speaks "Done." when a tool says nothing at all - so a schedule that was never
-      // created was reported as created. `offline` rather than `queued` because nothing here
-      // queues: the registry declares this tool `QUEUES` and only `record_dose` is wired to the
-      // journal, so the sentence that can be kept is the one that promises nothing (`DEV-085`).
-      return {
-        spoken: [],
-        utterances: [
-          outcome.kind === 'OFFLINE' ? 'offline' : utteranceForWriteFailure(outcome.kind),
-        ],
-      } satisfies ToolResult;
+      if (outcome.kind !== 'OFFLINE') {
+        return {
+          spoken: [],
+          utterances: [utteranceForWriteFailure(outcome.kind)],
+        } satisfies ToolResult;
+      }
+      const kept = await queued.scheduleCreate(itemId, body, key);
+      return { spoken: [], utterances: [kept ? 'queued' : 'offline'] } satisfies ToolResult;
     },
 
     add_medicine: async (call) => {
@@ -601,11 +656,37 @@ export function createToolExecutor(
      * here deletes a row: `active: false` is how reminders stop, which is the distinction the
      * registry's own description draws.
      */
+    /**
+     * Change the times a medicine is taken, and keep it on the phone where the write did not land.
+     *
+     * THE READ IS WHAT DECIDES WHETHER THIS CAN QUEUE (DEC-148)
+     * `ScheduleChangeBody` is whole-document and conditional on `expectedVersion`, and the one
+     * copy of that number is a server read - schedules are not in the local projection, which
+     * holds the profile list and the shelf and nothing else. So there are exactly two shapes here
+     * and they get opposite answers:
+     *
+     *   - **The read failed.** There is no version, and the two ways to send an update without one
+     *     are both refused by `13`. Unconditionally is a silent overwrite of a row that may have
+     *     moved since - which for a medication schedule is somebody's reminder times replaced by a
+     *     change made against a state nobody looked at. A guessed version is the same overwrite
+     *     with a lottery in front of it. So nothing is queued, and the sentence promises nothing.
+     *   - **The read landed and the write dropped.** The version is real, freshly read, and is the
+     *     one the person's change was made against - which is exactly the precondition the touch
+     *     path queues under, because the schedule sheet was populated by the same read. That
+     *     queues, and a replay against a row that has since moved comes back as a
+     *     `VERSION_CONFLICT` rather than as a win.
+     *
+     * No idempotency key. A conditional write is already exactly-once for its intent: the replay
+     * either matches the version and lands once, or does not and is refused.
+     */
     update_schedule: async (call) => {
       const itemId = argument(call, 'itemId');
       const scheduleId = argument(call, 'scheduleId');
       const current = await client.schedules(itemId);
       if (current.kind !== 'OK') {
+        // Nothing is queued and nothing is promised. `offline` says only that the server could not
+        // be asked, which is the whole of what is true when there is no version to be conditional
+        // on - and it is the sentence that does not tell somebody their reminder has moved.
         return {
           spoken: [],
           utterances: [
@@ -639,12 +720,14 @@ export function createToolExecutor(
 
       const outcome = await client.updateSchedule(scheduleId, body);
       if (outcome.kind === 'OK') return { spoken: [], focusId: itemId } satisfies ToolResult;
-      return {
-        spoken: [],
-        utterances: [
-          outcome.kind === 'OFFLINE' ? 'offline' : utteranceForWriteFailure(outcome.kind),
-        ],
-      } satisfies ToolResult;
+      if (outcome.kind !== 'OFFLINE') {
+        return {
+          spoken: [],
+          utterances: [utteranceForWriteFailure(outcome.kind)],
+        } satisfies ToolResult;
+      }
+      const kept = await queued.scheduleUpdate(scheduleId, body);
+      return { spoken: [], utterances: [kept ? 'queued' : 'offline'] } satisfies ToolResult;
     },
 
     list_people: async () => {

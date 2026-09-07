@@ -26,7 +26,12 @@
 
 import { describe, it, expect } from 'vitest';
 import { allTools, voiceCallableTools } from '@kynviora/agent';
-import { createToolExecutor, type ToolResult, type VoiceBridge } from './executor';
+import {
+  createToolExecutor,
+  type QueuedWrites,
+  type ToolResult,
+  type VoiceBridge,
+} from './executor';
 import type { ItemUpdateBody, ScheduleChangeBody } from '@kynviora/contracts';
 import { safetyInboxView, type KynvioraClient } from '@kynviora/contracts';
 import type { ToolCall, ToolExecutor } from '@kynviora/agent';
@@ -46,6 +51,54 @@ async function resultOf(
 }
 
 /**
+ * A journal that refuses everything, for a caller measuring something other than queueing.
+ *
+ * Refusing rather than accepting is the safe default for a helper: a test that forgot to say which
+ * it wanted gets the "nothing kept it" sentence, which is the one that fails loudly if the code
+ * under test believed otherwise.
+ */
+function refusingQueue(): QueuedWrites {
+  return {
+    dose: () => Promise.resolve(false),
+    scheduleCreate: () => Promise.resolve(false),
+    scheduleUpdate: () => Promise.resolve(false),
+  };
+}
+
+/**
+ * A journal that records exactly what it was handed, and whether it agreed to keep it.
+ *
+ * The bodies and the keys are kept, not just the fact of a call. What `13` asks of an offline
+ * write is a property of those values - the same key across a retry, the version the change was
+ * made against - and a helper that recorded only the tool name would pass over a replay that
+ * created a second schedule.
+ */
+function recordingQueue(
+  kept: string[],
+  accepts = true,
+): QueuedWrites & { readonly bodies: unknown[] } {
+  const bodies: unknown[] = [];
+  return {
+    bodies,
+    dose: (body, key) => {
+      bodies.push(body);
+      kept.push(`dose:${key}`);
+      return Promise.resolve(accepts);
+    },
+    scheduleCreate: (itemId, body, key) => {
+      bodies.push(body);
+      kept.push(`scheduleCreate:${itemId}:${key}`);
+      return Promise.resolve(accepts);
+    },
+    scheduleUpdate: (scheduleId, body) => {
+      bodies.push(body);
+      kept.push(`scheduleUpdate:${scheduleId}:v${String(body.expectedVersion)}`);
+      return Promise.resolve(accepts);
+    },
+  };
+}
+
+/**
  * Tools that are offered by voice and cannot run.
  *
  * Empty, and it is meant to stay empty. An entry here is a claim Voice Mode makes and cannot
@@ -62,12 +115,7 @@ const KNOWN_UNWIRED: readonly string[] = [];
 function executorKeys(): ReadonlySet<string> {
   const client = {} as KynvioraClient;
   const bridge = {} as VoiceBridge;
-  const executor = createToolExecutor(
-    client,
-    bridge,
-    () => Promise.resolve(false),
-    () => Promise.resolve([]),
-  );
+  const executor = createToolExecutor(client, bridge, refusingQueue(), () => Promise.resolve([]));
   return new Set(Object.keys(executor));
 }
 
@@ -162,11 +210,8 @@ describe('a write that failed says so (DEV-085)', () => {
       createItem: () => Promise.resolve(failure),
       recordDoseEvent: () => Promise.resolve(failure),
     } as unknown as KynvioraClient;
-    return createToolExecutor(
-      client,
-      {} as VoiceBridge,
-      () => Promise.resolve(false),
-      () => Promise.resolve([]),
+    return createToolExecutor(client, {} as VoiceBridge, refusingQueue(), () =>
+      Promise.resolve([]),
     );
   }
 
@@ -198,10 +243,12 @@ describe('a write that failed says so (DEV-085)', () => {
     }
   }
 
-  it('offline is reported as no connection, not as kept', async () => {
+  it('offline on a create is reported as no connection where nothing kept it', async () => {
     const executor = executorAnswering('OFFLINE');
+    // `executorAnswering` builds on `refusingQueue`, so this is the low-storage shape: the phone
+    // had no connection *and* the journal would not take the write (`DEV-055`, `LOW-2`).
     const result = await resultOf(executor, 'create_schedule', CALLS.create_schedule);
-    // `queued` promises the phone kept it and will send it. Nothing queues a schedule by voice.
+    // `queued` promises the phone kept it and will send it. Nothing did.
     expect(result?.utterances).toEqual(['offline']);
     expect(result?.utterances).not.toContain('queued');
   });
@@ -210,11 +257,8 @@ describe('a write that failed says so (DEV-085)', () => {
     const client = {
       createSchedule: () => Promise.resolve({ kind: 'OK', value: {} }),
     } as unknown as KynvioraClient;
-    const executor = createToolExecutor(
-      client,
-      {} as VoiceBridge,
-      () => Promise.resolve(false),
-      () => Promise.resolve([]),
+    const executor = createToolExecutor(client, {} as VoiceBridge, refusingQueue(), () =>
+      Promise.resolve([]),
     );
     const result = await resultOf(executor, 'create_schedule', CALLS.create_schedule);
     expect(result?.utterances ?? []).toEqual([]);
@@ -231,11 +275,8 @@ describe('a write that failed says so (DEV-085)', () => {
  */
 describe('the six tools DEV-084 was about', () => {
   function executorWith(client: Partial<KynvioraClient>, pending: readonly unknown[] = []) {
-    return createToolExecutor(
-      client as KynvioraClient,
-      {} as VoiceBridge,
-      () => Promise.resolve(false),
-      () => Promise.resolve(pending as never),
+    return createToolExecutor(client as KynvioraClient, {} as VoiceBridge, refusingQueue(), () =>
+      Promise.resolve(pending as never),
     );
   }
 
@@ -568,5 +609,208 @@ describe('the six tools DEV-084 was about', () => {
       arguments: { profileId: 'p1' },
     });
     expect(result?.spoken ?? []).toEqual([]);
+  });
+});
+
+/**
+ * The offline schedule parity gap, and what closing it must not do.
+ *
+ * Spec references: `12` (the pending-operation journal; a queued change is visible rather than
+ * assumed), `13` (the operation ID is the idempotency key; `medicine_schedule` resolves
+ * `ASK_USER`), `03` group J, DEC-111, DEC-148, `DEV-084`.
+ *
+ * WHY THIS BLOCK EXISTS
+ * `create_schedule` and `update_schedule` were `ONLINE_ONLY` because nothing had resolved what a
+ * queued schedule change means, while the touch path had queued both for months - so the same
+ * request, made with the same phone in the same room, was kept if it was typed and lost if it was
+ * spoken. Closing that is wiring; the assertions here are about the three things wiring alone gets
+ * wrong, each of which passes a smoke test:
+ *
+ *   - **A fresh key on the create.** `OFFLINE` is inferred from a failed fetch, which is also what
+ *     a request that arrived and lost its answer looks like - so a replay under a new key makes a
+ *     second schedule, and on this table that is somebody being told twice, at the same minute, to
+ *     take the same tablet. `OFF-4` measures it on hardware for touch; this measures the key.
+ *   - **A made-up version on the update.** The one copy of `expectedVersion` is a server read. An
+ *     update queued without one is either an unconditional overwrite or a guess, and `13` refuses
+ *     both for `medicine_schedule`.
+ *   - **The sentence.** A change nothing kept must never be described as kept (`DEV-085`), and a
+ *     change that *was* kept must not be described as done (`OFF-6`'s distinction).
+ */
+describe('a schedule change made with no signal', () => {
+  const CREATE = {
+    name: 'create_schedule',
+    arguments: { itemId: 'i1', timesOfDay: '08:00,20:00', timeZone: 'Europe/London' },
+  } as const;
+
+  const UPDATE = {
+    name: 'update_schedule',
+    arguments: { itemId: 'i1', scheduleId: 's1', timesOfDay: '09:00' },
+  } as const;
+
+  function schedulesAt(version: number) {
+    return {
+      kind: 'OK',
+      value: {
+        serverTime: '2026-09-07T00:00:00.000Z',
+        schedules: [
+          {
+            id: 's1',
+            ownedItemId: 'i1',
+            scheduleKind: 'FIXED_TIMES',
+            timesLocal: ['08:00'],
+            daysOfWeek: null,
+            timeZone: 'Europe/London',
+            startsOn: null,
+            endsOn: null,
+            active: true,
+            version,
+            updatedAt: null,
+          },
+        ],
+      },
+    } as never;
+  }
+
+  it('queues the create under the key the failed attempt spent, not a fresh one', async () => {
+    const sent: string[] = [];
+    const kept: string[] = [];
+    const queue = recordingQueue(kept);
+    const executor = createToolExecutor(
+      {
+        createSchedule: (_itemId: string, _body: unknown, key: string) => {
+          sent.push(key);
+          return Promise.resolve({ kind: 'OFFLINE' } as never);
+        },
+      } as unknown as KynvioraClient,
+      {} as VoiceBridge,
+      queue,
+      () => Promise.resolve([]),
+    );
+
+    const result = await resultOf(executor, 'create_schedule', CREATE);
+
+    expect(sent).toHaveLength(1);
+    // The key the request carried is the key the journal was handed. Written as an identity rather
+    // than as "a key was passed", because a fresh UUID on the queue side satisfies every other
+    // reading of "it queued" and is exactly the defect DEC-111 is about.
+    expect(kept).toEqual([`scheduleCreate:i1:${String(sent[0])}`]);
+    expect(result?.utterances).toEqual(['queued']);
+  });
+
+  it('queues the body it tried to send, not a second reading of what was said', async () => {
+    const queue = recordingQueue([]);
+    const executor = createToolExecutor(
+      {
+        createSchedule: () => Promise.resolve({ kind: 'OFFLINE' } as never),
+      } as unknown as KynvioraClient,
+      {} as VoiceBridge,
+      queue,
+      () => Promise.resolve([]),
+    );
+
+    await resultOf(executor, 'create_schedule', CREATE);
+
+    expect(queue.bodies).toEqual([
+      { scheduleKind: 'FIXED_TIMES', timesLocal: ['08:00', '20:00'], timeZone: 'Europe/London' },
+    ]);
+  });
+
+  it('queues an update under the version it was actually read at', async () => {
+    const kept: string[] = [];
+    const executor = createToolExecutor(
+      {
+        schedules: () => Promise.resolve(schedulesAt(3)),
+        updateSchedule: () => Promise.resolve({ kind: 'OFFLINE' } as never),
+      } as unknown as KynvioraClient,
+      {} as VoiceBridge,
+      recordingQueue(kept),
+      () => Promise.resolve([]),
+    );
+
+    const result = await resultOf(executor, 'update_schedule', UPDATE);
+
+    // Version 3, because that is what the read returned - never 0, never absent, and never
+    // whatever a payload happened to carry from somewhere else.
+    expect(kept).toEqual(['scheduleUpdate:s1:v3']);
+    expect(result?.utterances).toEqual(['queued']);
+  });
+
+  /**
+   * The condition DEC-148 turns on, and the one a plausible implementation drops.
+   *
+   * With no connection the read fails too, so there is no version to be conditional on. Queueing
+   * anyway would mean sending an update whose precondition nobody established - which for a
+   * medication schedule is somebody's reminder times replaced by a change made against a state
+   * that was never looked at.
+   */
+  it('queues nothing where the version could not be read, and promises nothing', async () => {
+    const kept: string[] = [];
+    const executor = createToolExecutor(
+      {
+        schedules: () => Promise.resolve({ kind: 'OFFLINE' } as never),
+        updateSchedule: () => {
+          throw new Error('the write must not be attempted without a version');
+        },
+      } as unknown as KynvioraClient,
+      {} as VoiceBridge,
+      recordingQueue(kept),
+      () => Promise.resolve([]),
+    );
+
+    const result = await resultOf(executor, 'update_schedule', UPDATE);
+
+    expect(kept).toEqual([]);
+    expect(result?.utterances).toEqual(['offline']);
+    expect(result?.utterances).not.toContain('queued');
+  });
+
+  /**
+   * A refusal is not a dropped connection, and neither is a revoked grant.
+   *
+   * The journal replays on its own, minutes or hours later, with nobody watching. An operation
+   * queued because the server said no would be a refusal retried behind somebody's back - and
+   * `12` requires authorization loss to invalidate local access rather than persist through it.
+   */
+  it('queues nothing when the server answered and declined', async () => {
+    for (const kind of ['UNAVAILABLE', 'AUTHORIZATION_LOST', 'REFUSED', 'SERVER_ERROR'] as const) {
+      const kept: string[] = [];
+      const executor = createToolExecutor(
+        {
+          createSchedule: () => Promise.resolve({ kind } as never),
+          schedules: () => Promise.resolve(schedulesAt(3)),
+          updateSchedule: () => Promise.resolve({ kind } as never),
+        } as unknown as KynvioraClient,
+        {} as VoiceBridge,
+        recordingQueue(kept),
+        () => Promise.resolve([]),
+      );
+
+      const created = await resultOf(executor, 'create_schedule', CREATE);
+      const updated = await resultOf(executor, 'update_schedule', UPDATE);
+
+      expect(kept, `${kind} was queued`).toEqual([]);
+      for (const result of [created, updated]) {
+        expect(result?.utterances ?? [], `${kind} was spoken as kept`).not.toContain('queued');
+        // And never silent, which `run` speaks as "Done." (`DEV-085`).
+        expect((result?.utterances ?? []).length, `${kind} would have said "Done."`).toBe(1);
+      }
+    }
+  });
+
+  /** A journal that refused the write is a change nothing kept, said as such (`LOW-2`). */
+  it('says nothing was kept where the journal refused it', async () => {
+    const executor = createToolExecutor(
+      {
+        createSchedule: () => Promise.resolve({ kind: 'OFFLINE' } as never),
+        schedules: () => Promise.resolve(schedulesAt(3)),
+        updateSchedule: () => Promise.resolve({ kind: 'OFFLINE' } as never),
+      } as unknown as KynvioraClient,
+      {} as VoiceBridge,
+      recordingQueue([], false),
+      () => Promise.resolve([]),
+    );
+
+    expect((await resultOf(executor, 'create_schedule', CREATE))?.utterances).toEqual(['offline']);
+    expect((await resultOf(executor, 'update_schedule', UPDATE))?.utterances).toEqual(['offline']);
   });
 });

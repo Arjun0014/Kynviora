@@ -5504,3 +5504,85 @@ refuses - the same reason `holdsCapability` answers `OWNER_ONLY` from `isOwner` 
 capability set.
 
 **Sources.** DEC-146, `DEV-081`, `12`, `13`, `packages/domain/src/lookup.ts`.
+
+---
+
+## DEC-148 - A schedule queues by voice exactly where it queues by touch, and an update queues only against a version somebody actually read
+
+**Context.** `create_schedule` and `update_schedule` were declared `ONLINE_ONLY` on 2026-09-07,
+which was honest about the build and left a gap nobody had chosen: the touch path has queued both
+since `DEV-038`, and `OFF-1` to `OFF-5` measure three creates under one key leaving one schedule on
+hardware. So the same request, made on the same phone in the same room, was kept if it was typed
+and lost if it was spoken. `14`'s touch-only group is deliberate and recorded; this was not in it.
+
+The thing that had never been resolved is what a **queued update** means. A create carries no
+precondition, so a replay carries it unchanged. `ScheduleChangeBody` is whole-document and
+conditional on `expectedVersion`, and a precondition minted while the row was at version 3 must not
+win against a row that has since moved to 4.
+
+**Options.** (a) Leave both `ONLINE_ONLY` and accept the asymmetry. (b) Queue the create only.
+(c) Queue both, sending the update unconditionally on replay. (d) Queue both, keeping the
+precondition, and let a stale replay come back as a conflict. (e) Queue both and re-read the
+version at drain time, rebasing onto whatever stands.
+
+**Decision.** (d), with one condition: **an update queues only where a version was actually read.**
+
+- `create_schedule` queues on `OFFLINE` under the key the failed attempt already spent, into
+  `medicine_schedule` / `CREATE` keyed by the **medicine**, which is what `PendingSenders` already
+  registers a sender for and what the shelf already queues.
+- `update_schedule` reads `schedules(itemId)` before it writes, because no client method reads one
+  schedule by its own ID. Two shapes follow, and they get opposite answers:
+  - **the read failed** - there is no version, nothing is queued, and the person is told only that
+    the server could not be asked;
+  - **the read landed and the write dropped** - the version is real and freshly read, and the
+    change queues into `medicine_schedule` / `UPDATE` keyed by the **schedule**, with
+    `baseVersion` set to the version it was made against and no idempotency key.
+- Both are `QUEUES` in the registry, because that is now what they do.
+
+**Rationale.** (c) is the one option `13` forbids outright. An unconditional replay is a silent
+overwrite of a row that may have moved, and for a medication schedule that is somebody's reminder
+times replaced by an edit made against a state nobody looked at - which is exactly why `13`
+resolves `medicine_schedule` `ASK_USER` rather than last-write-wins.
+
+(e) is the same failure wearing a re-read: rebasing at drain time overwrites content the person has
+not seen, hours later, with nobody watching. A precondition is only meaningful if it names a state
+somebody actually had.
+
+(b) would have closed the easy half and left the hard half looking closed.
+
+The condition on (d) is the whole of the design. The only copy of `expectedVersion` is a server
+read - schedules are **not** in the local projection, which holds the profile list and the shelf
+and nothing else - so with no connection there is no version to be conditional on, and the two ways
+to proceed without one are the two `13` refuses: unconditionally, or with a guess. That is why the
+read decides. It also makes voice's guarantee identical to touch's rather than merely similar: the
+schedule sheet's `expectedVersion` comes from the same read, taken when the sheet was populated.
+
+The key discipline is unchanged and is the reason a create queues under the key it spent rather
+than a fresh one. `OFFLINE` is inferred from a failed fetch, which is also what a request that
+arrived and lost its answer looks like - and under a fresh key the replay creates a **second
+schedule**, which on this table is being told twice, at the same minute, to take the same tablet
+(DEC-111). An update carries no key because a conditional write is already exactly-once for its
+intent.
+
+**Consequences.** Voice reaches the journal for three entity shapes now rather than one, through
+the same `usePendingSync().queue`, the same senders and the same drain - so `13`'s per-entity
+policy, the retry budget, `DEC-109`'s stop-on-authorization-loss and `12`'s resolvable failure
+state all apply without a line of new sync machinery. DEC-132 holds: the agent's reach is the
+app's reach because it is the app's code doing the reaching.
+
+A stale replay is a `VERSION_CONFLICT` carrying the version that now stands, classified `CONFLICT`
+by `classifyUpload`, written `CONFLICTED` by `recordUploadOutcome`, and surfaced by
+`needsUserAttention` on the Pending Changes screen. Nothing is overwritten and nothing is merged.
+What that screen then **offers** is a separate defect and is recorded as `DEV-092`.
+
+A revoked grant refuses the replay at the route, before the idempotency lookup, with the same 404 a
+stranger gets - asserted now for a schedule as `doseAuthorization.test.ts` already asserts it for a
+dose.
+
+What voice still cannot do offline is change a schedule when it could not read one, and that is a
+refusal rather than a gap: there is nothing safe to queue.
+
+**Sources.** `12`, `13`, `03` group J, `04` Phase 4.1, DEC-111, DEC-132, DEC-140, `DEV-084`,
+`DEV-085`, `DEV-089`, `apps/mobile/src/voice/executor.ts`,
+`apps/mobile/src/voice/VoiceProvider.tsx`, `packages/agent/src/registry.ts`,
+`services/api/src/schedule.test.ts`.

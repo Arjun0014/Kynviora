@@ -6096,3 +6096,110 @@ Nothing was changed in the app, because there is nothing in the app to fix and s
 dev-tooling warning would remove the one visible signal that a run was degraded. `SHEET-1` and
 `A11Y-1` name the cause now, so the next person reading a survey with the banner in it knows to
 check the dev server before believing the rest of the report (`DEV-088`).
+
+---
+
+## 2026-09-08 - A schedule change that survives the kitchen, and the read that decides whether it can
+
+**Starting commit** `42065a5`. Branch `master`, tree clean.
+
+### The baseline, and what it took to get an honest one
+
+`npm run verify` came back **exit 1** on the first run of the session: four suites failed to
+transform, all four naming the same file -
+`[TSCONFIG_ERROR] Failed to load tsconfig 'packages/contracts/src/pendingUpload.ts/tsconfig.json'`.
+The path is the source file treated as a directory, which is oxc's resolution walking up from a
+file and finding nothing; `C:/Web UI/KYNVIORA/tsconfig.json` is three levels up and exists. The two
+suites ran alone in 839ms, green.
+
+The second full run died differently: `Fatal process out of memory: Zone`, repeatedly, before a
+single test reported. The machine has 11.4GB with 1.5GB free - an Android emulator, a Playwright
+run and half a dozen MCP servers belonging to other work were resident - and vitest defaults to one
+worker per core, which here is twelve, each of which may boot its own PGlite.
+
+At `--maxWorkers=4` the suite is **5201 passed across 197 files, exit 0**, which is exactly what
+STATUS records. So the baseline reconciles and the gate does not: `npm run verify` at default
+concurrency is unreliable on this machine, in two different ways, and both look like findings about
+the code. Recorded as trap 209 rather than as a change to `vitest.config.ts`, because the right
+worker count is a property of the machine rather than of the repository, and pinning a low one
+would slow CI on a runner that has the memory.
+
+Three stale Kynviora `npm run dev` chains and a Metro were holding ports 3000 and 8081 from an
+earlier session and were stopped first - three API processes against one PGlite directory is trap
+175 waiting to happen.
+
+### The gap the brief named
+
+`create_schedule` and `update_schedule` were `ONLINE_ONLY`, the touch path had queued both since
+`DEV-038`, and `OFF-1` to `OFF-5` measure three creates under one key leaving one schedule on
+hardware. So the same change, on the same phone, in the same room, was kept if it was typed and
+lost if it was spoken (`DEV-089`). `14`'s touch-only group is deliberate and recorded, and a
+medicine schedule is in none of it.
+
+**What needed deciding was not the create.** A create carries no precondition, so a replay carries
+it unchanged, and the key discipline is `record_dose`'s exactly. The update is conditional on
+`expectedVersion`, and a replay minted while the row was at version 3 must not win against a row
+that has since moved to 4.
+
+**The answer is that the read decides** (DEC-148). `update_schedule` already reads
+`schedules(itemId)` before it writes, because no client method reads one schedule by its own ID -
+and that read is the only copy of the version there is. Schedules are **not** in the local
+projection; it holds the profile list and the shelf and nothing else. So:
+
+- the read failed - there is no version, nothing is queued, and the sentence promises nothing;
+- the read landed and the write dropped - the version is real, freshly read, and is the same one
+  the schedule sheet would have queued under, so the change goes into the journal conditional on
+  it.
+
+The two ways to queue an update without a version are the two `13` refuses: unconditionally, which
+is a silent overwrite of a row that may have moved, or with a guess, which is the same overwrite
+with a lottery in front of it. Re-reading at drain time is the same failure wearing a re-read - it
+overwrites content the person has not seen, hours later, with nobody watching.
+
+### What was proven, and where
+
+Nothing here is a new sync mechanism. `usePendingSync().queue`, `medicine_schedule`,
+`PendingSenders`' existing sender, `uploadOrder`, `classifyUpload`, `recordUploadOutcome` and
+`drainPendingOperations` are untouched; voice reaches the journal the shelf reaches.
+
+| Property                                                  | Where                                        |
+| --------------------------------------------------------- | -------------------------------------------- |
+| A create queues under the key the attempt spent           | `executor.test.ts`, as an identity           |
+| The queued body is the body that was sent                 | `executor.test.ts`                           |
+| An update queues under the version the read returned      | `executor.test.ts`, `VoiceProvider.test.tsx` |
+| A failed read queues nothing and never attempts the write | `executor.test.ts`, `VoiceProvider.test.tsx` |
+| A server that answered and declined is never queued       | `executor.test.ts`, four outcome kinds       |
+| A journal that refused says nothing was kept              | both                                         |
+| The entity type, ID and mutation are the shelf's          | `VoiceProvider.test.tsx`                     |
+| A revoked grant refuses the replay, times unchanged       | `schedule.test.ts`                           |
+| A stale precondition is a conflict, server's times stand  | `schedule.test.ts`                           |
+| Authorization is checked **before** the idempotency key   | `schedule.test.ts`                           |
+
+The last one is the one worth having. A route that looked the key up first would find the row it
+had already written and answer `idempotent-replay` with a schedule the caller may no longer see -
+so the test asserts the absence of that header as well as the 404.
+
+The key-as-identity assertion is the other. `expect(kept).toEqual(['scheduleCreate:i1:' + sent[0]])`
+rather than "a key was passed": a fresh UUID minted on the queue side satisfies every other reading
+of "it queued" and is exactly the defect DEC-111 exists for.
+
+### Three things found while reading, not yet fixed
+
+- **`DEV-090`** - a read that could not read is spoken as **"Done."** `run` speaks `done` when a
+  tool answers with nothing on either channel, and every read executor returns `{ spoken: [] }` for
+  every non-OK outcome. Ask "what am I taking?" with no signal and Kynviora says "Done." It is
+  `DEV-085` on the eleven reads; that fix covered the four writes and nothing looked at the rest.
+- **`DEV-091`** - the registry declares `LOCAL_PROJECTION` for nine tools, and the projection is
+  applied by `useResource`, not by the client. Every executor read is a live HTTP call, so not one
+  of the nine can be answered from the last thing the server said.
+- **`DEV-092`** - a `CONFLICTED` queued change offers "Try again", and `retry` re-sends the payload
+  unchanged - including the `expectedVersion` the server has just refused. Every conflict this
+  build can produce is a conditional write, so the control is structurally futile, and because
+  retry resets the attempt budget it can be pressed for ever. `pendingQueue.ts` already makes this
+  argument about `REJECTED` in its own comments and does not apply it here.
+
+### Files
+
+`packages/agent/src/registry.ts`, `apps/mobile/src/voice/executor.ts`,
+`apps/mobile/src/voice/VoiceProvider.tsx`, `apps/mobile/src/voice/executor.test.ts`,
+`apps/mobile/src/voice/VoiceProvider.test.tsx`, `services/api/src/schedule.test.ts`.

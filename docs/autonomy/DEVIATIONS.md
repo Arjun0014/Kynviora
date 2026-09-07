@@ -3473,3 +3473,76 @@ reverse` tunnel produces none either - the app has offline states and uses them.
   next person reading a survey with the banner in it knows to check the dev server before
   believing anything else in the report.
 - **Status**: **RESOLVED 2026-09-07** - identified, and correctly not fixed in the app.
+
+---
+
+## DEV-089 - A schedule change was kept if it was typed and lost if it was spoken
+
+- **Affected specification**: `12` ("Repository behavior" - a pending-operation journal; a queued
+  change is visible rather than assumed), `13` (per-entity conflict policy; the operation ID is the
+  idempotency key), `03` group J ("pending user edits with deterministic sync handling"), `14`
+  (which capabilities are deliberately touch-only), `docs/design/VOICE_MODE.md` section 3,
+  DEC-111, DEC-132, DEC-140.
+- **Expected behaviour**: "the agent's reach is the app's reach" (DEC-132). Where touch queues a
+  change with no signal, voice queues the same change, into the same journal, under the same key
+  and the same precondition. `14` names the capabilities voice is deliberately narrower on -
+  the Visit Pack, the export, caregiver administration, closing an account, deleting an item,
+  recording consent - and a medicine schedule is in none of those groups.
+- **Implemented behaviour**: `create_schedule` and `update_schedule` were `ONLINE_ONLY`. Gate 5
+  refused both with no connection, so the person heard "This phone has no connection at the moment"
+  and nothing was kept - while the identical change made on the schedule sheet, on the same phone,
+  in the same second, went into the journal and was sent on the next drain.
+
+- **The failure**: "set a reminder for my tablet at eight o'clock" in a kitchen with no signal.
+  Refused, honestly, and gone. The person has to remember to do it again, and a medication reminder
+  is the thing they were asking for because they do not want to have to remember.
+
+  It is `DEV-085`'s failure one step further back. That one was a schedule reported as created when
+  nothing was created; this is a schedule the app could have kept and declined to.
+
+- **Why it was not simply wired**: because the honest value in the registry was the _right_ answer
+  for the build as it stood, and the reason it stood that way was a real unresolved question rather
+  than a missing line. `record_dose` queues because `13` resolves `dose_event` `MERGE_BY_ID` and an
+  idempotency key makes a replay land once. A schedule **update** is conditional on
+  `expectedVersion`, and a replay minted while the row was at version 3 must not silently win
+  against a row that has since moved to 4. `DEV-084` recorded that as the remaining work and
+  declaring `ONLINE_ONLY` made the gap visible rather than closing it.
+
+- **How it was found**: the operating brief named it. `DEV-084` and STATUS had both recorded it as
+  the immediate next task.
+
+- **How it resolved**: DEC-148. A create queues under the key the attempt spent; an update queues
+  **only where a version was actually read**, conditional on that version. The journal, the entity
+  types, the entity IDs, the senders and the drain are the ones the shelf already uses - there is
+  no voice-specific sync path and no second mechanism.
+
+  The condition is the substance. Schedules are not in the local projection, so with no connection
+  the read that would supply `expectedVersion` fails too, and the two ways to send an update
+  without one are both refused by `13`: unconditionally, which is a silent overwrite of a row that
+  may have moved, or with a guess, which is the same overwrite with a lottery in front of it. So a
+  failed read queues nothing and promises nothing.
+
+- **Risk before the fix**: moderate and in the safe direction - a refusal rather than a wrong
+  action, and honest since `DEV-085`. What it cost is a reminder somebody set and did not get.
+
+- **Tests**: 11 in `apps/mobile/src/voice/executor.test.ts` and 5 in
+  `apps/mobile/src/voice/VoiceProvider.test.tsx`, and each is about something wiring alone gets
+  wrong rather than about the wiring: that the create keeps the key the request carried rather than
+  a fresh one (asserted as an identity against the key the client was given, because a fresh UUID
+  on the queue side passes every other reading of "it queued"); that the queued body is the body
+  that was sent rather than a second reading of the arguments; that the update carries the version
+  the read returned; that a failed read queues nothing and never attempts the write; that a server
+  that answered and declined is never queued and never spoken as a transport problem; and that a
+  journal which refused the write produces the sentence that promises nothing.
+
+  Four in `services/api/src/schedule.test.ts` for what a replay meets at the route: a revoked
+  caregiver's create and change both refused as absence with the stored times unchanged, a stale
+  precondition answered `VERSION_CONFLICT` with the version that now stands and the server's own
+  times still in place, and a revoked caregiver replaying a create made under a key minted while
+  the grant stood refused **without** the stored row coming back wearing a replay header - which
+  is what a route that looked the key up before checking authorization would return.
+
+- **What this does not close**: `DEV-092`. A conflicted queued change is now reachable by two
+  surfaces rather than one, and what the Pending Changes screen offers for one is a control that
+  cannot succeed.
+- **Status**: **RESOLVED 2026-09-08**.

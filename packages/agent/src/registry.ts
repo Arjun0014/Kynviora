@@ -185,9 +185,11 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'EXPLICIT',
     stepUp: false,
     voice: 'ALLOWED',
-    // See `update_schedule` below: only `record_dose` reaches the journal, so this is the value
-    // that describes the build rather than an intention (`DEV-084`).
-    offline: 'ONLINE_ONLY',
+    // The journal, under the key the failed attempt already spent (DEC-148). A create has no
+    // version to be conditional on, so there is nothing about it a replay cannot carry unchanged -
+    // which is exactly why the touch path has queued one since `OFF-1`, and why voice reaching the
+    // same journal is wiring rather than a second sync mechanism.
+    offline: 'QUEUES',
     surface: 'SCHEDULE_SHEET',
     parameters: [
       ITEM_ID,
@@ -215,14 +217,15 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'EXPLICIT',
     stepUp: false,
     voice: 'ALLOWED',
-    // `ONLINE_ONLY`, and it used to say `QUEUES`. Only `record_dose` reaches the offline journal
-    // (DEC-140); nothing queues a schedule change by voice, and a change conditional on
-    // `expectedVersion` is not something a replay can carry unchanged anyway. Declaring `QUEUES`
-    // meant gate 5 let it through with no connection, so the write failed and the person was told
-    // it had failed - honest since `DEV-085`, but a round trip to say what the gate already knew.
-    // Refusing early is the same answer, sooner, and the registry now describes the build
-    // (`DEV-084`).
-    offline: 'ONLINE_ONLY',
+    // `QUEUES`, and the condition is the whole of DEC-148: it queues **only where a version was
+    // actually read**. `ScheduleChangeBody` is conditional on `expectedVersion`, the one copy of
+    // that number is a server read, and the two ways to send an update without one are both
+    // refused by `13` - unconditionally, which silently overwrites a row that may have moved, or
+    // with a guess, which is the same overwrite with extra steps. So a read that fails queues
+    // nothing and says so; a read that lands and a write that drops queues under the version the
+    // person's change was made against, and a replay that finds the row has moved comes back as a
+    // conflict rather than as a win.
+    offline: 'QUEUES',
     surface: 'SCHEDULE_SHEET',
     parameters: [
       // The item as well as the schedule. `ScheduleChangeBody` is whole-document and conditional
