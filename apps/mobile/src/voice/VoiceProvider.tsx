@@ -10,12 +10,16 @@
  * and is tested without one.
  *
  * WHERE THE CAPABILITIES COME FROM
- * The server, as it last answered. `mayRecordDoses` from the shelf and `mayEdit`/`mayDelete` from
- * the item detail are already the app's honest picture of what this caller may do; the dispatch
- * context is assembled from those rather than from anything guessed here. That does not authorise
- * anything - the route decides, every time, on the session (`11`, `13`) - it stops the agent
- * offering something the write would refuse, which is what `mayRecordDoses` already does on the
- * shelf (DEC-116).
+ * The server, asked directly: `client.profileCapabilities` reports what this caller holds on the
+ * active profile with the predicate the policies themselves apply (DEC-141). That does not
+ * authorise anything - the route decides, every time, on the session (`11`, `13`) - it stops the
+ * agent offering something the write would refuse, which is what `mayRecordDoses` already does on
+ * the shelf (DEC-116).
+ *
+ * It used to be assembled from whatever screens somebody had happened to open, because there was
+ * no route to ask. A caregiver who had not visited an item detail was therefore told to use the
+ * screen for a change they were entirely entitled to make (`DEV-074`), which is Voice Mode
+ * offering less than touch for no reason anybody had decided.
  *
  * WITH NO PROVIDER, THIS IS STILL A USABLE INTERFACE
  * There is no recogniser, no model and no voice (`BLK-012`), so nothing here listens or speaks.
@@ -51,8 +55,11 @@ import {
   type VoiceProviders,
   type VoiceSession,
 } from '@kynviora/agent';
+import type { DoseEventBody } from '@kynviora/contracts';
 import { useApi } from '@/api/ApiProvider';
 import { useProfiles } from '@/api/ProfileProvider';
+import { useResource } from '@/api/useResource';
+import { usePendingSync } from '@/sync/PendingSyncProvider';
 import { createToolExecutor, type ToolResult, type VoiceBridge } from './executor';
 import { resolveVoiceProviders } from './devScript';
 import { capabilitiesFor } from './capabilities';
@@ -147,11 +154,40 @@ export function VoiceProvider({
     return `voice-${String(counter.current)}`;
   }, []);
 
+  /**
+   * What the server says this caller may do on the active profile.
+   *
+   * Read here rather than on a screen, for the reason `PendingSenders` is not on a screen either:
+   * what an interface may offer must not depend on which tab somebody last opened. `null` until it
+   * arrives, and `capabilitiesFor` narrows an absent answer to the read-only set - the safe
+   * direction, because an agent offered nothing is a person told to use the screen and the screen
+   * works.
+   *
+   * Not fetched for an owner: `capabilitiesFor` short-circuits on ownership, so the request would
+   * be a round trip whose answer changes nothing. Not fetched with Voice Mode closed either - a
+   * conversation nobody has opened needs no capabilities - which keeps this off every cold start.
+   */
+  const loadCapabilities = useMemo(
+    () =>
+      client === null || activeProfileId === null || owns || !isOpen
+        ? null
+        : () => client.profileCapabilities(activeProfileId),
+    [client, activeProfileId, owns, isOpen],
+  );
+
+  const { resource: capabilityResource } = useResource(loadCapabilities, {
+    enabled: loadCapabilities !== null,
+  });
+
+  const granted = capabilityResource.value?.capabilities ?? null;
+
   const context = useMemo<DispatchContext>(
     () => ({
-      // Derived from what the server said rather than assumed (`DEV-074`). This authorises
-      // nothing: the route checks again, on the session, every time.
-      capabilities: capabilities ?? capabilitiesFor({ isOwner: owns }),
+      // What the server reported, never a guess (`DEV-074`, DEC-141). This authorises nothing:
+      // the route checks again, on the session, every time.
+      capabilities:
+        capabilities ??
+        capabilitiesFor({ isOwner: owns, ...(granted === null ? {} : { granted }) }),
       isOwner: owns,
       // Always false. Nothing in this build can re-authenticate by voice, and every tool that
       // needs it is `TOUCH_ONLY` anyway - so this is the second of two mechanisms rather than the
@@ -161,21 +197,44 @@ export function VoiceProvider({
       origin: 'VOICE',
       confirmed: false,
     }),
-    [capabilities, owns, online],
+    [capabilities, owns, granted, online],
+  );
+
+  /**
+   * Keep a dose the server could not be told about, in the app's own journal (DEC-140).
+   *
+   * THE SAME PATH AS TOUCH, NOT A SECOND ONE
+   * `usePendingSync().queue` is the identical call the dose sheet makes, under the identical entity
+   * type and the identical key, so the drain, the per-entity policy (`13`), the retry budget and
+   * `PendingSenders`' wire call are all the ones already exercised by `OFF-6` and `OFF-7` on
+   * hardware. Voice adds no sync mechanism; it reaches the one that exists. That is DEC-132 applied
+   * to the offline path - the agent's reach is the app's reach because it is the app's code doing
+   * the reaching.
+   *
+   * `queue` answers `false` where `13`'s policy refuses the type or the store could not take the
+   * write, and the executor says the honest sentence for that rather than the queued one.
+   */
+  const { queue } = usePendingSync();
+  const queueDose = useCallback(
+    async (body: DoseEventBody, key: string): Promise<boolean> =>
+      queue({
+        entityType: 'dose_event',
+        entityId: body.ownedItemId,
+        mutation: 'CREATE',
+        payload: body,
+        baseVersion: null,
+        // The key the failed attempt already spent. `OFFLINE` is inferred from a failed fetch,
+        // which is also what a request that arrived and lost its answer looks like - and `13`
+        // resolves this table `MERGE_BY_ID` precisely so the replay lands on the row that may
+        // already exist (DEC-111).
+        operationId: key,
+      }),
+    [queue],
   );
 
   const executor = useMemo(
-    () =>
-      client === null
-        ? {}
-        : createToolExecutor(client, bridge, (_call: ToolCall, _key: string) => {
-            // The journal is wired to the dose sheet rather than here (`DEV-071`): what this build
-            // can honestly say is that the server did not take it.
-            void _call;
-            void _key;
-            return Promise.resolve(UTTERANCES.offline);
-          }),
-    [client, bridge],
+    () => (client === null ? {} : createToolExecutor(client, bridge, queueDose)),
+    [client, bridge, queueDose],
   );
 
   /** Add a line to the transcript, having put it through the Speech Gate first. */
@@ -202,13 +261,21 @@ export function VoiceProvider({
         setSession((current) => reduce(current, { kind: 'DONE' }).session);
         return;
       }
-      const lines = (outcome.value as ToolResult | undefined)?.spoken ?? [];
-      const parts: SpeechPart[] =
-        lines.length === 0
-          ? [{ kind: 'UTTERANCE', key: 'done' }]
-          : lines
-              .filter((line) => line.trim() !== '')
-              .map((line) => ({ kind: 'COMPOSED', text: line }) as const);
+      const result = outcome.value as ToolResult | undefined;
+      const lines = result?.spoken ?? [];
+      // The named sentences first, then the facts. A tool that says "I have kept it here" is
+      // describing the conversation, and the conversation's own words come from the closed set -
+      // which is the channel a key resolves against and a composed string cannot.
+      const named: SpeechPart[] = (result?.utterances ?? []).map(
+        (key) => ({ kind: 'UTTERANCE', key }) as const,
+      );
+      const composed: SpeechPart[] = lines
+        .filter((line) => line.trim() !== '')
+        .map((line) => ({ kind: 'COMPOSED', text: line }) as const);
+      const parts = [...named, ...composed];
+      // "Done." only where the tool said nothing at all. A tool that answered with a refusal has
+      // already said what happened, and appending "Done." to it would be two sentences describing
+      // one outcome and disagreeing about it.
       speak(parts.length === 0 ? [{ kind: 'UTTERANCE', key: 'done' }] : parts, lines);
       setSession((current) => reduce(current, { kind: 'DONE' }).session);
     },

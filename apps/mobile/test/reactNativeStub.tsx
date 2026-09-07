@@ -79,11 +79,54 @@ export const StyleSheet = {
   hairlineWidth: 1,
 };
 
-export const Platform = {
-  OS: 'android' as const,
+/**
+ * The platform, and a way to move it.
+ *
+ * `OS` is mutable for the same reason `fontScale` is: the adapters in `apps/mobile/src/platform`
+ * branch on it by design (`12`), and the branch that is not Android is unreachable from a test
+ * that cannot say so. Android is the default because it is the verified platform.
+ */
+export const Platform: {
+  OS: 'android' | 'ios';
+  select: <T>(options: { android?: T; ios?: T; default?: T }) => T | undefined;
+} = {
+  OS: 'android',
   select: <T,>(options: { android?: T; ios?: T; default?: T }): T | undefined =>
-    options.android ?? options.default,
+    (Platform.OS === 'ios' ? options.ios : options.android) ?? options.default,
 };
+
+/** Pretend to be a different platform. Restore it in a `finally`, as with the window metrics. */
+export function setPlatformOS(next: 'android' | 'ios'): void {
+  Platform.OS = next;
+}
+
+/**
+ * The vibrator, which records rather than buzzing.
+ *
+ * There is no motor in Node, so what a test can ask is what the engine **requested** - the same
+ * half `createRecordingHapticEngine` exists to make measurable. Whether a phone actually vibrates
+ * is a device question and is named as one (`DEV-070`).
+ */
+const vibrations: (number | readonly number[])[] = [];
+
+export const Vibration = {
+  vibrate(pattern: number | number[]): void {
+    vibrations.push(Array.isArray(pattern) ? [...pattern] : pattern);
+  },
+  cancel(): void {
+    // Nothing to cancel. Recorded as a call so a test could assert it was made.
+    vibrations.push([]);
+  },
+};
+
+/** Everything `Vibration.vibrate` was asked for since the last reset, in order. */
+export function recordedVibrations(): readonly (number | readonly number[])[] {
+  return [...vibrations];
+}
+
+export function resetVibrations(): void {
+  vibrations.length = 0;
+}
 
 // ---------------------------------------------------------------------------
 // The two pieces of ambient device state a test needs to move

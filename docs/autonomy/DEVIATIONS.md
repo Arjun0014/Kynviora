@@ -2789,7 +2789,7 @@ its own limit on pending local notifications, which is lower than Android's and 
 
 ---
 
-## DEV-070 - Haptics are designed, wired and not felt
+## DEV-070 - Haptics are designed, wired and not felt (resolved)
 
 - **Affected specification**: `18` (feedback channels), `12` (platform behaviour behind an
   adapter), DEC-131.
@@ -2803,18 +2803,35 @@ its own limit on pending local notifications, which is lower than Android's and 
   build. A newly declared permission appears on the Play listing and in the Data-safety form, which
   is a product decision rather than a side effect of a styling pass - and `verify:device:camera`
   exists precisely because a permission can arrive in a merged manifest with no screen changing.
-- **Workaround in place**: `createRecordingHapticEngine` is installed by default and
-  `installHapticEngine` takes a real one in a single call at the root. The call sites are asserted
-  by test, so the half that can be measured without hardware is measured.
+- **Workaround in place (historical)**: `createRecordingHapticEngine` was installed by default and
+  `installHapticEngine` took a real one in a single call at the root. The call sites were asserted
+  by test, so the half that can be measured without hardware was measured.
 - **Risk**: none. Nothing in this app reports anything through touch alone (DEC-131), so an absent
-  haptic costs a small amount of polish and no information.
-- **Required future work**: choose an engine, accept the manifest change, install it at the root,
-  and re-run `verify:device:camera` to confirm nothing else arrived in the manifest with it.
-- **Status**: OPEN.
+  haptic cost a small amount of polish and no information.
+- **How it resolved**: **the stated reason was false, and checking it took one command.**
+  `android.permission.VIBRATE` is already declared - the manifest merger report attributes it to the
+  app's own `AndroidManifest.xml`, where `expo-notifications`' config plugin puts it, and
+  `dumpsys package com.kynviora.app` lists it among the requested permissions of the build installed
+  on the emulator today. So React Native's own `Vibration` needed no new permission, no new
+  dependency and no prebuild, and `createVibrationHapticEngine` is installed at the root (DEC-139).
+
+  It is Android only. `Vibration.vibrate()` on iOS takes no duration, so every call is the same
+  full-length buzz and a `selection` tick would be that buzz on every press of every chip; the
+  adapter answers `null` there and the recording engine stays installed, which is the honest version
+  of "iOS is unverified" rather than a wrong feeling shipped as a right one.
+
+  **What being wrong about this cost**: a designed, wired and tested feature nobody could feel,
+  because the blocker was recorded as a fact and never re-measured. The lesson is narrow and worth
+  having: a blocker whose premise is a property of the build should be re-checked against the build,
+  not against the note that first described it.
+
+- **Still true**: a haptic is never the report of anything. Every call site fires one beside a
+  sentence already on the screen (DEC-131), and there is still no `error` intent to reach for.
+- **Status**: **RESOLVED 2026-09-07** (DEC-139).
 
 ---
 
-## DEV-071 - A dose recorded by voice with no signal is not queued
+## DEV-071 - A dose recorded by voice with no signal is not queued (resolved)
 
 - **Affected specification**: `12` (a queued change is visible rather than assumed), `03` group J,
   DEC-111, DEC-132.
@@ -2828,15 +2845,31 @@ its own limit on pending local notifications, which is lower than Android's and 
   confirmation a person just gave was for "record this", not for "keep this here and send it when
   you can". Making that change without saying it in the summary would be confirming one sentence
   and performing another, which is the failure DEC-134 exists to prevent.
-- **Workaround in place**: the honest sentence. Voice Mode says the phone has no connection and
-  says nothing about having kept anything - the same distinction the dose sheet draws between
-  "Recorded." and the queued wording, which `OFF-6` measures on a device.
-- **Risk**: low, and in the safe direction. A person is told the record was not made, which is
+- **Workaround in place (historical)**: the honest sentence. Voice Mode said the phone had no
+  connection and said nothing about having kept anything - the same distinction the dose sheet draws
+  between "Recorded." and the queued wording, which `OFF-6` measures on a device.
+- **Risk**: low, and in the safe direction. A person was told the record was not made, which was
   true. The opposite failure - saying it was kept when nothing was - is the one `OFF-6` exists for.
-- **Required future work**: decide the wording for a proposal whose outcome may be a queued write,
-  then wire `usePendingSync` into the voice executor and cover it the way `OFF-6` and `OFF-7` cover
-  the dose sheet.
-- **Status**: OPEN.
+- **How it resolved**: DEC-140 settles the semantic question the wiring was waiting on. **A
+  confirmation is for the record, not for the transport**: what somebody agreed to when they said
+  "record that I took it" is the record being made, and whether it travels now or in ten minutes is
+  a fact about the phone's radio. So the summary is unchanged and describes the intent; the
+  **report** says what happened, using `UTTERANCES.queued` - which already existed and is exactly
+  this sentence - instead of "Done.", never as well.
+
+  The queue is the one that already exists. `usePendingSync().queue`, `dose_event`, `CREATE`, under
+  the key the failed attempt already spent (DEC-111) - so the drain, `13`'s per-entity policy, the
+  retry budget and `PendingSenders`' wire call are all the ones `OFF-6` and `OFF-7` already exercise
+  on hardware. Voice adds no sync mechanism; it reaches the one that exists.
+
+  A `false` from the journal is a real answer - the store may not be open, or the device may have no
+  room (`DEV-055`) - and it produces the "no connection" sentence rather than the queued one,
+  because a person told their dose was kept when nothing kept it stops thinking about a record that
+  does not exist.
+
+- **What it found on the way**: `DEV-078`. Every failure had been reported as "no connection",
+  including the ones where a server had answered and declined.
+- **Status**: **RESOLVED 2026-09-07** (DEC-140).
 
 ---
 
@@ -2889,7 +2922,7 @@ its own limit on pending local notifications, which is lower than Android's and 
 
 ---
 
-## DEV-074 - Voice offers a caregiver less than they may actually do
+## DEV-074 - Voice offers a caregiver less than they may actually do (resolved)
 
 - **Affected specification**: `11` and `13` (the server decides), `14` (deny by default), DEC-116,
   DEC-132.
@@ -2902,14 +2935,46 @@ its own limit on pending local notifications, which is lower than Android's and 
 - **Reason**: the alternative is assuming a capability and letting the route refuse, which is a
   person completing a spoken form for nothing - the failure DEC-116's screen half exists to prevent,
   arriving through a different door.
-- **Workaround in place**: the refusal says what to do next and the screen it points at works. An
-  owner - which is who Voice Mode is for first - is unaffected.
-- **Risk**: none to safety, and it is in the safe direction. What it costs is a caregiver's
+- **How much less it actually offered, once somebody looked.** More than this entry said.
+  `VoiceProvider` called `capabilitiesFor({ isOwner: owns })` and passed **neither** of the two
+  answers the app already had, so a caregiver was offered the three read capabilities and nothing
+  else, in every session, whatever their grant said. Three tool capabilities were unreachable by
+  voice and reachable by touch: `RECORD_DOSES`, `MANAGE_MEDICINES` and `MANAGE_PERSONAL_CARE`.
+- **Workaround in place (historical)**: the refusal said what to do next and the screen it pointed
+  at worked. An owner - which is who Voice Mode is for first - was unaffected.
+- **Risk**: none to safety, and it was in the safe direction. What it cost was a caregiver's
   convenience.
-- **Required future work**: either a route that reports a caller's capabilities for a profile, or
-  wire the answers the shelf and the item detail already carry into the dispatch context as they
-  arrive. The second is smaller and is what the interface is shaped for.
-- **Status**: OPEN.
+- **How it resolved**: the first of the two routes this entry named, not the second (DEC-141).
+  `GET /v1/profiles/:profileId/capabilities` answers with `kynviora.has_capability` over
+  `CAREGIVER_CAPABILITIES`, and `capabilities.ts` maps that vocabulary onto the agent's with a
+  lookup that has no default. The second option - threading the shelf's and the item detail's
+  answers into the dispatch context - is smaller and was rejected: it makes what voice may offer
+  depend on which tabs somebody happened to open, which is the defect `PendingSenders` was moved off
+  the screens to avoid (`DEV-044`), and it still leaves `MANAGE_PERSONAL_CARE` answerable only by
+  opening a personal-care item.
+- **The audit, since this entry asked for one.** Every difference between what a caregiver may do
+  and what voice offers, and what each one now is:
+
+  | Tool capability        | Grant capability   | Touch                   | Voice, before | Voice, now |
+  | ---------------------- | ------------------ | ----------------------- | ------------- | ---------- |
+  | `VIEW_MEDICINES`       | `VIEW_MEDICINES`   | shelf rows, under RLS   | offered       | offered    |
+  | `VIEW_PERSONAL_CARE`   | `VIEW_SHELF`       | shelf rows, under RLS   | offered       | offered    |
+  | `VIEW_ALERTS`          | `VIEW_SAFETY`      | safety lines, under RLS | offered       | offered    |
+  | `RECORD_DOSES`         | `RECORD_DOSES`     | `mayRecordDoses`        | **withheld**  | offered    |
+  | `MANAGE_MEDICINES`     | `MANAGE_MEDICINES` | `mayEdit` on a medicine | **withheld**  | offered    |
+  | `MANAGE_PERSONAL_CARE` | `MANAGE_SHELF`     | `mayEdit` on a product  | **withheld**  | offered    |
+  | `OWNER_ONLY`           | none               | owner only              | owner only    | owner only |
+
+  What remains narrower by voice is **not** about capabilities and is in the registry rather than in
+  this mapping, and each has a reason that is about voice: `14` requires a fresh **typed** identity
+  for the Visit Pack, the data export, caregiver administration and closing an account, and nothing
+  in this build can re-authenticate by voice; `delete_item` removes a health record on a misheard
+  word; `record_consent` records that somebody read a specific versioned text, and a voice interface
+  cannot show anybody a text. All are `TOUCH_ONLY`, enforced twice - the agent is never told they
+  exist, and the dispatcher refuses one that arrives anyway - and all are still listed, so the agent
+  can say **where the control is** rather than that the capability does not exist.
+
+- **Status**: **RESOLVED 2026-09-07** (DEC-141).
 
 ---
 
@@ -2953,4 +3018,57 @@ its own limit on pending local notifications, which is lower than Android's and 
      know about the theme - a strip of daylight under a dark screen. It takes the theme's surface
      and hairline now, and the chosen destination carries `selection` rather than `informational`,
      which is the colour a fact about somebody's medicine is drawn in.
+- **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-077 - The dark theme was unreachable from the default appearance setting (resolved)
+
+- **Affected specification**: `18` (appearance is an accessibility setting, not decoration), `01`
+  (older adults are the primary audience), DEC-101, DEC-130, DEC-137.
+- **Expected behaviour**: `FOLLOW_SYSTEM` is the default appearance choice, so a phone in dark mode
+  draws the app in the dark theme.
+- **Implemented behaviour**: it drew the light theme. `useColorScheme()` returned `'light'`
+  regardless of what the phone was set to, so `FOLLOW_SYSTEM` could only ever resolve to `LIGHT`.
+  The dark theme was reachable only by going to You, then Accessibility, and choosing `DARK`.
+- **Reason**: `apps/mobile/app.json` carried `"userInterfaceStyle": "light"` from DEC-101, written
+  when there was no `DARK_THEME` at all. That is not inert configuration: `expo-system-ui`'s config
+  plugin writes it into `res/values/strings.xml`, and its activity lifecycle listener calls
+  `AppCompatDelegate.setDefaultNightMode(MODE_NIGHT_NO)` on every activity create - which forces the
+  `Configuration.uiMode` that `useColorScheme()` reads.
+- **How it was found**: by reading `app.json` while checking what a rebuild would regenerate for the
+  haptics work, not by a test. Nothing in this repository could have caught it: the theme resolution
+  is unit-tested and correct, the tokens are contrast-tested and correct, and the one thing that was
+  wrong lived in a platform configuration file three layers below either.
+- **How it resolved**: `"userInterfaceStyle": "automatic"` (DEC-137), which the same plugin maps to
+  `MODE_NIGHT_FOLLOW_SYSTEM`.
+- **What it says about the coverage**: the whole design system was asserted in Node and none of it
+  was asserted against a phone whose system theme had been moved. That gap is now closed by a device
+  check rather than by a test - `verify:device:a11y` reads both destinations under a system dark
+  mode, and the run that found this fixed is the evidence.
+- **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-078 - A dose refused by the server was reported to a voice user as "no connection" (resolved)
+
+- **Affected specification**: `12` (a queued change is visible rather than assumed; error handling
+  classes are distinct), `13` (clients branch on codes, never on message text), `18` (a refusal says
+  what to do next), DEC-134, DEC-140.
+- **Expected behaviour**: a dose the server answered and declined is reported as a refusal.
+- **Implemented behaviour**: every non-success outcome from `recordDoseEvent` produced
+  `UTTERANCES.offline` - "this phone has no connection at the moment". So a caregiver whose grant had
+  been revoked, a session that had expired, and a genuinely offline phone were all told the same
+  thing, and two of the three were told to try again later when a retry would be refused identically.
+- **Reason**: the executor's `record_dose` had two branches - `OK` and everything else - and the
+  everything-else branch was written when nothing could be queued, so "the server did not take it"
+  and "no server was reached" had not yet had to be different sentences.
+- **How it was found**: while wiring `DEV-071`. Adding the queue forced the question of _which_
+  failures may be queued, and the answer - only `OFFLINE`, because a refusal replayed by a journal is
+  refused again - showed that the existing single branch was answering two questions with one
+  sentence.
+- **How it resolved**: three answers instead of two (DEC-140). `OFFLINE` queues and says so;
+  `UNAUTHENTICATED`, `AUTHORIZATION_LOST`, `STEP_UP_REQUIRED` and `UNAVAILABLE` say
+  `notAllowed`; everything else says `cannotDoThat`. None of them invents a reason - `13` keeps the
+  reason out of the authorization responses on purpose and this respects that.
 - **Status**: **RESOLVED 2026-09-07**.

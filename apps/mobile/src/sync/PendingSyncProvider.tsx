@@ -132,7 +132,21 @@ const PendingSyncContext = createContext<PendingSyncContextValue>({
   discard: () => Promise.resolve(),
 });
 
-export function PendingSyncProvider({ children }: { readonly children: ReactNode }) {
+export interface PendingSyncProviderProps {
+  readonly children: ReactNode;
+  /**
+   * An injected journal, for a caller asserting what a screen **asks** of the queue.
+   *
+   * The same affordance `ApiProvider` and `ProfileProvider` already carry, and for the same
+   * reason: the real one needs an open SQLCipher database, which is a device concern
+   * (`verify:device` and `verify:device:offline` own it). What a caller can decide without one is
+   * whether a failed write was queued at all, under which key, and what the person was then told -
+   * and that decision is the one that regresses silently.
+   */
+  readonly value?: PendingSyncContextValue;
+}
+
+export function PendingSyncProvider({ children, value }: PendingSyncProviderProps) {
   const { pending, sessionId } = useProjection();
   const [counts, setCounts] = useState({ waiting: 0, needsAttention: 0 });
   const [generation, setGeneration] = useState(0);
@@ -234,6 +248,11 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
 
   useEffect(() => {
     if (pending === null) return;
+    // Nothing drains behind an injected journal. Otherwise a caller supplying a queue would still
+    // run the real pass it supplied the queue to avoid, and "the store was asked nothing" would be
+    // false for a reason nothing to do with what is being measured (`ProfileProvider` does the
+    // same with its load).
+    if (value !== undefined) return;
 
     // Deferred, never dropped. The same rule the reminder reconciliation uses, and for the same
     // reason: this effect's inputs arrive in stages, and the request that carries all of them is
@@ -291,7 +310,7 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
     return () => {
       live = false;
     };
-  }, [pending, sessionId, generation]);
+  }, [pending, sessionId, generation, value]);
 
   const list = useCallback(async (): Promise<readonly PendingOperation[]> => {
     if (pending === null) return [];
@@ -330,21 +349,32 @@ export function PendingSyncProvider({ children }: { readonly children: ReactNode
     [pending, sessionId, drain],
   );
 
-  const value = useMemo<PendingSyncContextValue>(
-    () => ({
+  const resolved = useMemo<PendingSyncContextValue>(
+    () =>
+      value ?? {
+        queue,
+        waiting: counts.waiting,
+        needsAttention: counts.needsAttention,
+        registerSender,
+        drain,
+        list,
+        retry,
+        discard,
+      },
+    [
+      value,
       queue,
-      waiting: counts.waiting,
-      needsAttention: counts.needsAttention,
+      counts.waiting,
+      counts.needsAttention,
       registerSender,
       drain,
       list,
       retry,
       discard,
-    }),
-    [queue, counts.waiting, counts.needsAttention, registerSender, drain, list, retry, discard],
+    ],
   );
 
-  return <PendingSyncContext.Provider value={value}>{children}</PendingSyncContext.Provider>;
+  return <PendingSyncContext.Provider value={resolved}>{children}</PendingSyncContext.Provider>;
 }
 
 export function usePendingSync(): PendingSyncContextValue {

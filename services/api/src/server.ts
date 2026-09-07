@@ -23,6 +23,7 @@ import { z } from 'zod';
 import {
   attentionReasons,
   asTimeZone,
+  CAREGIVER_CAPABILITIES,
   domainError,
   isErr,
   isItemLifecycleState,
@@ -729,6 +730,71 @@ export function createServer(options: ServerOptions): FastifyInstance {
           // this field exists to remove.
           isOwner: row.owner_user_id === (ctx.principal.userId as string),
         })),
+        serverTime: ctx.now,
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // GET /v1/profiles/:profileId/capabilities  (`DEV-074`, DEC-141)
+    // -------------------------------------------------------------------------
+    // What this caller may do on this profile, asked with the predicate the policies apply.
+    //
+    // WHY A ROUTE AND NOT AN INFERENCE
+    // Every surface that offers a control already asks a version of this question, and each asks
+    // only its own: `mayRecordDoses` on a shelf page, `mayEdit` and `mayDelete` on an item detail.
+    // That is enough for a screen, which offers one thing at a time. It is not enough for Voice
+    // Mode, which offers everything from one place and had to answer "what may this caller do"
+    // out of whatever screens somebody had happened to open - so a caregiver who had not visited
+    // an item detail was told to use the screen for a change they were fully entitled to make
+    // (`DEV-074`). The alternative, assuming a capability and letting the route refuse, is a
+    // person completing a spoken form for nothing, which is exactly what DEC-116's screen half
+    // exists to prevent.
+    //
+    // THIS AUTHORISES NOTHING
+    // It is a report, and every route checks again on the session against row-level security
+    // (`11`, `13`). What it decides is only whether a control is **offered**, which is the job
+    // `mayRecordDoses` has been doing on the shelf since DEC-116, generalised to a surface that
+    // needs the whole set at once.
+    //
+    // WHY IT DISCLOSES NOTHING
+    // Every answer is about the caller's own authorization, and `has_capability` consults
+    // `kynviora.current_user_id()` - there is no parameter that could name somebody else. A
+    // profile this caller cannot see answers `false` to all of them, which is the same thing an
+    // empty shelf page already tells them, so an unknown ID and a profile with no grant are
+    // indistinguishable. `13`'s rule that the API does not say "you are not allowed" is about a
+    // **refusal** carrying a reason; this is the affirmative report the same chapter requires so a
+    // screen can withhold a control rather than offer one the write would refuse.
+
+    app.get('/v1/profiles/:profileId/capabilities', async (request, reply) => {
+      const ctx = await contextFor(request, reply);
+      if (!ctx) return;
+
+      const params = profileIdParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        return fail(
+          reply,
+          domainError('VALIDATION_FAILED', 'Invalid profile id.', { reason_code: 'params_schema' }),
+          ctx.correlationId,
+        );
+      }
+
+      // One round trip over the whole vocabulary rather than one per capability. `unnest` keeps
+      // the list in the query parameters, so a capability added to `CAREGIVER_CAPABILITIES` is
+      // reported here without this route changing - and a capability removed from it stops being
+      // reported, rather than lingering as a string nothing can grant.
+      const held = await ctx.db((db) =>
+        db.query<{ capability: string; held: boolean }>(
+          `SELECT c AS capability, kynviora.has_capability($1, c) AS held
+             FROM unnest($2::text[]) AS c`,
+          [params.data.profileId, [...CAREGIVER_CAPABILITIES]],
+        ),
+      );
+
+      return reply.send({
+        // Only what is held. A list of everything with a boolean beside it would be the same
+        // information in a shape that invites a client to render "you cannot do this", which is
+        // the sentence `14` and DEC-045 both keep off a screen.
+        capabilities: held.rows.filter((row) => row.held).map((row) => row.capability),
         serverTime: ctx.now,
       });
     });

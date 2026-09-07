@@ -60,6 +60,27 @@ export interface ProfilesResponse {
   readonly serverTime: string;
 }
 
+/**
+ * What this caller may do on one profile, as the server answers it (DEC-141, `DEV-074`).
+ *
+ * Only what is **held**. A list of every capability with a boolean beside it would be the same
+ * information in a shape that invites a client to render "you cannot do this" - the sentence `14`
+ * and DEC-045 both keep off a screen, where a control is withheld rather than drawn and disabled.
+ *
+ * Untyped strings rather than a narrowed union, deliberately. The vocabulary belongs to the
+ * database (`caregiver_grant.capabilities`) and a client that narrowed it would either drop a
+ * capability a newer server reports - silently offering less than the caller may do, which is the
+ * defect this route exists to fix - or fail to parse the response. The consumer decides what to do
+ * with a name it does not recognise, and the only sound answer is to ignore it.
+ *
+ * THIS AUTHORISES NOTHING. Every route checks again on the session (`11`, `13`); this only stops a
+ * surface offering what the write would refuse.
+ */
+export interface ProfileCapabilitiesResponse {
+  readonly capabilities: readonly string[];
+  readonly serverTime: string;
+}
+
 export interface ShelfItem {
   readonly id: string;
   readonly profileId: string;
@@ -1304,6 +1325,15 @@ export interface KynvioraClient {
   health(): Promise<ApiOutcome<{ status: string }>>;
 
   listProfiles(): Promise<ApiOutcome<ProfilesResponse>>;
+  /**
+   * What this caller may do on one profile (`DEV-074`, DEC-141).
+   *
+   * Asked by a surface that offers many things at once - Voice Mode - rather than by a screen,
+   * which offers one and already has its own answer beside it (`mayRecordDoses` on a shelf page,
+   * `mayEdit` on an item detail). A profile the caller cannot see answers with an empty list,
+   * which is the same thing an empty shelf page already tells them.
+   */
+  profileCapabilities(profileId: string): Promise<ApiOutcome<ProfileCapabilitiesResponse>>;
   listItems(query: ItemsQuery): Promise<ApiOutcome<ItemsResponse>>;
   /** One item and what is not settled about it (`04` Phase 2.1). */
   itemDetail(itemId: string): Promise<ApiOutcome<ItemDetailResponse>>;
@@ -1697,6 +1727,11 @@ export function createClient(options: ClientOptions): KynvioraClient {
     health: () => get<{ status: string }>('/health'),
 
     listProfiles: () => get<ProfilesResponse>('/v1/profiles'),
+
+    profileCapabilities: (profileId) =>
+      get<ProfileCapabilitiesResponse>(
+        `/v1/profiles/${encodeURIComponent(profileId)}/capabilities`,
+      ),
 
     listItems: (query) =>
       get<ItemsResponse>('/v1/items', {

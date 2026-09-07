@@ -3,7 +3,8 @@
  *
  * Spec references: `06` Journey 6 and its required screen states, `03` group H (explicit grants,
  * revocation, audit visibility), `18` (plain language, 48dp targets, never colour alone),
- * `12` (no client-side authorization, no optimistic change to a caregiver grant).
+ * `12` (no client-side authorization, no optimistic change to a caregiver grant), DEC-130,
+ * DEC-142.
  *
  * WHAT THIS SCREEN DELIBERATELY DOES NOT DO
  * It never decides who may see anything. `12` forbids the client from holding authorization
@@ -11,15 +12,30 @@
  * what the server returned and asks the server for every change. There is no local capability
  * check anywhere in this file, and there is no optimistic update: a grant shown as removed before
  * the server agreed would be a false statement about who can see a person's health data.
+ *
+ * WHY IT NO LONGER SCROLLS ITSELF (DEC-142)
+ * It used to hold its own `ScrollView` inside the one `care.tsx` already had - two scroll views
+ * nested in the same direction, which on Android is one of them eating the other's gestures. It
+ * also drew its own screen heading, so Care had two ways of saying what screen this is. Both were
+ * artefacts of Care being the one destination that did not use `Screen`; it does now, and this
+ * renders content.
+ *
+ * WHY A GRANT IS THREE BLOCKS AND NOT A ROW OF CHIPS
+ * "What they can see", "what they can change" and "what is not shared" are three different
+ * questions, they are separately granted (DEC-116), and the third is the one somebody actually
+ * came to check. Capabilities used to be a row of small grey chips with the withheld list as one
+ * lowercased caption underneath - which reads as a tag cloud with a footnote, so the granted set
+ * was scannable and the withheld set was not. `summarizeAccess` already composes all three and
+ * already has the copy; this renders them at the same rank and in the same shape, because `18`
+ * will not let a limitation sit a level below the thing it qualifies and this screen is entirely
+ * about limitations.
  */
 
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import {
   CAREGIVER_COPY,
+  RADIUS,
   SPACING,
-  FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
-  describeCapability,
   presentCaregiverAccess,
   summarizeAccess,
   type CaregiverAccessState,
@@ -28,9 +44,12 @@ import {
 import type { CaregiverCapability } from '@kynviora/domain';
 import { isRemovable, type AccessHistoryView } from '@kynviora/contracts';
 import { AccessHistory } from './AccessHistory';
+import { Card } from '@/components/Card';
+import { SectionHeader } from '@/components/SectionHeader';
 import { StatusChip } from '@/components/StatusChip';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { Typography } from '@/components/Typography';
 import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
 import { useThemedStyles } from '@/theme/ThemeProvider';
 
@@ -84,7 +103,6 @@ export function CaregiverAccessList({
   onRetry,
   history,
 }: CaregiverAccessListProps) {
-  const styles = useThemedStyles(makeStyles);
   if (state !== 'READY') {
     // Every non-success state is rendered explicitly. `06` treats a screen with only a success
     // path as incomplete, and this one can genuinely be offline, stale or newly unauthorized.
@@ -92,11 +110,8 @@ export function CaregiverAccessList({
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <Text accessibilityRole="header" style={styles.heading}>
-        Who can see this profile
-      </Text>
-      <Text style={styles.intro}>{CAREGIVER_COPY.inviteIntro}</Text>
+    <>
+      <SectionHeader title="Who can see this profile" explanation={CAREGIVER_COPY.inviteIntro} />
 
       {rows.length === 0 ? (
         <ScreenState state="EMPTY" message={CAREGIVER_COPY.emptyState} />
@@ -109,7 +124,7 @@ export function CaregiverAccessList({
       {/* After a removal the list is one row shorter, which is the least informative possible
           confirmation. The history is where the removal itself is visible (`03` group H). */}
       {history === undefined ? null : <AccessHistory history={history} />}
-    </ScrollView>
+    </>
   );
 }
 
@@ -128,36 +143,36 @@ function CaregiverRow({
   const canRevoke = isRemovable(row);
 
   return (
-    <View style={styles.row}>
-      <Text style={styles.name}>{row.displayName}</Text>
+    <Card>
+      <Typography role="title" heading>
+        {row.displayName}
+      </Typography>
 
       {/* The state is carried by the chip, which always renders a label and a shape icon. */}
       <StatusChip presentation={presentation} showDescription />
 
-      {row.capabilities.length > 0 ? (
-        <View style={styles.capabilities}>
-          {row.capabilities.map((capability) => (
-            <Text key={capability} style={styles.capability}>
-              {describeCapability(capability).label}
-            </Text>
-          ))}
-        </View>
-      ) : null}
+      {/* Three blocks, in the same shape and at the same rank: what they can see, what they can
+          change, and what is not shared at all. `summarizeAccess` composes all three - seeing and
+          changing are separate because they are separately granted (DEC-116), and the third is the
+          one somebody actually came to check. It used to be a caption under a row of grey chips,
+          which made the granted set scannable and the withheld set a footnote. */}
+      <CapabilityBlock title="What they can see" entries={summary.viewing} />
+      <CapabilityBlock title="What they can change" entries={summary.changing} />
+      <CapabilityBlock title="Not shared with them" entries={summary.notIncluded} />
 
-      {/* What was withheld, not only what was granted. */}
-      {summary.notIncluded.length > 0 ? (
-        <Text style={styles.limitation}>
-          Not shared: {summary.notIncluded.join(', ').toLowerCase()}.
-        </Text>
-      ) : null}
+      {/* Two facts that qualify the grant rather than describing it, so they sit under both
+          blocks as captions rather than inside either. */}
+      {summary.administrationWarning === null ? null : (
+        <Typography role="caption" colour="secondary">
+          {summary.administrationWarning}
+        </Typography>
+      )}
 
-      {summary.administrationWarning !== null ? (
-        <Text style={styles.limitation}>{summary.administrationWarning}</Text>
-      ) : null}
-
-      {row.expiresAt !== null ? (
-        <Text style={styles.limitation}>Access ends on {row.expiresAt.slice(0, 10)}.</Text>
-      ) : null}
+      {row.expiresAt === null ? null : (
+        <Typography role="caption" colour="secondary">
+          Access ends on {row.expiresAt.slice(0, 10)}.
+        </Typography>
+      )}
 
       {canRevoke ? (
         <PrimaryButton
@@ -165,53 +180,57 @@ function CaregiverRow({
           // The label already says what happens; the hint carries the consequence for a screen
           // reader without making the visible label long enough to wrap awkwardly.
           accessibilityHint={CAREGIVER_COPY.revokeConfirm}
+          style={styles.remove}
           onPress={() => {
             onRevoke(row.id);
           }}
         />
       ) : null}
+    </Card>
+  );
+}
+
+/**
+ * One labelled list, or nothing.
+ *
+ * Absent rather than empty, and that is the interesting case: "what they can change - nothing" is
+ * a sentence with two readings, and the wrong one is that changing is a thing this grant does at a
+ * level below what is listed. The other two blocks say what the grant is; a block with no entries
+ * says nothing and is not drawn.
+ */
+function CapabilityBlock({
+  title,
+  entries,
+}: {
+  readonly title: string;
+  readonly entries: readonly string[];
+}) {
+  const styles = useThemedStyles(makeStyles);
+  if (entries.length === 0) return null;
+  return (
+    <View style={styles.block}>
+      <Typography role="label" colour="secondary" heading>
+        {title}
+      </Typography>
+      {entries.map((entry) => (
+        <Typography key={entry} role="body">
+          {entry}
+        </Typography>
+      ))}
     </View>
   );
 }
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    content: { padding: SPACING.lg, gap: SPACING.md },
-    heading: {
-      fontSize: FONT_SIZE.heading,
-      fontWeight: '700',
-      color: theme.surface.foreground,
-    },
-    intro: {
-      fontSize: FONT_SIZE.body,
-      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
-    },
-    row: {
-      gap: SPACING.sm,
+    // A sunken well: "this is about the record", the same treatment a read-only block gets
+    // everywhere else. Deliberately not a tone - a coloured panel here would be a colour making a
+    // claim about somebody's access, and the two lists must read as equally important.
+    block: {
+      gap: SPACING.xxs,
       padding: SPACING.md,
-      borderWidth: 1,
-      borderRadius: SPACING.sm,
-      borderColor: theme.surface.border,
-      backgroundColor: theme.surface.background,
+      borderRadius: RADIUS.md,
+      backgroundColor: theme.sunken.background,
     },
-    name: {
-      fontSize: FONT_SIZE.title,
-      fontWeight: '600',
-      color: theme.surface.foreground,
-    },
-    capabilities: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
-    capability: {
-      fontSize: FONT_SIZE.caption,
-      color: theme.surfaceMuted.foreground,
-      backgroundColor: theme.surfaceMuted.background,
-      borderRadius: SPACING.xs,
-      paddingHorizontal: SPACING.sm,
-      paddingVertical: SPACING.xs,
-    },
-    limitation: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
-    },
+    remove: { marginTop: SPACING.xs },
   });

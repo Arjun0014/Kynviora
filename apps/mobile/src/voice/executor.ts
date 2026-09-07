@@ -28,17 +28,32 @@ import {
   doseHistory,
   itemDetailScreenView,
   shelfView,
+  type DoseEventBody,
   type KynvioraClient,
   type ScheduleBody,
 } from '@kynviora/contracts';
 import { isDoseEventKind, type DoseEventKind } from '@kynviora/domain';
-import type { ToolCall, ToolExecutor } from '@kynviora/agent';
+import type { ToolCall, ToolExecutor, UtteranceKey } from '@kynviora/agent';
 import { newIdempotencyKey } from '@/platform/ids';
 
 /** What every executor answers with: what to say, and what the screen should open. */
 export interface ToolResult {
   /** Lines the Speech Gate will accept, because the presentation layer composed them. */
   readonly spoken: readonly string[];
+  /**
+   * Fixed sentences, named rather than written out.
+   *
+   * A key into the Speech Gate's closed set, which is a **different channel** from `spoken` and
+   * exists to close a small hole in the first one. `spoken` is checked against `composedFrom`,
+   * and the caller passes this file's own `spoken` array as `composedFrom` - so a string written
+   * here would cite itself and pass. Every one of them happens to come from the presentation layer
+   * today, and nothing was enforcing that.
+   *
+   * A key cannot cite itself: `gateSpeech` resolves it against `UTTERANCES` and refuses one this
+   * build does not have. So a conversation's own sentences - "I have kept it here", "I cannot do
+   * that by voice" - go through here, and only facts about somebody's records go through `spoken`.
+   */
+  readonly utterances?: readonly UtteranceKey[];
   /** An identifier the caller may need to open a surface - an item, a schedule. */
   readonly focusId?: string;
 }
@@ -87,8 +102,21 @@ export interface VoiceBridge {
 export function createToolExecutor(
   client: KynvioraClient,
   bridge: VoiceBridge,
-  /** Queue a dose the server could not be told about, returning the sentence to say. */
-  queueDose: (call: ToolCall, idempotencyKey: string) => Promise<string>,
+  /**
+   * Keep a dose no server could be reached about, answering whether it was kept.
+   *
+   * Takes the **body that was sent** and the key it was sent under rather than the call, because
+   * the journal replays a request and not an intent: a queue built from the arguments again would
+   * be a second reading of what the person said, taken minutes later, and a different reading is a
+   * different dose. `13` resolves `dose_event` `MERGE_BY_ID`, so the replay under this key lands on
+   * the row the failed attempt may already have written (DEC-111).
+   *
+   * `false` is a real answer and not a failure of this function: the store may not be open, or the
+   * device may have no room for the write (`19`'s low-storage scenario, `DEV-055`). What must not
+   * happen is a person being told their dose was kept when nothing kept it, which is the
+   * distinction `OFF-6` measures on a device for the touch path.
+   */
+  queueDose: (body: DoseEventBody, idempotencyKey: string) => Promise<boolean>,
 ): ToolExecutor {
   return {
     list_medicines: async (call) => {
@@ -175,25 +203,60 @@ export function createToolExecutor(
       } satisfies ToolResult;
     },
 
+    /**
+     * Record a dose, and keep it on the phone where no server could be reached (DEC-140).
+     *
+     * THE THREE ANSWERS, AND WHY THEY ARE THREE
+     * This used to have two, and the missing one cost a dose. Every failure was reported as "this
+     * phone has no connection", so a caregiver whose grant had been revoked was told to try again
+     * later - and a person in a kitchen with no signal was told their record had not been made and
+     * nothing kept it (`DEV-071`).
+     *
+     * `OFFLINE` is the only kind that means no server was reached. It is the one that queues, under
+     * **the key the attempt already spent**: a fresh key would commit a second event where the
+     * first request arrived and lost its answer, and on a dose history that is a false record of
+     * what somebody did (DEC-111).
+     *
+     * Everything else is a server that answered and declined. Saying "no connection" to that is
+     * telling somebody to retry something that will be refused identically, so it is reported as a
+     * refusal - `notAllowed` where the answer was about permission, which is the sentence the
+     * screen's own refusal path uses, and `cannotDoThat` otherwise. Neither invents a reason: `13`
+     * keeps the reason out of the authorization responses on purpose and this respects that.
+     */
     record_dose: async (call) => {
       // Minted once, here, for this intent. If the send fails the journal keeps **this** key, so
       // the replay lands once (DEC-111).
       const key = newIdempotencyKey();
-      const outcome = await client.recordDoseEvent(
-        {
-          ownedItemId: argument(call, 'itemId'),
-          // Narrowed rather than cast. The dispatcher has already refused anything that is not
-          // one of the four, so this cannot fail - and a cast would be the one place a fifth kind
-          // could reach a column with a CHECK against it.
-          eventKind: asDoseEventKind(argument(call, 'eventKind')),
-          ...(argument(call, 'note') === '' ? {} : { note: argument(call, 'note') }),
-        },
-        key,
-      );
+      const body: DoseEventBody = {
+        ownedItemId: argument(call, 'itemId'),
+        // Narrowed rather than cast. The dispatcher has already refused anything that is not
+        // one of the four, so this cannot fail - and a cast would be the one place a fifth kind
+        // could reach a column with a CHECK against it.
+        eventKind: asDoseEventKind(argument(call, 'eventKind')),
+        ...(argument(call, 'note') === '' ? {} : { note: argument(call, 'note') }),
+      };
+      const outcome = await client.recordDoseEvent(body, key);
       if (outcome.kind === 'OK') return { spoken: [] } satisfies ToolResult;
-      // Not "Recorded." - the two are different promises, and the shorter one would be telling
-      // somebody the server has their record when the request has just failed.
-      return { spoken: [await queueDose(call, key)] } satisfies ToolResult;
+
+      if (outcome.kind !== 'OFFLINE') {
+        return {
+          spoken: [],
+          utterances: [
+            outcome.kind === 'UNAUTHENTICATED' ||
+            outcome.kind === 'AUTHORIZATION_LOST' ||
+            outcome.kind === 'STEP_UP_REQUIRED' ||
+            outcome.kind === 'UNAVAILABLE'
+              ? 'notAllowed'
+              : 'cannotDoThat',
+          ],
+        } satisfies ToolResult;
+      }
+
+      // Not "Recorded." and not "Done." - those are promises about a server that has the record.
+      // `queued` is the promise this can actually keep, and it is the same distinction the dose
+      // sheet draws between "Recorded." and its offline note, which `OFF-6` measures on hardware.
+      const kept = await queueDose(body, key);
+      return { spoken: [], utterances: [kept ? 'queued' : 'offline'] } satisfies ToolResult;
     },
 
     create_schedule: async (call) => {

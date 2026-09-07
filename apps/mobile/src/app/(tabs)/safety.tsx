@@ -5,7 +5,7 @@
  * status), `09` (product states; a coverage statement accompanies every result), `18` (never
  * present an absence of findings as reassurance), `23` D-005 (evidence level and urgency are never
  * combined) and D-014 (an absence of a matched rule must never render as approval), `11` and
- * DEC-010 (safety is server-authoritative), `BLK-006`, DEC-016.
+ * DEC-010 (safety is server-authoritative), `BLK-006`, DEC-016, DEC-130, DEC-138.
  *
  * ONE LINE PER ITEM, NOT ONE PER ALERT
  * This screen used to list published alerts, which meant an item with no alert did not appear at
@@ -20,6 +20,15 @@
  * answer, and the coverage statement is on screen in every state - because "Kynviora found
  * nothing" and "there is nothing to find" are different sentences and only the first is true.
  *
+ * WHY THE COVERAGE STATEMENT IS THE FIRST THING AND NOT THE LAST (DEC-138)
+ * It used to sit under the list. On a shelf of five identical "not enough information" lines the
+ * conclusion is formed while scanning, so a qualification arriving underneath arrives after the
+ * thing it was meant to qualify. And on a longer shelf it is below the fold, which for a sentence
+ * whose whole job is to stop a misreading is the same as not being there. The design system's own
+ * rule is that a limitation never moves down a layer, and below the fold is a layer. It is a card
+ * in `informational`, at the same visual rank as the results - which is what `09` means by the
+ * coverage statement accompanying the result rather than being inferred from its absence.
+ *
  * THE LENS OPENS FROM AN ITEM, WHERE THE SUBSTANCE IS
  * `09` shows a regulatory status "beside, not substituted for" the safety state, so the Lens is
  * reached from a line rather than being its own destination. The control appears only where the
@@ -28,18 +37,32 @@
  * about whatever it was given. Until guided capture lands (`DEV-024`) that is every item, so the
  * control appears nowhere and says nothing false while it does.
  *
+ * URGENCY AND EVIDENCE SIT IN THEIR OWN BLOCK, LABELLED AS TWO QUESTIONS
+ * `23` D-005 forbids merging them, and three chips in a row is how they get merged anyway: a
+ * person reads a strip of adjacent chips as one compound verdict. So where a line has them they
+ * are drawn in a sunken well under their own marker, each behind its own question - "How soon"
+ * and "How well established" - with a sentence saying neither answers the other. Where a line has
+ * no live alert it has neither, and the block is absent rather than empty: a default chip would be
+ * a claim nobody made.
+ *
  * NO COUNT, NO BADGE, NO RANKING
  * The filters narrow; they do not rank. There is no "3 items need action" anywhere on this screen
  * and no code path in this app that could compute a severity: the rule engine is server-side
- * (DEC-010) and this screen renders what a reviewer approved.
+ * (DEC-010) and this screen renders what a reviewer approved. The one number it may state is the
+ * size of the shelf, which is a fact about the shelf.
+ *
+ * THE CHOSEN FILTER CARRIES `selection`, NOT `informational`
+ * It used to carry `informational`, which is the colour a fact about somebody's medicine is drawn
+ * in. "This is the filter you turned on" and "here is something about your medicine" must not be
+ * the same colour, or the second stops being noticeable (DEC-130). `selection` is the one hue in
+ * this app that is about the interface rather than about a product.
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
 import {
+  RADIUS,
   SPACING,
-  FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
   MIN_TOUCH_TARGET_DP,
   presentSafetyState,
   type Theme,
@@ -59,23 +82,35 @@ import {
 import { useApi } from '@/api/ApiProvider';
 import { useProfiles } from '@/api/ProfileProvider';
 import { useResource } from '@/api/useResource';
+import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
+import { SectionHeader } from '@/components/SectionHeader';
 import { ResourceState } from '@/components/ScreenState';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { StatusChip } from '@/components/StatusChip';
+import { Typography } from '@/components/Typography';
 import { RegulatoryLens } from '@/features/lens/RegulatoryLens';
 import { AlertDetail } from '@/features/safety/AlertDetail';
 import { SafetyReceipt } from '@/features/safety/SafetyReceipt';
-import { useTheme, useThemedStyles } from '@/theme/ThemeProvider';
+import { useThemedStyles } from '@/theme/ThemeProvider';
 import { VoiceBar } from '@/voice/VoiceHost';
+import { haptic } from '@/platform/haptics';
 
 const EMPTY = { lines: [], totalItems: 0 } as const;
 
+/**
+ * The marker over the coverage card.
+ *
+ * Deliberately not "Safety summary" or anything else that could be read as a verdict about the
+ * shelf. It names what Kynviora is doing, which is watching sources - and the sentence under it
+ * says what that currently amounts to.
+ */
+const COVERAGE_HEADING = 'What Kynviora is watching';
+
 export default function SafetyScreen() {
-  const theme = useTheme();
   const styles = useThemedStyles(makeStyles);
   const { client } = useApi();
-  const { activeProfileId } = useProfiles();
+  const { activeProfile, activeProfileId } = useProfiles();
 
   /**
    * The state filter, as a set the user toggles.
@@ -203,6 +238,9 @@ export default function SafetyScreen() {
       void client.recordResolution(receiptFor, { resolution }).then((outcome) => {
         setRecording(false);
         if (outcome.kind === 'OK') {
+          // Beside the sentence, never instead of it (DEC-131). Every branch below writes a
+          // sentence into a polite live region first; the haptic is the second channel.
+          haptic('confirm');
           setRecordMessage(
             outcome.value.alreadyRecorded
               ? 'That was already what stood, so nothing changed.'
@@ -213,6 +251,7 @@ export default function SafetyScreen() {
           reloadReceipt();
           return;
         }
+        haptic('failure');
         setRecordMessage(
           outcome.kind === 'OFFLINE'
             ? 'Kynviora could not reach the server, so nothing was recorded. Try again later.'
@@ -239,6 +278,7 @@ export default function SafetyScreen() {
     void client.reportIncorrectMatch(alertFor).then((outcome) => {
       setReporting(false);
       if (outcome.kind === 'OK') {
+        haptic('confirm');
         setReportMessage(
           outcome.value.alreadyReported
             ? 'You had already told Kynviora this match is wrong.'
@@ -247,6 +287,7 @@ export default function SafetyScreen() {
         reloadAlert();
         return;
       }
+      haptic('failure');
       setReportMessage(
         outcome.kind === 'OFFLINE'
           ? 'Kynviora could not reach the server, so nothing was recorded. Try again later.'
@@ -319,9 +360,15 @@ export default function SafetyScreen() {
     );
   }
 
+  // A filter is on and matched nothing. Distinct from an empty shelf, which `isEmpty` above hands
+  // to `ResourceState` with its own copy - and the two must not share a sentence, because one is
+  // about the filter and the other is about the household.
+  const filteredToNothing = view.totalItems > 0 && view.lines.length === 0;
+
   return (
     <Screen
       title="Safety"
+      eyebrow={activeProfile?.displayName ?? null}
       intro="Every item on this shelf, and what Kynviora can say about it today."
       onRefresh={onRetry}
       refreshing={refreshing}
@@ -330,49 +377,85 @@ export default function SafetyScreen() {
 
       <ResourceState resource={resource} onRetry={onRetry} />
 
-      {/* Filters, offered as the five states rather than as "show me the bad ones". Each is a
-          toggle with its own label and accessibility state, never colour alone (`18`). */}
-      <View style={styles.filters}>
-        {PRODUCT_SAFETY_STATES.map((state) => {
-          const chosen = states.includes(state);
-          const presentation = presentSafetyState(state);
-          return (
-            <Pressable
-              key={state}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: chosen }}
-              accessibilityLabel={presentation.label}
-              accessibilityHint={presentation.description}
-              onPress={() => {
-                setStates((current) =>
-                  chosen ? current.filter((s) => s !== state) : [...current, state],
-                );
-              }}
-              style={[
-                styles.filter,
-                {
-                  backgroundColor: chosen
-                    ? theme.informational.background
-                    : theme.surface.background,
-                  borderColor: chosen ? theme.informational.border : theme.surface.border,
-                },
-              ]}
-            >
-              <Text style={styles.filterLabel}>
-                {chosen ? '☑  ' : '☐  '}
-                {presentation.label}
-              </Text>
-            </Pressable>
-          );
-        })}
+      {/* The coverage statement, first and at the same rank as the results (DEC-138). Drawn in
+          every state including the filtered and empty ones: `09` requires it to accompany the
+          result rather than be inferred from its absence, and a filtered page with no rows on it
+          is the easiest place in the app to read "nothing found" as "nothing to find". */}
+      <Card tone="informational">
+        <Typography role="overline" colour="informational" heading>
+          {COVERAGE_HEADING}
+        </Typography>
+        <Typography role="bodyLarge" colour="informational">
+          {view.coverageStatement}
+        </Typography>
+      </Card>
+
+      <View style={styles.block}>
+        <SectionHeader
+          title="Narrow this list"
+          explanation="A filter changes which items are shown. It never changes their order."
+        />
+
+        {/* Filters, offered as the five states rather than as "show me the bad ones". Each is a
+            checkbox with its own name and its own announced state - the tick is drawn in the
+            label as well, because `18` forbids meaning carried by colour alone. */}
+        <View style={styles.filters}>
+          {PRODUCT_SAFETY_STATES.map((state) => {
+            const chosen = states.includes(state);
+            const presentation = presentSafetyState(state);
+            return (
+              <Pressable
+                key={state}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: chosen }}
+                // The bare label, and deliberately not "…filter, on": the state belongs in
+                // `accessibilityState`, which is where a screen reader looks for it, and a name
+                // that changed with the state would be a control that renames itself when pressed.
+                accessibilityLabel={presentation.label}
+                accessibilityHint={presentation.description}
+                onPress={() => {
+                  haptic('selection');
+                  setStates((current) =>
+                    chosen ? current.filter((s) => s !== state) : [...current, state],
+                  );
+                }}
+                style={[styles.filter, chosen ? styles.filterOn : null]}
+              >
+                {/* The tick is in the text as well as in the styling, because `18` forbids
+                    meaning carried by colour alone. `Typography` rather than a raw `Text` so the
+                    label grows with the system font scale like every other control's does. */}
+                <Typography role="label" {...(chosen ? { style: styles.filterLabelOn } : {})}>
+                  {chosen ? '☑  ' : '☐  '}
+                  {presentation.label}
+                </Typography>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* Says the list is a subset without counting anything urgent. `02` refuses the badge;
+            this is the size of the shelf, which is a fact about the shelf. */}
+        {view.filtered ? (
+          <Typography role="caption" colour="secondary">
+            Showing {view.lines.length} of {view.totalItems} items on this shelf.
+          </Typography>
+        ) : null}
       </View>
 
-      {/* Says the list is a subset without counting anything urgent. `02` refuses the badge; this
-          is the size of the shelf, which is a fact about the shelf. */}
-      {view.filtered ? (
-        <Text style={styles.coverage}>
-          Showing {view.lines.length} of {view.totalItems} items on this shelf.
-        </Text>
+      {view.totalItems === 0 ? null : (
+        <SectionHeader
+          title="Every item on this shelf"
+          explanation="Each item has a line, whether or not Kynviora has anything to say about it."
+        />
+      )}
+
+      {filteredToNothing ? (
+        <Card>
+          <Typography role="body" colour="secondary">
+            Nothing on this shelf is in the state you asked for. That is a fact about the filter,
+            not about the items.
+          </Typography>
+        </Card>
       ) : null}
 
       {view.lines.map((line) => (
@@ -383,15 +466,19 @@ export default function SafetyScreen() {
           onOpenAlert={setAlertFor}
         />
       ))}
-
-      {/* Rendered in every state, including the empty one. `09` requires the coverage statement
-          to accompany the result rather than be inferred from its absence. */}
-      <Text style={styles.coverage}>{view.coverageStatement}</Text>
     </Screen>
   );
 }
 
-function SafetyRow({
+/**
+ * One item's line.
+ *
+ * Exported so it can be rendered on its own. What it decides is which of `23`'s two hardest rules
+ * a line is currently expressing - an absence that must not read as approval, and two dimensions
+ * that must not merge - and reaching it through the whole screen would mean standing up four
+ * providers and a network client to ask a question about a conditional.
+ */
+export function SafetyRow({
   line,
   onOpenLens,
   onOpenAlert,
@@ -404,92 +491,138 @@ function SafetyRow({
   readonly onOpenAlert: (alertPublicationId: string) => void;
 }) {
   const styles = useThemedStyles(makeStyles);
-  return (
-    <View style={styles.alert}>
-      <Text accessibilityRole="header" style={styles.name}>
-        {line.displayName}
-      </Text>
+  // Null together by construction (`safetyInboxView`), and read as a pair here so the block is
+  // absent rather than half-drawn if that ever stops being true.
+  const hasAlertDimensions = line.urgency !== null || line.evidence !== null;
 
-      {/* The state, and beside it - never merged with it - urgency and evidence. `23` D-005, and
-          Phase 7.1's second exit criterion. A line with no live alert shows neither, because it
-          has neither: a default chip would be a claim nobody made. */}
+  return (
+    <Card>
+      <Typography role="title" heading>
+        {line.displayName}
+      </Typography>
+
+      {/* The state, with its qualification attached rather than as a bare label. `18`: a
+          limitation travels with the fact it qualifies, at every level. */}
       <StatusChip presentation={line.state} showDescription />
-      {line.urgency === null ? null : <StatusChip presentation={line.urgency} showDescription />}
-      {line.evidence === null ? null : <StatusChip presentation={line.evidence} showDescription />}
 
       {/* When it was last looked at, or that it never has been. The absence is the point: an item
-          Kynviora has never assessed must not read like one it checked this morning. */}
-      <Text style={styles.coverage}>
-        {line.lastAssessedAt === null
-          ? 'Kynviora has not assessed this item.'
-          : `Last assessed ${line.lastAssessedAt.slice(0, 10)}.`}
-      </Text>
+          Kynviora has never assessed must not read like one it checked this morning, and a blank
+          where the date goes reads exactly like that. In a sunken well, which is the design
+          system saying "this is about the record" - deliberately not a tone, because a coloured
+          panel here would be a colour claiming something about the medicine. */}
+      <View style={styles.record}>
+        <Typography role="caption" colour="secondary">
+          {line.lastAssessedAt === null
+            ? 'Kynviora has not assessed this item.'
+            : `Last assessed ${line.lastAssessedAt.slice(0, 10)}.`}
+        </Typography>
+      </View>
+
+      {/* Two dimensions, two questions, one sentence saying they are not the same question.
+          `23` D-005. Absent where there is no live alert, because then there is neither - and a
+          default chip would be a claim nobody made. */}
+      {hasAlertDimensions ? (
+        <View style={styles.dimensions}>
+          <Typography role="overline" colour="secondary" heading>
+            About this alert
+          </Typography>
+
+          {line.urgency === null ? null : (
+            <View style={styles.dimension}>
+              <Typography role="label" colour="secondary">
+                How soon
+              </Typography>
+              <StatusChip presentation={line.urgency} showDescription />
+            </View>
+          )}
+
+          {line.evidence === null ? null : (
+            <View style={styles.dimension}>
+              <Typography role="label" colour="secondary">
+                How well established
+              </Typography>
+              <StatusChip presentation={line.evidence} showDescription />
+            </View>
+          )}
+
+          <Typography role="caption" colour="secondary">
+            These are two separate things. Neither one answers the other.
+          </Typography>
+        </View>
+      ) : null}
 
       {/* Only where there is a live alert to explain. A line whose state came from an assessment
           rather than a publication has nothing to open, and a disabled control would state that
           an explanation exists and is being withheld (DEC-045). */}
-      {line.alertPublicationId === null ? null : (
-        <PrimaryButton
-          label="Why am I seeing this?"
-          variant="secondary"
-          onPress={() => {
-            onOpenAlert(line.alertPublicationId as string);
-          }}
-        />
-      )}
+      {line.alertPublicationId === null && line.substances.length === 0 ? null : (
+        <View style={styles.actions}>
+          {line.alertPublicationId === null ? null : (
+            <PrimaryButton
+              label="Why am I seeing this?"
+              onPress={() => {
+                onOpenAlert(line.alertPublicationId as string);
+              }}
+            />
+          )}
 
-      {/* Beside the safety state, never substituted for it (`09`). One control per confirmed
-          substance, and none at all where there are none - a Lens opened on a substance nobody
-          confirmed is in the pack would answer about whatever it was given. */}
-      {line.substances.map((substance) => (
-        <PrimaryButton
-          key={substance.substanceKey}
-          label={`How ${substance.preferredName} is treated elsewhere`}
-          variant="secondary"
-          onPress={() => {
-            onOpenLens({
-              substanceKey: substance.substanceKey,
-              disclosedConcentrationPercent: substance.disclosedConcentrationPercent,
-            });
-          }}
-        />
-      ))}
-    </View>
+          {/* Beside the safety state, never substituted for it (`09`). One control per confirmed
+              substance, and none at all where there are none - a Lens opened on a substance
+              nobody confirmed is in the pack would answer about whatever it was given. */}
+          {line.substances.map((substance) => (
+            <PrimaryButton
+              key={substance.substanceKey}
+              label={`How ${substance.preferredName} is treated elsewhere`}
+              variant="secondary"
+              onPress={() => {
+                onOpenLens({
+                  substanceKey: substance.substanceKey,
+                  disclosedConcentrationPercent: substance.disclosedConcentrationPercent,
+                });
+              }}
+            />
+          ))}
+        </View>
+      )}
+    </Card>
   );
 }
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    alert: {
-      gap: SPACING.sm,
-      padding: SPACING.md,
-      borderWidth: 1,
-      borderRadius: SPACING.sm,
-      borderColor: theme.surface.border,
-      backgroundColor: theme.surface.background,
-    },
-    name: {
-      fontSize: FONT_SIZE.title,
-      fontWeight: '600',
-      color: theme.surface.foreground,
-    },
+    // A block of one idea - the filters and what they did - so it sits together and the list
+    // below it is clearly something else.
+    block: { gap: SPACING.sm },
     filters: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
     filter: {
       minHeight: MIN_TOUCH_TARGET_DP,
       justifyContent: 'center',
+      paddingHorizontal: SPACING.lg,
       borderWidth: 1,
-      borderRadius: SPACING.sm,
-      paddingHorizontal: SPACING.md,
-      paddingVertical: SPACING.sm,
+      borderRadius: RADIUS.pill,
+      borderColor: theme.line.strong,
+      backgroundColor: theme.surface.background,
     },
-    filterLabel: {
-      fontSize: FONT_SIZE.caption,
-      fontWeight: '600',
-      color: theme.surface.foreground,
+    filterOn: {
+      borderColor: theme.selection.border,
+      backgroundColor: theme.selection.background,
     },
-    coverage: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
+    // `selection` is a pair rather than one of the seven semantic tones, so it is not something
+    // `Typography` will take by name - a status must not be able to resolve to an interface
+    // colour. Named here, where the chip's own background is being named beside it.
+    filterLabelOn: { color: theme.selection.foreground },
+    // The sunken well: "this is about the record", and the same treatment a read-only block gets
+    // everywhere else in this app.
+    record: {
+      padding: SPACING.md,
+      borderRadius: RADIUS.md,
+      backgroundColor: theme.sunken.background,
     },
+    dimensions: {
+      gap: SPACING.sm,
+      padding: SPACING.md,
+      borderRadius: RADIUS.md,
+      backgroundColor: theme.sunken.background,
+    },
+    dimension: { gap: SPACING.xs },
+    actions: { gap: SPACING.sm, marginTop: SPACING.xs },
   });

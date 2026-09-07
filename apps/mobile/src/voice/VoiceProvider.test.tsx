@@ -18,14 +18,24 @@ import type { ApiOutcome, KynvioraClient } from '@kynviora/contracts';
 import { renderScreen, flush, allNodes, textOf, type Rendered } from '../../test/render';
 import { ApiProvider } from '@/api/ApiProvider';
 import { ProfileProvider, type ProfileContextValue } from '@/api/ProfileProvider';
+import { PendingSyncProvider, type PendingSyncContextValue } from '@/sync/PendingSyncProvider';
 import { VoiceProvider, useVoice } from './VoiceProvider';
 import type { VoiceBridge } from './executor';
 
 const PROFILE = '00000000-0000-4000-8000-0000000000p1'.replace('p1', '0001');
 const ITEM = '00000000-0000-4000-8000-000000000i01'.replace('i01', '0002');
 
-/** Every call the client was asked to make, in order. The heart of every assertion here. */
-function recordingClient(calls: string[]): KynvioraClient {
+/**
+ * Every call the client was asked to make, in order. The heart of every assertion here.
+ *
+ * `doseOutcome` is what `recordDoseEvent` answers with. Injected because the three answers a dose
+ * has - written, kept here, refused - differ only in what the server said, and a test that could
+ * not move that would be measuring one of the three (`DEV-071`).
+ */
+function recordingClient(
+  calls: string[],
+  doseOutcome?: ApiOutcome<{ readonly id: string; readonly serverTime: string }>,
+): KynvioraClient {
   const ok = <T,>(value: T): Promise<ApiOutcome<T>> =>
     Promise.resolve({ kind: 'OK', value, correlationId: null });
 
@@ -56,7 +66,11 @@ function recordingClient(calls: string[]): KynvioraClient {
     },
     recordDoseEvent: (body: { readonly eventKind: string }, key: string) => {
       calls.push(`recordDoseEvent:${body.eventKind}:${key.length > 0 ? 'keyed' : 'unkeyed'}`);
-      return ok({ id: 'dose-1', serverTime: '2026-09-07T08:00:00.000Z' });
+      return (
+        doseOutcome === undefined
+          ? ok({ id: 'dose-1', serverTime: '2026-09-07T08:00:00.000Z' })
+          : Promise.resolve(doseOutcome)
+      ) as Promise<ApiOutcome<{ readonly id: string; readonly serverTime: string }>>;
     },
     listProfiles: () => {
       calls.push('listProfiles');
@@ -151,6 +165,34 @@ function press(rendered: Rendered, label: string): void {
   onPress?.();
 }
 
+/**
+ * A journal that records what it was asked to keep, and whether it agreed to.
+ *
+ * The real one is a table in an encrypted database, which is a device concern
+ * (`verify:device:offline` owns it). What is decidable here is the half that regresses silently:
+ * whether a failed write is offered to the queue at all, under which key, and what the person is
+ * told about the answer.
+ */
+function recordingJournal(queued: string[], accepts = true): PendingSyncContextValue {
+  return {
+    queue: (request) => {
+      queued.push(
+        `${request.entityType}:${request.mutation}:${request.entityId}:${
+          request.operationId === undefined ? 'no-key' : 'keyed'
+        }`,
+      );
+      return Promise.resolve(accepts);
+    },
+    waiting: 0,
+    needsAttention: 0,
+    registerSender: () => undefined,
+    drain: () => undefined,
+    list: () => Promise.resolve([]),
+    retry: () => Promise.resolve(),
+    discard: () => Promise.resolve(),
+  };
+}
+
 function mount(options: {
   readonly script: string;
   readonly rules: readonly ScriptedRule[];
@@ -158,29 +200,33 @@ function mount(options: {
   readonly moves: string[];
   readonly capabilities?: ReadonlySet<string>;
   readonly online?: boolean;
+  readonly doseOutcome?: ApiOutcome<{ readonly id: string; readonly serverTime: string }>;
+  readonly journal?: PendingSyncContextValue;
 }): Rendered {
   return renderScreen(
     <ApiProvider
       value={{
-        client: recordingClient(options.calls),
+        client: recordingClient(options.calls, options.doseOutcome),
         session: { kind: 'ANONYMOUS' },
         configurationError: null,
         elevate: () => null,
       }}
     >
       <ProfileProvider value={profileContext()}>
-        <VoiceProvider
-          providers={agentFor(options.rules)}
-          bridge={bridgeRecording(options.moves)}
-          capabilities={
-            (options.capabilities ??
-              new Set(['VIEW_MEDICINES', 'RECORD_DOSES'])) as ReadonlySet<never>
-          }
-          online={options.online ?? true}
-          now={() => 1_760_000_000_000}
-        >
-          <Probe script={options.script} />
-        </VoiceProvider>
+        <PendingSyncProvider {...(options.journal === undefined ? {} : { value: options.journal })}>
+          <VoiceProvider
+            providers={agentFor(options.rules)}
+            bridge={bridgeRecording(options.moves)}
+            capabilities={
+              (options.capabilities ??
+                new Set(['VIEW_MEDICINES', 'RECORD_DOSES'])) as ReadonlySet<never>
+            }
+            online={options.online ?? true}
+            now={() => 1_760_000_000_000}
+          >
+            <Probe script={options.script} />
+          </VoiceProvider>
+        </PendingSyncProvider>
       </ProfileProvider>
     </ApiProvider>,
   );
@@ -465,5 +511,126 @@ describe('offline', () => {
     await flush();
     expect(calls).toEqual([]);
     expect(lastSpoken(rendered)).toContain('no connection');
+  });
+});
+
+describe('a dose recorded with no signal (DEV-071, DEC-140)', () => {
+  const RULES: readonly ScriptedRule[] = [
+    {
+      whenSaid: /took/,
+      then: {
+        kind: 'CALL',
+        name: 'record_dose',
+        arguments: { itemId: ITEM, eventKind: 'TAKEN' },
+      },
+    },
+  ];
+
+  /** Say it, agree to it, and let both the request and the journal settle. */
+  async function recordAndConfirm(rendered: Rendered): Promise<void> {
+    press(rendered, 'say');
+    await flush();
+    press(rendered, 'confirm');
+    await flush();
+  }
+
+  it('goes into the same journal the dose sheet uses, under the key the attempt spent', async () => {
+    // The whole of DEC-140: voice adds no sync mechanism, it reaches the one that exists. The
+    // entity type, the mutation and the key are the ones `PendingSenders` already knows how to
+    // put on the wire and `OFF-6`/`OFF-7` already measure on hardware.
+    const calls: string[] = [];
+    const queued: string[] = [];
+    const rendered = mount({
+      script: 'i took it',
+      rules: RULES,
+      calls,
+      moves: [],
+      doseOutcome: { kind: 'OFFLINE' },
+      journal: recordingJournal(queued),
+    });
+
+    await recordAndConfirm(rendered);
+
+    expect(calls).toEqual(['recordDoseEvent:TAKEN:keyed']);
+    expect(queued).toEqual([`dose_event:CREATE:${ITEM}:keyed`]);
+  });
+
+  it('says it kept it, which is a different promise from having recorded it', async () => {
+    // Not "Done." `12` requires a queued change to be visible rather than assumed, and the two
+    // sentences are two different promises - the shorter one would be telling somebody the server
+    // has their record when the request has just failed.
+    const rendered = mount({
+      script: 'i took it',
+      rules: RULES,
+      calls: [],
+      moves: [],
+      doseOutcome: { kind: 'OFFLINE' },
+      journal: recordingJournal([]),
+    });
+
+    await recordAndConfirm(rendered);
+
+    expect(lastSpoken(rendered)).toContain('kept it here');
+    expect(lastSpoken(rendered)).not.toContain('Done.');
+  });
+
+  it('says only that there is no connection when nothing would keep it', async () => {
+    // `false` from the journal is a real answer: the store may not be open, or the device may have
+    // no room (`19`'s low-storage scenario, `DEV-055`). A person told their dose was kept when
+    // nothing kept it stops thinking about a record that does not exist, and there is no later
+    // moment at which they find out - which is the failure `LOW-2` exists for.
+    const rendered = mount({
+      script: 'i took it',
+      rules: RULES,
+      calls: [],
+      moves: [],
+      doseOutcome: { kind: 'OFFLINE' },
+      journal: recordingJournal([], false),
+    });
+
+    await recordAndConfirm(rendered);
+
+    expect(lastSpoken(rendered)).toContain('no connection');
+    expect(lastSpoken(rendered)).not.toContain('kept it here');
+  });
+
+  it('does not queue a dose the server answered and refused', async () => {
+    // The other half of `DEV-071`, and the one that was quietly wrong: every failure was reported
+    // as "no connection", so a caregiver whose grant had been revoked was told to try again later
+    // - and a retry would be refused identically. A refusal is not a transport problem and must
+    // never enter a journal that will replay it.
+    const queued: string[] = [];
+    const rendered = mount({
+      script: 'i took it',
+      rules: RULES,
+      calls: [],
+      moves: [],
+      doseOutcome: { kind: 'UNAVAILABLE' },
+      journal: recordingJournal(queued),
+    });
+
+    await recordAndConfirm(rendered);
+
+    expect(queued).toEqual([]);
+    expect(lastSpoken(rendered)).toContain('do not have access');
+    expect(lastSpoken(rendered)).not.toContain('no connection');
+  });
+
+  it('still says "Done." when the server took it', async () => {
+    // The control. Every assertion above is about a failure path, and a change that broke the
+    // success path would satisfy all of them.
+    const queued: string[] = [];
+    const rendered = mount({
+      script: 'i took it',
+      rules: RULES,
+      calls: [],
+      moves: [],
+      journal: recordingJournal(queued),
+    });
+
+    await recordAndConfirm(rendered);
+
+    expect(queued).toEqual([]);
+    expect(lastSpoken(rendered)).toContain('Done.');
   });
 });

@@ -17,6 +17,12 @@
  * reminders to survive the app being killed and the device restarting. A sync that only ran when
  * somebody opened a particular tab would stop extending the horizon the moment they stopped
  * visiting it, and the person would find out by not being reminded.
+ *
+ * The haptic engine is installed here for a different reason: it is a module-level swap rather
+ * than a provider (`platform/haptics.ts` says why), so it needs exactly one call and this is the
+ * one file guaranteed to run before anything can be pressed. `null` on a platform with no engine
+ * leaves the recording one in place, which is what iOS gets and what the tests measure
+ * (DEC-139, `DEV-070`).
  */
 
 import { Stack } from 'expo-router';
@@ -35,6 +41,18 @@ import { PendingSyncProvider } from '@/sync/PendingSyncProvider';
 import { PendingSenders } from '@/sync/PendingSenders';
 import { VoiceProvider } from '@/voice/VoiceProvider';
 import { VoiceHost } from '@/voice/VoiceHost';
+import { installHapticEngine } from '@/platform/haptics';
+import { createVibrationHapticEngine } from '@/platform/vibrationHaptics';
+
+/**
+ * At module scope, not in an effect.
+ *
+ * A press can happen on the first frame, and an effect runs after it. Installing an engine is
+ * idempotent and touches no platform API until something asks for a haptic, so there is nothing
+ * to defer.
+ */
+const HAPTIC_ENGINE = createVibrationHapticEngine();
+if (HAPTIC_ENGINE !== null) installHapticEngine(HAPTIC_ENGINE);
 
 export default function RootLayout() {
   return (

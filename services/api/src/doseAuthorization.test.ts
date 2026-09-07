@@ -414,3 +414,94 @@ describe('an idempotency key another household has already used (DEV-031)', () =
     expect((await recordAgainst(OWNER, testUuid(32), key)).statusCode).toBe(201);
   });
 });
+
+/**
+ * The other side of the same question: what a surface may **offer**.
+ *
+ * Spec references: `11`, `13`, `14`, DEC-045 (withheld, never disabled), DEC-116, DEC-141,
+ * `DEV-074`.
+ *
+ * It lives in this file because the fixtures above are exactly the situations it needs - a
+ * view-only caregiver, one granted `RECORD_DOSES`, one granted `MANAGE_MEDICINES` and not the
+ * other, one revoked, and a stranger - and because the two halves belong together. Every test
+ * above asserts that the route refuses; every test here asserts that the report the screen reads
+ * agrees with it. A report that disagreed would be a person filling in a form for nothing, which
+ * is the failure DEC-116's screen half exists to prevent (trap 89).
+ */
+describe('what this caller may do on a profile', () => {
+  async function capabilities(as: string): Promise<readonly string[]> {
+    const response = await request(principalFor(as), {
+      method: 'GET',
+      url: `/v1/profiles/${PROFILE}/capabilities`,
+    });
+    expect(response.statusCode).toBe(200);
+    return [...response.json<{ capabilities: string[] }>().capabilities].sort();
+  }
+
+  it('tells an owner they hold everything, because ownership is not a grant', async () => {
+    // The positive control, and it has to be first: every assertion below is that somebody holds
+    // *less*, and a route answering nobody anything would satisfy all of them.
+    const held = await capabilities(OWNER);
+    expect(held).toContain('RECORD_DOSES');
+    expect(held).toContain('MANAGE_MEDICINES');
+    expect(held).toContain('MANAGE_CAREGIVERS');
+  });
+
+  it('reports exactly the capabilities a grant carries, and no neighbours', async () => {
+    // A grant carries what its owner ticked. DEC-116's whole point is that the capabilities are a
+    // set rather than a ladder, so a report that rounded `VIEW_MEDICINES` up to anything would be
+    // the over-granting the split exists to avoid, arriving through the report instead of the
+    // policy.
+    expect(await capabilities(VIEWER)).toEqual(['VIEW_MEDICINES']);
+    expect(await capabilities(RECORDER)).toEqual(['RECORD_DOSES', 'VIEW_MEDICINES']);
+    expect(await capabilities(MANAGER)).toEqual(['MANAGE_MEDICINES', 'VIEW_MEDICINES']);
+  });
+
+  it('agrees with the route about who may record a dose', async () => {
+    // The property this route exists for. `mayRecordDoses` and the report must not be able to
+    // disagree, because both are asked with `has_capability` - and this is the test that would
+    // fail the day one of them stops being.
+    expect(await capabilities(RECORDER)).toContain('RECORD_DOSES');
+    expect((await recordDose(RECORDER, 700)).statusCode).toBe(201);
+
+    expect(await capabilities(VIEWER)).not.toContain('RECORD_DOSES');
+    expect((await recordDose(VIEWER, 701)).statusCode).toBe(404);
+  });
+
+  it('reports nothing for a caregiver whose grant was revoked', async () => {
+    // Evaluated per access, so revocation takes effect immediately (`15` A2). A report cached
+    // anywhere would leave a revoked caregiver being offered controls for as long as it lived.
+    expect(await capabilities(REVOKED)).toEqual([]);
+  });
+
+  it('reports nothing to a stranger, and does not confirm the profile exists', async () => {
+    // 200 with an empty list rather than 404. `13` makes a profile ID narrow rather than grant,
+    // and an unknown ID must be indistinguishable from one the caller simply has no grant on -
+    // which a refusal would give away.
+    expect(await capabilities(STRANGER)).toEqual([]);
+
+    const unknown = await request(principalFor(STRANGER), {
+      method: 'GET',
+      url: `/v1/profiles/${testUuid(999)}/capabilities`,
+    });
+    expect(unknown.statusCode).toBe(200);
+    expect(unknown.json<{ capabilities: string[] }>().capabilities).toEqual([]);
+  });
+
+  it('refuses a profile id that is not one', async () => {
+    const response = await request(principalFor(OWNER), {
+      method: 'GET',
+      url: '/v1/profiles/not-a-uuid/capabilities',
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('answers nothing at all without a session', async () => {
+    // The report is about the caller. There is no caller.
+    const response = await request(null, {
+      method: 'GET',
+      url: `/v1/profiles/${PROFILE}/capabilities`,
+    });
+    expect(response.statusCode).toBe(401);
+  });
+});

@@ -1,9 +1,22 @@
 /**
  * You screen.
  *
- * Spec references: `06` (You is a primary destination), `15` A6 (what a notification may show on
- * a locked screen), DEC-025 (two dials, the narrower wins), `14` (no session secret on screen),
- * `04` Phase 1.1.
+ * Spec references: `06` (You is a primary destination, and its own hierarchy - account,
+ * accessibility, privacy, notifications, data), `15` A6 (what a notification may show on a locked
+ * screen), DEC-025 (two dials, the narrower wins), `14` (no session secret on screen), `04`
+ * Phase 1.1, DEC-130, DEC-143.
+ *
+ * WHY IT IS SECTIONED (DEC-143)
+ * It was a flat stack of eight feature blocks with nothing saying where one subject ended and the
+ * next began - which reads as an admin form, and this is the screen holding consent, what leaves
+ * the device and how to close an account. `06` names five subjects for this destination and they
+ * are now five markers a screen reader can navigate by, which is the half of "sectioned" that is
+ * not decoration.
+ *
+ * The order inside them is unchanged where a comment already gave a reason, and those reasons are
+ * still beside the blocks they belong to. Appearance stays above everything that needs a network
+ * answer; the person stays above every setting that is about them; consent stays above the
+ * notification dials it decides the meaning of; and the two irreversible things stay last.
  *
  * The notification settings, the health context and the consent list are the live parts. What is
  * still absent - account, export and deletion - is gated on Phase 1.1 choosing an auth provider
@@ -22,14 +35,8 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { Text, StyleSheet, Share } from 'react-native';
-import {
-  SPACING,
-  FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
-  CONSENT_COPY,
-  type Theme,
-} from '@kynviora/presentation';
+import { Share } from 'react-native';
+import { CONSENT_COPY } from '@kynviora/presentation';
 import type { NotificationDetailLevel, QuietHours } from '@kynviora/domain';
 import {
   asChosenDetailLevel,
@@ -45,8 +52,11 @@ import { QUIET_HOURS_COPY, type ScreenState as ScreenStateKind } from '@kynviora
 import { useApi } from '@/api/ApiProvider';
 import { useProfiles } from '@/api/ProfileProvider';
 import { useResource } from '@/api/useResource';
+import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
+import { SectionHeader } from '@/components/SectionHeader';
 import { ResourceState } from '@/components/ScreenState';
+import { Typography } from '@/components/Typography';
 import { DeliveryPolicy } from '@/features/notifications/DeliveryPolicy';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
 import { ConsentSettings } from '@/features/consent/ConsentSettings';
@@ -58,11 +68,9 @@ import { ProfileSwitcher } from '@/features/profiles/ProfileSwitcher';
 import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
 import { PendingQueue } from '@/features/sync/PendingQueue';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
-import { useThemedStyles } from '@/theme/ThemeProvider';
 import { VoiceBar } from '@/voice/VoiceHost';
 
 export default function YouScreen() {
-  const styles = useThemedStyles(makeStyles);
   const { client, session, configurationError, elevate } = useApi();
   // Read here rather than inside `PendingQueue`, so the section is absent when the journal is empty
   // rather than rendering a heading over nothing.
@@ -299,30 +307,41 @@ export default function YouScreen() {
     >
       <VoiceBar />
 
-      {/* Who the app is acting as. Never a token, a header value or an email address (`14`). */}
-      <Text style={styles.identity}>
-        {session.kind === 'ANONYMOUS'
-          ? 'Not signed in on this device.'
-          : 'Signed in with a development identity.'}
-      </Text>
+      {/* Who the app is acting as, in a card rather than as a grey line under the heading: this is
+          the answer to "which account am I looking at", which is the first question when a screen
+          shows less than expected. Never a token, a header value or an email address (`14`). */}
+      <Card>
+        <Typography role="body">
+          {session.kind === 'ANONYMOUS'
+            ? 'Not signed in on this device.'
+            : 'Signed in with a development identity.'}
+        </Typography>
 
-      {configurationError === null ? null : (
-        // A developer-facing sentence, deliberately not the message from the exception: that text
-        // is written for whoever is running the app, and this is the screen a user sees.
-        <Text style={styles.identity}>
-          Kynviora is not set up to talk to a server on this device.
-        </Text>
-      )}
+        {configurationError === null ? null : (
+          // A developer-facing sentence, deliberately not the message from the exception: that
+          // text is written for whoever is running the app, and this is the screen a user sees.
+          <Typography role="caption" colour="secondary">
+            Kynviora is not set up to talk to a server on this device.
+          </Typography>
+        )}
+      </Card>
 
       {/* Above everything that needs a network answer, because it needs none: appearance is a
           device setting, and a person on a phone that cannot reach the server should still be
           able to make the screen readable (`18`, DEC-130). */}
+      <SectionHeader
+        title="Making this easier to read"
+        explanation="Appearance and motion. Text size follows your phone's own setting."
+      />
       <AppearanceSettings />
 
       {/* Near the top, and only when there is something in it. `12` requires a **resolvable**
           failure state, and a change the server refused is the one thing on this screen that is
           waiting on the person rather than describing a setting. It renders nothing when the
-          journal is empty, so it is not a permanent reminder that syncing exists (`DEV-038`). */}
+          journal is empty, so it is not a permanent reminder that syncing exists (`DEV-038`).
+
+          No section marker: a heading that appeared and disappeared with the journal would be a
+          landmark a screen reader could not navigate to twice, and `PendingQueue` names itself. */}
       {pendingWaiting + pendingNeedsAttention > 0 ? <PendingQueue /> : null}
 
       {/* `04` Phase 1.2. Above everything else on this screen: whose records these are is the
@@ -331,6 +350,10 @@ export default function YouScreen() {
           Nothing is offered while the list is still loading. An empty list and a list that has
           not arrived look identical, and the setup screen for the second would invite somebody
           with a household to create a second one - which nothing in this build merges. */}
+      <SectionHeader
+        title="Who this is about"
+        explanation="The people in this household, and the one these settings apply to."
+      />
       {!profilesLoaded ? (
         <ResourceState resource={profilesResource} onRetry={reloadProfiles} />
       ) : addingPerson || switcher.isEmpty ? (
@@ -362,6 +385,36 @@ export default function YouScreen() {
           Nothing is offered while it is still loading. A consent list that has not arrived and
           one where nobody has answered look identical, and rendering the second for the first
           would tell somebody they had never agreed to anything. */}
+      {/* `04` Phase 1.3. The only health information Kynviora asks for, and it sits with the person
+          it is about rather than with the notification settings - which is what its own comment
+          always said and what its placement, between two notification blocks, did not.
+
+          Gated on its own read now. It used to sit inside the notification-settings guard, so a
+          household whose notification settings would not load lost a health context that had
+          arrived perfectly well - a partial state rendered as an absence, which is exactly the
+          failure `06` names that state to prevent. */}
+      {activeProfileId === null || !profilesLoaded || switcher.isEmpty || addingPerson ? null : (
+        <>
+          <SectionHeader
+            title="Health context"
+            explanation="Allergies and sensitivities, and where each one came from."
+          />
+          {factsResource.value === null ? (
+            <ResourceState resource={factsResource} onRetry={reloadFacts} />
+          ) : (
+            <HealthContext
+              view={healthContextView(factsResource.value)}
+              profileId={activeProfileId}
+              onChanged={reloadFacts}
+            />
+          )}
+        </>
+      )}
+
+      <SectionHeader
+        title="Privacy and your data"
+        explanation="What you have agreed to, what is kept, and how to take a copy."
+      />
       {profilesLoaded && !switcher.isEmpty && !addingPerson ? (
         consentsResource.value === null ? (
           <ResourceState resource={consentsResource} onRetry={reloadConsents} />
@@ -377,6 +430,11 @@ export default function YouScreen() {
           />
         )
       ) : null}
+
+      <SectionHeader
+        title="Notifications"
+        explanation="What arrives, when, and how much it says on a locked screen."
+      />
 
       {activeProfileId === null || settings === null || policy === null ? (
         <ResourceState resource={resource} onRetry={onRetry} />
@@ -395,18 +453,6 @@ export default function YouScreen() {
             onChoose={onChoose}
           />
 
-          {/* `04` Phase 1.3. The only health information Kynviora asks for, and it sits with the
-              person it is about rather than with the notification settings. */}
-          {factsResource.value === null ? (
-            <ResourceState resource={factsResource} onRetry={reloadFacts} />
-          ) : (
-            <HealthContext
-              view={healthContextView(factsResource.value)}
-              profileId={activeProfileId}
-              onChanged={reloadFacts}
-            />
-          )}
-
           {/* `04` Phase 7.5. Below the privacy dial because it answers a different question -
               that one is what a notification may say, this one is whether it arrives at all. */}
           <DeliveryPolicy
@@ -422,6 +468,10 @@ export default function YouScreen() {
       {/* Last on the screen and outside every gate above it. Signing out must be reachable
           whatever else failed to load - a person whose profile list would not arrive is one of
           the people most likely to want it. */}
+      <SectionHeader
+        title="Your account"
+        explanation="Leaving this device, and closing the account altogether."
+      />
       <SignOutControl />
       {/* Below signing out, and last on the page. `16` requires the control to exist; `18`
           decides where - the irreversible thing goes after the reversible one, so nobody reaches
@@ -430,13 +480,3 @@ export default function YouScreen() {
     </Screen>
   );
 }
-
-const makeStyles = (theme: Theme) =>
-  StyleSheet.create({
-    identity: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
-      paddingBottom: SPACING.xs,
-    },
-  });

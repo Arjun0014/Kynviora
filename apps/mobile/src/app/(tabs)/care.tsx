@@ -19,6 +19,15 @@
  * back is handed straight to the component that displays it and is never stored, logged or put in
  * a URL (DEC-018, trap 11).
  *
+ * IT USES `Screen` NOW, LIKE EVERY OTHER DESTINATION (DEC-142)
+ * It did not, and the stated reason was that `Screen` draws a destination heading and this tab had
+ * never had one. That reason expired on 2026-09-07, when removing the navigator's header gave Care
+ * a heading of its own (`DEV-076`) - and what was left was the one destination with a hand-rolled
+ * frame: its own `SafeAreaView`, its own `ScrollView`, its own heading block, its own padding, and
+ * a second `ScrollView` nested inside the first in `CaregiverAccessList`. Two scroll views in the
+ * same direction is one of them eating the other's gestures, which is the shape of `DEV-046` and
+ * is not something a test in this repository can see.
+ *
  * REMOVING ACCESS IS THE SAME SHAPE, WITH ONE DIFFERENCE
  * It is a server operation behind step-up and is never applied optimistically (`12`, `14`) - a
  * row that disappears on a failed request is the same false statement again. The difference is
@@ -29,9 +38,7 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { SPACING, type ScreenState as ScreenStateKind, type Theme } from '@kynviora/presentation';
+import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
 import {
   ALREADY_ACCEPTED_CODE,
   accessHistory,
@@ -53,15 +60,13 @@ import { CaregiverAccessList } from '@/features/caregivers/CaregiverAccessList';
 import { InviteCaregiver } from '@/features/caregivers/InviteCaregiver';
 import { RemoveCaregiverAccess } from '@/features/caregivers/RemoveCaregiverAccess';
 import { newIdempotencyKey } from '@/platform/ids';
-import { useThemedStyles } from '@/theme/ThemeProvider';
+import { Screen } from '@/components/Screen';
 import { VoiceBar } from '@/voice/VoiceHost';
-import { Typography } from '@/components/Typography';
 
 /** Matches `DEFAULT_INVITATION_TTL_DAYS` on the server. Shown, not sent. */
 const INVITATION_TTL_DAYS = 7;
 
 export default function CareScreen() {
-  const styles = useThemedStyles(makeStyles);
   const { client, elevate } = useApi();
   const { activeProfileId, activeProfile } = useProfiles();
 
@@ -317,102 +322,75 @@ export default function CareScreen() {
     setRemoved(null);
   }, []);
 
-  return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-      {removing !== null ? (
-        <ScrollView contentContainerStyle={styles.sheet}>
-          <RemoveCaregiverAccess
-            target={removing}
-            onConfirm={onConfirmRemoval}
-            onCancel={onCloseRemoval}
-            state={removeState}
-            stateMessage={removeMessage}
-            removed={removed}
-          />
-        </ScrollView>
-      ) : inviting && activeProfileId !== null ? (
-        <ScrollView contentContainerStyle={styles.sheet}>
-          <InviteCaregiver
-            profileId={activeProfileId}
-            authority={authority}
-            invitationTtlDays={INVITATION_TTL_DAYS}
-            onSend={onSend}
-            onClose={onCloseInvite}
-            created={created}
-            state={sendState}
-            stateMessage={sendMessage}
-          />
-        </ScrollView>
-      ) : (
-        <ScrollView contentContainerStyle={styles.sheet}>
-          {/* This tab draws its own heading rather than borrowing `Screen`'s, because it is the one
-              destination whose branches are full-screen sheets rather than content inside a frame.
-              It had none at all until the navigator's header was removed, which is `18`'s
-              heading-navigation requirement going unmet on one screen out of five. */}
-          <View style={styles.heading}>
-            <Typography role="heading" heading>
-              Care
-            </Typography>
-            <Typography role="body" colour="secondary">
-              Who is in this household, who may see what, and what you can share.
-            </Typography>
-          </View>
+  if (removing !== null) {
+    return (
+      <Screen title="Care" intro="Taking access back, and what that stops.">
+        <RemoveCaregiverAccess
+          target={removing}
+          onConfirm={onConfirmRemoval}
+          onCancel={onCloseRemoval}
+          state={removeState}
+          stateMessage={removeMessage}
+          removed={removed}
+        />
+      </Screen>
+    );
+  }
 
-          {/* Only on the list, not over a sheet. A conversation started from inside a half-filled
-              invitation form would lose the form; Voice Mode has no way to put it back. */}
-          <VoiceBar />
-          <CaregiverAccessList
-            // EMPTY is passed through as READY so the list renders its own empty copy, which says
-            // something specific - "no one else has access to this profile" - rather than the
-            // generic "nothing here yet". On this screen that distinction is the whole answer to
-            // the question the user came to ask.
-            // EMPTY and PARTIAL both render the list: EMPTY so it can say "no one else has access
-            // to this profile" rather than the generic copy, PARTIAL because the rows that did load
-            // are still worth showing.
-            state={
-              resource.state === 'EMPTY' || resource.state === 'PARTIAL' ? 'READY' : resource.state
-            }
-            rows={rows}
-            onRetry={onRetry}
-            // DEC-045 one level up: a caregiver who may delegate nothing is not offered the
-            // control, rather than being asked to fill in a form whose only outcome is a refusal.
-            // The server decides again either way.
-            onInvite={
-              mayInvite(authority)
-                ? () => {
-                    setInviting(true);
-                  }
-                : null
-            }
-            // Never applied locally. `12` forbids optimistic authorization changes, and a row
-            // that vanishes on a failed request misstates who can read this profile - so this
-            // opens a confirmation, and the list only changes when the server says it has.
-            onRevoke={onRevoke}
-            history={history}
-          />
-        </ScrollView>
-      )}
-    </SafeAreaView>
+  if (inviting && activeProfileId !== null) {
+    return (
+      <Screen title="Care" intro="Giving somebody access, and choosing exactly what they get.">
+        <InviteCaregiver
+          profileId={activeProfileId}
+          authority={authority}
+          invitationTtlDays={INVITATION_TTL_DAYS}
+          onSend={onSend}
+          onClose={onCloseInvite}
+          created={created}
+          state={sendState}
+          stateMessage={sendMessage}
+        />
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen
+      title="Care"
+      eyebrow={activeProfile?.displayName ?? null}
+      intro="Who is in this household, who may see what, and what you can share."
+      onRefresh={onRetry}
+    >
+      {/* Only on the list, not over a sheet. A conversation started from inside a half-filled
+          invitation form would lose the form; Voice Mode has no way to put it back. */}
+      <VoiceBar />
+
+      <CaregiverAccessList
+        // EMPTY and PARTIAL both render the list: EMPTY so it can say "no one else has access to
+        // this profile" rather than the generic "nothing here yet" - on this screen that
+        // distinction is the whole answer to the question the person came to ask - and PARTIAL
+        // because the rows that did load are still worth showing.
+        state={
+          resource.state === 'EMPTY' || resource.state === 'PARTIAL' ? 'READY' : resource.state
+        }
+        rows={rows}
+        onRetry={onRetry}
+        // DEC-045 one level up: a caregiver who may delegate nothing is not offered the control,
+        // rather than being asked to fill in a form whose only outcome is a refusal. The server
+        // decides again either way.
+        onInvite={
+          mayInvite(authority)
+            ? () => {
+                setInviting(true);
+              }
+            : null
+        }
+        // Never applied locally. `12` forbids optimistic authorization changes, and a row that
+        // vanishes on a failed request misstates who can read this profile - so this opens a
+        // confirmation, and the list only changes when the server says it has.
+        onRevoke={onRevoke}
+        history={history}
+      />
+    </Screen>
   );
 }
-
-/**
- * Every branch of this screen scrolls, and that is a fix rather than a preference.
- *
- * This tab was the only one not rendering its sheets inside `Screen`, whose `ScrollView` is what
- * makes the other four reachable. On a 1080x2400 device the invite form's capability list already
- * fills the screen, so the email field, "Review what you are sharing" and "Cancel" were drawn
- * below the fold with nothing able to bring them into view: `uiautomator` reported the container
- * as `scrollable=false` and a person could not invite anybody at all (`DEV-046`). `18` requires
- * every control to remain usable at font scale 2, where less of the form fits still.
- *
- * A `ScrollView` here rather than adopting `Screen`, because `Screen` also draws a destination
- * heading and this tab has never had one - adding it is a design change, and this is a screen that
- * could not be finished.
- */
-const makeStyles = (theme: Theme) =>
-  StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: theme.surface.background },
-    sheet: { padding: SPACING.lg, gap: SPACING.md },
-    heading: { gap: SPACING.xxs, marginBottom: SPACING.xs },
-  });

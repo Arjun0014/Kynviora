@@ -107,6 +107,42 @@ of the six has a default: a new tool cannot compile without all of them.
 
 `read_extracted_fields` and `confirm_extracted_item` are **blocked on `BLK-007`**. See section 7.
 
+### Where the capabilities come from
+
+The **server**, asked directly: `GET /v1/profiles/:profileId/capabilities` reports what this caller
+holds on the active profile, with the predicate the policies themselves apply (DEC-141). It
+authorises nothing - the route checks again on the session, every time (`11`, `13`) - it stops the
+agent offering something the write would refuse, which is the job `mayRecordDoses` has been doing on
+the shelf since DEC-116.
+
+It used to be assembled from whatever screens somebody had happened to open, and in practice from
+nothing at all: `VoiceProvider` passed neither of the two answers the app already had. So a
+caregiver was offered the three read capabilities and nothing else, in every session, whatever their
+grant said - `RECORD_DOSES`, `MANAGE_MEDICINES` and `MANAGE_PERSONAL_CARE` were reachable by touch
+and not by voice, for no reason anybody had decided (`DEV-074`).
+
+**Voice now offers exactly what a caregiver may do**, with one class of exception, and the
+exception is not about capabilities:
+
+| Tool capability        | Grant capability   | Reachable by voice |
+| ---------------------- | ------------------ | ------------------ |
+| `VIEW_MEDICINES`       | `VIEW_MEDICINES`   | yes                |
+| `VIEW_PERSONAL_CARE`   | `VIEW_SHELF`       | yes                |
+| `VIEW_ALERTS`          | `VIEW_SAFETY`      | yes                |
+| `RECORD_DOSES`         | `RECORD_DOSES`     | yes                |
+| `MANAGE_MEDICINES`     | `MANAGE_MEDICINES` | yes                |
+| `MANAGE_PERSONAL_CARE` | `MANAGE_SHELF`     | yes                |
+| `OWNER_ONLY`           | none - ownership   | owner only         |
+
+The two vocabularies stay two. `caregiver_grant.capabilities` is what an owner can grant;
+`ToolCapability` is what a tool can require. The mapping is a lookup with **no default**, so a grant
+capability with no tool behind it - `VIEW_CARE`, `EXPORT_SUMMARY`, `MANAGE_CAREGIVERS` - contributes
+nothing rather than being mapped to something adjacent, and a capability a newer server invents is
+ignored rather than throwing.
+
+Absent narrows to the read-only set. `14` is deny by default, and an agent offered nothing is a
+person told to use the screen - where the control is.
+
 ### Why the touch-only group is touch-only
 
 Three reasons, and each covers a different set:
@@ -236,6 +272,40 @@ camera tools are not blocked: the photograph is real, and blocking it would lose
 - The Voice Mode screen is real and usable: a transcript, very large confirmation controls, the
   state said in a word and drawn in a shape, and a typed input that takes the identical path a
   spoken sentence would.
+- **A dose recorded with no signal is kept on the phone and sent later** (DEC-140), through the
+  identical journal the dose sheet uses - the same entity type, the same key, the same drain, the
+  same `PendingSenders` wire call. Voice adds no sync mechanism; it reaches the one that exists.
+- **A caregiver is offered everything their grant carries**, read from the server rather than
+  inferred from which screens they happened to open (DEC-141).
+
+### What a confirmation is for, and what it is not for
+
+A confirmation is for **the record, not the transport** (DEC-140). When somebody says "record that I
+took it", what they are agreeing to is the record being made; whether it travels now or in ten
+minutes is a fact about the phone's radio. So the summary describes the intent and never mentions
+the network, and the **report** says what happened - `queued` instead of `done`, never as well as.
+
+That is the same distinction the dose sheet draws between "Recorded." and its offline note, which
+`OFF-6` measures on a device: the shorter sentence is the one that stops somebody recording it
+again.
+
+There are **three** answers, not two. `OFFLINE` is the only outcome meaning no server was reached
+and the only one that queues. Everything else is a server that answered and declined, and is
+reported as a refusal - because telling somebody with a revoked grant to try again later is telling
+them to retry something that will be refused identically (`DEV-078`).
+
+### Two channels out of a tool, and why
+
+`ToolResult` carries `spoken` and `utterances`. `spoken` is text a tool result composed and is
+checked against what that result carried; `utterances` are **keys** into the Speech Gate's closed
+set.
+
+The second exists because the first had a small hole: the caller passes the executor's own `spoken`
+array as the thing to check it against, so a sentence written in the executor cited itself and
+passed. Every one of them happened to come from the presentation layer, and nothing was enforcing
+it. A key cannot cite itself - `gateSpeech` resolves it against `UTTERANCES` and refuses one this
+build does not have - so the conversation's own sentences go through there, and only facts about
+somebody's records go through `spoken`.
 
 **What is not there:** speech recognition, a conversational model, and speech synthesis. All three
 are `BLK-012`. Nothing listens and nothing speaks, and the screen says so rather than pretending.

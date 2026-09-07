@@ -210,6 +210,14 @@ is a genuinely different state from having chosen whichever theme the system cur
 somebody following the system in September is still following it in October when their phone
 switches itself at dusk.
 
+**That requires `"userInterfaceStyle": "automatic"` in `app.json`**, and it said `"light"` until
+2026-09-07. Expo writes that value into a string resource and calls
+`AppCompatDelegate.setDefaultNightMode(MODE_NIGHT_NO)` with it at every activity create, which
+forces the `Configuration.uiMode` that `useColorScheme()` reads - so `FOLLOW_SYSTEM` could only ever
+resolve to light and the dark theme was reachable only by choosing it explicitly. Every unit here
+was correct and the product still had one theme (DEC-137, `DEV-077`). A design system whose values
+are asserted in Node is not a design system anybody has seen.
+
 **The dark ground is `#0E1116`, not black**, for two reasons that point the same way. An elevation
 ladder needs somewhere below the first step, and on black a card can only ever be lighter, so
 "further away" stops being expressible. And pure white on pure black is the highest-glare pairing
@@ -251,6 +259,11 @@ than a colour and a string, so a caller cannot construct one that carries meanin
 | `ScreenState`   | Loading / empty / offline / error / authorization lost, announced politely  |
 | `FieldRow`      | A labelled value, with an explicit empty state rather than a blank          |
 | `SectionHeader` | An `overline` and an optional one-line explanation                          |
+
+All five destinations render through `Screen` (DEC-142). Care was the exception until 2026-09-07 -
+its own safe area, its own scroll view, its own heading and its own padding, with a second scroll
+view nested inside the first. Five destinations with four frames is four places for an inset, a
+pull-to-refresh and a heading role to drift.
 
 ### Cards
 
@@ -299,7 +312,22 @@ is `12`'s adapter rule applied to touch.
 
 There is no haptic that fires as the _report_ of anything. A buzz that is the only report of a
 refusal is a report nobody who cannot feel it receives - `18`'s single-channel rule, applied to
-touch. Every haptic accompanies a sentence; none of them is the sentence.
+touch. Every haptic accompanies a sentence; none of them is the sentence. That is also why there is
+no `error` intent for a call site to reach for.
+
+**The engine is React Native's `Vibration`, on Android** (DEC-139). It needs no new dependency and
+no new permission: `android.permission.VIBRATE` has been in the merged manifest since the first
+build, put there by `expo-notifications`. The four patterns escalate by **pulse count** rather than
+by length - one for something that happened, two for something to look at, three for something that
+did not work - because length alone is not distinguishable through a pocket or by somebody with
+reduced sensation. `selection` and `confirm` share a count on purpose and are not meant to be told
+apart by feel.
+
+**iOS gets no engine at all**, and that is the adapter doing its job rather than failing at it.
+`Vibration.vibrate()` on iOS takes no duration, so every call is the same full-length buzz - a
+`selection` tick would be that buzz on every press of every chip. Its real answer is
+`UIImpactFeedbackGenerator`, which this build does not have, so `createVibrationHapticEngine`
+answers `null` there and the recording engine stays installed.
 
 ---
 
@@ -395,31 +423,63 @@ actions      edit; record a dose; set the times; delete
 
 ```
 heading      Safety
-coverage     what is and is not being watched, stated up front
-cards        one line per item, always - an absence of a matched rule is never approval
+coverage     what is and is not being watched - a card, first, at the same rank as the results
 filters      narrow, never rank; a filter matching nothing still says so
+cards        one line per item, always - an absence of a matched rule is never approval
 ```
+
+**The coverage card is first, and that is the decision this screen turns on** (DEC-138). It used to
+sit under the list. On a shelf of five identical "not enough information" lines the conclusion is
+formed while scanning, so a qualification arriving underneath arrives after the thing it qualifies -
+and on a longer shelf it is below the fold, which for a sentence whose whole job is to stop a
+misreading is the same as absent. A limitation never moves down a layer, and below the fold is a
+layer.
+
+**Urgency and evidence sit in their own block, under two questions.** `23` D-005 forbids merging
+them, and three chips in a row is how they get merged anyway: a person reads a strip of adjacent
+chips as one compound verdict. Where a line has them they are drawn in a sunken well under "How
+soon" and "How well established", with a sentence saying neither answers the other. Where there is
+no live alert the block is **absent** rather than empty - a default chip would be a claim nobody
+made.
 
 ### Care
 
 ```
 heading      Care
-people       profiles in this household, and who is being looked at
-access       caregivers, what each may do, and how to take it back
-sharing      Visit Pack
+eyebrow      the profile this is about
+access       caregivers - who, what they can see, what they can change, what is not shared
+invite       one control, absent where this caller may delegate nothing
 history      an audit somebody can actually read
 ```
+
+**A grant is three blocks, not a row of chips**: what they can see, what they can change, and what
+is not shared with them, at the same rank and in the same shape. They are separately granted
+(DEC-116) and the third is the one somebody actually came to check - it used to be a lowercased
+caption under a tag cloud, so the granted set was scannable and the withheld set was a footnote.
+
+Profiles and the Visit Pack are **not** here today. The switcher lives on You, where the household
+is set up, and the Visit Pack on Today, where preparing for an appointment starts. Moving them is a
+product decision about where a journey begins rather than a layout one, and is not made by a
+styling pass.
 
 ### You
 
 ```
 heading      You
-account      who is signed in
-accessibility appearance, text size guidance, motion
-privacy      consent, what is kept, what leaves
-notifications what arrives, when, and how much it says
-data         export, deletion
+account      who is signed in, in a card rather than a grey line
+appearance   theme and motion - above everything needing a network answer, because it needs none
+person       the profile switcher; whose records these are, before any setting means anything
+health       allergies and sensitivities, gated on their own read
+privacy      consent, what is kept, what leaves, and taking a copy
+notifications what arrives, when, and how much it says on a locked screen
+account      signing out, then closing the account - reversible before irreversible
 ```
+
+Each is a `SectionHeader`, which is a heading a screen reader navigates by rather than a divider
+(DEC-143). The order inside them is unchanged wherever a reason was already written down, and those
+reasons stay beside the blocks they belong to. The pending-changes block gets **no** marker: a
+heading that appeared and disappeared with the journal would be a landmark nobody could navigate to
+twice.
 
 ---
 
