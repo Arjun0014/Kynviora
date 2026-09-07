@@ -239,17 +239,50 @@ describe('capability and offline behaviour', () => {
     }
   });
 
-  it('lets the two things `03` group J promises work with no signal', () => {
-    // Reading the shelf, and recording a dose. Those are the two the offline journal exists for.
-    expect(toolNamed('list_medicines')?.offline).toBe('LOCAL_PROJECTION');
-    expect(toolNamed('record_dose')?.offline).toBe('QUEUES');
+  it('lets the three writes `03` group J promises reach the journal with no signal', () => {
+    // A dose, and since DEC-148 a schedule set or changed. Those are what the offline journal
+    // carries, and `QUEUES` is what makes gate 5 let them through to reach it.
+    for (const name of ['record_dose', 'create_schedule', 'update_schedule'] as const) {
+      expect(toolNamed(name)?.offline).toBe('QUEUES');
+    }
+  });
+
+  /**
+   * This used to assert `list_medicines` is `LOCAL_PROJECTION`, and it was measuring a word.
+   *
+   * `03` group J does require the shelf to be readable with no signal, and it is - by the shelf,
+   * which reads the encrypted projection through `useResource`. A **tool** executes by calling the
+   * `KynvioraClient` method directly, and the client has no projection in it: nine reads declared
+   * `LOCAL_PROJECTION` and not one of them could be answered without the network (`DEV-091`).
+   *
+   * So the claim is gone rather than the requirement. What is left is a rule about the three that
+   * still make it, which is that `LOCAL_PROJECTION` now means something a caller can rely on:
+   * two navigations that touch nothing, and the pending-changes list, which reads this phone's own
+   * journal. `apps/mobile/src/voice/executor.test.ts` drives each of them against a client where
+   * every method answers `OFFLINE` and requires a real answer, so the declaration cannot become
+   * aspirational again without a test going red.
+   */
+  it('claims to work offline only where nothing has to be asked of a server', () => {
+    const local = TOOLS.filter((tool) => tool.offline === 'LOCAL_PROJECTION');
+    expect(local.map((tool) => tool.name).sort()).toEqual([
+      'list_pending_changes',
+      'open_item',
+      'open_screen',
+    ]);
+    // And none of them writes. A write claiming to work offline without reaching the journal is
+    // a change that vanishes - `QUEUES` is the only honest offline answer a write can give, which
+    // is the rule `DEV-055` and `DEV-085` are two halves of.
+    for (const tool of local) {
+      expect(tool.effect, `${tool.name} writes and claims to need no server`).not.toBe('WRITE');
+    }
   });
 
   it('is honest that everything else needs the server', () => {
     // A tool claiming to work offline that does not is a queued write nobody sent, which is the
-    // failure `DEV-055` was.
-    expect(toolNamed('add_medicine')?.offline).toBe('ONLINE_ONLY');
-    expect(toolNamed('invite_caregiver')?.offline).toBe('ONLINE_ONLY');
+    // failure `DEV-055` was - and a read nobody could answer, which is the one `DEV-090` was.
+    for (const name of ['add_medicine', 'invite_caregiver', 'list_medicines'] as const) {
+      expect(toolNamed(name)?.offline).toBe('ONLINE_ONLY');
+    }
   });
 });
 

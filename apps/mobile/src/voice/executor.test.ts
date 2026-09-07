@@ -25,7 +25,14 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { allTools, voiceCallableTools } from '@kynviora/agent';
+import {
+  allTools,
+  checkCall,
+  TOOL_CAPABILITIES,
+  voiceCallableTools,
+  type DispatchContext,
+  type ToolDefinition,
+} from '@kynviora/agent';
 import {
   createToolExecutor,
   type QueuedWrites,
@@ -812,5 +819,229 @@ describe('a schedule change made with no signal', () => {
 
     expect((await resultOf(executor, 'create_schedule', CREATE))?.utterances).toEqual(['offline']);
     expect((await resultOf(executor, 'update_schedule', UPDATE))?.utterances).toEqual(['offline']);
+  });
+});
+
+/**
+ * What the registry claims about having no connection, against what the executor does.
+ *
+ * Spec references: `17` (the agent's reach is the app's reach), `12` (offline is a state, and a
+ * queued change is visible rather than assumed), `13`, `18` (a person is told what actually
+ * happened), `docs/design/VOICE_MODE.md` sections 3 and 8, DEC-100, DEC-148, `DEV-090`, `DEV-091`.
+ *
+ * WHY THIS EXISTS
+ * `executor.test.ts` already compared the registry's **list** with the executor's keys, because
+ * those had disagreed for as long as both existed (`DEV-084`). The same was true one field further
+ * in and nothing was looking: `offline` is one of the eight answers a tool must give, and nine
+ * tools answered `LOCAL_PROJECTION` while the projection is applied by `useResource` - a hook a
+ * screen calls - and a tool executes by calling the `KynvioraClient` method directly, on a client
+ * that has no projection in it at all (`DEV-091`).
+ *
+ * The consequence was not a wrong answer. It was a **word**: `LOCAL_PROJECTION` means gate 5 lets
+ * the call through with no connection, the request fails, the read returned nothing, and
+ * `VoiceProvider.run` speaks "Done." when a tool says nothing at all. So "what am I taking?" in a
+ * room with no signal was answered "Done." (`DEV-090`).
+ *
+ * THE THREE RULES, AND WHY EACH IS A DIFFERENT QUESTION
+ *   1. A tool that says it works offline has to work offline. Driven against a client where every
+ *      method answers `OFFLINE`, so a declaration that is only aspirational fails here.
+ *   2. A tool that says it needs the server has to be refused **before** the executor runs, which
+ *      is gate 5 and is `checkCall`'s job rather than the executor's.
+ *   3. A read must never answer with nothing, whatever the server said - because nothing is
+ *      spoken as "Done."
+ */
+describe('the offline declarations, against what the executor does', () => {
+  const RUNNABLE = allTools().filter((tool) => tool.blockedBy === null);
+
+  /** Every client method, answering the same thing. A tool that touches the network gets it. */
+  function clientAnswering(outcome: unknown): KynvioraClient {
+    return new Proxy(
+      {},
+      {
+        get: (_target, property) => {
+          if (property === 'session') return { kind: 'ANONYMOUS' };
+          return () => Promise.resolve(outcome);
+        },
+      },
+    ) as KynvioraClient;
+  }
+
+  function executorOver(client: KynvioraClient): ToolExecutor {
+    return createToolExecutor(
+      client,
+      {
+        openScreen: () => undefined,
+        openItem: () => undefined,
+        openCamera: () => undefined,
+        captureNextPhoto: () => undefined,
+      },
+      refusingQueue(),
+      () => Promise.resolve([]),
+    );
+  }
+
+  /**
+   * Arguments that satisfy `validateArguments` for any tool, built from its own declaration.
+   *
+   * Generated rather than listed, because a hand-written table would drift from the registry and
+   * this file exists to stop exactly that. Values are shaped only well enough to pass gate 3 - the
+   * question here is what a tool does with an answer, not what it does with a good argument.
+   */
+  function argumentsFor(tool: ToolDefinition): Record<string, unknown> {
+    const args: Record<string, unknown> = {};
+    for (const parameter of tool.parameters) {
+      if (!parameter.required) continue;
+      switch (parameter.type) {
+        case 'string':
+          args[parameter.name] = 'x';
+          break;
+        case 'number':
+          args[parameter.name] = 1;
+          break;
+        case 'boolean':
+          args[parameter.name] = true;
+          break;
+        case 'enum':
+          args[parameter.name] = parameter.values?.[0] ?? 'x';
+          break;
+      }
+    }
+    return args;
+  }
+
+  const OFFLINE_CONTEXT: DispatchContext = {
+    // Everything, so a refusal below is about the offline declaration rather than about a
+    // capability the caller happened not to hold.
+    capabilities: new Set(TOOL_CAPABILITIES),
+    isOwner: true,
+    stepUpFresh: true,
+    online: false,
+    origin: 'VOICE',
+    confirmed: true,
+  };
+
+  /**
+   * Rule 1. A `LOCAL_PROJECTION` tool, run with nothing reachable, must produce an answer.
+   *
+   * `offline` is the sentence for "I could not ask the server", so a tool claiming to need no
+   * server and saying it is the declaration contradicting itself. The three that pass are the two
+   * navigations, which touch nothing, and `list_pending_changes`, which reads this phone's own
+   * journal - which is the whole reason it can answer a question about this phone.
+   */
+  it('every tool that claims to work offline does', async () => {
+    const executor = executorOver(clientAnswering({ kind: 'OFFLINE' }));
+    for (const tool of RUNNABLE.filter((entry) => entry.offline === 'LOCAL_PROJECTION')) {
+      const run = executor[tool.name];
+      expect(run, `${tool.name} claims LOCAL_PROJECTION and has no executor`).toBeDefined();
+      const result = (await run?.({
+        name: tool.name,
+        arguments: argumentsFor(tool),
+      })) as ToolResult | undefined;
+      expect(
+        result?.utterances ?? [],
+        `${tool.name} says LOCAL_PROJECTION and answered that it has no connection`,
+      ).not.toContain('offline');
+    }
+  });
+
+  /**
+   * Rule 2. An `ONLINE_ONLY` tool is refused at gate 5, before anything is attempted.
+   *
+   * This is what makes the declaration load-bearing rather than documentation: the refusal is the
+   * dispatcher's, so a tool cannot quietly acquire an offline behaviour by having an executor that
+   * happens to cope.
+   */
+  it('every tool that says it needs the server is refused before it runs', () => {
+    for (const tool of RUNNABLE.filter((entry) => entry.offline === 'ONLINE_ONLY')) {
+      if (tool.voice === 'TOUCH_ONLY') continue;
+      const outcome = checkCall(
+        { name: tool.name, arguments: argumentsFor(tool) },
+        OFFLINE_CONTEXT,
+      );
+      expect(outcome.kind, `${tool.name} was not refused with no connection`).toBe('REFUSED');
+      if (outcome.kind === 'REFUSED') expect(outcome.refusal).toBe('OFFLINE');
+    }
+  });
+
+  /** And the mirror: a queueing tool is let through, because the journal is where it goes. */
+  it('every tool that queues is let through with no connection', () => {
+    for (const tool of RUNNABLE.filter((entry) => entry.offline === 'QUEUES')) {
+      const outcome = checkCall(
+        { name: tool.name, arguments: argumentsFor(tool) },
+        OFFLINE_CONTEXT,
+      );
+      expect(outcome.kind, `${tool.name} queues and was refused at gate 5`).toBe('OK');
+    }
+  });
+
+  /**
+   * Rule 3, and the one `DEV-090` was. A read that answers with nothing is spoken as "Done."
+   *
+   * Every failure kind, over every read the executor defines, because the defect was not in one
+   * of them - it was the shape they all shared. `list_pending_changes` is included and does not
+   * touch the client, which is why it passes on its own merits rather than by exclusion.
+   */
+  it('no read answers with silence, whatever the server said', async () => {
+    const FAILURES = [
+      'OFFLINE',
+      'UNAVAILABLE',
+      'UNAUTHENTICATED',
+      'AUTHORIZATION_LOST',
+      'STEP_UP_REQUIRED',
+      'SERVER_ERROR',
+      'REFUSED',
+    ] as const;
+
+    for (const kind of FAILURES) {
+      const executor = executorOver(clientAnswering({ kind }));
+      for (const tool of RUNNABLE.filter((entry) => entry.effect === 'READ')) {
+        const run = executor[tool.name];
+        if (run === undefined) continue;
+        const result = (await run({
+          name: tool.name,
+          arguments: argumentsFor(tool),
+        })) as ToolResult | undefined;
+        // The condition `run` actually applies: empty on both channels is "Done."
+        const parts = (result?.utterances ?? []).length + (result?.spoken ?? []).length;
+        expect(parts, `${tool.name} on ${kind} would have been spoken as "Done."`).toBeGreaterThan(
+          0,
+        );
+      }
+    }
+  });
+
+  /**
+   * The other half of rule 3, and the one that happens on an ordinary day.
+   *
+   * A read that worked and found nothing is the empty shelf, the medicine with no times, the
+   * household with one person and no grants. It is not an error and it is not "Done." either.
+   */
+  it('a read that found nothing says so rather than saying nothing', async () => {
+    const executor = executorOver(
+      clientAnswering({
+        kind: 'OK',
+        value: {
+          items: [],
+          schedules: [],
+          profiles: [],
+          grants: [],
+          events: [],
+          nextCursor: null,
+        },
+      }),
+    );
+
+    for (const name of ['list_medicines', 'list_personal_care', 'list_schedules', 'list_people']) {
+      const tool = RUNNABLE.find((entry) => entry.name === name);
+      expect(tool, name).toBeDefined();
+      const result = (await executor[name]?.({
+        name,
+        arguments: argumentsFor(tool as ToolDefinition),
+      })) as ToolResult | undefined;
+      expect(result?.spoken ?? [], `${name} read something out of an empty list`).toEqual([]);
+      expect(result?.utterances ?? [], `${name} on an empty list would have said "Done."`).toEqual([
+        'nothingRecorded',
+      ]);
+    }
   });
 });

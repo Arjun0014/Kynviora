@@ -13,9 +13,9 @@ Last updated: 2026-09-08
 | ------------------ | --------------------------------------------------------------------- |
 | **Current stage**  | Stage 4 complete; the design layer carried past the golden path       |
 | **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work                |
-| **Last completed** | Voice queues a schedule change where touch does, under a read version |
+| **Last completed** | The registry's offline claims audited, and the "Done." it was costing |
 | **Branch**         | `master`                                                              |
-| **Latest commit**  | `feat(voice,api): a schedule change that survives the kitchen...`     |
+| **Latest commit**  | `fix(voice,agent): the registry's eighth answer, audited...`          |
 | **Baseline tag**   | `baseline-spec-only`                                                  |
 
 **The full accessibility survey is green for the first time: 74 PASS, 0 FAIL, 0 INCONCLUSIVE.**
@@ -733,6 +733,8 @@ the API will not distinguish them.
 | Voice Mode: gates, confirmation, Speech Gate, the shell        | Complete; **9/9 on a device**; all 30 tools runnable or refused by design |
 | Voice Mode's offline dose, through the app's own journal       | Complete, 5 tests; same entity, same key, same drain (DEC-140)            |
 | Voice Mode's offline schedule, created and changed             | Complete, 20 tests; a change queues on a **read** version (DEC-148)       |
+| What the registry claims about being offline, against reality  | Complete, 8 tests; three declarations left that earn it (`DEV-091`)       |
+| What voice says when it could not read, and when it read none  | Complete, 10 tests; never "Done." to a question (`DEV-090`)               |
 | What a caller may do on a profile, reported by the server      | Complete, 7 tests; voice offers what a grant carries (DEC-141)            |
 | CI pipeline                                                    | Written; not yet run on a real runner                                     |
 
@@ -791,10 +793,6 @@ guards against for exactly this reason. `13` resolves `medicine_schedule` and `a
 
 It matters more since DEC-148, because a conflicted schedule change is now reachable from two
 surfaces rather than one.
-
-**And two Voice Mode defects found on the way there**, both about a sentence rather than a write:
-`DEV-090` (a read that could not read is spoken as "Done.") and `DEV-091` (nine tools declare
-`LOCAL_PROJECTION` and the executor never touches the projection).
 
 **Then a mailbox** (`BLK-010`), which is still the whole of what stands between the fourteenth
 device scenario and every one of its eleven checks passing.
@@ -870,6 +868,13 @@ deterministic phrase matcher. A person can already ask for what they are taking,
 set a reminder, add an item, open the camera, hear what is missing and get to a screen, and be
 refused - out loud and in writing - when they ask for something voice may not carry. What is
 missing is the three providers, and the screen says so on itself rather than pretending to listen.
+
+**What it cannot do with no signal is read.** Nine tools declared `LOCAL_PROJECTION` and none of
+them could be answered without the network - the projection is applied by `useResource`, which is a
+hook a screen calls, and a tool calls the client directly. They are `ONLINE_ONLY` now, so a person
+with no signal is told the server could not be asked rather than being told "Done." (`DEV-090`,
+`DEV-091`). Reading the shelf **by voice** while offline is `DEV-093` and waits on a sentence that
+says how old the copy is, which is the spoken form of the `STALE` badge a screen already has.
 
 **Since 2026-09-08 it can also set and change a reminder with no signal**, into the journal the
 schedule sheet uses, under the key the attempt spent for a create and the version the read returned

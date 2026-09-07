@@ -46,6 +46,8 @@ function recordingClient(
   scheduleOutcome?: ApiOutcome<unknown>,
   /** What `schedules` answers with. The read is what decides whether a change can queue at all. */
   readOutcome?: ApiOutcome<unknown>,
+  /** What `listItems` answers with, so a read that could not read has a sentence (`DEV-090`). */
+  listOutcome?: ApiOutcome<unknown>,
 ): KynvioraClient {
   const ok = <T,>(value: T): Promise<ApiOutcome<T>> =>
     Promise.resolve({ kind: 'OK', value, correlationId: null });
@@ -54,6 +56,7 @@ function recordingClient(
     session: { kind: 'ANONYMOUS' as const },
     listItems: (query: { readonly profileId?: string; readonly itemKind?: string }) => {
       calls.push(`listItems:${query.itemKind ?? ''}:${query.profileId ?? ''}`);
+      if (listOutcome !== undefined) return Promise.resolve(listOutcome);
       return ok({
         items: [
           {
@@ -268,6 +271,7 @@ function mount(options: {
   readonly doseOutcome?: ApiOutcome<{ readonly id: string; readonly serverTime: string }>;
   readonly scheduleOutcome?: ApiOutcome<unknown>;
   readonly readOutcome?: ApiOutcome<unknown>;
+  readonly listOutcome?: ApiOutcome<unknown>;
   readonly journal?: PendingSyncContextValue;
 }): Rendered {
   return renderScreen(
@@ -278,6 +282,7 @@ function mount(options: {
           options.doseOutcome,
           options.scheduleOutcome,
           options.readOutcome,
+          options.listOutcome,
         ),
         session: { kind: 'ANONYMOUS' },
         configurationError: null,
@@ -932,5 +937,96 @@ describe('a schedule set or changed with no signal', () => {
 
     expect(lastSpoken(rendered)).toContain('no connection');
     expect(lastSpoken(rendered)).not.toContain('kept it here');
+  });
+});
+
+/**
+ * What a person hears when the question could not be answered.
+ *
+ * Spec references: `18` (a person is told what actually happened; the audience `01` names first is
+ * not looking at the screen), `12` (offline is a state), `13`, `docs/design/VOICE_MODE.md`
+ * section 8, DEC-144, `DEV-085`, `DEV-090`.
+ *
+ * WHY THIS IS AT THIS LEVEL AND NOT ONLY IN `executor.test.ts`
+ * Because the defect was in the seam. Each read answered `{ spoken: [] }` for every non-OK
+ * outcome, which read as reasonable in isolation - nothing was written, so there was nothing to
+ * report - and `run` speaks "Done." when a tool answers with nothing at all, which also reads as
+ * reasonable in isolation. Neither file was wrong on its own. What a person heard was the two
+ * together, and only a test that runs both can see it.
+ */
+describe('a question the server could not answer', () => {
+  const RULES: readonly ScriptedRule[] = [
+    {
+      whenSaid: /taking/,
+      then: { kind: 'CALL', name: 'list_medicines', arguments: { profileId: PROFILE } },
+    },
+  ];
+
+  it('is not answered with "Done."', async () => {
+    // The exact journey: "what medicines am i taking" in a room with no signal. Before this,
+    // Kynviora said "Done." - a word meaning an action completed, in reply to a question about
+    // somebody's medicines, with no later moment at which they find out it was never answered.
+    const rendered = mount({
+      script: 'what medicines am i taking',
+      rules: RULES,
+      calls: [],
+      moves: [],
+      listOutcome: { kind: 'OFFLINE' },
+    });
+
+    press(rendered, 'say');
+    await flush();
+
+    expect(lastSpoken(rendered)).not.toContain('Done.');
+    expect(lastSpoken(rendered)).toContain('no connection');
+  });
+
+  it('never says a refusal was an absence of records, or the other way round', async () => {
+    // `13` makes absence and refused access deliberately indistinguishable, so a 404 gets the
+    // sentence the screen uses for the same answer and never "you do not have access" (DEC-144).
+    // A server that failed gets neither: `couldNotRead` says only that the read did not happen.
+    for (const [kind, expected] of [
+      ['UNAVAILABLE', 'nothing to show'],
+      ['SERVER_ERROR', 'could not read'],
+      ['AUTHORIZATION_LOST', 'could not read'],
+    ] as const) {
+      const rendered = mount({
+        script: 'what medicines am i taking',
+        rules: RULES,
+        calls: [],
+        moves: [],
+        listOutcome: { kind } as ApiOutcome<never>,
+      });
+
+      press(rendered, 'say');
+      await flush();
+
+      expect(lastSpoken(rendered), kind).toContain(expected);
+      expect(lastSpoken(rendered), kind).not.toContain('Done.');
+      // Never the sentence that asserts the reading the server declined to give.
+      expect(lastSpoken(rendered), kind).not.toContain('do not have access');
+    }
+  });
+
+  it('says an empty shelf is empty rather than saying nothing', async () => {
+    // Not a failure at all, and the commonest shape on a new account. "Done." in reply to "what
+    // am I taking?" over an empty shelf is the same wrong word for a different reason.
+    const rendered = mount({
+      script: 'what medicines am i taking',
+      rules: RULES,
+      calls: [],
+      moves: [],
+      listOutcome: {
+        kind: 'OK',
+        value: { items: [], nextCursor: null, mayRecordDoses: true },
+        correlationId: null,
+      } as unknown as ApiOutcome<never>,
+    });
+
+    press(rendered, 'say');
+    await flush();
+
+    expect(lastSpoken(rendered)).toContain('nothing recorded');
+    expect(lastSpoken(rendered)).not.toContain('Done.');
   });
 });

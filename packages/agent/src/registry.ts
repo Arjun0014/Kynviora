@@ -67,7 +67,12 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     voice: 'ALLOWED',
     // The shelf is one of the things `03` group J requires with no signal, so this answers from
     // the projection - marked stale, never as though it were fresh (DEC-100).
-    offline: 'LOCAL_PROJECTION',
+    // `ONLINE_ONLY`, and it used to say `LOCAL_PROJECTION`. The projection is applied by
+    // `useResource`, which is a hook a screen calls; a tool executes by calling the
+    // `KynvioraClient` method directly, and the client has no projection in it at all. So
+    // there was no path by which this could be answered from the last thing the server said,
+    // and the declaration promised one (`DEV-091`).
+    offline: 'ONLINE_ONLY',
     surface: 'SHELF',
     parameters: [PROFILE_ID],
     blockedBy: null,
@@ -80,7 +85,12 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'NONE',
     stepUp: false,
     voice: 'ALLOWED',
-    offline: 'LOCAL_PROJECTION',
+    // `ONLINE_ONLY`, and it used to say `LOCAL_PROJECTION`. The projection is applied by
+    // `useResource`, which is a hook a screen calls; a tool executes by calling the
+    // `KynvioraClient` method directly, and the client has no projection in it at all. So
+    // there was no path by which this could be answered from the last thing the server said,
+    // and the declaration promised one (`DEV-091`).
+    offline: 'ONLINE_ONLY',
     surface: 'SHELF',
     parameters: [PROFILE_ID],
     blockedBy: null,
@@ -93,7 +103,12 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'NONE',
     stepUp: false,
     voice: 'ALLOWED',
-    offline: 'LOCAL_PROJECTION',
+    // `ONLINE_ONLY`, and it used to say `LOCAL_PROJECTION`. The projection is applied by
+    // `useResource`, which is a hook a screen calls; a tool executes by calling the
+    // `KynvioraClient` method directly, and the client has no projection in it at all. So
+    // there was no path by which this could be answered from the last thing the server said,
+    // and the declaration promised one (`DEV-091`).
+    offline: 'ONLINE_ONLY',
     surface: 'ITEM_DETAIL',
     parameters: [ITEM_ID],
     blockedBy: null,
@@ -107,7 +122,12 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'NONE',
     stepUp: false,
     voice: 'ALLOWED',
-    offline: 'LOCAL_PROJECTION',
+    // `ONLINE_ONLY`, and it used to say `LOCAL_PROJECTION`. The projection is applied by
+    // `useResource`, which is a hook a screen calls; a tool executes by calling the
+    // `KynvioraClient` method directly, and the client has no projection in it at all. So
+    // there was no path by which this could be answered from the last thing the server said,
+    // and the declaration promised one (`DEV-091`).
+    offline: 'ONLINE_ONLY',
     surface: 'ITEM_DETAIL',
     parameters: [ITEM_ID],
     blockedBy: null,
@@ -124,7 +144,12 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'NONE',
     stepUp: false,
     voice: 'ALLOWED',
-    offline: 'LOCAL_PROJECTION',
+    // `ONLINE_ONLY`, and it used to say `LOCAL_PROJECTION`. The projection is applied by
+    // `useResource`, which is a hook a screen calls; a tool executes by calling the
+    // `KynvioraClient` method directly, and the client has no projection in it at all. So
+    // there was no path by which this could be answered from the last thing the server said,
+    // and the declaration promised one (`DEV-091`).
+    offline: 'ONLINE_ONLY',
     surface: 'SCHEDULE_SHEET',
     parameters: [ITEM_ID],
     blockedBy: null,
@@ -137,7 +162,12 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'NONE',
     stepUp: false,
     voice: 'ALLOWED',
-    offline: 'LOCAL_PROJECTION',
+    // `ONLINE_ONLY`, and it used to say `LOCAL_PROJECTION`. The projection is applied by
+    // `useResource`, which is a hook a screen calls; a tool executes by calling the
+    // `KynvioraClient` method directly, and the client has no projection in it at all. So
+    // there was no path by which this could be answered from the last thing the server said,
+    // and the declaration promised one (`DEV-091`).
+    offline: 'ONLINE_ONLY',
     surface: 'DOSE_SHEET',
     parameters: [ITEM_ID],
     blockedBy: null,
@@ -368,7 +398,12 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'NONE',
     stepUp: false,
     voice: 'ALLOWED',
-    offline: 'LOCAL_PROJECTION',
+    // `ONLINE_ONLY`, and it used to say `LOCAL_PROJECTION`. The projection is applied by
+    // `useResource`, which is a hook a screen calls; a tool executes by calling the
+    // `KynvioraClient` method directly, and the client has no projection in it at all. So
+    // there was no path by which this could be answered from the last thing the server said,
+    // and the declaration promised one (`DEV-091`).
+    offline: 'ONLINE_ONLY',
     surface: 'SAFETY',
     parameters: [PROFILE_ID],
     blockedBy: null,
@@ -382,7 +417,12 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'NONE',
     stepUp: false,
     voice: 'ALLOWED',
-    offline: 'LOCAL_PROJECTION',
+    // `ONLINE_ONLY`, and it used to say `LOCAL_PROJECTION`. The projection is applied by
+    // `useResource`, which is a hook a screen calls; a tool executes by calling the
+    // `KynvioraClient` method directly, and the client has no projection in it at all. So
+    // there was no path by which this could be answered from the last thing the server said,
+    // and the declaration promised one (`DEV-091`).
+    offline: 'ONLINE_ONLY',
     surface: 'SAFETY',
     parameters: [{ name: 'alertId', type: 'string', required: true, description: 'Which alert.' }],
     blockedBy: null,
@@ -399,7 +439,12 @@ const TOOLS: readonly ToolDefinition[] = Object.freeze([
     confirmation: 'NONE',
     stepUp: false,
     voice: 'ALLOWED',
-    offline: 'LOCAL_PROJECTION',
+    // `ONLINE_ONLY`, and it used to say `LOCAL_PROJECTION`. The projection is applied by
+    // `useResource`, which is a hook a screen calls; a tool executes by calling the
+    // `KynvioraClient` method directly, and the client has no projection in it at all. So
+    // there was no path by which this could be answered from the last thing the server said,
+    // and the declaration promised one (`DEV-091`).
+    offline: 'ONLINE_ONLY',
     surface: 'CARE',
     parameters: [],
     blockedBy: null,

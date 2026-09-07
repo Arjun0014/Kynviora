@@ -76,6 +76,24 @@ export const UTTERANCES = Object.freeze({
    * is no later moment at which they find out (`DEV-055`, `LOW-2`).
    */
   didNotGoThrough: 'That did not go through, and Kynviora has not kept it. Nothing has changed.',
+  /**
+   * Said when a **read** could not be answered for any reason other than the four with sentences
+   * of their own.
+   *
+   * Separate from `didNotGoThrough`, whose second half - "Kynviora has not kept it" - is about a
+   * write and is meaningless about a question. The rule the two share is the one that matters: a
+   * tool answering with nothing at all is spoken as "Done." by the shell, and "Done." in reply to
+   * "what am I taking?" is an answer to a different question (`DEV-090`).
+   */
+  couldNotRead: 'I could not read that just now, so there is nothing I can tell you.',
+  /**
+   * Said when the read worked and there was nothing in it.
+   *
+   * Not `cannotAnswerThat`, which says Kynviora does not keep a record of that kind of thing.
+   * This one says it does and the list is empty, which is a different fact and the one a person
+   * asking "what am I taking?" with an empty shelf needs to hear.
+   */
+  nothingRecorded: 'There is nothing recorded there.',
   // Confirmation.
   confirmPrompt: 'Shall I do that? Say yes, or press the large button.',
   confirmationExpired:

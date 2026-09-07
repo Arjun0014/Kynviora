@@ -3546,3 +3546,182 @@ reverse` tunnel produces none either - the app has offline states and uses them.
   surfaces rather than one, and what the Pending Changes screen offers for one is a control that
   cannot succeed.
 - **Status**: **RESOLVED 2026-09-08**.
+
+---
+
+## DEV-090 - A question Kynviora could not answer was answered "Done."
+
+- **Affected specification**: `18` (a person is told what actually happened; the audience `01`
+  names first is not looking at the screen), `12` (offline is a state, not a silence), `13`,
+  `docs/design/VOICE_MODE.md` section 8, DEC-144.
+- **Expected behaviour**: a read that could not be answered says so. "Done." means an action
+  completed and belongs to a write that succeeded quietly.
+- **Implemented behaviour**: `VoiceProvider.run` speaks `done` when a tool answers with nothing on
+  either channel -
+
+  ```ts
+  speak(parts.length === 0 ? [{ kind: 'UTTERANCE', key: 'done' }] : parts, lines);
+  ```
+
+  and **every one of the eleven read executors** answered `{ spoken: [] }` for every non-OK
+  outcome. Several also answered `{ spoken: [] }` for a successful read of an empty list.
+
+- **The failure**: "what medicines am I taking" in a room with no signal. Kynviora says **"Done."**
+  The same word answers a 404, a lost session, a server error, and an empty shelf on a new account.
+
+  A person looking at the screen sees the shelf and can work it out. The audience Voice Mode exists
+  for is the one that is not looking, and what they hear is a word meaning an action completed in
+  reply to a question about their medicines - with no later moment at which they find out nothing
+  was read.
+
+- **Why it survived `DEV-085`**: that fix was scoped to the writes and named them - `create_schedule`,
+  `add_medicine`, `add_personal_care_item` - because a write reporting success it did not have is
+  the obviously dangerous shape. A failed read looks harmless from the executor's side: nothing was
+  written, so nothing was lost. What is lost is the question, and that is only visible from the
+  shell. Neither file was wrong on its own; the defect was in the seam, which is why the
+  regression test for it runs both.
+- **How it was found**: reading `run` against the executor while auditing the registry's `offline`
+  declarations (`DEV-091`). The two are the same investigation - `LOCAL_PROJECTION` is what let a
+  read be attempted with no connection in the first place.
+- **How it resolved**: `utteranceForReadFailure`, a total function over the failure kinds, and
+  `readResult`, which names the empty case. Two utterances were added to the closed set:
+  `couldNotRead` ("I could not read that just now, so there is nothing I can tell you") and
+  `nothingRecorded` ("There is nothing recorded there").
+
+  The four kinds with sentences of their own keep them: `offline` for no connection, `notAvailable`
+  for a 404 - never `notAllowed`, because `13` makes absence and refused access deliberately
+  indistinguishable and naming a refusal asserts the reading the server declined to give
+  (DEC-144) - and `needsIdentity` for step-up. `couldNotRead` rather than `didNotGoThrough` for the
+  rest, because that sentence's second half is "Kynviora has not kept it", which is a statement
+  about a write and says nothing about a question.
+
+  `readResult` filters blank lines with the identical test `run` applies, so the helper and the
+  shell cannot disagree about what "nothing" means.
+
+- **Risk before the fix**: moderate. Nothing wrong was written and nothing wrong was spoken about a
+  medicine - the Speech Gate saw to that. What was wrong is that a person could not tell an
+  unanswered question from an answered one.
+- **Tests**: a sweep in `apps/mobile/src/voice/executor.test.ts` over every read the executor
+  defines by every failure kind, asserting the condition `run` actually applies rather than a
+  sentence - `utterances.length + spoken.length > 0`; an empty-list case for the four list reads;
+  and three in `apps/mobile/src/voice/VoiceProvider.test.tsx` that run the shell and the executor
+  together, because that is where the defect lived. Each was run against the old code first:
+  reverting `list_medicines` alone turns the sweep red with
+  `list_medicines on OFFLINE would have been spoken as "Done."`.
+- **Status**: **RESOLVED 2026-09-08**.
+
+---
+
+## DEV-091 - Nine tools declared they worked offline through a projection they never touched
+
+- **Affected specification**: `17` ("the agent's reach is the app's reach"), `12` (a read
+  projection, and `STALE` is a state a person is shown), `03` group J, DEC-100,
+  `docs/design/VOICE_MODE.md` section 3.
+- **Expected behaviour**: `offline` is one of the eight answers the registry demands of every tool,
+  and `LOCAL_PROJECTION` means "it can be answered from the last thing the server said". A tool
+  declaring it must be answerable with no connection.
+- **Implemented behaviour**: `list_medicines`, `list_personal_care`, `describe_item`,
+  `explain_what_is_missing`, `list_schedules`, `read_dose_history`, `list_safety_state`,
+  `describe_alert` and `list_people` all declared `LOCAL_PROJECTION`. **The projection is applied
+  by `useResource`**, a hook a screen calls with a `projectionKey`; a tool executes by calling the
+  `KynvioraClient` method directly, and the client contains no reference to a projection at all
+  (`grep -c projection packages/contracts/src/client.ts` is 0). Only two resources are projected in
+  any case - the profile list and the shelf.
+
+- **The failure**: the declaration is load-bearing. `LOCAL_PROJECTION` is what makes gate 5 let a
+  call through with no connection, so each of the nine was attempted, failed, and returned nothing
+  - which the shell speaks as "Done." (`DEV-090`). The registry over-claimed and the person paid
+    for it in a word.
+- **How it was found**: the operating brief asked for the offline declarations to be audited
+  against actual executor and client behaviour. `executor.test.ts` had compared the registry's
+  **list** with the executor's keys since `DEV-084` and nothing had ever compared a field.
+- **How it resolved**: the nine are `ONLINE_ONLY`, which is what they are. Gate 5 refuses them with
+  no connection and the person hears that the server could not be asked - the same sentence, one
+  round trip earlier, and now the registry describes the build.
+
+  Three still declare `LOCAL_PROJECTION` and all three earn it: `open_screen` and `open_item` touch
+  nothing, and `list_pending_changes` reads this phone's own journal, which is the whole reason it
+  can answer a question about this phone.
+
+- **What this does not close**: reading the shelf **by voice** with no signal. `03` group J's
+  offline requirement is met by the shelf screen, which reads the projection and labels it `STALE`
+  (DEC-100), and voice has no way to label anything - a spoken sentence carries no staleness badge,
+  and reading out medicine names from a cached copy without saying how old it is is a worse failure
+  than saying the server could not be asked. Doing it properly needs a sentence in the closed set
+  that says when the copy is from, which is a product decision rather than a wiring one.
+  Recorded as `DEV-093`.
+- **Tests**: `apps/mobile/src/voice/executor.test.ts` drives every `LOCAL_PROJECTION` tool against a
+  client where every method answers `OFFLINE` and requires that none of them replies that it has no
+  connection; asserts every `ONLINE_ONLY` tool is refused at gate 5 by `checkCall` rather than by an
+  executor that happens to cope; and asserts every `QUEUES` tool is let through. Re-declaring
+  `list_medicines` as `LOCAL_PROJECTION` turns the first red with
+  `list_medicines says LOCAL_PROJECTION and answered that it has no connection`.
+  `packages/agent/src/registry.test.ts` pinned the old claim and now pins the list of three plus the
+  rule that none of them is a `WRITE`.
+- **Status**: **RESOLVED 2026-09-08**.
+
+---
+
+## DEV-092 - A conflicted queued change offers a "Try again" that cannot succeed
+
+- **Affected specification**: `12` ("Repository behavior" - a **resolvable** failure state), `13`
+  (`medicine_schedule`, `owned_item`, `allergy_record` and `profile` all resolve `ASK_USER`), `18`,
+  DEC-148.
+- **Expected behaviour**: `13` resolves these types `ASK_USER`, and the question a person is asked
+  has to be one they can answer. `pendingQueue.ts` states the rule itself, about rejections: "a
+  'try again' there is a button that produces the same refusal and teaches a person to distrust
+  every other one."
+- **Implemented behaviour**: `actionsFor('CONFLICTED')` returns `['RETRY', 'DISCARD']`, and
+  `PendingSyncProvider.retry` puts the operation back as `PENDING` with the attempt count reset and
+  **the payload unchanged** - including the `expectedVersion` the server has just refused.
+
+- **The failure**: every conflict this build can produce is a conditional write. `VERSION_CONFLICT`
+  is answered by comparing the stored version against `expectedVersion`, so re-sending the same
+  bytes gets the same 409 for ever. Worse than the rejection case the same file guards against:
+  retry resets the budget, so there is no attempt cap to end it, and the row sits in "needs you to
+  decide" while the only control that looks like a decision does nothing.
+
+  What the copy promises is not what the screen offers, either. "Somebody else changed this after
+  you did. Kynviora will not choose between the two, so this one is yours to decide" describes a
+  choice between two versions; the person is shown neither and offered neither.
+
+- **How it was found**: reading the resolution path while wiring DEC-148, because a queued schedule
+  change is now reachable from two surfaces rather than one.
+- **Risk**: low in the safe direction - nothing is overwritten and nothing is merged, which are the
+  two failures `13` is protecting against. What it costs is the second half of `12`'s sentence: the
+  change is kept and visible and **not** resolvable.
+- **Required future work**: a conflicted conditional write should offer a review rather than a
+  retry - the record as it now stands, beside what the person asked for, and a choice made while
+  looking at both. Rebasing onto a remembered `currentVersion` without showing the content is the
+  same silent overwrite one step later, so the resolution needs the record, which means the queue
+  screen needs a way to reach it. Never auto-merge: `13` resolves `medicine_schedule` `ASK_USER`
+  precisely because merging medication times is not something software may do.
+- **Interim**: nothing has been changed, and the risk is bounded by the server rather than by this
+  screen - a stale replay is refused, the authoritative state stands, and
+  `services/api/src/schedule.test.ts` asserts both.
+- **Status**: **OPEN**. The immediate next task.
+
+---
+
+## DEV-093 - Voice cannot read the shelf with no signal, and the shelf can
+
+- **Affected specification**: `03` group J (offline essentials: medicines, schedules, shelf),
+  `12` (a read projection; `STALE` is a state a person is shown), DEC-100, `DEV-091`.
+- **Expected behaviour**: DEC-132 - the agent's reach is the app's reach.
+- **Implemented behaviour**: the shelf screen reads the encrypted projection through `useResource`
+  and renders it labelled `STALE`. A tool calls the client, which has no projection, so every voice
+  read needs the network. Until `DEV-091` the registry claimed otherwise; it no longer does.
+- **Why this is not simply wired**: because `12` does not merely allow a local copy to be read, it
+  requires the person to be told it is one. A screen has a badge; a spoken sentence has nothing,
+  and reading out a list of medicines from a cached copy without saying when it is from is a worse
+  failure than saying the server could not be asked - it is a set of current-sounding facts about
+  somebody's medicines.
+
+  So closing this needs a sentence in the Speech Gate's closed set that says how old the copy is,
+  and that sentence needs the projection to record when it was written, which it does not. Both are
+  product decisions about what an old answer sounds like out loud rather than wiring.
+
+- **Risk**: low. A refusal, and an honest one since `DEV-091`.
+- **Status**: **OPEN**. Not blocked on anything external; waiting on a decision about the wording,
+  which is a good candidate for the Claude Design pass since it is the same question the `STALE`
+  badge answers on a screen.

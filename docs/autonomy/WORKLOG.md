@@ -6203,3 +6203,103 @@ of "it queued" and is exactly the defect DEC-111 exists for.
 `packages/agent/src/registry.ts`, `apps/mobile/src/voice/executor.ts`,
 `apps/mobile/src/voice/VoiceProvider.tsx`, `apps/mobile/src/voice/executor.test.ts`,
 `apps/mobile/src/voice/VoiceProvider.test.tsx`, `services/api/src/schedule.test.ts`.
+
+---
+
+## 2026-09-08 (continued) - The registry's eighth answer, audited, and the word it cost
+
+**Starting commit** `14d0176`.
+
+The brief asked for the Agent Tool Registry's offline declarations to be checked against what the
+executor and the client actually do. They did not match, and the mismatch was being paid for in a
+word a person hears.
+
+### What the audit found
+
+`offline` is one of the eight answers the registry demands of every tool, and nine reads answered
+`LOCAL_PROJECTION`: `list_medicines`, `list_personal_care`, `describe_item`,
+`explain_what_is_missing`, `list_schedules`, `read_dose_history`, `list_safety_state`,
+`describe_alert`, `list_people`.
+
+**The projection is applied by `useResource`**, which is a hook a screen calls with a
+`projectionKey`. A tool executes by calling the `KynvioraClient` method directly, and the client
+has no projection in it - `grep -c projection packages/contracts/src/client.ts` is `0`. Only two
+resources are projected at all: the profile list and the shelf. So not one of the nine could be
+answered without the network (`DEV-091`).
+
+`executor.test.ts` had compared the registry's **list** against the executor's keys since
+`DEV-084`. Nothing had ever compared a field.
+
+### What the over-claim cost, which was not what it looks like
+
+`LOCAL_PROJECTION` is what makes gate 5 let a call through with no connection. So each of the nine
+was attempted with no signal, failed, and returned `{ spoken: [] }` - and `run` speaks "Done." when
+a tool answers with nothing at all.
+
+**"What medicines am I taking?" in a room with no signal was answered "Done."** (`DEV-090`). So was
+a 404, a lost session, a server error, and - on a new account - an empty shelf.
+
+It is `DEV-085` on the other half of the registry. That fix gave the four writes a sentence each
+and named them; nothing looked at the eleven reads, because a failed read looks harmless from the
+executor's side - nothing was written, so nothing was lost. What is lost is the question, and that
+is only visible from the shell. Neither file was wrong on its own. The defect was in the seam,
+which is why the regression test for it runs both.
+
+### The fixes
+
+**`DEV-091`.** The nine are `ONLINE_ONLY`. Gate 5 refuses them and the person hears that the server
+could not be asked - the same sentence, one round trip earlier, over a registry that now describes
+the build. Three still declare `LOCAL_PROJECTION` and all three earn it: `open_screen` and
+`open_item` touch nothing, and `list_pending_changes` reads this phone's own journal.
+
+**`DEV-090`.** `utteranceForReadFailure`, total over the failure kinds, and `readResult`, which
+names the empty case. Two utterances joined the closed set - `couldNotRead` and `nothingRecorded`.
+The four kinds with sentences of their own keep them, and `notAvailable` rather than `notAllowed`
+for a 404, because `13` makes absence and refused access indistinguishable on purpose (DEC-144).
+`couldNotRead` rather than `didNotGoThrough`, whose "Kynviora has not kept it" is about a write.
+
+`readResult` filters blank lines with the identical test `run` applies, so the helper and the shell
+cannot disagree about what "nothing" means.
+
+### The audit is a test now, and both halves were run against the old code
+
+Three rules, each a different question:
+
+1. **A tool that says it works offline does.** Every `LOCAL_PROJECTION` tool is driven against a
+   client where every method answers `OFFLINE`, and must not reply that it has no connection.
+2. **A tool that says it needs the server is refused before it runs**, by `checkCall` rather than
+   by an executor that happens to cope - which is what keeps the declaration load-bearing.
+3. **No read answers with silence**, over every read by every failure kind, asserted as the
+   condition `run` applies (`utterances.length + spoken.length > 0`) rather than as a sentence.
+
+Reverting `list_medicines`'s failure handling turns rule 3 red -
+`list_medicines on OFFLINE would have been spoken as "Done."` Re-declaring it `LOCAL_PROJECTION`
+turns rule 1 red - `list_medicines says LOCAL_PROJECTION and answered that it has no connection`.
+Both were measured, then restored.
+
+### A test that was pinning a word
+
+`registry.test.ts` asserted `list_medicines` is `LOCAL_PROJECTION` under the heading "lets the two
+things `03` group J promises work with no signal". The requirement is real and is met - by the
+shelf screen, which reads the projection and labels it `STALE`. The test was measuring the
+registry's claim about voice, which nothing enforced. It now pins the three that genuinely need no
+server, plus the rule that none of them is a `WRITE` - a write claiming to work offline without
+reaching the journal is a change that vanishes.
+
+### Opened, not closed
+
+- **`DEV-092`** - a `CONFLICTED` queued change offers "Try again", and `retry` re-sends the payload
+  with the `expectedVersion` the server has just refused. Every conflict this build can produce is
+  a conditional write, so it can never succeed - and because retry resets the attempt budget there
+  is no cap to end it. The copy promises a choice between two versions and the screen shows
+  neither. The next task.
+- **`DEV-093`** - voice cannot read the shelf with no signal and the shelf can. Not wiring: `12`
+  requires a local copy to be **labelled**, a screen has a badge, and a spoken sentence has
+  nothing. Closing it needs a sentence saying how old the copy is, and the projection does not
+  record when it was written.
+
+### Files
+
+`packages/agent/src/speech.ts`, `packages/agent/src/registry.ts`,
+`packages/agent/src/registry.test.ts`, `apps/mobile/src/voice/executor.ts`,
+`apps/mobile/src/voice/executor.test.ts`, `apps/mobile/src/voice/VoiceProvider.test.tsx`.

@@ -141,6 +141,69 @@ function utteranceForWriteFailure(
 }
 
 /**
+ * What to say when a read could not read, and when it read nothing.
+ *
+ * WHY A READ NEEDS THIS AT ALL
+ * `VoiceProvider.run` speaks "Done." when a tool answers with nothing on either channel, which is
+ * right for a write that succeeded quietly and is wrong for every other case. Every read here used
+ * to answer `{ spoken: [] }` for every non-OK outcome and for an empty result - so "what am I
+ * taking?" with no signal, or on an empty shelf, was answered **"Done."** (`DEV-090`).
+ *
+ * That is `DEV-085` on the other half of the registry. That fix gave the four writes a sentence
+ * each and nothing looked at the eleven reads, because a read failing looks harmless: nothing was
+ * written, so nothing was lost. What is lost is the question. A person who is not looking at the
+ * screen hears a word that means an action completed, in reply to a question about their
+ * medicines, and has no way to tell that Kynviora never answered.
+ *
+ * A total function over the failure kinds, so a kind added to `ApiOutcome` later is a compile error
+ * here rather than a read silently acquiring somebody else's sentence.
+ *
+ * The four with sentences of their own keep them. `OFFLINE` says the server could not be asked.
+ * `UNAVAILABLE` is `notAvailable` and never `notAllowed`, because `13` makes absence and refused
+ * access deliberately indistinguishable and naming a refusal would assert the reading the server
+ * declined to give (DEC-144). `STEP_UP_REQUIRED` points at the screen where a password can be
+ * typed. Everything else is `couldNotRead` - never `didNotGoThrough`, whose "Kynviora has not kept
+ * it" is a statement about a write and says nothing about a question.
+ */
+function utteranceForReadFailure(kind: Exclude<ApiOutcome<unknown>['kind'], 'OK'>): UtteranceKey {
+  switch (kind) {
+    case 'OFFLINE':
+      return 'offline';
+    case 'STEP_UP_REQUIRED':
+      return 'needsIdentity';
+    case 'UNAVAILABLE':
+      return 'notAvailable';
+    case 'UNAUTHENTICATED':
+    case 'AUTHORIZATION_LOST':
+    case 'REFUSED':
+    case 'SERVER_ERROR':
+      return 'couldNotRead';
+  }
+}
+
+/**
+ * A read's answer, with the empty case named rather than left silent.
+ *
+ * The blank filter matches `run`'s exactly - it drops a line that is empty or whitespace before
+ * deciding whether anything was said - because a helper that disagreed with the shell about what
+ * "nothing" means would leave the defect in place for the one shape it got wrong. Every read here
+ * composes at least one line from a value that may legitimately be absent, so this is not a
+ * defensive branch: `list_medicines` over an empty shelf and `list_schedules` over a medicine with
+ * no times both reach it on an ordinary day.
+ *
+ * `nothingRecorded` rather than `cannotAnswerThat`: the second says Kynviora does not keep a record
+ * of that kind of thing, and an empty shelf is the opposite claim.
+ */
+function readResult(lines: readonly string[], focusId?: string): ToolResult {
+  const said = lines.filter((line) => line.trim() !== '');
+  return {
+    spoken: said,
+    ...(said.length === 0 ? { utterances: ['nothingRecorded' as const] } : {}),
+    ...(focusId === undefined ? {} : { focusId }),
+  } satisfies ToolResult;
+}
+
+/**
  * The four the vocabulary has, and no fifth.
  *
  * The dispatcher has already refused anything else - the tool declares the enum and
@@ -251,14 +314,14 @@ export function createToolExecutor(
         profileId: argument(call, 'profileId'),
         itemKind: 'MEDICINE',
       });
-      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      if (outcome.kind !== 'OK') {
+        return { spoken: [], utterances: [utteranceForReadFailure(outcome.kind)] };
+      }
       const view = shelfView(outcome.value.items, outcome.value.nextCursor ?? null);
-      return {
-        // The item's own name and its three status lines, exactly as the shelf renders them.
-        // Reading out a name without the qualification beside it would be the summary card that
-        // states a conclusion whose caveat lives two taps away.
-        spoken: view.items.flatMap((item) => [item.displayName, item.identity.label]),
-      } satisfies ToolResult;
+      // The item's own name and its three status lines, exactly as the shelf renders them.
+      // Reading out a name without the qualification beside it would be the summary card that
+      // states a conclusion whose caveat lives two taps away.
+      return readResult(view.items.flatMap((item) => [item.displayName, item.identity.label]));
     },
 
     list_personal_care: async (call) => {
@@ -266,68 +329,74 @@ export function createToolExecutor(
         profileId: argument(call, 'profileId'),
         itemKind: 'PERSONAL_CARE',
       });
-      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      if (outcome.kind !== 'OK') {
+        return { spoken: [], utterances: [utteranceForReadFailure(outcome.kind)] };
+      }
       const view = shelfView(outcome.value.items, outcome.value.nextCursor ?? null);
-      return {
-        spoken: view.items.flatMap((item) => [item.displayName, item.formulation.label]),
-      } satisfies ToolResult;
+      return readResult(view.items.flatMap((item) => [item.displayName, item.formulation.label]));
     },
 
     describe_item: async (call) => {
       const itemId = argument(call, 'itemId');
       const outcome = await client.itemDetail(itemId);
-      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      if (outcome.kind !== 'OK') {
+        return { spoken: [], utterances: [utteranceForReadFailure(outcome.kind)] };
+      }
       const view = itemDetailScreenView(outcome.value);
-      return {
-        spoken: [
+      return readResult(
+        [
           view.displayName,
           ...view.categoryFields.map(
             (field) => `${field.label}. ${field.value ?? field.absentNote ?? ''}`,
           ),
           view.verificationNote,
         ],
-        focusId: itemId,
-      } satisfies ToolResult;
+        itemId,
+      );
     },
 
     explain_what_is_missing: async (call) => {
       const itemId = argument(call, 'itemId');
       const outcome = await client.itemDetail(itemId);
-      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      if (outcome.kind !== 'OK') {
+        return { spoken: [], utterances: [utteranceForReadFailure(outcome.kind)] };
+      }
       const view = itemDetailScreenView(outcome.value);
-      return {
-        // Each reason with **its own next step attached**, which is the rule a limitation never
-        // moves down a layer: read out separately they would arrive as a list of complaints.
-        spoken:
-          view.attention.reasons.length === 0
-            ? [view.attention.settledNote ?? '']
-            : view.attention.reasons.map((reason) => `${reason.label} ${reason.nextStep}`),
-        focusId: itemId,
-      } satisfies ToolResult;
+      // Each reason with **its own next step attached**, which is the rule a limitation never
+      // moves down a layer: read out separately they would arrive as a list of complaints.
+      return readResult(
+        view.attention.reasons.length === 0
+          ? [view.attention.settledNote ?? '']
+          : view.attention.reasons.map((reason) => `${reason.label} ${reason.nextStep}`),
+        itemId,
+      );
     },
 
     list_schedules: async (call) => {
       const outcome = await client.schedules(argument(call, 'itemId'));
-      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
-      return {
-        spoken: outcome.value.schedules.map((schedule) => (schedule.timesLocal ?? []).join(', ')),
-        focusId: argument(call, 'itemId'),
-      } satisfies ToolResult;
+      if (outcome.kind !== 'OK') {
+        return { spoken: [], utterances: [utteranceForReadFailure(outcome.kind)] };
+      }
+      return readResult(
+        outcome.value.schedules.map((schedule) => (schedule.timesLocal ?? []).join(', ')),
+        argument(call, 'itemId'),
+      );
     },
 
     read_dose_history: async (call) => {
       const outcome = await client.doseEvents({ ownedItemId: argument(call, 'itemId') });
-      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      if (outcome.kind !== 'OK') {
+        return { spoken: [], utterances: [utteranceForReadFailure(outcome.kind)] };
+      }
       // `doseHistory` returns no count, rate or streak, so there is nothing here to read out that
       // could become one even by accident (`02`, `04` Phase 4.3).
       const history = doseHistory(outcome.value.events);
-      return {
-        spoken:
-          history.lines.length === 0
-            ? [history.emptyMessage]
-            : history.lines.map((line) => `${line.presentation.label} ${line.recordedOn}`),
-        focusId: argument(call, 'itemId'),
-      } satisfies ToolResult;
+      return readResult(
+        history.lines.length === 0
+          ? [history.emptyMessage]
+          : history.lines.map((line) => `${line.presentation.label} ${line.recordedOn}`),
+        argument(call, 'itemId'),
+      );
     },
 
     /**
@@ -499,17 +568,17 @@ export function createToolExecutor(
       // a different shape - it carries live alert rows rather than a line per shelf item, so it
       // cannot answer "is there anything I should know", which is about every item.
       const outcome = await client.safetyInbox(argument(call, 'profileId'));
-      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      if (outcome.kind !== 'OK') {
+        return { spoken: [], utterances: [utteranceForReadFailure(outcome.kind)] };
+      }
       const view = safetyInboxView(outcome.value);
-      return {
-        spoken: [
-          view.coverageStatement,
-          // Name and state together, never a count and never a ranking (`02`): "three need
-          // attention" is the aggregate score this app refuses to produce, and a sorted list is
-          // that score with the number left off.
-          ...view.lines.flatMap((line) => [line.displayName, line.state.label]),
-        ],
-      } satisfies ToolResult;
+      return readResult([
+        view.coverageStatement,
+        // Name and state together, never a count and never a ranking (`02`): "three need
+        // attention" is the aggregate score this app refuses to produce, and a sorted list is
+        // that score with the number left off.
+        ...view.lines.flatMap((line) => [line.displayName, line.state.label]),
+      ]);
     },
 
     /**
@@ -523,10 +592,12 @@ export function createToolExecutor(
     describe_alert: async (call) => {
       const alertId = argument(call, 'alertId');
       const outcome = await client.alertDetail(alertId);
-      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      if (outcome.kind !== 'OK') {
+        return { spoken: [], utterances: [utteranceForReadFailure(outcome.kind)] };
+      }
       const view = alertDetailScreenView(outcome.value);
-      return {
-        spoken: [
+      return readResult(
+        [
           ...(view.withdrawnNotice === null ? [] : [view.withdrawnNotice]),
           ...(view.message ?? []),
           ...(view.unexplainable === null ? [] : [view.unexplainable.body]),
@@ -536,8 +607,8 @@ export function createToolExecutor(
           view.coverageStatement,
           ...(view.withheldNotice === null ? [] : [view.withheldNotice]),
         ],
-        focusId: alertId,
-      } satisfies ToolResult;
+        alertId,
+      );
     },
 
     /**
@@ -552,10 +623,12 @@ export function createToolExecutor(
     list_caregiver_access: async (call) => {
       const profileId = argument(call, 'profileId');
       const outcome = await client.listCaregiverGrants({ profileId });
-      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
+      if (outcome.kind !== 'OK') {
+        return { spoken: [], utterances: [utteranceForReadFailure(outcome.kind)] };
+      }
       const rows = caregiverAccessRows(outcome.value.grants);
-      return {
-        spoken: rows.flatMap((row) => {
+      return readResult(
+        rows.flatMap((row) => {
           const named = row.displayName !== row.id && !UUID_LIKE.test(row.displayName);
           const summary = summarizeAccess(row.capabilities);
           return [
@@ -567,7 +640,7 @@ export function createToolExecutor(
             ...summary.changing,
           ];
         }),
-      } satisfies ToolResult;
+      );
     },
 
     /**
@@ -589,11 +662,9 @@ export function createToolExecutor(
           maxAttempts: MAX_UPLOAD_ATTEMPTS,
         })),
       );
-      return {
-        // The summary first, then each row's what and why. `why` is never a code or a
-        // correlation ID, which is the property that makes it safe to say out loud.
-        spoken: [view.summary, ...view.rows.flatMap((row) => [row.what, row.why])],
-      } satisfies ToolResult;
+      // The summary first, then each row's what and why. `why` is never a code or a
+      // correlation ID, which is the property that makes it safe to say out loud.
+      return readResult([view.summary, ...view.rows.flatMap((row) => [row.what, row.why])]);
     },
 
     /**
@@ -732,10 +803,10 @@ export function createToolExecutor(
 
     list_people: async () => {
       const outcome = await client.listProfiles();
-      if (outcome.kind !== 'OK') return { spoken: [] } satisfies ToolResult;
-      return {
-        spoken: outcome.value.profiles.map((profile) => profile.displayName),
-      } satisfies ToolResult;
+      if (outcome.kind !== 'OK') {
+        return { spoken: [], utterances: [utteranceForReadFailure(outcome.kind)] };
+      }
+      return readResult(outcome.value.profiles.map((profile) => profile.displayName));
     },
 
     // Navigation writes nothing and asks the server nothing. It is here so that voice and touch
