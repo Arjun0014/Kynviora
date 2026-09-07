@@ -18,11 +18,11 @@
  * trusting the settings that are working.
  */
 
-import { Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
 import {
+  MIN_TOUCH_TARGET_DP,
+  RADIUS,
   SPACING,
-  FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
   ALERT_DELIVERY_COPY,
   notificationSettingsView,
   previewNotification,
@@ -30,6 +30,7 @@ import {
 } from '@kynviora/presentation';
 import type { NotificationDetailLevel } from '@kynviora/domain';
 import { ScreenState } from '@/components/ScreenState';
+import { Typography } from '@/components/Typography';
 import type { ScreenState as ScreenStateKind } from '@kynviora/presentation';
 import { useThemedStyles } from '@/theme/ThemeProvider';
 
@@ -71,13 +72,18 @@ export function NotificationSettings({
   });
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <Text accessibilityRole="header" style={styles.heading}>
-        Notifications
-      </Text>
-      <Text style={styles.intro}>{ALERT_DELIVERY_COPY.settingsIntro}</Text>
+    <>
+      <Typography role="body" colour="secondary">
+        {ALERT_DELIVERY_COPY.settingsIntro}
+      </Typography>
 
-      {view.capNote !== null ? <Text style={styles.capNote}>{view.capNote}</Text> : null}
+      {view.capNote === null ? null : (
+        <View style={styles.capNote}>
+          <Typography role="body" colour="informational">
+            {view.capNote}
+          </Typography>
+        </View>
+      )}
 
       {view.levels.map((option) => {
         const example = previewNotification(option.level, {
@@ -100,84 +106,72 @@ export function NotificationSettings({
               option.unavailable ? styles.optionUnavailable : null,
             ]}
           >
-            <Text style={styles.optionLabel}>{option.label}</Text>
-            <Text style={styles.optionMeaning}>{option.meaning}</Text>
-            {/* The real string, from the real renderer. */}
-            <Text style={styles.example}>{example}</Text>
+            {/* The mark is in the text as well as in the border, because `18` forbids meaning
+                carried by colour alone - and a chosen privacy level is the one setting on this
+                screen a person most needs to be sure about. */}
+            <Typography role="title" decorative>
+              {option.selected ? '\u2713  ' : ''}
+              {option.label}
+            </Typography>
+            <Typography role="caption" colour="secondary" decorative>
+              {option.meaning}
+            </Typography>
+            {/* The real string, from the real renderer, in a sunken well - it is a quotation of
+                what a locked screen would show rather than something Kynviora is saying now. */}
+            <View style={styles.example}>
+              <Typography role="body" decorative>
+                {example}
+              </Typography>
+            </View>
             {option.unavailable ? (
-              <Text style={styles.unavailableNote}>
+              <Typography role="caption" colour="secondary" decorative>
                 Not available while the ceiling is set lower.
-              </Text>
+              </Typography>
             ) : null}
           </Pressable>
         );
       })}
 
       {/* 03 group H, said out loud rather than only enforced on the server. */}
-      <Text style={styles.limitation}>{ALERT_DELIVERY_COPY.separatePermissions}</Text>
-    </ScrollView>
+      <Typography role="caption" colour="secondary">
+        {ALERT_DELIVERY_COPY.separatePermissions}
+      </Typography>
+    </>
   );
 }
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    content: { padding: SPACING.lg, gap: SPACING.md },
-    heading: {
-      fontSize: FONT_SIZE.heading,
-      fontWeight: '700',
-      color: theme.surface.foreground,
-    },
-    intro: {
-      fontSize: FONT_SIZE.body,
-      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surface.foreground,
-    },
     capNote: {
-      fontSize: FONT_SIZE.body,
-      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.informational.foreground,
       backgroundColor: theme.informational.background,
       borderColor: theme.informational.border,
       borderWidth: 1,
-      borderRadius: SPACING.sm,
+      borderRadius: RADIUS.md,
       padding: SPACING.md,
     },
+    // A card a person can press. Drawn here rather than wrapping `Card`, because a `Card` is a
+    // `View` and this has to be the pressable node itself - one announced control, not a control
+    // inside a container that also announces.
     option: {
-      // 48dp minimum target (spec 18). Padding plus three lines of text clears it comfortably.
-      minHeight: SPACING.xxxl,
-      padding: SPACING.md,
-      gap: SPACING.xs,
+      // 48dp minimum target (`18`). Padding plus three lines of text clears it comfortably, and
+      // `minHeight` rather than `height` so it grows with the font scale instead of clipping.
+      minHeight: MIN_TOUCH_TARGET_DP,
+      padding: SPACING.lg,
+      gap: SPACING.sm,
       borderWidth: 1,
-      borderRadius: SPACING.sm,
+      borderRadius: RADIUS.lg,
       borderColor: theme.surface.border,
       backgroundColor: theme.surface.background,
     },
-    optionSelected: { borderWidth: 2, borderColor: theme.surface.foreground },
+    // `selection`, which is the one hue in this app about the interface rather than about a
+    // product (DEC-130). The tick in the label is what carries it for somebody who cannot see the
+    // colour.
+    optionSelected: { borderWidth: 2, borderColor: theme.selection.border },
     // Marked rather than hidden: a missing option is indistinguishable from a broken screen.
     optionUnavailable: { backgroundColor: theme.surfaceMuted.background },
-    optionLabel: {
-      fontSize: FONT_SIZE.title,
-      fontWeight: '600',
-      color: theme.surface.foreground,
-    },
-    optionMeaning: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
-    },
     example: {
-      fontSize: FONT_SIZE.body,
-      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-      color: theme.surface.foreground,
-    },
-    unavailableNote: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
-    },
-    limitation: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
+      padding: SPACING.md,
+      borderRadius: RADIUS.md,
+      backgroundColor: theme.sunken.background,
     },
   });

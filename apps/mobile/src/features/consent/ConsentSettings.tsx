@@ -41,11 +41,10 @@
  */
 
 import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import {
+  RADIUS,
   SPACING,
-  FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
   CONSENT_COPY,
   type ScreenState as ScreenStateKind,
   type Theme,
@@ -56,8 +55,11 @@ import {
   type ConsentRowView,
   type ConsentView,
 } from '@kynviora/contracts';
+import { Card } from '@/components/Card';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { SectionHeader } from '@/components/SectionHeader';
+import { Typography } from '@/components/Typography';
 import { useApi } from '@/api/ApiProvider';
 import { useThemedStyles } from '@/theme/ThemeProvider';
 
@@ -141,40 +143,62 @@ export function ConsentSettings({
   );
 
   return (
-    <View style={styles.container}>
-      <Text accessibilityRole="header" style={styles.heading}>
-        {CONSENT_COPY.heading}
-      </Text>
-      <Text style={styles.body}>{CONSENT_COPY.intro}</Text>
+    <>
+      <SectionHeader title={CONSENT_COPY.heading} explanation={CONSENT_COPY.intro} />
 
       {state !== null ? <ScreenState state={state} message={message} /> : null}
-      {saved !== null && state === null ? <Text style={styles.help}>{saved}</Text> : null}
+      {saved !== null && state === null ? (
+        <Typography role="caption" colour="secondary" announce>
+          {saved}
+        </Typography>
+      ) : null}
 
       {view.rows.map((row) => (
-        <View key={row.purpose} style={styles.row}>
-          <Text accessibilityRole="header" style={styles.rowLabel}>
+        <Card key={row.purpose}>
+          <Typography role="title" heading>
             {row.label}
-          </Text>
+          </Typography>
 
-          {/* The chip that tells the two switches that do something from the five that do not.
-              Text, never colour alone (`18`). */}
+          {/* Which of the switches actually does something. Text, never colour alone (`18`). */}
           {row.statusLabel === null ? null : (
-            <Text style={styles.statusLabel}>{row.statusLabel}</Text>
+            <Typography role="label" colour="secondary">
+              {row.statusLabel}
+            </Typography>
           )}
 
-          <Text style={styles.body}>{row.description}</Text>
+          <Typography role="body">{row.description}</Typography>
 
           {/* Above the control. See the module note - this is the sentence that matters most on
-              the notifications row, and it is never under the button. */}
-          <Text style={row.enforcesSomething ? styles.limitation : styles.help}>
-            {row.withdrawalEffect}
-          </Text>
-
-          {row.notYetNote === null ? null : <Text style={styles.help}>{row.notYetNote}</Text>}
-          {row.neverAnsweredNote === null ? null : (
-            <Text style={styles.help}>{row.neverAnsweredNote}</Text>
+              the notifications row, and it is never under the button. A purpose that enforces
+              something gets the informational panel; one that enforces nothing today gets a
+              caption, because the two sentences are different claims and must not look alike. */}
+          {row.enforcesSomething ? (
+            <View style={styles.limitation}>
+              <Typography role="caption" colour="informational">
+                {row.withdrawalEffect}
+              </Typography>
+            </View>
+          ) : (
+            <Typography role="caption" colour="secondary">
+              {row.withdrawalEffect}
+            </Typography>
           )}
-          {row.staleNote === null ? null : <Text style={styles.help}>{row.staleNote}</Text>}
+
+          {row.notYetNote === null ? null : (
+            <Typography role="caption" colour="secondary">
+              {row.notYetNote}
+            </Typography>
+          )}
+          {row.neverAnsweredNote === null ? null : (
+            <Typography role="caption" colour="secondary">
+              {row.neverAnsweredNote}
+            </Typography>
+          )}
+          {row.staleNote === null ? null : (
+            <Typography role="caption" colour="secondary">
+              {row.staleNote}
+            </Typography>
+          )}
 
           {row.actionLabel === null ? null : (
             <PrimaryButton
@@ -188,18 +212,20 @@ export function ConsentSettings({
               }}
             />
           )}
-        </View>
+        </Card>
       ))}
 
       {/* Taking a copy. What it contains and what it leaves out are both said before the control,
           because `16` asks an export to show what will be included and a person checks a copy
           once. */}
-      <View style={styles.block}>
-        <Text accessibilityRole="header" style={styles.subheading}>
+      <Card>
+        <Typography role="title" heading>
           {CONSENT_COPY.exportHeading}
-        </Text>
-        <Text style={styles.body}>{CONSENT_COPY.exportIntro}</Text>
-        <Text style={styles.help}>{CONSENT_COPY.exportOmissionsNote}</Text>
+        </Typography>
+        <Typography role="body">{CONSENT_COPY.exportIntro}</Typography>
+        <Typography role="caption" colour="secondary">
+          {CONSENT_COPY.exportOmissionsNote}
+        </Typography>
 
         {exportState != null && exportState !== 'READY' ? (
           <ScreenState state={exportState} message={exportMessage} />
@@ -208,15 +234,15 @@ export function ConsentSettings({
         {/* Said only where a section actually failed. A standing caveat would train somebody to
             skip the sentence on the run where it matters. */}
         {exportIncomplete === true ? (
-          <Text accessibilityLiveRegion="polite" style={styles.body}>
+          <Typography role="body" announce>
             {CONSENT_COPY.exportIncompleteNote}
-          </Text>
+          </Typography>
         ) : null}
 
         {exportReady === true && exportIncomplete !== true ? (
-          <Text accessibilityLiveRegion="polite" style={styles.body}>
+          <Typography role="body" announce>
             {CONSENT_COPY.exportReadyNote}
-          </Text>
+          </Typography>
         ) : null}
 
         {onExport === undefined ? null : (
@@ -228,81 +254,31 @@ export function ConsentSettings({
             onPress={onExport}
           />
         )}
-      </View>
+      </Card>
 
       {/* No button, because there is still nothing behind one. See the module note. */}
-      <View style={styles.block}>
-        <Text accessibilityRole="header" style={styles.subheading}>
+      <Card>
+        <Typography role="title" heading>
           {CONSENT_COPY.deletionHeading}
-        </Text>
-        <Text style={styles.help}>{CONSENT_COPY.deletionNote}</Text>
-      </View>
-    </View>
+        </Typography>
+        <Typography role="caption" colour="secondary">
+          {CONSENT_COPY.deletionNote}
+        </Typography>
+      </Card>
+    </>
   );
 }
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    container: { gap: SPACING.md },
-    heading: {
-      fontSize: FONT_SIZE.title,
-      fontWeight: '700',
-      color: theme.surface.foreground,
-    },
-    body: {
-      fontSize: FONT_SIZE.body,
-      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surface.foreground,
-    },
-    help: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
-    },
     // The sentence somebody has to read before pressing. `informational` rather than `attention`:
     // withdrawing consent is a right being exercised, not a warning about a medicine, and styling
     // it as an alarm would be friction placed on one side of a choice (`02`).
     limitation: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.informational.foreground,
       backgroundColor: theme.informational.background,
       borderColor: theme.informational.border,
       borderWidth: 1,
-      borderRadius: SPACING.sm,
-      padding: SPACING.sm,
-    },
-    row: {
-      gap: SPACING.xs,
+      borderRadius: RADIUS.md,
       padding: SPACING.md,
-      borderWidth: 1,
-      borderRadius: SPACING.sm,
-      borderColor: theme.surface.border,
-      backgroundColor: theme.surface.background,
-    },
-    // The two sections below the purposes. Same surface as a consent row, because they are the same
-    // kind of thing to the person reading them: something they may do with their own record.
-    block: {
-      gap: SPACING.sm,
-      padding: SPACING.md,
-      borderWidth: 1,
-      borderRadius: SPACING.sm,
-      borderColor: theme.surface.border,
-      backgroundColor: theme.surface.background,
-    },
-    subheading: {
-      fontSize: FONT_SIZE.body,
-      fontWeight: '600',
-      color: theme.surface.foreground,
-    },
-    rowLabel: {
-      fontSize: FONT_SIZE.body,
-      fontWeight: '600',
-      color: theme.surface.foreground,
-    },
-    statusLabel: {
-      fontSize: FONT_SIZE.caption,
-      fontWeight: '600',
-      color: theme.surfaceMuted.foreground,
     },
   });

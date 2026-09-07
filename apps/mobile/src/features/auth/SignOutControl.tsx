@@ -17,20 +17,13 @@
  */
 
 import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import {
-  SPACING,
-  FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
-  SIGN_OUT_COPY,
-  type Theme,
-} from '@kynviora/presentation';
+import { SIGN_OUT_COPY } from '@kynviora/presentation';
+import { Card } from '@/components/Card';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { Typography } from '@/components/Typography';
 import { useAuth } from '@/auth/AuthProvider';
-import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export function SignOutControl() {
-  const styles = useThemedStyles(makeStyles);
   const auth = useAuth();
   const [busy, setBusy] = useState(false);
 
@@ -51,8 +44,13 @@ export function SignOutControl() {
   if (auth.state !== 'SIGNED_IN') return null;
 
   return (
-    <View style={styles.block}>
-      <Text style={styles.hint}>{SIGN_OUT_COPY.hint}</Text>
+    <Card>
+      {/* Above the control, never under it. It is the sentence that says signing out here signs
+          out everywhere and removes the copy of the shelf kept on this phone - which is the part
+          that would otherwise be a surprise (`12`). */}
+      <Typography role="body" colour="secondary">
+        {SIGN_OUT_COPY.hint}
+      </Typography>
       <PrimaryButton
         label={busy ? SIGN_OUT_COPY.working : SIGN_OUT_COPY.label}
         onPress={press}
@@ -60,16 +58,6 @@ export function SignOutControl() {
         variant="secondary"
         disabled={busy}
       />
-    </View>
+    </Card>
   );
 }
-
-const makeStyles = (theme: Theme) =>
-  StyleSheet.create({
-    block: { gap: SPACING.sm, marginTop: SPACING.lg },
-    hint: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
-    },
-  });

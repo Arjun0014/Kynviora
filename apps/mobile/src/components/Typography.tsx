@@ -41,6 +41,18 @@ export interface TypographyProps {
   readonly accessibilityLabel?: string;
   /** Hide from screen readers where the text duplicates something already announced. */
   readonly decorative?: boolean;
+  /**
+   * Announce this text when it appears or changes.
+   *
+   * `polite`, never `assertive`, and the prop has no second value on purpose: `18` requires a
+   * meaningful status change to be announced **without interrupting** what somebody is already
+   * doing, and an assertive region is exactly the interruption. A caller that could ask for one
+   * would eventually.
+   *
+   * For the sentence that reports an outcome - "removed", "kept on this phone", "recorded" - which
+   * a person who is not looking at the screen otherwise never receives.
+   */
+  readonly announce?: boolean;
 }
 
 export function Typography({
@@ -53,6 +65,7 @@ export function Typography({
   style,
   accessibilityLabel,
   decorative = false,
+  announce = false,
 }: TypographyProps) {
   const theme = useTheme();
   const { fontScale } = useWindowDimensions();
@@ -72,6 +85,7 @@ export function Typography({
       {...(decorative
         ? { accessibilityElementsHidden: true, importantForAccessibility: 'no' as const }
         : {})}
+      {...(announce ? { accessibilityLiveRegion: 'polite' as const } : {})}
       {...(numberOfLines === undefined ? {} : { numberOfLines })}
       style={[
         resolved,

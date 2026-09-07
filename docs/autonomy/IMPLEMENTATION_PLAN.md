@@ -73,6 +73,19 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
   dose - and Voice Mode joins the accessibility survey as a fifth sheet at both font scales.
   `DEV-076` records what removing the navigator's duplicate header cost and what it revealed.
 
+- **Carried past the golden path later the same day** (DEC-137 to DEC-143). Safety, Care and You
+  now render through the shared components: the coverage statement is a card at the top rather than
+  a sentence under a list (DEC-138), Care uses `Screen` like the other four destinations and stops
+  nesting a scroll view inside one (DEC-142), and You is sectioned by the five subjects `06` names
+  (DEC-143). The haptic vocabulary finally has an engine behind it (DEC-139), and
+  `userInterfaceStyle` stopped forcing the light theme on every phone (DEC-137, `DEV-077`) - which
+  is the finding worth remembering, because every unit here was correct and the product still had
+  one theme.
+
+  What is still on raw `FONT_SIZE` is the second layer of features: `InviteCaregiver`,
+  `SetUpHousehold`, `HealthContext`, `DeleteAccount`, `PendingQueue`, `ProfileSwitcher`, the
+  reconciliation and review-inbox flows, and the alert detail.
+
 ### 0.4 - Domain contracts and data-classification baseline
 
 - Branded entity IDs across all eight product layers; provenance model with append-only field

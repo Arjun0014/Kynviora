@@ -5586,3 +5586,127 @@ a gradle daemon. Nothing was wrong with the code - the same suite is green with 
 it is the second resource-shaped failure of `npm run verify` this session, after `DEV-072`, and
 both were quiet. A worker that dies takes its file's results with it and the run still prints a
 count.
+
+## 2026-09-07 (later) - A reference Safety screen, and three blockers that were not
+
+### What the session was asked for, and what it found
+
+Carry the design system into Safety, Care and You; close the two Voice Mode parity gaps; close
+DEV-070 if it was genuinely unblocked. All of that happened. What was not expected is that **all
+three of the deviations named in the brief had premises that were simply false**, and checking each
+took one command.
+
+### Safety
+
+The screen is on the shared components now, and one change is the whole point of it.
+
+**The coverage statement moved from under the list to a card above it** (DEC-138). `09` requires it
+to accompany the result, and the old layout satisfied that literally. It did not satisfy it in
+practice: on a shelf of five identical "not enough information" lines the conclusion is formed
+**while scanning**, so a qualification arriving underneath arrives after the thing it qualifies -
+and on a longer shelf it is below the fold, which for a sentence whose whole job is to stop a
+misreading is the same as absent. The design system's own rule is that a limitation never moves
+down a layer, and below the fold is a layer.
+
+**Urgency and evidence sit in their own block, under two questions.** `23` D-005 forbids merging
+them and three chips in a row is how they get merged anyway - a person reads a strip of adjacent
+chips as one compound verdict. They are now in a sunken well under "How soon" and "How well
+established", with a sentence saying neither answers the other, and the block is **absent** rather
+than empty where there is no live alert.
+
+That branch is unreachable on hardware today (`BLK-006` means nothing is publishable), so the
+device scenario has only ever measured the absent half. `SafetyRow.test.tsx` measures the other
+one - twelve tests, including that no node's announcement carries both dimensions, which is what
+would break the moment somebody wrapped the pair in one `accessible` container to tidy up a screen
+reader's output.
+
+The chosen filter also stopped being `informational`, which is the colour a fact about somebody's
+medicine is drawn in. It carries `selection` now - the one hue in this app about the interface.
+
+### The three blockers
+
+**`DEV-070` - haptics.** Recorded as blocked on declaring `android.permission.VIBRATE`, because a
+newly declared permission appears on the Play listing and in the Data-safety form. The permission
+is already declared: the manifest merger report attributes it to the app's own manifest, where
+`expo-notifications`' plugin puts it, and `dumpsys package com.kynviora.app` lists it among the
+requested permissions of the build that was installed at the time. React Native's own `Vibration`
+needed no dependency, no permission and no prebuild (DEC-139).
+
+Android only, and that is the adapter working rather than failing: `Vibration.vibrate()` on iOS
+takes no duration, so every call is the same full-length buzz and a `selection` tick would be that
+buzz on every press of every chip. The engine answers `null` there.
+
+**`DEV-071` - a dose recorded by voice with no signal.** The wiring was small and was never the
+blocker. The question was whether queueing performs a different act from the one confirmed, and the
+answer (DEC-140) is that **a confirmation is for the record, not the transport**. What somebody
+agreed to when they said "record that I took it" is the record being made; whether it travels now
+or in ten minutes is a fact about the phone's radio. So the summary describes the intent and the
+report says what happened - `UTTERANCES.queued`, which already existed and is exactly this
+sentence, spoken instead of "Done." and never as well.
+
+It goes into the identical journal the dose sheet uses: same entity type, same mutation, same key,
+same drain, same `PendingSenders` wire call. Voice adds no sync mechanism.
+
+**`DEV-074` - voice offering a caregiver less than touch.** Worse than the entry said.
+`VoiceProvider` called `capabilitiesFor({ isOwner: owns })` and passed **neither** of the two
+answers the app already had, so a caregiver was offered three read capabilities in every session
+whatever their grant carried. Three tool capabilities were reachable by touch and not by voice.
+
+`GET /v1/profiles/:profileId/capabilities` answers it with `kynviora.has_capability` over the grant
+vocabulary, in one query, returning only what is held (DEC-141). It authorises nothing - every
+route checks again on the session - and it discloses nothing, because a profile the caller cannot
+see answers with an empty list, which is what an empty shelf page already tells them.
+
+The entry proposed a smaller fix: thread the shelf's and the item detail's answers into the
+dispatch context. That was rejected for the reason `PendingSenders` was moved off the screens
+(`DEV-044`) - it makes what an interface may offer depend on which tabs somebody happened to open.
+
+### Two defects found on the way
+
+**`DEV-077` - the dark theme was unreachable from the default appearance setting.** `app.json` still
+carried `"userInterfaceStyle": "light"` from DEC-101, written when there was no `DARK_THEME` at all.
+That is not inert: `expo-system-ui`'s plugin writes it into a string resource and its lifecycle
+listener calls `AppCompatDelegate.setDefaultNightMode(MODE_NIGHT_NO)` on every activity create,
+which forces the `Configuration.uiMode` that `useColorScheme()` reads. So `FOLLOW_SYSTEM` - the
+default - could only ever resolve to light, and the dark theme was reachable only by choosing it
+explicitly.
+
+**Every unit was correct.** `resolveThemeName` is tested and right; the tokens are contrast-tested
+and right; the whole design system is asserted in Node. The one thing that was wrong lived in a
+platform configuration file three layers below any of them, and nothing in this repository could
+have caught it. It was found by reading `app.json` while checking what a rebuild would regenerate.
+
+**`DEV-078` - a refusal reported as "no connection".** Found while wiring `DEV-071`. Adding the
+queue forced the question of which failures may be queued, and the answer - only `OFFLINE`, because
+a refusal replayed by a journal is refused again - showed that the existing single failure branch
+was answering two questions with one sentence. A caregiver whose grant had been revoked was told to
+try again later.
+
+### Care and You
+
+**Care goes through `Screen` like the other four destinations** (DEC-142). It was the one with a
+hand-rolled frame - its own safe area, scroll view, heading and padding - with a **second** scroll
+view nested inside the first, in `CaregiverAccessList`. Two scroll views in the same direction is
+one of them eating the other's gestures, which is the shape of `DEV-046` and is not something any
+test here can see. The stated reason for the exception had expired the same day it was written:
+`Screen` draws a heading, and Care had gained one when the navigator's header was removed.
+
+Care also painted `surface` as its ground, so every card was the same colour as the page behind it.
+
+**A grant is three blocks now**: what they can see, what they can change, and what is not shared.
+They are separately granted (DEC-116) and the third is the one somebody actually came to check - it
+used to be a lowercased caption under a row of grey chips.
+
+**You is sectioned by the five subjects `06` names** (DEC-143), each a heading a screen reader can
+navigate to. The order inside them is unchanged wherever a comment already gave a reason. One thing
+moved for a reason that is a defect fix rather than a preference: the health context sat inside the
+notification-settings guard, so a household whose **notification settings** would not load lost a
+health context that had arrived perfectly well - a partial state rendered as an absence.
+
+### One more channel out of a tool, and why
+
+`ToolResult` gained `utterances`. `spoken` is checked against `composedFrom`, and the caller passes
+the executor's own `spoken` array as `composedFrom` - so a string written in the executor cited
+itself and passed. Every one of them happened to come from the presentation layer and nothing was
+enforcing it. A key cannot cite itself: `gateSpeech` resolves it against `UTTERANCES` and refuses
+one this build does not have.

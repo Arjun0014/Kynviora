@@ -15,83 +15,72 @@
  * The `detail` on each event. It is capability codes, counts and booleans, and turning them into
  * prose here would describe a grant a third time, in different words from the list and the
  * confirmation. An action this build has no sentence for is counted, not guessed at.
+ *
+ * ONE EVENT PER CARD, AND ITS OWN SECTION (DEC-142)
+ * It used to be one bordered box containing a heading, an introduction and every event as two
+ * lines of text - which on a household with any history at all is a wall inside a card, and a card
+ * is supposed to be one idea. Each event is now a card, under a section marker a screen reader can
+ * navigate to directly: "who can read this now" and "what has happened to that" are two questions,
+ * and somebody who came for the second should not have to pass through the first.
  */
 
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import {
   SPACING,
-  FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
   CAREGIVER_COPY,
   REVOCATION_COPY,
   unreadableHistoryNote,
-  type Theme,
 } from '@kynviora/presentation';
 import type { AccessHistoryView } from '@kynviora/contracts';
-import { useThemedStyles } from '@/theme/ThemeProvider';
+import { Card } from '@/components/Card';
+import { SectionHeader } from '@/components/SectionHeader';
+import { Typography } from '@/components/Typography';
 
 export interface AccessHistoryProps {
   readonly history: AccessHistoryView;
 }
 
 export function AccessHistory({ history }: AccessHistoryProps) {
-  const styles = useThemedStyles(makeStyles);
   if (history.lines.length === 0 && history.unreadableCount === 0) return null;
 
   return (
-    <View style={styles.container}>
-      <Text accessibilityRole="header" style={styles.heading}>
-        {CAREGIVER_COPY.auditHeading}
-      </Text>
-      <Text style={styles.intro}>{REVOCATION_COPY.historyIntro}</Text>
+    <>
+      {/* Its own section rather than a heading inside a card: it answers a different question from
+          the list above it - that one is who can read this now, this one is what has happened -
+          and a screen reader navigating by headings should be able to land on the second without
+          passing through the first. */}
+      <SectionHeader
+        title={CAREGIVER_COPY.auditHeading}
+        explanation={REVOCATION_COPY.historyIntro}
+      />
 
       {history.lines.map((line) => (
-        <View key={line.id} style={styles.line}>
-          <Text style={styles.body}>{line.description}</Text>
+        <Card key={line.id}>
+          <Typography role="body">{line.description}</Typography>
           {/* The date only. A time to the second reads as precision about something the owner
               cannot check, and the question here is what happened, not exactly when. */}
-          <Text style={styles.when}>{line.occurredAt.slice(0, 10)}</Text>
-        </View>
+          <Typography role="caption" colour="secondary">
+            {line.occurredAt.slice(0, 10)}
+          </Typography>
+        </Card>
       ))}
 
       {/* Counted, not hidden. Every word comes from the presentation layer: `apps/**` is
           excluded from the test run, so a string defined here is the one kind of user-visible
           copy no scan looks at (trap 39). */}
       {unreadableHistoryNote(history.unreadableCount) === null ? null : (
-        <Text style={styles.body}>{unreadableHistoryNote(history.unreadableCount)}</Text>
+        <View style={styles.note}>
+          <Typography role="body" colour="secondary">
+            {unreadableHistoryNote(history.unreadableCount)}
+          </Typography>
+        </View>
       )}
-    </View>
+    </>
   );
 }
 
-const makeStyles = (theme: Theme) =>
-  StyleSheet.create({
-    container: {
-      gap: SPACING.sm,
-      padding: SPACING.md,
-      borderWidth: 1,
-      borderRadius: SPACING.sm,
-      borderColor: theme.surface.border,
-      backgroundColor: theme.surface.background,
-    },
-    heading: {
-      fontSize: FONT_SIZE.title,
-      fontWeight: '600',
-      color: theme.surface.foreground,
-    },
-    intro: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
-    },
-    line: { gap: SPACING.xxs },
-    body: {
-      fontSize: FONT_SIZE.body,
-      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-      color: theme.surface.foreground,
-    },
-    when: {
-      fontSize: FONT_SIZE.caption,
-      color: theme.surfaceMuted.foreground,
-    },
-  });
+const styles = StyleSheet.create({
+  // Not a card. A card is one idea and this is a qualification on the whole list, so it sits in
+  // the page's own rhythm rather than pretending to be another event.
+  note: { paddingHorizontal: SPACING.xs },
+});

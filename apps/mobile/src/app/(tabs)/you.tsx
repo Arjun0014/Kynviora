@@ -411,10 +411,10 @@ export default function YouScreen() {
         </>
       )}
 
-      <SectionHeader
-        title="Privacy and your data"
-        explanation="What you have agreed to, what is kept, and how to take a copy."
-      />
+      {/* No marker here: `ConsentSettings` draws its own - "What you have agreed to" - and two
+          section headings over one block is a screen reader hearing the same landmark twice. The
+          copy belongs to the presentation layer, where it is scanned; a second heading written
+          here would be the one piece of user-visible text nothing checks (trap 39). */}
       {profilesLoaded && !switcher.isEmpty && !addingPerson ? (
         consentsResource.value === null ? (
           <ResourceState resource={consentsResource} onRetry={reloadConsents} />

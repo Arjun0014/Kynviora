@@ -23,13 +23,20 @@
  * thing the threat model relies on. The one attention-toned line is the accepted-invitation
  * refusal, which is a real correction: the record on screen is not the record carrying the
  * access.
+ *
+ * WHY THE SUBJECT AND THE CONSEQUENCES ARE TWO CARDS (DEC-142)
+ * They are two ideas and a card is one. The first says who this is about and what they can
+ * currently do; the second says what happens when the control below is pressed. Run together in one
+ * box - which is what this was - the person's name, the two capability lists, the timing sentence,
+ * the consequences and the step-up prompt are eleven lines of the same weight, and the one that
+ * surprises people (the token cannot be reissued, so restoring access means a new invitation) is
+ * indistinguishable from the four around it.
  */
 
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import {
+  RADIUS,
   SPACING,
-  FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
   CAREGIVER_COPY,
   REVOCATION_COPY,
   describeRevocation,
@@ -38,8 +45,10 @@ import {
   type Theme,
 } from '@kynviora/presentation';
 import type { RevocationTarget } from '@kynviora/contracts';
+import { Card } from '@/components/Card';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { Typography } from '@/components/Typography';
 import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface RemoveCaregiverAccessProps {
@@ -74,15 +83,15 @@ export function RemoveCaregiverAccess({
 
   if (removed != null) {
     return (
-      <View style={styles.container}>
-        <Text accessibilityRole="header" style={styles.heading}>
+      <Card>
+        <Typography role="title" heading>
           {CAREGIVER_COPY.revokeDone}
-        </Text>
-        <Text accessibilityLiveRegion="polite" style={styles.body}>
+        </Typography>
+        <Typography role="bodyLarge" announce>
           {removed.alreadyRemoved ? REVOCATION_COPY.nothingToRemove : words.immediate}
-        </Text>
+        </Typography>
         <PrimaryButton label={REVOCATION_COPY.doneLabel} onPress={onCancel} />
-      </View>
+      </Card>
     );
   }
 
@@ -90,57 +99,70 @@ export function RemoveCaregiverAccess({
     // Every failure renders as a state, including step-up. The one message shown is the server's
     // own, which `errors.ts` has already made client-safe - never a reason invented here.
     return (
-      <View style={styles.container}>
+      <Card>
         <ScreenState state={state} message={stateMessage} />
         <PrimaryButton label={REVOCATION_COPY.cancelLabel} variant="secondary" onPress={onCancel} />
-      </View>
+      </Card>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Text accessibilityRole="header" style={styles.heading}>
-        {words.heading}
-      </Text>
-      <Text style={styles.name}>{target.displayName}</Text>
+    <>
+      {/* Who this is about, and what they can currently do. */}
+      <Card>
+        <Typography role="title" heading>
+          {words.heading}
+        </Typography>
+        <Typography role="bodyLarge">{target.displayName}</Typography>
 
-      {/* What stops, in the same words the access list and the invitation review used. Three
-          screens describing one grant three ways is how a person ends up unsure what they
-          approved. */}
-      {summary.viewing.length > 0 ? (
-        <>
-          <Text style={styles.label}>{words.seeingHeading}</Text>
-          {summary.viewing.map((line) => (
-            <Text key={line} style={styles.body}>
-              {line}
-            </Text>
-          ))}
-        </>
-      ) : null}
+        {/* What stops, in the same words the access list and the invitation review used. Three
+            screens describing one grant three ways is how a person ends up unsure what they
+            approved. */}
+        {summary.viewing.length === 0 ? null : (
+          <View style={styles.block}>
+            <Typography role="label" colour="secondary" heading>
+              {words.seeingHeading}
+            </Typography>
+            {summary.viewing.map((line) => (
+              <Typography key={line} role="body">
+                {line}
+              </Typography>
+            ))}
+          </View>
+        )}
 
-      {summary.changing.length > 0 ? (
-        <>
-          <Text style={styles.label}>{words.changingHeading}</Text>
-          {summary.changing.map((line) => (
-            <Text key={line} style={styles.body}>
-              {line}
-            </Text>
-          ))}
-        </>
-      ) : null}
+        {summary.changing.length === 0 ? null : (
+          <View style={styles.block}>
+            <Typography role="label" colour="secondary" heading>
+              {words.changingHeading}
+            </Typography>
+            {summary.changing.map((line) => (
+              <Typography key={line} role="body">
+                {line}
+              </Typography>
+            ))}
+          </View>
+        )}
+      </Card>
 
-      {/* When it happens. `15` A2 is the behaviour and this is the sentence that matches it. */}
-      <Text style={styles.body}>{words.immediate}</Text>
+      {/* What pressing the control does. A second card, because it is a second idea - and because
+          the sentence people are surprised by is in here rather than eleventh in a list. */}
+      <Card>
+        {/* When it happens. `15` A2 is the behaviour and this is the sentence that matches it. */}
+        <Typography role="bodyLarge">{words.immediate}</Typography>
 
-      {words.consequences.map((line) => (
-        <Text key={line} style={styles.body}>
-          {line}
-        </Text>
-      ))}
+        {words.consequences.map((line) => (
+          <Typography key={line} role="body" colour="secondary">
+            {line}
+          </Typography>
+        ))}
 
-      {/* `14`: caregiver administration needs re-authentication. The confirmation is the step,
-          and the caller performs it - this component never holds an elevated client. */}
-      <Text style={styles.body}>{CAREGIVER_COPY.stepUpPrompt}</Text>
+        {/* `14`: caregiver administration needs re-authentication. The confirmation is the step,
+            and the caller performs it - this component never holds an elevated client. */}
+        <Typography role="body" colour="secondary">
+          {CAREGIVER_COPY.stepUpPrompt}
+        </Typography>
+      </Card>
 
       <PrimaryButton
         label={words.confirmLabel}
@@ -150,38 +172,18 @@ export function RemoveCaregiverAccess({
         }}
       />
       <PrimaryButton label={REVOCATION_COPY.cancelLabel} variant="secondary" onPress={onCancel} />
-    </View>
+    </>
   );
 }
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    container: {
-      gap: SPACING.md,
+    // The same sunken well the access list draws its three capability blocks in, so a grant looks
+    // like the same object wherever it is described.
+    block: {
+      gap: SPACING.xxs,
       padding: SPACING.md,
-      borderWidth: 1,
-      borderRadius: SPACING.sm,
-      borderColor: theme.surface.border,
-      backgroundColor: theme.surface.background,
-    },
-    heading: {
-      fontSize: FONT_SIZE.title,
-      fontWeight: '600',
-      color: theme.surface.foreground,
-    },
-    name: {
-      fontSize: FONT_SIZE.body,
-      fontWeight: '600',
-      color: theme.surface.foreground,
-    },
-    label: {
-      fontSize: FONT_SIZE.body,
-      fontWeight: '600',
-      color: theme.surface.foreground,
-    },
-    body: {
-      fontSize: FONT_SIZE.body,
-      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.normal,
-      color: theme.surface.foreground,
+      borderRadius: RADIUS.md,
+      backgroundColor: theme.sunken.background,
     },
   });

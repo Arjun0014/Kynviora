@@ -32,22 +32,25 @@
  */
 
 import { useCallback, useState } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { View, TextInput, StyleSheet } from 'react-native';
 import {
-  SPACING,
-  FONT_SIZE,
-  LINE_HEIGHT_MULTIPLIER,
   MIN_TOUCH_TARGET_DP,
+  RADIUS,
+  SPACING,
   QUIET_HOURS_COPY,
   URGENCY_CHANNEL_COPY,
   presentUrgency,
+  typeStyle,
   type ScreenState as ScreenStateKind,
   type Theme,
 } from '@kynviora/presentation';
 import { quietHoursFromClock, type QuietHours } from '@kynviora/domain';
 import type { NotificationPolicyView } from '@kynviora/contracts';
+import { Card } from '@/components/Card';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenState } from '@/components/ScreenState';
+import { SectionHeader } from '@/components/SectionHeader';
+import { Typography } from '@/components/Typography';
 import { useThemedStyles } from '@/theme/ThemeProvider';
 
 export interface DeliveryPolicyProps {
@@ -105,195 +108,184 @@ export function DeliveryPolicy({
   );
 
   return (
-    <View style={styles.container}>
+    <>
       {/* ------------------------------------------------------------------ */}
       {/* What reaches a device. A statement, not a control.                  */}
       {/* ------------------------------------------------------------------ */}
-      <Text accessibilityRole="header" style={styles.heading}>
-        {URGENCY_CHANNEL_COPY.heading}
-      </Text>
-      <Text style={styles.body}>{URGENCY_CHANNEL_COPY.intro}</Text>
+      <SectionHeader
+        title={URGENCY_CHANNEL_COPY.heading}
+        explanation={URGENCY_CHANNEL_COPY.intro}
+      />
 
       {view.urgencyChannels.map((line) => (
-        <View key={line.urgency} style={styles.row}>
+        <Card key={line.urgency}>
           {/* The urgency as a phrase. Never its code beside somebody's medicine (trap 129). */}
-          <Text style={styles.rowLabel}>{presentUrgency(line.urgency).label}</Text>
-          <Text style={styles.body}>{line.channelLabel}</Text>
-          <Text style={styles.help}>{line.channelDescription}</Text>
-        </View>
+          <Typography role="title" heading>
+            {presentUrgency(line.urgency).label}
+          </Typography>
+          <Typography role="body">{line.channelLabel}</Typography>
+          <Typography role="caption" colour="secondary">
+            {line.channelDescription}
+          </Typography>
+        </Card>
       ))}
 
-      <Text style={styles.help}>{URGENCY_CHANNEL_COPY.foreignNote}</Text>
+      <Typography role="caption" colour="secondary">
+        {URGENCY_CHANNEL_COPY.foreignNote}
+      </Typography>
 
       {/* ------------------------------------------------------------------ */}
       {/* Quiet hours.                                                        */}
       {/* ------------------------------------------------------------------ */}
-      <Text accessibilityRole="header" style={styles.heading}>
-        {QUIET_HOURS_COPY.heading}
-      </Text>
-      <Text style={styles.body}>{QUIET_HOURS_COPY.help}</Text>
-      {/* With the heading, not under the controls. See the module note. */}
-      <Text style={styles.exception}>{QUIET_HOURS_COPY.exception}</Text>
+      <SectionHeader title={QUIET_HOURS_COPY.heading} explanation={QUIET_HOURS_COPY.help} />
 
-      <Text style={styles.body}>
-        {view.quietHoursLabel === null ? QUIET_HOURS_COPY.notSet : view.quietHoursLabel}
-      </Text>
+      <Card>
+        {/* With the heading, not under the controls. See the module note. */}
+        <View style={styles.exception}>
+          <Typography role="body" colour="informational">
+            {QUIET_HOURS_COPY.exception}
+          </Typography>
+        </View>
 
-      {/* Said whether or not a window is set. The person who most needs it is the one about to
-          set their first one; the view decides, so no surface can forget (see the module note). */}
-      {view.limitationNote === null ? null : (
-        <Text style={styles.limitation}>{view.limitationNote}</Text>
-      )}
+        <Typography role="bodyLarge">
+          {view.quietHoursLabel === null ? QUIET_HOURS_COPY.notSet : view.quietHoursLabel}
+        </Typography>
 
-      {state !== null ? <ScreenState state={state} message={stateMessage} /> : null}
-      {savedNote === null ? null : <Text style={styles.saved}>{savedNote}</Text>}
+        {/* Said whether or not a window is set. The person who most needs it is the one about to
+            set their first one; the view decides, so no surface can forget (see the module
+            note). */}
+        {view.limitationNote === null ? null : (
+          <Typography role="caption" colour="secondary">
+            {view.limitationNote}
+          </Typography>
+        )}
 
-      {view.mayChangePolicy ? (
-        view.quietHoursUnreadable ? (
-          // The server reported a window whose numbers this build could not read. Offering an
-          // editor prefilled with nothing would clear it the moment somebody pressed save, so the
-          // controls are absent and the label above still shows what is set.
-          <Text style={styles.limitation}>{QUIET_HOURS_COPY.unreadableWindow}</Text>
-        ) : (
-          <>
-            <View style={styles.field}>
-              <Text style={styles.rowLabel}>{QUIET_HOURS_COPY.startLabel}</Text>
-              <Text style={styles.help}>{QUIET_HOURS_COPY.fieldHelp}</Text>
-              <TextInput
-                accessibilityLabel={`${QUIET_HOURS_COPY.startLabel}. ${QUIET_HOURS_COPY.fieldHelp}`}
-                value={start}
-                onChangeText={setStart}
-                autoCorrect={false}
-                autoCapitalize="none"
-                placeholder="22:00"
-                style={[
-                  styles.input,
-                  refusal?.field === 'quietHoursStart' ? styles.inputRefused : null,
-                ]}
-              />
-            </View>
+        {state !== null ? <ScreenState state={state} message={stateMessage} /> : null}
+        {savedNote === null ? null : (
+          <Typography role="body" colour="positive" announce>
+            {savedNote}
+          </Typography>
+        )}
 
-            <View style={styles.field}>
-              <Text style={styles.rowLabel}>{QUIET_HOURS_COPY.endLabel}</Text>
-              <Text style={styles.help}>{QUIET_HOURS_COPY.fieldHelp}</Text>
-              <TextInput
-                accessibilityLabel={`${QUIET_HOURS_COPY.endLabel}. ${QUIET_HOURS_COPY.fieldHelp}`}
-                value={end}
-                onChangeText={setEnd}
-                autoCorrect={false}
-                autoCapitalize="none"
-                placeholder="07:00"
-                style={[
-                  styles.input,
-                  refusal?.field === 'quietHoursEnd' ? styles.inputRefused : null,
-                ]}
-              />
-            </View>
+        {view.mayChangePolicy ? (
+          view.quietHoursUnreadable ? (
+            // The server reported a window whose numbers this build could not read. Offering an
+            // editor prefilled with nothing would clear it the moment somebody pressed save, so
+            // the controls are absent and the label above still shows what is set.
+            <Typography role="caption" colour="secondary">
+              {QUIET_HOURS_COPY.unreadableWindow}
+            </Typography>
+          ) : (
+            <>
+              <View style={styles.field}>
+                <Typography role="label">{QUIET_HOURS_COPY.startLabel}</Typography>
+                <Typography role="caption" colour="secondary">
+                  {QUIET_HOURS_COPY.fieldHelp}
+                </Typography>
+                <TextInput
+                  accessibilityLabel={`${QUIET_HOURS_COPY.startLabel}. ${QUIET_HOURS_COPY.fieldHelp}`}
+                  value={start}
+                  onChangeText={setStart}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  placeholder="22:00"
+                  style={[
+                    styles.input,
+                    refusal?.field === 'quietHoursStart' ? styles.inputRefused : null,
+                  ]}
+                />
+              </View>
 
-            {refusal === null ? null : <Text style={styles.refusal}>{refusal.message}</Text>}
+              <View style={styles.field}>
+                <Typography role="label">{QUIET_HOURS_COPY.endLabel}</Typography>
+                <Typography role="caption" colour="secondary">
+                  {QUIET_HOURS_COPY.fieldHelp}
+                </Typography>
+                <TextInput
+                  accessibilityLabel={`${QUIET_HOURS_COPY.endLabel}. ${QUIET_HOURS_COPY.fieldHelp}`}
+                  value={end}
+                  onChangeText={setEnd}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  placeholder="07:00"
+                  style={[
+                    styles.input,
+                    refusal?.field === 'quietHoursEnd' ? styles.inputRefused : null,
+                  ]}
+                />
+              </View>
 
-            <Text style={styles.help}>{QUIET_HOURS_COPY.stepUpPrompt}</Text>
+              {refusal === null ? null : (
+                <Typography role="body" colour="attention" announce>
+                  {refusal.message}
+                </Typography>
+              )}
 
-            <PrimaryButton
-              label={QUIET_HOURS_COPY.saveLabel}
-              disabled={state === 'LOADING'}
-              onPress={() => {
-                submit(start, end);
-              }}
-            />
+              <Typography role="caption" colour="secondary">
+                {QUIET_HOURS_COPY.stepUpPrompt}
+              </Typography>
 
-            {/* Absent where there is nothing to turn off, rather than a control that does
-                nothing. Clearing is emptying both fields, so it goes through the same path. */}
-            {view.quietHours === null ? null : (
               <PrimaryButton
-                label={QUIET_HOURS_COPY.clearLabel}
-                variant="secondary"
+                label={QUIET_HOURS_COPY.saveLabel}
                 disabled={state === 'LOADING'}
                 onPress={() => {
-                  setStart('');
-                  setEnd('');
-                  submit('', '');
+                  submit(start, end);
                 }}
               />
-            )}
-          </>
-        )
-      ) : (
-        // A caregiver reads the window and changes nothing. Said, rather than left as a screen
-        // with no controls on it - `16`: a setting whose effect its holder cannot see is
-        // indistinguishable from a bug.
-        <Text style={styles.limitation}>{QUIET_HOURS_COPY.ownerOnly}</Text>
-      )}
-    </View>
+
+              {/* Absent where there is nothing to turn off, rather than a control that does
+                nothing. Clearing is emptying both fields, so it goes through the same path. */}
+              {view.quietHours === null ? null : (
+                <PrimaryButton
+                  label={QUIET_HOURS_COPY.clearLabel}
+                  variant="secondary"
+                  disabled={state === 'LOADING'}
+                  onPress={() => {
+                    setStart('');
+                    setEnd('');
+                    submit('', '');
+                  }}
+                />
+              )}
+            </>
+          )
+        ) : (
+          // A caregiver reads the window and changes nothing. Said, rather than left as a screen
+          // with no controls on it - `16`: a setting whose effect its holder cannot see is
+          // indistinguishable from a bug.
+          <Typography role="caption" colour="secondary">
+            {QUIET_HOURS_COPY.ownerOnly}
+          </Typography>
+        )}
+      </Card>
+    </>
   );
 }
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    container: { gap: SPACING.md },
-    heading: {
-      fontSize: FONT_SIZE.title,
-      fontWeight: '700',
-      color: theme.surface.foreground,
-    },
-    body: {
-      fontSize: FONT_SIZE.body,
-      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surface.foreground,
-    },
-    help: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
-    },
     // The one sentence a person must read before relying on quiet hours, given its own weight.
     exception: {
-      fontSize: FONT_SIZE.body,
-      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.informational.foreground,
       backgroundColor: theme.informational.background,
       borderColor: theme.informational.border,
       borderWidth: 1,
-      borderRadius: SPACING.sm,
+      borderRadius: RADIUS.md,
       padding: SPACING.md,
-    },
-    limitation: {
-      fontSize: FONT_SIZE.caption,
-      lineHeight: FONT_SIZE.caption * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.surfaceMuted.foreground,
-    },
-    saved: {
-      fontSize: FONT_SIZE.body,
-      color: theme.positive.foreground,
-    },
-    refusal: {
-      fontSize: FONT_SIZE.body,
-      lineHeight: FONT_SIZE.body * LINE_HEIGHT_MULTIPLIER.relaxed,
-      color: theme.attention.foreground,
-    },
-    row: {
-      gap: 2,
-      padding: SPACING.md,
-      borderWidth: 1,
-      borderRadius: SPACING.sm,
-      borderColor: theme.surface.border,
-      backgroundColor: theme.surface.background,
-    },
-    rowLabel: {
-      fontSize: FONT_SIZE.body,
-      fontWeight: '600',
-      color: theme.surface.foreground,
     },
     field: { gap: SPACING.xs },
+    // A `TextInput` is not `Typography` and cannot be: the text style has to be on the input
+    // itself. The size comes from the same role the label uses, resolved at 1x - React Native
+    // scales the rendered text on top, as it does everywhere else.
     input: {
+      ...typeStyle('body', 1),
       minHeight: MIN_TOUCH_TARGET_DP,
-      paddingHorizontal: SPACING.sm,
+      paddingHorizontal: SPACING.md,
       paddingVertical: SPACING.sm,
       borderWidth: 1,
-      borderRadius: SPACING.sm,
+      borderRadius: RADIUS.md,
       borderColor: theme.surface.border,
-      backgroundColor: theme.surfaceMuted.background,
-      fontSize: FONT_SIZE.body,
+      // A sunken well, like every other inset field in this app.
+      backgroundColor: theme.sunken.background,
       color: theme.surface.foreground,
     },
     // `attention`, not `action`. A mistyped time is something to fix, not a recall.
