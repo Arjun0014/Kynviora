@@ -13,9 +13,9 @@ Last updated: 2026-09-07
 | ------------------ | ----------------------------------------------------------------------- |
 | **Current stage**  | Stage 4 complete; the design layer carried past the golden path         |
 | **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work                  |
-| **Last completed** | A reference Safety screen, and three blockers that turned out not to be |
+| **Last completed** | A reference Safety screen, three blockers that were not, a gate hole    |
 | **Branch**         | `master`                                                                |
-| **Latest commit**  | `feat(design,voice): a reference Safety screen, and three blockers`     |
+| **Latest commit**  | `fix(voice,api): the Speech Gate would say anything named after Obj...` |
 | **Baseline tag**   | `baseline-spec-only`                                                    |
 
 This session carried the design system past the golden path and **closed three deviations whose
@@ -150,9 +150,38 @@ The five destinations are excluded from a sheet's survey. They are drawn over ev
 not part of one, and the leftmost and rightmost tabs cannot pass by construction - their outer
 edges _are_ the screen's, which `isFullyVisible` reads as clipped.
 
-Last run **74/74 PASS** on 2026-09-07, over the redesigned golden path and Voice Mode at both
-scales: every control on all five destinations and on all five sheets reachable, announced and at
-least 48dp. That is the run that says the design work did not cost anything `18` asks for.
+Last run on 2026-09-07, after Safety, Care and You were rebuilt on the design system:
+
+| Part                             | Result                                                   |
+| -------------------------------- | -------------------------------------------------------- |
+| Five destinations, scale 1 and 2 | **30/30 PASS** - the redesign cost nothing `18` asks for |
+| Five sheets, scale 2             | **20/20 PASS** - the run that matters, on a clean stack  |
+
+**Two defects in the survey itself were found and fixed on the way, and both were false reports.**
+
+`DEV-079` was a false **FAIL**: `SHEET-2/Add a medicine@2` reported "Save" as never reachable, and
+`Save` is at y1633 with the tab bar at y2209. The survey ends when a dump matches the previous one,
+`SCROLL_ANCHOR_Y` is a fixed 1900, and at font scale 2 that form is almost entirely tall text
+fields - so the drag began inside an `EditText`, was taken as text selection, and nothing moved. An
+unchanged dump now buys one retry from an anchor no field occupies (DEC-145).
+
+`DEV-080` was a false **INCONCLUSIVE**: `relaunch()` slept a fixed thirty seconds, and a cold start
+at font scale 2 on a loaded emulator takes longer - sixteen seconds gives a hierarchy of nothing but
+frame layouts. It waits on the tab bar now, which its own helper existed for, and reports a failure
+to start as a failure to start.
+
+**The survey can be narrowed now**, which is the third thing that run cost and the one worth
+keeping. A full survey is twenty-two checks over a dozen cold starts; re-running the one check a fix
+was about used to mean re-running all of it, and a survey nobody re-runs after a fix is a survey
+whose red results stop being acted on.
+
+```bash
+KYNVIORA_A11Y_PARTS=sheets KYNVIORA_A11Y_SHEETS="Add a medicine" KYNVIORA_A11Y_SCALES=2 npm run verify:device:a11y
+```
+
+A narrowed run says so under its own report, because "4/4 PASS" over a twentieth of the survey is
+not the same claim as "4/4 PASS" and a reader two weeks later has the report rather than the command
+line. An unrecognised part name is a stop rather than a silent omission.
 
 ```bash
 npm run verify:device:reminders
@@ -280,7 +309,17 @@ of the same name also carries; the coverage statement is on screen; no control o
 alert that does not exist (DEC-045, absent rather than disabled); nothing counts or ranks what needs
 attention (`02`); and a filter matching nothing still says it is showing none of five and still
 carries the coverage statement underneath - which is where somebody would most reasonably conclude
-their shelf had been cleared. Last run **7/7 PASS**.
+their shelf had been cleared. Last run **7/7 PASS**, on the redesigned screen (DEC-138): the
+coverage statement is a card at the top rather than a sentence under the list, and `SAF-3` and
+`SAF-6` are unaffected because `collectScreenText` scrolls the whole screen and neither was ever
+measuring position.
+
+What the device scenario cannot reach is the branch where a line **has** an urgency and an evidence
+level, because `BLK-006` means nothing is publishable - so `SAF-2` and `SAF-4` currently measure the
+absent half of both rules. `apps/mobile/src/features/safety/SafetyRow.test.tsx` measures the other
+half in Node: twelve tests, including that no single announcement carries both dimensions, which is
+what breaks the moment somebody wraps the pair in one `accessible` container to tidy up a screen
+reader's output.
 
 ```bash
 npm run verify:device:doseaccess
@@ -675,8 +714,15 @@ deliver to (`DEV-069`). One mailbox closes all three.
 
 ## Immediate next task
 
-**A mailbox** (`BLK-010`), and it is now the whole of what stands between the fourteenth device
-scenario and every one of its eleven checks passing.
+**Read `DEV-081` first, whatever you do next.** The Speech Gate - the mechanism the whole
+conversational layer rests on - had a hole in it from the day it was written, and it was found by a
+review rather than by anything in this repository. The generalisable rule is DEC-146: **any lookup
+whose key comes from outside this repository must resolve as an own property**, because
+`Object.freeze` does not remove a prototype and `UTTERANCES['toString']` is not `undefined`. Two
+such lookups existed and both are fixed. A third would not be surprising.
+
+**Then a mailbox** (`BLK-010`), which is still the whole of what stands between the fourteenth
+device scenario and every one of its eleven checks passing.
 
 `SIGN-10` is the only one not green, and it is not green because no account can be created through
 the app's own form: the provider refuses the **address**. `kynviora.test` has no MX record, so

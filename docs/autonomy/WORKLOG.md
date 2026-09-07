@@ -5770,3 +5770,98 @@ this app's statement about itself rather than an inference about a server's sile
 `DARK_THEME.canvas.background`, with the appearance setting left at its default. Before today the
 same phone drew `#F7F9FB`, because `app.json` said `light` and Expo turns that into
 `AppCompatDelegate.setDefaultNightMode(MODE_NIGHT_NO)` (`DEV-077`).
+
+### What a review found that nothing in this repository could have
+
+Two read-only reviews of the session's diff, one for correctness and security and one for
+documentation consistency. Between them they found seven things, and the first of them is the most
+important thing in this session.
+
+**`DEV-081` - the Speech Gate would say anything named after a property of `Object.prototype`.**
+
+`gateSpeech` resolved an utterance key by indexing `UTTERANCES` and refusing only on `undefined`.
+**`Object.freeze` does not remove a prototype.** Measured:
+
+```
+toString    => function toString() { [native code] }
+constructor => function Object() { [native code] }
+__proto__   => [object Object]
+nope        => UNDEFINED (refused)
+```
+
+It was reachable rather than theoretical, and that is the part worth carrying. An agent turn of
+kind `SAY` carries `utterance` as a **raw string off a model completion** (`ports.ts`), and
+`VoiceProvider` cast it with `as keyof typeof UTTERANCES` - a cast changes the type and checks
+nothing. A model returning `{ kind: 'SAY', utterance: 'toString' }` had
+`"function toString() { [native code] }"` spoken by the synthesizer and written into the transcript,
+and `findForbiddenClaims` matched none of it.
+
+The harm is bounded: a dozen prototype names, none of them about a medicine. What it broke is the
+**property**, which is the thing that makes the rest of the design defensible. `docs/design/
+VOICE_MODE.md` section 6 says there is "no path, including a jailbroken or prompt-injected one" -
+and there was one, in the resolution step, since the file was written.
+
+`Object.hasOwn` and a `typeof`, `isUtteranceKey` exported so the one place a model supplies a key
+narrows instead of casting, and five tests: four looping the inherited names, one asserting no
+assembled sentence can contain `native code` - the harm rather than the mechanism - and a positive
+control that every real key still passes, because a gate that refused everything would satisfy the
+other four. `FROM_GRANT` in `capabilities.ts` had the same shape over names from a server response;
+it is a `Map` now (DEC-146).
+
+**How it was found is the generalisable part.** Nothing here could have caught it: the gate is
+tested and every test used a real key. The review asked whether the **new** channel could smuggle
+text, established that it could not, and then asked the same question of the path that had been
+there all along.
+
+**`DEV-082` - the capability report answered for a profile its caller could no longer see.** The new
+route's own comment claimed it disclosed nothing. `kynviora.has_capability` short-circuits on
+ownership through `owns_profile`, which filters `deleted_at IS NULL` - and its **caregiver-grant**
+branch does not, while `0025` soft-deletes a profile without revoking the grants hanging off it.
+Measured directly on the caller's own connection after a delete: `held = true`, `visible rows = 0`.
+So a caregiver could distinguish "the owner deleted this profile" from "your access was revoked",
+which nothing else on this surface allows and which `13` makes deliberately unavailable. One
+`WHERE EXISTS` in the same statement, and three tests including that an owner and a stranger now
+get identical answers.
+
+**`DEV-083` - one profile's capabilities could be applied to another.** `useResource` keeps its last
+successful value when a later read fails, which is right for a medicine list and wrong for an
+authorization report: switch person with no signal and the previous profile's grant stands. The
+answer carries the profile it is about now, and a mismatch reads as no answer.
+
+**And the read capabilities stopped being unconditional.** They were added to every caregiver on the
+reasoning that offering a read costs nothing, because row-level security answers an ungranted one
+with an empty page. True - and not the rule the file now claims. A caregiver holding only
+`VIEW_SHELF` was offered `list_medicines` and `describe_alert` and told there was nothing there
+about medicines that exist.
+
+**Two of the harness fixes were themselves defective**, which is the second lesson. `narrowed()`
+called a run full when an unknown part name had silently dropped TalkBack, and `main()` discarded
+`relaunch()`'s answer - so the very failure the new return value exists to report would have been
+surveyed through.
+
+**`DEV-080` - a fixed sleep, and the comment that predicted it.** `relaunch()` slept thirty seconds.
+Measured this session, a cold start at font scale 2 gave a hierarchy of nothing but frame layouts at
+sixteen seconds and content somewhere before forty. Its own comment had named the failure - "a dump
+taken too early reports a screen with no controls" - and then slept for a fixed time anyway.
+`waitForAppReady` already existed for this, and its comment says so. It is also six minutes faster
+over a full survey, which matters for the reason `DEV-079` matters: a survey nobody re-runs after a
+fix is a survey whose red results stop being acted on.
+
+The documentation review found eleven factual errors, including a test count two sessions stale, a
+table saying thirty migrations over a directory holding thirty-one, a planned task this session had
+already done, a byte-identical duplicate of DEC-099, and - worst - `DEV-078`'s "how it resolved"
+describing the draft that was **rejected** rather than what shipped.
+
+### An operational trap worth writing down
+
+Killing a stalled harness with `taskkill //F` orphaned several `tsx watch src/main.ts` processes,
+all contending for `.kynviora-data` - which PGlite opens as a single writer (DEC-037). The next API
+start aborted with `Failed: Aborted()`, which says nothing about why. A stale `postmaster.pid` was
+part of it and removing that was not enough; the store had been killed mid-write and had to be
+recreated, which the dev command does on its own because it migrates and seeds at start.
+
+Two things follow. The abort is silent about its cause, so the first hypothesis is always the wrong
+one - a device run reading a shelf of **zero** items reported a Voice Mode failure that was entirely
+the dead API. And a run that force-kills a process holding a single-writer store should expect to
+recreate it; the store is synthetic and gitignored, and treating it as precious costs more than
+rebuilding it.
