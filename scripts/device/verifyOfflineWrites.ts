@@ -31,7 +31,11 @@
  *
  * WHAT THIS NEEDS
  * The seeded API on `127.0.0.1:3000` (`KYNVIORA_DEV_AUTH=1 KYNVIORA_DEV_SEED=1 npm run dev`), a
- * Metro bundler, and an attached device with the app installed. It repoints `adb reverse tcp:3000`
+ * Metro bundler, and an attached device with the app installed. Run D additionally needs
+ * `EXPO_PUBLIC_DEV_VOICE_SCRIPT=1` and `EXPO_PUBLIC_DEV_VOICE_ITEM_ID=<the seed's first medicine>`
+ * in `apps/mobile/.env.local`, and a Metro restart after adding them - without the second,
+ * `demonstrationScript` leaves the reminder rule out and the run reports `INCONCLUSIVE` naming the
+ * confirmation it never saw (`DEV-095`). It repoints `adb reverse tcp:3000`
  * at its own switch for the duration and puts it back afterwards. It deactivates the schedules it
  * creates, but it is a write scenario against a real database, so it belongs on the development
  * seed and nowhere else.
@@ -44,6 +48,7 @@ import { PACKAGE, adb, isInstalled, sleep } from './adb.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
 import { startApiSwitch, type ApiSwitch } from './apiSwitch.js';
 import { DOSE_COPY } from '@kynviora/presentation';
+import { UTTERANCES } from '@kynviora/agent';
 import {
   committedOnceCheck,
   doseCommittedOnceCheck,
@@ -55,12 +60,16 @@ import {
   processDiedCheck,
   queuedRatherThanFailedCheck,
   scheduleCreates,
+  voiceDrainedOnceCheck,
+  voiceQueuedOnScreenCheck,
 } from './offlineWrites.js';
 import {
   captureFailure,
+  centreOf,
   coldStart as startApp,
   collectScreenText,
   dismissKeyboard,
+  forInputText,
   killApp,
   launch,
   pressHome,
@@ -68,6 +77,8 @@ import {
   screenShowsFailure,
   scrollToAndTap,
   scrollToAndTapBelow,
+  scrollToClickableNamed,
+  tapAt,
   tapNamed,
   typeInto,
 } from './ui.js';
@@ -90,6 +101,23 @@ const RUN_B_TIME = '04:10';
 
 /** The seed's first medicine, by the name its row is headed with. */
 const ITEM_NAME = 'Synthetic Tablet A';
+
+/**
+ * Run D's phrase, and what the scripted agent turns it into.
+ *
+ * `demonstrationScript` maps "remind me at eight" to `create_schedule` at `08:00` - a fixed list
+ * of regular expressions behind `EXPO_PUBLIC_DEV_VOICE_SCRIPT=1` (`DEV-073`), not a model. The
+ * time is the script's rather than this file's on purpose: a harness that chose its own would be
+ * measuring a rule nobody ships.
+ */
+const VOICE_PHRASE = 'remind me at eight';
+const VOICE_TIME = '08:00';
+
+/** The controls, by the names the screen gives them. `verifyVoiceMode.ts` uses the same three. */
+const VOICE_ENTRY = 'Talk to Kynviora';
+const VOICE_FIELD = 'Type what you would say';
+const VOICE_ASK = 'Ask Kynviora';
+const VOICE_CONFIRM = 'Yes, do that';
 
 /**
  * The note Run C writes, carrying this run's own suffix.
@@ -579,6 +607,161 @@ async function runOfflineDose(apiSwitch: ApiSwitch): Promise<readonly Check[]> {
   return checks;
 }
 
+/**
+ * Run D: the same journal, reached by speaking.
+ *
+ * `OFF-1` to `OFF-5` measure the schedule sheet and `OFF-6`/`OFF-7` measure the dose sheet. This
+ * measures the claim DEC-148 actually makes, which neither of them can: that a reminder set by
+ * **voice** with no signal goes into the identical journal, is drained by the identical pass, and
+ * lands as one row.
+ *
+ * WHY IT IS NOT ENOUGH TO TEST THIS IN NODE
+ * `apps/mobile/src/voice` proves the executor hands the right values to a queue it was given, and
+ * `VoiceProvider.test.tsx` proves the queue it is given is `usePendingSync().queue`. Neither runs
+ * a drain, a sender, a process death or a real route - so a voice path that queued correctly into
+ * a journal nothing drained would pass every one of them. That is exactly the shape `DEV-044` was,
+ * and it took a device to find.
+ *
+ * THE TWO CHECKS
+ * `OFF-8` is about the sentence, which is the whole of what Voice Mode's audience gets: "Done." is
+ * a false statement about a reminder that does not exist yet, and the offline sentence is a false
+ * statement in the other direction that has somebody set it twice.
+ *
+ * `OFF-9` is about the row. One create, one key, one active schedule at the minute that was asked
+ * for - because two is a person told twice, at the same minute, to take the same tablet.
+ *
+ * WHY THE PROJECTION IS WARMED FIRST
+ * Voice Mode asks the server what the caller may do (DEC-141) and falls back to the profile list's
+ * `isOwner`, which lives in the encrypted projection. A cold start straight into an unreachable
+ * server has neither, so the agent would be offered nothing and the run would measure a refusal
+ * about capabilities rather than anything about the journal.
+ */
+async function runVoiceOffline(apiSwitch: ApiSwitch): Promise<readonly Check[]> {
+  const inconclusive = (id: string, title: string, detail: string): Check => ({
+    id,
+    title,
+    status: 'INCONCLUSIVE',
+    detail,
+  });
+
+  const QUEUED = 'A reminder set by voice with no signal is kept, and said to be kept';
+  const ARRIVES = 'The reminder set by voice is sent on the first launch, and lands once';
+
+  await deactivateAll();
+
+  // `activeTimes`, never the raw times. `0004` grants the app role no DELETE on this table, so
+  // every schedule any run ever created is still there - `deactivateAll` turns them off and cannot
+  // remove them. Counting the deactivated ones would trip this precondition on the second run of
+  // the day and would let `OFF-9` report two reminders where there is one.
+  const before = await serverSchedules();
+  if (before === null || activeTimes(before).includes(VOICE_TIME)) {
+    const detail =
+      before === null
+        ? `The API on 127.0.0.1:${String(API_PORT)} could not be read before the run started.`
+        : `The medicine already has an active schedule at ${VOICE_TIME}, so "exactly one" would ` +
+          'have been true before the phone did anything.';
+    return [inconclusive('OFF-8', QUEUED, detail), inconclusive('OFF-9', ARRIVES, detail)];
+  }
+
+  // Online first, so the profile list and the shelf are in the projection and the agent is offered
+  // what an owner holds rather than nothing.
+  apiSwitch.setMode('pass');
+  apiSwitch.clear();
+  if (!coldStart()) {
+    const detail = 'The app did not start, so nothing below was driven (trap 195).';
+    return [inconclusive('OFF-8', QUEUED, detail), inconclusive('OFF-9', ARRIVES, detail)];
+  }
+  sleep(8_000);
+
+  process.stdout.write('Run D: opening Voice Mode...\n');
+  if (!scrollToAndTap(VOICE_ENTRY)) {
+    const evidence = captureFailure('offline-open-voice-mode');
+    const detail = `Voice Mode could not be opened (see ${evidence.join(', ')}).`;
+    return [inconclusive('OFF-8', QUEUED, detail), inconclusive('OFF-9', ARRIVES, detail)];
+  }
+  sleep(6_000);
+
+  process.stdout.write('Run D: cutting the connection and asking for a reminder...\n');
+  apiSwitch.setMode('offline');
+  apiSwitch.clear();
+
+  // The field is the **clickable** node: its own visible label carries the same words, and tapping
+  // that types into nothing (`verifyVoiceMode.ts` has the long version of this).
+  const field = scrollToClickableNamed(VOICE_FIELD);
+  if (field === null) {
+    const evidence = captureFailure('offline-voice-field');
+    const detail = `The "${VOICE_FIELD}" field was never reachable (see ${evidence.join(', ')}).`;
+    return [inconclusive('OFF-8', QUEUED, detail), inconclusive('OFF-9', ARRIVES, detail)];
+  }
+  tapAt(centreOf(field));
+  sleep(1_500);
+  adb(['shell', 'input', 'text', forInputText(VOICE_PHRASE)]);
+  sleep(1_500);
+  dismissKeyboard();
+
+  if (!scrollToAndTap(VOICE_ASK)) {
+    const evidence = captureFailure('offline-voice-ask');
+    const detail = `"${VOICE_ASK}" could not be pressed (see ${evidence.join(', ')}).`;
+    return [inconclusive('OFF-8', QUEUED, detail), inconclusive('OFF-9', ARRIVES, detail)];
+  }
+  sleep(6_000);
+
+  // `create_schedule` is `EXPLICIT`, so nothing has been attempted until this is pressed - which
+  // is the property `VOICE-5` measures and this run depends on.
+  if (!scrollToAndTap(VOICE_CONFIRM)) {
+    const evidence = captureFailure('offline-voice-confirm');
+    const detail =
+      `The confirmation "${VOICE_CONFIRM}" was never offered or could not be pressed, so no ` +
+      `write was proposed (see ${evidence.join(', ')}).`;
+    return [inconclusive('OFF-8', QUEUED, detail), inconclusive('OFF-9', ARRIVES, detail)];
+  }
+  sleep(12_000);
+
+  const transcript = collectScreenText(8);
+  const duringOffline = apiSwitch.seen();
+  const afterSave = await serverSchedules();
+
+  const checks: Check[] = [];
+  checks.push(
+    voiceQueuedOnScreenCheck({
+      transcript,
+      queuedSentence: UTTERANCES.queued,
+      doneSentence: UTTERANCES.done,
+      offlineSentence: UTTERANCES.offline,
+      requestsWhileOffline: duringOffline,
+      activeAfterSave: activeTimes(afterSave).filter((time) => time === VOICE_TIME).length,
+    }),
+  );
+
+  process.stdout.write('Run D: killing the process and reconnecting...\n');
+  // HOME first: Android will not kill a foreground process at all, and a run that asked for a
+  // death it did not get reports a journal surviving something that never happened (trap 182).
+  pressHome();
+  sleep(2_000);
+  killApp();
+  apiSwitch.setMode('pass');
+  apiSwitch.clear();
+  launch();
+  sleep(55_000);
+
+  const drained = apiSwitch.seen();
+  const settled = await serverSchedules();
+  checks.push(
+    settled === null
+      ? inconclusive(
+          'OFF-9',
+          ARRIVES,
+          `The API on 127.0.0.1:${String(API_PORT)} could not be read after the relaunch.`,
+        )
+      : voiceDrainedOnceCheck({
+          requestsOnFirstLaunch: drained,
+          activeTimesAfter: activeTimes(settled),
+          expectedTime: VOICE_TIME,
+        }),
+  );
+  return checks;
+}
+
 async function main(): Promise<void> {
   if (!isInstalled()) {
     process.stdout.write(
@@ -613,6 +796,7 @@ async function main(): Promise<void> {
     checks.push(...(await runOffline(apiSwitch)));
     checks.push(...(await runLostAnswer(apiSwitch)));
     checks.push(...(await runOfflineDose(apiSwitch)));
+    checks.push(...(await runVoiceOffline(apiSwitch)));
   } finally {
     await deactivateAll();
     apiSwitch.setMode('pass');

@@ -764,3 +764,34 @@ export function captureFailure(label: string, directory = 'scratchpad'): readonl
 
   return written;
 }
+
+/**
+ * Scroll downward until the **clickable** node with this name is on screen, and return it.
+ *
+ * Written once here rather than in each harness that needs it, because the reason it exists is a
+ * trap rather than a convenience. `scrollTo` returns the first node matching the name and prefers
+ * a clickable one **within the dump it happens to be looking at** - so on a long screen where a
+ * field's own visible label is a strip at the foot of the viewport and the field itself is another
+ * screen below, `scrollTo` returns the label, stops, and every later step operates on a piece of
+ * text. Typing then goes nowhere and the run reports a silent refusal.
+ *
+ * Hiding the label from a screen reader is the right fix for a person and no fix at all here:
+ * `uiautomator` dumps the view hierarchy rather than the accessibility tree, so a node marked
+ * `importantForAccessibility="no"` is still in it with its text.
+ *
+ * Scrolls from wherever the screen is rather than returning to the top, because every caller so
+ * far wants the last thing on a growing page and starting at the top costs a swipe per use.
+ */
+export function scrollToClickableNamed(name: string, maxSwipes = 20): UiNode | null {
+  for (let step = 0; step <= maxSwipes; step += 1) {
+    const nodes = currentNodes();
+    const found =
+      nodes?.find(
+        (node) => node.packageName === PACKAGE && node.clickable && accessibleNameOf(node) === name,
+      ) ?? null;
+    if (found !== null) return found;
+    scrollDown();
+    sleep(900);
+  }
+  return null;
+}

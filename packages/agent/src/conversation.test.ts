@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createScriptedAgent, demonstrationScript } from './scriptedAgent.js';
+import { createScriptedAgent, demonstrationScript, type ScriptedRule } from './scriptedAgent.js';
 import { checkCall, dispatch, type DispatchContext, type ToolExecutor } from './dispatcher.js';
 import { emptySession, reduce, type PendingProposal, type VoiceSession } from './session.js';
 import { gateSpeech, UTTERANCES, type SpeechPart } from './speech.js';
@@ -329,5 +329,80 @@ describe('the transcript', () => {
       'KYNVIORA',
     ]);
     expect(second.session.transcript[1]?.text).toBe(SHELF_LINE);
+  });
+});
+
+/**
+ * The identifiers the demonstration script needs, and what it does without them.
+ *
+ * Spec references: `19` (a device scenario measures what only a device can show), `17`, DEC-136,
+ * `DEV-073`, `DEV-095`.
+ *
+ * WHY THIS IS WORTH A TEST IN A FILE ABOUT A FAKE
+ * The script is a development affordance and its failure mode was not. `resolveVoiceProviders`
+ * passed `null` for the item, `demonstrationScript` turned that into `''`, and `validateArguments`
+ * refuses an empty required string - so every item-scoped rule was refused as `INVALID_ARGUMENTS`
+ * and the shell spoke "I cannot do that by voice."
+ *
+ * That is a sentence about a capability, said about a capability that works. A device harness
+ * reading it cannot tell a refused proposal from a malformed one, and none of
+ * `verify:device:voice`'s nine checks drives an item-scoped tool that has to succeed - so nothing
+ * noticed until a run tried to set a reminder and was told voice could not (`DEV-095`).
+ */
+describe('a script with identifiers it does not have', () => {
+  const named = (rules: readonly ScriptedRule[]): readonly string[] =>
+    rules.flatMap((rule) => (rule.then.kind === 'CALL' ? [rule.then.name] : []));
+
+  it('leaves out every rule whose identifier is missing, rather than emitting an empty one', () => {
+    const withoutItem = named(demonstrationScript(PROFILE, null));
+    // The four that need one. `delete_item` is `TOUCH_ONLY` and would be refused a gate earlier,
+    // which is exactly why it must not be here either: a refusal for the wrong reason reads as the
+    // right one.
+    for (const name of [
+      'explain_what_is_missing',
+      'record_dose',
+      'create_schedule',
+      'delete_item',
+    ]) {
+      expect(withoutItem, `${name} was offered with no item`).not.toContain(name);
+    }
+    // And the profile-scoped ones are untouched, so this is a filter rather than a collapse.
+    expect(withoutItem).toContain('list_medicines');
+    expect(withoutItem).toContain('start_package_capture');
+  });
+
+  it('leaves out the profile-scoped rules when there is no profile', () => {
+    const withoutProfile = named(demonstrationScript(null, ITEM));
+    expect(withoutProfile).not.toContain('list_medicines');
+    expect(withoutProfile).not.toContain('start_package_capture');
+    expect(withoutProfile).toContain('record_dose');
+  });
+
+  it('never emits an empty string argument, whatever it was given', () => {
+    // The property rather than the list: a rule added later with a new identifier is covered.
+    for (const [profile, item] of [
+      [PROFILE, ITEM],
+      [PROFILE, null],
+      [null, ITEM],
+      [null, null],
+    ] as const) {
+      for (const rule of demonstrationScript(profile, item)) {
+        if (rule.then.kind !== 'CALL') continue;
+        for (const [key, value] of Object.entries(rule.then.arguments)) {
+          expect(
+            typeof value === 'string' ? value.trim() : 'ok',
+            `${rule.then.name}.${key}`,
+          ).not.toBe('');
+        }
+      }
+    }
+  });
+
+  it('keeps the answers, which need no identifier at all', () => {
+    // `yes` and `no` are how a confirmation is released, so a script stripped of everything else
+    // must still be able to answer one.
+    const bare = demonstrationScript(null, null);
+    expect(bare.some((rule) => rule.then.kind === 'CONFIRM')).toBe(true);
+    expect(bare.some((rule) => rule.then.kind === 'CANCEL')).toBe(true);
   });
 });

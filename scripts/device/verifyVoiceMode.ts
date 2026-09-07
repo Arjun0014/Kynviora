@@ -16,7 +16,11 @@
  * looking at them.
  *
  * WHAT IT NEEDS, AND WHY THE FLAG IS NOT A CHEAT
- * `EXPO_PUBLIC_DEV_VOICE_SCRIPT=1` in `apps/mobile/.env.local`. With no speech provider
+ * `EXPO_PUBLIC_DEV_VOICE_SCRIPT=1` and `EXPO_PUBLIC_DEV_VOICE_ITEM_ID=<the seed's first medicine>`
+ * in `apps/mobile/.env.local`. The second is not optional and its absence is silent: without it
+ * `demonstrationScript` leaves out every item-scoped rule, so a harness asking for a dose or a
+ * reminder gets "I did not catch that" and reads it as the app refusing (`DEV-095`). With no
+ * speech provider
  * (`BLK-012`) the app understands nothing, so the only thing a device could otherwise show is that
  * a screen renders. The flag installs `createScriptedAgent` - a list of regular expressions, named
  * for what it is - which turns a typed sentence into a proposal. **Every proposal it makes goes
@@ -41,12 +45,13 @@ import { formatReport, overallStatus, type Check } from './analysis.js';
 import { accessibleNameOf, isInteractiveTarget, sizeInDp, type UiNode } from './accessibility.js';
 import {
   centreOf,
+  coldStart,
   collectScreenText,
   currentNodes,
   dismissKeyboard,
   forInputText,
   prepareDeviceForDriving,
-  scrollDown,
+  scrollToClickableNamed,
   scrollTo,
   tapAt,
   waitForNamed,
@@ -85,10 +90,24 @@ function establishTunnels(): boolean {
   return listed.includes('tcp:3000') && listed.includes('tcp:8081');
 }
 
-function relaunch(): void {
-  adb(['shell', 'am', 'force-stop', PACKAGE]);
-  adb(['shell', 'am', 'start', '-n', `${PACKAGE}/.MainActivity`]);
-  sleep(30_000);
+/**
+ * Start the app from dead and wait until it is actually drawing.
+ *
+ * `coldStart` rather than a fixed sleep, and this is `DEV-080` arriving on a second harness. It
+ * slept thirty seconds; a cold start behind Metro takes anywhere between fifteen and fifty
+ * depending on whether the bundle is cached, so on a freshly booted emulator with a first-time
+ * bundle the reads that follow were taken off an app that had not drawn yet. `VOICE-1` then
+ * reported the way into Voice Mode as **missing from Today, Shelf and Safety** on a build where it
+ * is on all five - the three it happened to try first, before the app finished starting. The same
+ * run passed on Care and You, which is what made it look like a property of those screens
+ * (`DEV-094`).
+ *
+ * `false` means the app did not start twice running, and every caller says so rather than
+ * describing what a screen did - a launch that did not happen must never be reported as a finding
+ * about the app (trap 195, DEC-102).
+ */
+function relaunch(): boolean {
+  return coldStart('voice');
 }
 
 function pressNamed(name: string): boolean {
@@ -200,44 +219,6 @@ function confirmationCard(): {
 }
 
 /**
- * The clickable node with this name, on the screen as it is now.
- *
- * A label and the field it names carry the same words, and only one of them can be typed into.
- */
-function clickableNamed(name: string): UiNode | null {
-  const nodes = currentNodes();
-  if (nodes === null) return null;
-  return (
-    nodes.find(
-      (node) => node.packageName === PACKAGE && node.clickable && accessibleNameOf(node) === name,
-    ) ?? null
-  );
-}
-
-/**
- * Scroll downward until the **clickable** node with this name is on screen.
- *
- * `scrollTo` cannot be used for the field, and the reason is worth writing down. It returns the
- * first node matching the name, preferring a clickable one **within the dump it happens to be
- * looking at** - and at the top of a long conversation the field's own label is visible as a strip
- * at the foot of the viewport while the field itself is another screen below. So `scrollTo`
- * returned the label, stopped, and every later step operated on a piece of text.
- *
- * Scrolling from wherever it is rather than returning to the top: the field is the last thing on
- * this screen, so downward is always the right direction and starting at the top costs a swipe per
- * exchange for nothing.
- */
-function scrollToClickable(name: string, maxSwipes = 20): UiNode | null {
-  for (let step = 0; step <= maxSwipes; step += 1) {
-    const found = clickableNamed(name);
-    if (found !== null) return found;
-    scrollDown();
-    sleep(900);
-  }
-  return null;
-}
-
-/**
  * Ask something, and report what the screen said back.
  *
  * The field is **scrolled to** rather than assumed on screen. It is the last thing on the page and
@@ -255,7 +236,7 @@ function ask(said: string): Exchange {
   // `uiautomator` dumps the view hierarchy rather than the accessibility tree, so a node marked
   // `importantForAccessibility="no"` is still in it with its text. The field is the **clickable**
   // one of the two, which is what `clickableNamed` picks.
-  const field = scrollToClickable(FIELD);
+  const field = scrollToClickableNamed(FIELD);
   if (field === null) return { said, transcript: [], summary: null };
   tapAt(centreOf(field));
   sleep(1_500);
@@ -340,7 +321,19 @@ async function run(): Promise<readonly Check[]> {
 
   step('looking for the way in, on each destination');
   const positions = new Map<string, number | null>();
-  relaunch();
+  if (!relaunch()) {
+    return [
+      ...checks,
+      {
+        id: 'VOICE-1',
+        title: 'The way in is on every destination',
+        status: 'INCONCLUSIVE',
+        detail:
+          'The app did not start, so no destination was read. Every check below depends on this ' +
+          'one having been driven.',
+      },
+    ];
+  }
   for (const tab of TABS) {
     if (!openTab(tab)) {
       positions.set(tab, null);
@@ -351,8 +344,7 @@ async function run(): Promise<readonly Check[]> {
   checks.push(entryControlCheck(positions, [...TABS]));
 
   step('opening Voice Mode');
-  relaunch();
-  if (!pressNamed(ENTRY)) {
+  if (!relaunch() || !pressNamed(ENTRY)) {
     checks.push({
       id: 'VOICE-2',
       title: 'The state is said in a word, not only drawn',

@@ -145,9 +145,9 @@ export function VoiceProvider({
       resolveVoiceProviders(
         {
           EXPO_PUBLIC_DEV_VOICE_SCRIPT: process.env.EXPO_PUBLIC_DEV_VOICE_SCRIPT,
+          EXPO_PUBLIC_DEV_VOICE_ITEM_ID: process.env.EXPO_PUBLIC_DEV_VOICE_ITEM_ID,
         },
         activeProfileId,
-        null,
       ),
     [providers, activeProfileId],
   );

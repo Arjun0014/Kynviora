@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { DOSE_COPY } from '@kynviora/presentation';
+import { UTTERANCES } from '@kynviora/agent';
 import {
   committedOnceCheck,
   doseCommittedOnceCheck,
@@ -22,6 +23,8 @@ import {
   processDiedCheck,
   queuedRatherThanFailedCheck,
   scheduleCreates,
+  voiceDrainedOnceCheck,
+  voiceQueuedOnScreenCheck,
   type ObservedRequest,
 } from './offlineWrites.js';
 
@@ -384,5 +387,202 @@ describe('OFF-7, a dose whose answer was lost', () => {
       note: 'offline dose QQ1',
     });
     expect(check.status).toBe('INCONCLUSIVE');
+  });
+});
+
+describe('OFF-8, what a person hears when a reminder is kept rather than set', () => {
+  const sentences = {
+    queuedSentence: UTTERANCES.queued,
+    doneSentence: UTTERANCES.done,
+    offlineSentence: UTTERANCES.offline,
+  };
+
+  /** A screen line as `VoiceScreen` announces one of Kynviora's turns. */
+  const said = (text: string): string => `Kynviora said. ${text}`;
+
+  /**
+   * The screen's own idle hint, verbatim.
+   *
+   * It ends "or press Done." and it is on screen after every exchange, so a check that searched
+   * everything for `Done.` found it whatever happened. That is what this file's first version did
+   * and it turned a passing run red (trap 209).
+   */
+  const IDLE_HINT = 'Ask Kynviora something, or press Done.';
+
+  it('passes when the transcript says it is kept here and will be sent', () => {
+    const check = voiceQueuedOnScreenCheck({
+      transcript: [said(UTTERANCES.queued)],
+      ...sentences,
+      requestsWhileOffline: [],
+      activeAfterSave: 0,
+    });
+    expect(check.status).toBe('PASS');
+  });
+
+  it('fails on "Done.", which is the sentence a person acts on', () => {
+    // The failure `DEV-085` and `DEV-090` are two halves of. Checked before everything else,
+    // because it is the one that stops somebody thinking about a reminder that does not exist.
+    const check = voiceQueuedOnScreenCheck({
+      transcript: [said(UTTERANCES.done)],
+      ...sentences,
+      requestsWhileOffline: [],
+      activeAfterSave: 0,
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('nothing at all');
+  });
+
+  it('fails when it says only that there is no connection', () => {
+    // The mirror failure. The phone did keep it, and a person told otherwise sets it again - so
+    // the journal sends both and they are reminded twice.
+    const check = voiceQueuedOnScreenCheck({
+      transcript: [said(UTTERANCES.offline)],
+      ...sentences,
+      requestsWhileOffline: [],
+      activeAfterSave: 0,
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('set it again');
+  });
+
+  it('fails when the transcript says nothing about it at all', () => {
+    const check = voiceQueuedOnScreenCheck({
+      transcript: [said('Something else entirely.')],
+      ...sentences,
+      requestsWhileOffline: [],
+      activeAfterSave: 0,
+    });
+    expect(check.status).toBe('FAIL');
+  });
+
+  it('is inconclusive when a request reached the server it was supposed not to', () => {
+    // Not a failure: the app was never offline, so nothing here measured what it claims to
+    // (DEC-102). Reporting it as a defect would send somebody looking at the app.
+    const check = voiceQueuedOnScreenCheck({
+      transcript: [said(UTTERANCES.queued)],
+      ...sentences,
+      requestsWhileOffline: [create()],
+      activeAfterSave: 0,
+    });
+    expect(check.status).toBe('INCONCLUSIVE');
+    expect(check.detail).toContain('never offline');
+  });
+
+  it('fails when the server gained a schedule while it was unreachable', () => {
+    const check = voiceQueuedOnScreenCheck({
+      transcript: [said(UTTERANCES.queued)],
+      ...sentences,
+      requestsWhileOffline: [],
+      activeAfterSave: 1,
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('cannot have happened');
+  });
+
+  it('is inconclusive when the transcript could not be read', () => {
+    expect(
+      voiceQueuedOnScreenCheck({
+        transcript: null,
+        ...sentences,
+        requestsWhileOffline: [],
+        activeAfterSave: 0,
+      }).status,
+    ).toBe('INCONCLUSIVE');
+  });
+
+  /**
+   * The screen's own words are not Kynviora's, and this check cost a device run to learn it.
+   *
+   * `OFF-8` failed on a run where `OFF-9` had just proved the same reminder queued and arrived,
+   * because the idle hint on the screen ends "or press Done." and the check searched everything on
+   * screen. Trap 193 in a second place: compare the whole announcement, which only a transcript
+   * line carries.
+   */
+  it('does not read the screen’s own hint as something Kynviora said', () => {
+    const check = voiceQueuedOnScreenCheck({
+      transcript: [IDLE_HINT, 'Ready', said(UTTERANCES.queued), 'Done'],
+      ...sentences,
+      requestsWhileOffline: [],
+      activeAfterSave: 0,
+    });
+    expect(check.status).toBe('PASS');
+  });
+
+  it('still catches "Done." when Kynviora is the one who said it', () => {
+    // The other direction, so narrowing to the transcript has not made the check unable to fail.
+    const check = voiceQueuedOnScreenCheck({
+      transcript: [IDLE_HINT, said(UTTERANCES.done)],
+      ...sentences,
+      requestsWhileOffline: [],
+      activeAfterSave: 0,
+    });
+    expect(check.status).toBe('FAIL');
+  });
+
+  it('is inconclusive when the screen carried nothing Kynviora had said', () => {
+    // A screen full of controls and no transcript is a run that did not happen, not a passing one.
+    const check = voiceQueuedOnScreenCheck({
+      transcript: [IDLE_HINT, 'Ready', 'Ask Kynviora'],
+      ...sentences,
+      requestsWhileOffline: [],
+      activeAfterSave: 0,
+    });
+    expect(check.status).toBe('INCONCLUSIVE');
+  });
+});
+
+describe('OFF-9, the reminder set by voice arriving once', () => {
+  it('passes on one create under one key leaving one active time', () => {
+    const check = voiceDrainedOnceCheck({
+      requestsOnFirstLaunch: [create()],
+      activeTimesAfter: ['08:00'],
+      expectedTime: '08:00',
+    });
+    expect(check.status).toBe('PASS');
+    expect(check.detail).toContain('same pass');
+  });
+
+  it('fails when nothing was sent on the launch that followed the kill', () => {
+    // The change is in the journal and the person has already been told it was kept, which is the
+    // asymmetry that makes this worse than a plain failure to save.
+    const check = voiceDrainedOnceCheck({
+      requestsOnFirstLaunch: [read],
+      activeTimesAfter: [],
+      expectedTime: '08:00',
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('told it was kept');
+  });
+
+  it('fails a replay sent under a fresh key', () => {
+    const check = voiceDrainedOnceCheck({
+      requestsOnFirstLaunch: [create(), create({ key: 'cccccccc-0000-4000-8000-000000000002' })],
+      activeTimesAfter: ['08:00', '08:00'],
+      expectedTime: '08:00',
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('not an idempotency key');
+  });
+
+  it('fails when the create went out and the server does not have the time', () => {
+    const check = voiceDrainedOnceCheck({
+      requestsOnFirstLaunch: [create()],
+      activeTimesAfter: ['20:00'],
+      expectedTime: '08:00',
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('does not have 08:00 active');
+  });
+
+  it('fails on two active schedules at the same minute', () => {
+    // One request, two reminders. The shape a duplicate produces on this table, and the reason
+    // the count is here rather than a presence test.
+    const check = voiceDrainedOnceCheck({
+      requestsOnFirstLaunch: [create()],
+      activeTimesAfter: ['08:00', '08:00'],
+      expectedTime: '08:00',
+    });
+    expect(check.status).toBe('FAIL');
+    expect(check.detail).toContain('One request, two reminders');
   });
 });

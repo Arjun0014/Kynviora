@@ -595,3 +595,236 @@ export function doseCommittedOnceCheck(evidence: DoseReplayEvidence): Check {
       `event noted ${JSON.stringify(evidence.note)} exists.`,
   };
 }
+
+// ---------------------------------------------------------------------------
+// OFF-8 and OFF-9 - the same journal, reached by voice
+// ---------------------------------------------------------------------------
+
+/**
+ * What a transcript entry of Kynviora's is called, so its text can be told from the screen's.
+ *
+ * `VoiceScreen` announces each entry as `Kynviora said. <text>`, and the prefix is the whole point:
+ * a screen carries sentences nobody spoke. The idle state's own hint is
+ * "Ask Kynviora something, or press Done." - which contains `Done.` - so a check that searched
+ * everything on screen for the sentence the shell speaks when a tool says nothing found it on
+ * **every** run, whatever happened, and reported the one thing this check exists to catch.
+ *
+ * It did. `OFF-8` failed on a run where `OFF-9` had just proved the reminder queued and arrived,
+ * which is the pair that made it obvious. This is trap 193 in a second place: compare the whole
+ * announcement, which only a transcript line carries.
+ */
+const SAID_BY_KYNVIORA = 'Kynviora said. ';
+
+export interface VoiceQueuedEvidence {
+  /**
+   * Everything on screen after the confirmation, or `null` if it could not be read.
+   *
+   * The whole screen rather than the transcript, because the whole screen is what a harness can
+   * collect - and narrowing it to what Kynviora said is a rule, which belongs here where it is
+   * tested rather than in the driver where it is not.
+   */
+  readonly transcript: readonly string[] | null;
+  /** What the app says when it has kept a change here. `UTTERANCES.queued`. */
+  readonly queuedSentence: string;
+  /** What it says when a tool answered with nothing at all. `UTTERANCES.done`. */
+  readonly doneSentence: string;
+  /** What it says when the server could not be asked and nothing was kept. `UTTERANCES.offline`. */
+  readonly offlineSentence: string;
+  /** Requests that reached the API while it was supposed to be unreachable. */
+  readonly requestsWhileOffline: readonly ObservedRequest[];
+  /** Schedules the server has active on the medicine after the confirmation. */
+  readonly activeAfterSave: number;
+}
+
+/**
+ * A schedule set by voice with no signal is kept here, and said to be kept.
+ *
+ * WHY THIS IS A SEPARATE CHECK FROM `OFF-1`
+ * `OFF-1` measures the schedule sheet, which draws a screen state; this measures a **sentence
+ * somebody hears**, which is the only thing Voice Mode's audience gets. `01` names an older adult
+ * first and `18` builds on that: a person who is not looking at the screen has nothing to go back
+ * to, so the words are the whole of what they are told and there is no later moment at which a
+ * wrong one is corrected.
+ *
+ * THE THREE WRONG ANSWERS, AND WHY THE FIRST IS THE ONE TO LOOK FOR
+ * **"Done."** is the failure `DEV-085` and `DEV-090` are two halves of. The shell speaks it when a
+ * tool answers with nothing at all, which is right for a write that succeeded quietly and is a
+ * false statement about one that did not happen. It is checked first and by exact sentence,
+ * because it is the one a person acts on: they stop thinking about a reminder that does not exist.
+ *
+ * **The offline sentence** promises nothing, which is honest and is the wrong half here - the
+ * phone did keep it, and telling somebody it did not is the mirror failure: they set it again.
+ *
+ * **A request reaching the server** means the run never measured what it thinks it did, which is
+ * an inconclusive rather than a failure (DEC-102).
+ */
+export function voiceQueuedOnScreenCheck(evidence: VoiceQueuedEvidence): Check {
+  const id = 'OFF-8';
+  const title = 'A reminder set by voice with no signal is kept, and said to be kept';
+
+  if (evidence.transcript === null) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail: 'The transcript could not be read after the confirmation.',
+    };
+  }
+  const reached = evidence.requestsWhileOffline.length;
+  if (reached > 0) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail:
+        `${String(reached)} request(s) reached the API while it was supposed to be unreachable ` +
+        `(${evidence.requestsWhileOffline.map((request) => `${request.method} ${request.path}`).join(', ')}), ` +
+        'so the app was never offline and nothing had to be queued.',
+    };
+  }
+
+  const spoken = evidence.transcript
+    .filter((line) => line.startsWith(SAID_BY_KYNVIORA))
+    .map((line) => line.slice(SAID_BY_KYNVIORA.length));
+  if (spoken.length === 0) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail:
+        'The screen was read and carried no line Kynviora had spoken, so either the exchange did ' +
+        'not happen or the transcript was not on screen.',
+    };
+  }
+
+  const says = (fragment: string): boolean => spoken.some((line) => line.includes(fragment));
+
+  if (says(evidence.doneSentence)) {
+    return {
+      id,
+      title,
+      status: 'FAIL',
+      detail:
+        `The transcript says ${JSON.stringify(evidence.doneSentence)}. That is what the shell ` +
+        'speaks when a tool answers with nothing at all, and it is a statement that the reminder ' +
+        'is set. It is not.',
+    };
+  }
+  if (evidence.activeAfterSave !== 0) {
+    return {
+      id,
+      title,
+      status: 'FAIL',
+      detail: 'The server gained a schedule while it was unreachable, which cannot have happened.',
+    };
+  }
+  if (says(evidence.offlineSentence) && !says(evidence.queuedSentence)) {
+    return {
+      id,
+      title,
+      status: 'FAIL',
+      detail:
+        'The transcript says only that there is no connection, and the change was kept. A person ' +
+        'told their reminder was not set will set it again, and the journal will send both.',
+    };
+  }
+  if (!says(evidence.queuedSentence)) {
+    return {
+      id,
+      title,
+      status: 'FAIL',
+      detail:
+        `Nothing in the transcript said ${JSON.stringify(evidence.queuedSentence)}. A person who ` +
+        'has just asked for a reminder cannot tell a save from a failure.',
+    };
+  }
+  return {
+    id,
+    title,
+    status: 'PASS',
+    detail:
+      'No request left the phone, the server was unchanged, and the transcript says the change is ' +
+      'kept here and will be sent - not that it is done.',
+  };
+}
+
+export interface VoiceDrainEvidence {
+  /** Every request the switch saw on the launch that followed the kill. */
+  readonly requestsOnFirstLaunch: readonly ObservedRequest[];
+  /** The times the server has active on the medicine after that launch. */
+  readonly activeTimesAfter: readonly string[];
+  readonly expectedTime: string;
+}
+
+/**
+ * The reminder set by voice arrives on the first launch after the kill, exactly once.
+ *
+ * WHAT THIS ADDS OVER `OFF-3`, WHICH LOOKS THE SAME
+ * The path into the journal, and that is the only difference on purpose. DEC-148's whole claim is
+ * that voice reaches the journal the schedule sheet reaches rather than a second one - so what has
+ * to be true is that a change queued by **speaking** is drained by the same pass, sent by the same
+ * registered sender, and lands as one row. A voice-specific queue would pass every assertion in
+ * `apps/mobile/src/voice` and be invisible here only if this check did not exist.
+ *
+ * The count is the half that cannot be faked. One create is a schedule; two is a person told twice,
+ * at the same minute, to take the same tablet - which is what a fresh idempotency key on the replay
+ * produces and what DEC-111 is about.
+ */
+export function voiceDrainedOnceCheck(evidence: VoiceDrainEvidence): Check {
+  const id = 'OFF-9';
+  const title = 'The reminder set by voice is sent on the first launch, and lands once';
+  const creates = scheduleCreates(evidence.requestsOnFirstLaunch);
+  const keys = new Set(creates.map((create) => create.key).filter((key) => key !== null));
+  const matching = evidence.activeTimesAfter.filter((time) => time === evidence.expectedTime);
+
+  if (creates.length === 0) {
+    return {
+      id,
+      title,
+      status: 'FAIL',
+      detail:
+        'No schedule was created on the launch that followed the kill. The change is still in the ' +
+        'journal, and the person has been told it was kept.',
+    };
+  }
+  if (keys.size > 1) {
+    return {
+      id,
+      title,
+      status: 'FAIL',
+      detail:
+        `${String(creates.length)} create(s) went out under ${String(keys.size)} distinct keys. A ` +
+        'fresh key on a replay is not an idempotency key: on this table it is a second reminder ' +
+        'for the same tablet at the same minute (DEC-111).',
+    };
+  }
+  if (matching.length === 0) {
+    return {
+      id,
+      title,
+      status: 'FAIL',
+      detail:
+        `The create was sent and the server does not have ${evidence.expectedTime} active (it has ` +
+        `${evidence.activeTimesAfter.join(', ') || 'nothing'}).`,
+    };
+  }
+  if (matching.length > 1) {
+    return {
+      id,
+      title,
+      status: 'FAIL',
+      detail:
+        `The server has ${String(matching.length)} active schedules at ${evidence.expectedTime}. ` +
+        'One request, two reminders.',
+    };
+  }
+  return {
+    id,
+    title,
+    status: 'PASS',
+    detail:
+      `${String(creates.length)} create(s) went out on that launch under one key, and the server ` +
+      `has exactly one active schedule at ${evidence.expectedTime}. Voice and touch drained ` +
+      'through the same pass.',
+  };
+}

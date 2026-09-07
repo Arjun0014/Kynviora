@@ -63,22 +63,38 @@ export function createScriptedAgent(rules: readonly ScriptedRule[]): Conversatio
  * plausible: a fixture that looked like a real medicine ID is one somebody eventually pastes
  * somewhere real.
  */
-export function demonstrationScript(profileId: string, itemId: string): readonly ScriptedRule[] {
-  return [
+export function demonstrationScript(
+  profileId: string | null,
+  itemId: string | null,
+): readonly ScriptedRule[] {
+  // A rule whose identifier is absent is **left out**, never emitted with an empty string.
+  //
+  // `validateArguments` refuses an empty required string - deliberately, because an empty string
+  // is a missing value wearing the right type - so a rule carrying one is refused as
+  // `INVALID_ARGUMENTS`, which the shell speaks as "I cannot do that by voice". That is a sentence
+  // about the capability, said about a capability that works, and a device harness reading it has
+  // no way to tell a refused proposal from a malformed one.
+  //
+  // It cost a run to find. `resolveVoiceProviders` passed `null` for the item, this function turned
+  // it into `''`, and every item-scoped script - both doses, the missing-fields question and the
+  // reminder - had been unreachable for as long as the script had existed. Nothing noticed, because
+  // none of `verify:device:voice`'s nine checks drives an item-scoped tool that has to succeed
+  // (`DEV-095`).
+  const rules: ScriptedRule[] = [
     {
       whenSaid: /what (medicines|medication|tablets) am i (taking|on)/,
-      then: { kind: 'CALL', name: 'list_medicines', arguments: { profileId } },
+      then: { kind: 'CALL', name: 'list_medicines', arguments: { profileId: profileId ?? '' } },
     },
     {
       whenSaid: /what (else )?(do you need|is missing)/,
-      then: { kind: 'CALL', name: 'explain_what_is_missing', arguments: { itemId } },
+      then: { kind: 'CALL', name: 'explain_what_is_missing', arguments: { itemId: itemId ?? '' } },
     },
     {
       whenSaid: /i (took|have taken) (it|them)/,
       then: {
         kind: 'CALL',
         name: 'record_dose',
-        arguments: { itemId, eventKind: 'TAKEN' },
+        arguments: { itemId: itemId ?? '', eventKind: 'TAKEN' },
       },
     },
     {
@@ -86,7 +102,7 @@ export function demonstrationScript(profileId: string, itemId: string): readonly
       then: {
         kind: 'CALL',
         name: 'record_dose',
-        arguments: { itemId, eventKind: 'SKIPPED' },
+        arguments: { itemId: itemId ?? '', eventKind: 'SKIPPED' },
       },
     },
     {
@@ -94,7 +110,7 @@ export function demonstrationScript(profileId: string, itemId: string): readonly
       then: {
         kind: 'CALL',
         name: 'create_schedule',
-        arguments: { itemId, timesOfDay: '08:00', timeZone: 'Asia/Kolkata' },
+        arguments: { itemId: itemId ?? '', timesOfDay: '08:00', timeZone: 'Asia/Kolkata' },
       },
     },
     {
@@ -106,7 +122,7 @@ export function demonstrationScript(profileId: string, itemId: string): readonly
       then: {
         kind: 'CALL',
         name: 'start_package_capture',
-        arguments: { profileId, panel: 'FRONT' },
+        arguments: { profileId: profileId ?? '', panel: 'FRONT' },
       },
     },
     {
@@ -126,16 +142,20 @@ export function demonstrationScript(profileId: string, itemId: string): readonly
     },
     {
       whenSaid: /give my daughter access/,
-      then: { kind: 'CALL', name: 'invite_caregiver', arguments: { profileId } },
+      then: { kind: 'CALL', name: 'invite_caregiver', arguments: { profileId: profileId ?? '' } },
     },
     {
       whenSaid: /remove (that|this) (medicine|item)/,
-      then: { kind: 'CALL', name: 'delete_item', arguments: { itemId } },
+      then: { kind: 'CALL', name: 'delete_item', arguments: { itemId: itemId ?? '' } },
     },
     {
       whenSaid: /double (the|my) dose/,
       // No such tool, which is the point: the vocabulary has no way to express it.
-      then: { kind: 'CALL', name: 'change_dose', arguments: { itemId, multiplier: 2 } },
+      then: {
+        kind: 'CALL',
+        name: 'change_dose',
+        arguments: { itemId: itemId ?? '', multiplier: 2 },
+      },
     },
     {
       whenSaid: /show me everything for everyone/,
@@ -143,10 +163,19 @@ export function demonstrationScript(profileId: string, itemId: string): readonly
       then: {
         kind: 'CALL',
         name: 'list_medicines',
-        arguments: { profileId, includeOtherHouseholds: true },
+        arguments: { profileId: profileId ?? '', includeOtherHouseholds: true },
       },
     },
     { whenSaid: /^yes$/, then: { kind: 'CONFIRM' } },
     { whenSaid: /^(no|cancel|stop)$/, then: { kind: 'CANCEL' } },
   ];
+
+  return rules.filter((rule) => {
+    if (rule.then.kind !== 'CALL') return true;
+    // Read off the arguments the rule actually carries rather than from a list of tool names, so a
+    // rule added later cannot be forgotten here.
+    return Object.values(rule.then.arguments).every(
+      (value) => typeof value !== 'string' || value.trim() !== '',
+    );
+  });
 }

@@ -6351,3 +6351,102 @@ you are looking at is not the current state". Flagged for the Claude Design impl
 ### Files
 
 `packages/presentation/src/pendingQueue.ts`, `packages/presentation/src/pendingQueue.test.ts`.
+
+---
+
+## 2026-09-08 (continued) - The claim on hardware, and three things the run had to find first
+
+**Starting commit** `a3e1594`.
+
+DEC-148 makes a claim nothing in `apps/**` can check: that a reminder set by **voice** with no
+signal goes into the identical journal, is drained by the identical pass, and lands as one row.
+`executor.test.ts` proves the executor hands the right values to a queue it was given, and
+`VoiceProvider.test.tsx` proves the queue it is given is `usePendingSync().queue`. Neither runs a
+drain, a registered sender, a process death or a real route - so a voice path that queued perfectly
+into a journal nothing drained would pass every one of them. That is precisely the shape `DEV-044`
+was, and it took a device to find.
+
+### Run D, and the two checks it adds
+
+`verify:device:offline` has a fourth run and two checks, alongside the three it had.
+
+`OFF-8` is about the **sentence**, because a sentence is the whole of what Voice Mode's audience
+gets. Three wrong answers, and the order they are checked in is deliberate: "Done." first, because
+it is the one a person acts on - they stop thinking about a reminder that does not exist; then the
+offline sentence, which is the mirror failure, because somebody told their reminder was not kept
+sets it again and the journal sends both; then silence.
+
+`OFF-9` is about the **row**: one create, on the first launch after the kill, under one key,
+leaving one active schedule at the minute that was asked for. Two is a person told twice, at the
+same minute, to take the same tablet.
+
+Both read `activeTimes` rather than the raw times, and that was a defect caught before the run
+rather than by it: `0004` grants the app role no DELETE on `medicine_schedule`, so every schedule
+any run ever created is still there - deactivated, never removed. Counting those would have tripped
+the precondition on the second run of a day and reported two reminders where there is one.
+
+The judgements are 15 tests in `scripts/device/offlineWrites.test.ts`, in Node, so a rule can change
+without hardware and CI will notice - which is what `DEV-040` asks of every harness here.
+
+### Three defects between writing the run and believing it
+
+**A harness that reported a control missing from three screens it is on.** The first
+`verify:device:voice` run came back 8/9 with `VOICE-1` failing: "No 'Talk to Kynviora' control on:
+Today, Shelf, Safety." Nothing this session touched the entry control and a hand-driven probe found
+it present. `relaunch()` was `force-stop`, `am start`, `sleep(30_000)` - and on a freshly booted
+emulator with a first-time Metro bundle, thirty seconds is short of a cold start, so the loop read
+the first three destinations off an app that had not drawn yet. That the two which passed were Care
+and You, the two most recently migrated screens, made it look like a property of the migration. It
+is `DEV-080` on a second harness, and the helper that fixed the first one - `coldStart` in `ui.ts` -
+was never adopted here. It is now, and both callers act on its answer (`DEV-094`).
+
+**Four scripted rules that had never been able to run.** Run D's first attempt reported `OFF-8` and
+`OFF-9` `INCONCLUSIVE` - the confirmation was never offered - and the captured hierarchy showed
+why: `"You said. remind me at eight"` answered by `"I cannot do that by voice."`
+`VoiceProvider` passed a literal `null` as the scripted agent's item, `resolveVoiceProviders` turned
+it into `''`, and `validateArguments` refuses an empty required string - so every item-scoped rule
+was refused at gate 3 as `INVALID_ARGUMENTS`, which the shell speaks as `cannotDoThat`.
+
+Four rules had been unreachable for as long as the script existed: both doses, the missing-fields
+question and the reminder. Nothing noticed because none of `verify:device:voice`'s nine checks
+drives an item-scoped tool that has to **succeed**. It is development-only and nothing ships - but
+DEC-140 says a dose recorded by voice takes "the identical path the dose sheet uses, which `OFF-6`
+and `OFF-7` already measure on hardware", and those measure the dose **sheet**. Recording a dose by
+voice had never been driven on a device and could not have been (`DEV-095`).
+
+`demonstrationScript` now leaves out a rule whose identifier it does not have rather than emitting
+one that can only be refused, and the item comes from `EXPO_PUBLIC_DEV_VOICE_ITEM_ID` alongside
+`EXPO_PUBLIC_DEV_USER_ID`. Both harness headers say so, because `.env.local` is not tracked and its
+absence is otherwise silent.
+
+**A check that read the screen's furniture as something Kynviora said.** With the script fixed,
+`OFF-9` passed - "1 create went out on that launch under one key, and the server has exactly one
+active schedule at 08:00" - and `OFF-8` failed on `Done.`. It was in the idle state's own hint,
+"Ask Kynviora something, or press Done.", which is on screen after every exchange. The check
+searched everything `collectScreenText` returned. It now narrows to lines announced as
+`Kynviora said. <text>`, which is the only place a spoken sentence lives (trap 209, trap 193 in a
+second place).
+
+The pair is what made it obvious. Either check alone would have sent somebody looking at the app.
+
+### What this machine could and could not do
+
+Twice the emulator was found with a **zero-byte working set** and unresponsive to `adb` - once
+wedged past recovery and restarted, once paging back in on its own. The machine has 11.4GB, and an
+Android emulator, Metro, the API, a PGlite database and another project's browser suite do not fit
+in it. It is the same constraint trap 208 records for `npm run verify`: on this workstation a device
+run and a full test run cannot be trusted to overlap.
+
+**And a mistake worth recording.** Stopping Metro by
+`CommandLine -like '*expo*start*'` also matched Chromium's `--export-tagged-pdf ... --no-startup-window`,
+so it killed another project's running headless browsers. Trap 207 says to free a port by its
+owning process rather than by a pattern; the same rule applies to stopping a server, and a wildcard
+either side of a common word is not a process identity. Match the executable and the script path.
+
+### Files
+
+`scripts/device/verifyOfflineWrites.ts`, `scripts/device/offlineWrites.ts`,
+`scripts/device/offlineWrites.test.ts`, `scripts/device/verifyVoiceMode.ts`,
+`scripts/device/ui.ts`, `packages/agent/src/scriptedAgent.ts`,
+`packages/agent/src/conversation.test.ts`, `apps/mobile/src/voice/devScript.ts`,
+`apps/mobile/src/voice/VoiceProvider.tsx`.

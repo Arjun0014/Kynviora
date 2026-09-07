@@ -3747,3 +3747,121 @@ reverse` tunnel produces none either - the app has offline states and uses them.
 - **Status**: **OPEN**. Not blocked on anything external; waiting on a decision about the wording,
   which is a good candidate for the Claude Design pass since it is the same question the `STALE`
   badge answers on a screen.
+
+---
+
+## DEV-094 - A fixed thirty-second launch, and the control it reported missing from three screens
+
+- **Affected specification**: `19` (a device scenario measures what only a device can show), DEC-102
+  ("could not look" is never "looked and it was fine"), `DEV-080`, trap 195, trap 205.
+- **Expected behaviour**: a harness waits for a **determinate state** before reading a screen, and
+  reports a launch that did not happen as a launch that did not happen.
+- **Implemented behaviour**: `verifyVoiceMode.ts`'s `relaunch()` was
+
+  ```ts
+  adb(['shell', 'am', 'force-stop', PACKAGE]);
+  adb(['shell', 'am', 'start', '-n', `${PACKAGE}/.MainActivity`]);
+  sleep(30_000);
+  ```
+
+  a fixed wait, with no check that anything had started and no way for the caller to know.
+
+- **The failure**: on a freshly booted emulator with a first-time Metro bundle, `VOICE-1` reported
+  **"No 'Talk to Kynviora' control on: Today, Shelf, Safety"** - on a build where `VoiceBar` is
+  rendered by all five destinations and was verified present by hand on the same device minutes
+  later.
+
+  Thirty seconds was short of the cold start. The loop walks the destinations in order, so the
+  three it tried first were read off an app that had not drawn yet, and by Care and You - each
+  several seconds further in - it had. That the two that passed were the two most recently migrated
+  screens (DEC-142, DEC-143) made it look like a property of the migration.
+
+  This is exactly what `DEV-080` was, on a different harness: `verifyAccessibility.ts` slept a
+  fixed thirty seconds, a cold start at font scale 2 took longer, and the result was reported as an
+  `INCONCLUSIVE` about the app. That fix waited on the tab bar "which its own helper existed for" -
+  and the helper it grew, `coldStart` in `ui.ts`, was never adopted here.
+
+- **How it was found**: `VOICE-1` failed on a run whose only code changes were in the voice
+  executor and the tool registry, neither of which touches the entry control. A hand-driven probe
+  of the same device found the control present, and the harness's own log showed one second between
+  the API read and the first destination read.
+- **Risk**: none to the product and high to the record. It is a false FAIL, which is the more
+  expensive direction: a green run that should be red hides a defect once, and a red run that
+  should be green sends somebody looking for one that does not exist - here, at three screens, one
+  of which had just been migrated.
+- **How it resolved**: `relaunch()` is `coldStart('voice')`, which force-stops, launches, waits up
+  to ninety seconds for the tab bar, retries one launch that did not happen, and **answers whether
+  it started**. Both callers act on that answer: `VOICE-1` reports `INCONCLUSIVE` naming the launch
+  rather than the screens, and the Voice Mode step folds into the refusal it already had.
+
+  `scrollToClickable` moved to `ui.ts` as `scrollToClickableNamed` in the same change, because
+  `verifyOfflineWrites.ts` now needs it too and a second copy of a helper that exists to avoid a
+  trap is how the trap comes back.
+
+- **Tests**: none, and deliberately. The judgement `entryControlCheck` was always right - it was
+  given a reading taken too early. What changed is the driving, which is the half `19` puts on
+  hardware; `scripts/device/ui.test.ts` covers `coldStart`'s contract already.
+- **Status**: **RESOLVED 2026-09-08**.
+
+---
+
+## DEV-095 - The scripted agent was never given an item, so four of its rules could not run
+
+- **Affected specification**: `19` (a device scenario measures what only a device can show), `17`,
+  `docs/design/VOICE_MODE.md` section 3, DEC-136, DEC-140, DEC-148, `DEV-073`.
+- **Expected behaviour**: `demonstrationScript`'s identifiers "come from the app's own state, so
+  the scripted proposals name rows that actually exist - a proposal naming a fixture ID would be
+  refused by the route rather than by the gate under test, which is the wrong measurement passing
+  for the right one." That comment is in `devScript.ts` and describes what was intended.
+- **Implemented behaviour**: `VoiceProvider` called
+  `resolveVoiceProviders({...}, activeProfileId, null)` - the item was a **literal `null`** - and
+  `resolveVoiceProviders` turned it into `''` before handing it to `demonstrationScript`.
+
+  `validateArguments` refuses an empty required string, deliberately, because "an empty string is a
+  missing value wearing the right type". So every item-scoped rule was refused at gate 3 as
+  `INVALID_ARGUMENTS`, which `utteranceForRefusal` maps to `cannotDoThat`: **"I cannot do that by
+  voice. You can do it on the screen, and I can take you there."**
+
+- **The failure**: four of the script's rules had never been able to run - "what else do you need"
+  (`explain_what_is_missing`), both dose rules (`record_dose`), and "remind me at eight"
+  (`create_schedule`). A device harness driving any of them is told, in the app's own words, that
+  Voice Mode cannot do a thing Voice Mode does.
+
+  It is not a product defect: the flag is off in every ordinary build and nothing here ships. It is
+  worse than a harness bug in one respect, though, and that is why it has a number. DEC-140 records
+  that a dose recorded by voice with no signal goes into the app's own journal "the identical path
+  the dose sheet uses, which `OFF-6` and `OFF-7` already measure on hardware" - and `OFF-6`/`OFF-7`
+  measure the **dose sheet**. Recording a dose by voice has never been driven on a device at all,
+  and could not have been.
+
+- **Why nothing noticed**: none of `verify:device:voice`'s nine checks drives an item-scoped tool
+  that has to **succeed**. `VOICE-3` is `delete_account`, which takes no arguments and is refused a
+  gate earlier for being `TOUCH_ONLY`; `VOICE-4` is a fixed sentence; `VOICE-5` and `VOICE-7` use
+  `start_package_capture`, which takes a `profileId` and no item. The one refusal the suite does
+  assert is `touchOnly`, and this defect produces `cannotDoThat` - a different sentence nothing was
+  looking at.
+- **How it was found**: `verify:device:offline`'s new Run D reported `OFF-8` and `OFF-9`
+  `INCONCLUSIVE` - "the confirmation was never offered" - and the captured hierarchy showed the
+  transcript: `"You said. remind me at eight"` answered by `"I cannot do that by voice."` The
+  refusal identifies itself: `cannotDoThat` is reachable only from `UNKNOWN_TOOL`,
+  `INVALID_ARGUMENTS`, `UNEXPECTED_ARGUMENT` and `CONFIRMATION_REQUIRED`, and the tool exists.
+- **How it resolved**: two changes, and the second is the one that matters.
+
+  `demonstrationScript` takes `string | null` and **leaves out** a rule whose identifier it does not
+  have, rather than emitting one that can only be refused. The filter reads the arguments each rule
+  actually carries rather than a list of tool names, so a rule added later is covered.
+
+  The item comes from `EXPO_PUBLIC_DEV_VOICE_ITEM_ID`, alongside `EXPO_PUBLIC_DEV_USER_ID` and for
+  the same reason: reading it from the shelf would be a request on every launch of every build to
+  serve a flag that is off in all of them, and `VoiceProvider` deliberately does not depend on which
+  tab somebody last opened.
+
+  It is documented as a requirement in both harness headers, because `.env.local` is not tracked
+  and its absence is otherwise silent - the run reports a confirmation it never saw rather than a
+  variable nobody set.
+
+- **Tests**: 4 in `packages/agent/src/conversation.test.ts`, including the property rather than the
+  list: over all four combinations of present and absent identifiers, no rule may carry an empty
+  string argument. The `CONFIRM` and `CANCEL` rules survive a script stripped of everything else,
+  because a script that cannot answer a confirmation cannot drive anything.
+- **Status**: **RESOLVED 2026-09-08**.

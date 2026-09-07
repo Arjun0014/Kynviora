@@ -13,9 +13,9 @@ Last updated: 2026-09-08
 | ------------------ | ----------------------------------------------------------------- |
 | **Current stage**  | Stage 4 complete; the design layer carried past the golden path   |
 | **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work            |
-| **Last completed** | A conflict no longer offers a retry that could never succeed      |
+| **Last completed** | A reminder set by voice with no signal, proven on hardware, 10/10 |
 | **Branch**         | `master`                                                          |
-| **Latest commit**  | `fix(presentation): the button on a conflict that could not work` |
+| **Latest commit**  | `test(device,agent): the claim on hardware, and three defects...` |
 | **Baseline tag**   | `baseline-spec-only`                                              |
 
 **The full accessibility survey is green for the first time: 74 PASS, 0 FAIL, 0 INCONCLUSIVE.**
@@ -268,7 +268,7 @@ cover is a build whose local schema differs from the one on disk (`DEV-042`).
 npm run verify:device:offline
 ```
 
-Eight checks on an edit made with no signal, across the two entity types the journal carries.
+Ten checks on an edit made with no signal, across the two entity types the journal carries and the two surfaces that reach it.
 
 The first five drive the ordinary chain: a schedule is saved with the API switched off, the app's
 process is killed - `am kill` after backgrounding, because Android will not kill a foreground
@@ -289,8 +289,23 @@ cut, on purpose: with no journal at all the swallowed request still commits, so 
 counted rows afterwards would pass an app that kept nothing. Two creates under one key, with the
 server answering `idempotent-replay` to the second, is the shape only a replay produces.
 
-Last run **8/8 PASS**: three schedule creates under one key leaving one schedule, and three dose
-creates under one key leaving one event.
+`OFF-8` and `OFF-9` ask the same question of a reminder set **by voice**, which is what DEC-148
+made possible and what nothing else can measure. `apps/mobile/src/voice` proves the executor hands
+the right values to a queue it was given and that the queue it is given is the app's own; neither
+runs a drain, a registered sender, a process death or a real route - so a voice path that queued
+correctly into a journal nothing drained would pass every one of them. That is the shape `DEV-044`
+was, and it took a device to find.
+
+`OFF-8` is about the sentence, because a sentence is the whole of what Voice Mode's audience gets:
+"Done." is a false statement about a reminder that does not exist yet, and the offline sentence is
+the mirror failure - a person told it was not kept sets it again, and the journal sends both.
+`OFF-9` is about the row: one create, one key, one active schedule at the minute that was asked
+for.
+
+Both read `activeTimes` rather than the raw times. `0004` grants the app role no DELETE on this
+table, so every schedule any run ever created is still there - deactivated, not removed - and
+counting those would trip the precondition on the second run of the day and report two reminders
+where there is one.
 
 The switch between the phone and the API is a separate process on purpose (`apiSwitchServer.ts`):
 `sleep` here is `Atomics.wait`, which blocks the event loop for most of a run, and a server sharing
@@ -582,6 +597,11 @@ those runs confirm rather than assume.
 npm run verify:device:voice
 ```
 
+It needs `EXPO_PUBLIC_DEV_VOICE_ITEM_ID` as well as `EXPO_PUBLIC_DEV_VOICE_SCRIPT` since
+2026-09-08, and the second is not optional: without it `demonstrationScript` leaves out every
+item-scoped rule, so a harness asking for a dose or a reminder is told Voice Mode cannot do it
+(`DEV-095`).
+
 Nine checks on Voice Mode, and every one of them is about **rendering** - the gates themselves are
 proved in `packages/agent`, in Node, without React or a phone. What a phone adds is whether a
 refusal is a sentence somebody can read, whether the summary of a write is on screen before the
@@ -711,7 +731,7 @@ the API will not distinguish them.
 | The encrypted read projection, offline shelf and profiles      | Complete, 11 tests; no offline writes (`DEV-038`)                         |
 | Medicine schedules: the write path, the editor, the reads      | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)                |
 | Local reminders: plan, reconcile, exact alarms, lock screen    | Complete, 52 tests; **measured on a device** (`DEV-041`)                  |
-| Device harnesses: seventeen, storage to Voice Mode             | Complete, 542 tests; 13 of `19`'s 14 scenarios (`DEV-040`)                |
+| Device harnesses: seventeen, storage to Voice Mode             | Complete, 560 tests; 13 of `19`'s 14 scenarios (`DEV-040`)                |
 | The mobile app itself: rendering, hooks, providers             | 217 tests, and `apps/**` linted at last (`DEV-043` closed)                |
 | Recording a dose: `RECORD_DOSES`, its own capability           | Complete, 47 tests; 7/7 on a device (DEC-116)                             |
 | Caregiver, export, inbox, reconciliation, add-an-item UI       | Wired; **not device-verified** (`DEV-007`)                                |
@@ -732,7 +752,7 @@ the API will not distinguish them.
 | Agent Tool Registry: 30 tools, eight answers each, no defaults | Complete, 111 tests; what `17` forbids has no name to be called           |
 | Voice Mode: gates, confirmation, Speech Gate, the shell        | Complete; **9/9 on a device**; all 30 tools runnable or refused by design |
 | Voice Mode's offline dose, through the app's own journal       | Complete, 5 tests; same entity, same key, same drain (DEC-140)            |
-| Voice Mode's offline schedule, created and changed             | Complete, 20 tests; a change queues on a **read** version (DEC-148)       |
+| Voice Mode's offline schedule, created and changed             | Complete, 20 tests; **10/10 on a device** (DEC-148, `OFF-8`/`OFF-9`)      |
 | What the registry claims about being offline, against reality  | Complete, 8 tests; three declarations left that earn it (`DEV-091`)       |
 | What voice says when it could not read, and when it read none  | Complete, 10 tests; never "Done." to a question (`DEV-090`)               |
 | What a caller may do on a profile, reported by the server      | Complete, 7 tests; voice offers what a grant carries (DEC-141)            |
@@ -2142,3 +2162,13 @@ files`, exit 0. Re-run narrowed before believing a transform error, and re-run t
      `vitest.config.ts`, because the right worker count is a property of the machine and a low one
      would slow a CI runner that has the memory - but a green `npm run verify` on a busy
      workstation is worth one confirming pass at four workers.
+209. A screen carries sentences nobody spoke, and a check that searches all of it will find them.
+     `verify:device:offline`'s `OFF-8` looks for `Done.` - the sentence the voice shell speaks when
+     a tool answers with nothing at all - and `collectScreenText` returns the whole screen. Voice
+     Mode's idle hint is "Ask Kynviora something, or press Done.", it is on screen after **every**
+     exchange, and it contains that substring. So the check failed on a run where `OFF-9` had just
+     proved the same reminder queued, drained on the first launch and landed once: the pair is what
+     made it obvious, and either check alone would have sent somebody looking at the app. Narrow to
+     what the speaker actually said - `VoiceScreen` announces its turns as `Kynviora said. <text>`,
+     and the prefix is the whole difference. This is trap 193 in a second place, and both times the
+     shape was the same: the screen's own furniture carrying the string a check was looking for.
