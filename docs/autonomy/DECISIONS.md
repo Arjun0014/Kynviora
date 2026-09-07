@@ -5461,3 +5461,46 @@ had been there all along. That is the generalisable part.
 
 **Sources.** `15`, `17`, DEC-135, `DEV-081`, `packages/agent/src/speech.ts`,
 `apps/mobile/src/voice/capabilities.ts`.
+
+---
+
+## DEC-147 - The DEC-146 rule is one function, and it applies where the fallback is load-bearing
+
+**Decision.** `ownEntry(table, key)` in `packages/domain/src/lookup.ts` is the single expression of
+DEC-146's rule, and every lookup whose key crosses a trust boundary resolves through it rather
+than through an index and a `??`.
+
+**Why one function rather than five copies.** DEC-146 fixed two lookups in place, each with its own
+`Object.hasOwn` guard, and predicted "a third would not be surprising". There were four more. Five
+hand-written copies of the same three lines is how the sixth gets forgotten - and `domain` has no
+dependencies and everything depends on it, so there is exactly one place the rule can live where
+`presentation`, `contracts` and `agent` can all reach it.
+
+**Where it applies, and where applying it would be churn.** The distinguishing property is an
+**open `string` key with a load-bearing `??` fallback**. Those functions genuinely do not know
+whether the key is one of the table's - that is what the fallback is for - and an inherited
+property is the one input that walks past it while looking like a hit.
+
+A lookup taking a **narrowed union** the caller has already validated is a different situation:
+`presentCertainty(certainty: FactCertainty)` after `isFactCertainty`, or `toolNamed` which narrows
+with `isToolName` before touching a `Map`. Roughly thirty such sites were read and left alone.
+Wrapping them would add diff and no safety, and would blur the line so the next reader could not
+tell which lookups were load-bearing.
+
+**What the rule is actually protecting.** Not "prototype pollution" as a label. In this codebase a
+fallback almost always encodes a decision about **absence**, and the decision is usually to say
+nothing: `describeUnresolvedCondition` returns `null` so the Lens drops a condition it has no
+approved sentence for, because a generic one "reads as a complete answer when it is not". An
+inherited property turns that carefully-chosen silence into `function toString() { [native code] }`
+on a screen making legal claims about a medicine. The consequence is a safety-copy failure, not a
+memory-safety one.
+
+**A second rule, from the one finding that was not about prototypes.** A lookup that encodes a
+**prohibition** must fail closed. `isOptimisticallyApplicable` was
+`conflictPolicyFor(entityType) !== 'SERVER_WINS'`, and an unrecognised type is not `'SERVER_WINS'`,
+so `12`'s "do not optimistically change caregiver grants or safety publication state" answered
+**yes** for every input nobody had enumerated. The safe direction for an unknown is the one that
+refuses - the same reason `holdsCapability` answers `OWNER_ONLY` from `isOwner` rather than from a
+capability set.
+
+**Sources.** DEC-146, `DEV-081`, `12`, `13`, `packages/domain/src/lookup.ts`.

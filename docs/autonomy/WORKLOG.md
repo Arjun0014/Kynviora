@@ -5888,3 +5888,97 @@ because three runs disagree with it, and that is the wrong instinct twice over: 
 one run in four is a check nobody will trust, and this session already spent an hour on `DEV-079`
 learning what a red result nobody believes costs. `captureFailure` already writes a screenshot and a
 hierarchy dump beside a failing check; pointing it at this one turns the hypothesis into evidence.
+
+---
+
+## 2026-09-07 (later) - the node, four more lookups, and a write that lied
+
+Four tracks were started as subagents. Three were killed mid-run by a session rate limit and the
+fourth stopped when its parent process exited. Nothing was lost - the work was in the tree and the
+evidence was on disk - and what follows is partly theirs and partly the recovery, which is worth
+saying because two of the findings came out of files a dead agent left behind.
+
+### The intermittent accessibility failure was LogBox
+
+The hypothesis this repository had recorded - an Android text-selection handle raised by a drag
+beginning inside a field - was wrong. The node was captured and it is **React Native's LogBox
+warning banner**, specifically its dismiss button, which Android's own dump marks `NAF="true"`. It
+is in `com.kynviora.app` because LogBox renders inside the app's process, which is why filtering by
+package never removed it.
+
+Everything that made it look like noise follows from that. LogBox is on screen only once something
+has logged a warning, so **whether** it appears depends on what the run did before, and **which**
+sheet it lands on is whichever one was being surveyed at the time - `Invite someone@2` once,
+`Voice Mode@1` the next. It was never a property of either sheet.
+
+The instrumentation is the half worth keeping. The survey folded each dump into four fields per
+control and discarded the node, and by the time a check runs the sheet is closed and the app
+relaunched - so a failure had nothing behind it and three narrowed re-runs could only ever disagree
+with it. A control now carries its whole reading, and an offender is written out with a screenshot
+and a hierarchy dump **at the moment it is on screen**.
+
+Excluded by identity, and reported rather than swallowed. Excluding it for being small, or unnamed,
+or intermittent would have hidden the defects those two checks exist to find.
+
+### Four more lookups keyed from outside, and one that failed open
+
+DEC-146 predicted a third. There were four more, and the rule is now one function - `ownEntry` in
+`packages/domain/src/lookup.ts` - rather than five copies of `Object.hasOwn`.
+
+The one that matters is `describeUnresolvedCondition`. `lens.ts` drops a condition it has no
+approved sentence for by testing `=== null`, and its own comment says why: a generic sentence
+"reads as a complete answer when it is not". A prototype name resolved to a **function**, which is
+not null, so it was not dropped - the Global Regulatory Lens rendered
+`function toString() { [native code] }` as its explanation of why a rule could not be resolved. The
+key arrives on a `LensEntryResponse`. `presentProvenance` did the same beside somebody's allergy;
+`describeResolution` to a caregiver alert's outcome; and `authFailureFor` - keyed by the
+**provider's** own `error_code`, the one key in this repository Kynviora does not choose - returned
+a function from a signature promising an `AuthFailure`, which `authRefusal` turned into `undefined`
+and the sign-in screen dereferenced.
+
+The triage discipline mattered more than the fixes. About thirty sibling lookups were read and left
+alone, because they take a narrowed union the caller has already guarded. The distinguishing
+property is an **open `string` key with a load-bearing `??`** - those functions genuinely do not
+know whether the key is one of the table's, which is what the fallback is for.
+
+And one finding that was not about prototypes at all. `isOptimisticallyApplicable` was
+`conflictPolicyFor(entityType) !== 'SERVER_WINS'`, and an unrecognised type is not `'SERVER_WINS'`
+
+- so `12`'s prohibition answered **yes** for every input nobody had enumerated. A rule stated as a
+  prohibition has to fail closed.
+
+Every fix has a test that was run against the old code first: 15 failures in domain and
+presentation, 17 in contracts. A regression test that never failed proves nothing.
+
+### A write that never happened was spoken as "Done."
+
+`VoiceProvider.run` speaks `done` when a tool returns no sentences, which is right for a tool that
+succeeded quietly. `create_schedule`, `add_medicine` and `add_personal_care_item` returned
+`{ spoken: [] }` for **every** non-OK outcome. So "set a reminder for my tablet at eight" with no
+signal created nothing, queued nothing, and answered "Done." - and there is no later moment at
+which the person finds out.
+
+`record_dose` was the only write wired correctly, and it is the one the device scenarios drive.
+`utteranceForWriteFailure` already existed in the same file with exactly one caller. 22 assertions,
+failing against the old code.
+
+`offline` rather than `queued`, because nothing queues a schedule by voice. The registry says it
+does; only the dose reaches the journal. That gap is `DEV-084`.
+
+### And six tools the agent is offered and cannot run
+
+`createToolExecutor` defines 15 of 30. Seven absences are correct (`TOUCH_ONLY`) and two are
+correct (`BLK-007`). Six are offered, unblocked and unrunnable - `list_safety_state` among them,
+which is a journey Voice Mode exists for. Nothing had ever compared the registry to the executor;
+`everyToolNameIsDefined()` checks the registry against itself. A test compares them now, with the
+six named, and it fails both when a seventh appears and when one is wired without being removed
+from the list.
+
+### Environment, honestly
+
+Two full survey runs were lost to the environment rather than to the code: Metro and the API had
+died with an earlier session, so the app could not load its bundle and reported `INCONCLUSIVE` at
+both font scales, and later the emulator hung under memory pressure with 4GB free on an 11GB
+machine. `npm run verify` also failed twice with heap exhaustion while Metro was running, and
+passed cleanly at 5183/197 once it was stopped. None of that is a finding about the product, and
+none of it is recorded as one.

@@ -56,11 +56,11 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5035 tests passing**, 0 failing, across 194 files.
+- **5183 tests passing**, 0 failing, across 197 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
-  everything that runs on Node or in Postgres. `mobile` is `apps/mobile` - 172 tests across 16
+  everything that runs on Node or in Postgres. `mobile` is `apps/mobile` - 205 tests across 17
   files that render real components, with `react-native` and the Expo modules resolved to stubs,
   because React Native's source is Flow-annotated JavaScript esbuild cannot parse and expects a
   native bridge Node does not have. What each stub substitutes and what it therefore cannot
@@ -157,34 +157,51 @@ Last run on 2026-09-07, after Safety, Care and You were rebuilt on the design sy
 | Five destinations, scale 1 and 2 | **30/30 PASS** - the redesign cost nothing `18` asks for |
 | Five sheets, scale 2             | **20/20 PASS** - the run that matters, on a clean stack  |
 
-The whole survey then ran in one process, with the fixed harness, and finished: **72 PASS, 2 FAIL,
-no `INCONCLUSIVE`** over 74 checks. The TalkBack pass is green again - it was the `DEV-080` blank
-screen that had made it inconclusive.
+**The intermittent failure is solved, and the hypothesis this document recorded was wrong.**
 
-**The two failures are an open question and are not explained here.** Both are on
-`Invite someone@2`, and both are the same node: `SHEET-3` "1 control(s) have no accessible name at
-all" and `SHEET-4` "1 control(s) are under 48dp: (unnamed) 20x20dp".
+The full survey used to finish **72 PASS, 2 FAIL** over 74 checks, both failures on
+`Invite someone@2` and both the same node: `SHEET-3` "1 control(s) have no accessible name at all"
+and `SHEET-4` "1 control(s) are under 48dp: (unnamed) 20x20dp". It never reproduced in a narrowed
+re-run. The standing hypothesis, recorded here with a mechanism and an explicit warning that it was
+not evidence, was an Android **text-selection handle** raised by a drag beginning inside a field.
 
-What is known:
+It was captured on 2026-09-07 and it is not that. It is **React Native's LogBox** - the development
+warning banner - and the 20x20dp node is its **dismiss button**:
 
-- **It does not reproduce in isolation.** The same sheet at the same font scale, run on its own
-  immediately afterwards, is **4/4 PASS**. So is the run of all five sheets at scale 2 taken before
-  the full survey. Three narrowed runs, three passes; one full run, two failures.
-- It is therefore **state-dependent** - something about what the survey did before reaching that
-  sheet, not something about the sheet.
-- A 20x20dp unnamed clickable node is the shape of a **text-selection handle**, which Android
-  raises when a drag begins inside a field. The survey now retries a stalled scroll from a
-  different anchor (DEC-145), and the invitation form at scale 2 is mostly fields. That is a
-  hypothesis with a mechanism, and it is **not** evidence: nobody has captured the node.
+```
+content-desc="!, Open debugger to view warnings."          <- the banner
+  ...
+  <node NAF="true" class="android.view.ViewGroup" clickable="true" focusable="true"
+        content-desc="" bounds="[970,2183][1022,2235]" />  <- the dismiss control
+```
 
-What must not be concluded from it: that the invitation form has an unlabelled control. Three runs
-say it does not, and no such control exists in `InviteCaregiver.tsx`. What also must not be
-concluded: that the failure is noise. A check that fails one run in four is a check nobody will
-trust, which is the same cost as a check that is wrong.
+`NAF="true"` is Android's own flag: not accessibility friendly. It sits in `com.kynviora.app`
+because LogBox renders inside the app's process, which is exactly why filtering by package never
+removed it.
 
-**The next run should capture it.** `captureFailure` already writes a screenshot and a hierarchy
-dump beside a failed check; pointing it at this one, and printing the offending node's bounds and
-class, turns a hypothesis into a reading.
+That accounts for every property that made it look like noise. LogBox appears only once something
+has logged a warning, so **whether** it is on screen depends on what the run did before - the
+state-dependence - and **which** sheet it lands on is whichever one was being surveyed when the
+warning fired. It was blamed on `Invite someone@2` once and on `Voice Mode@1` the next time. It was
+never a property of either sheet, and the warning against concluding that the invitation form has
+an unlabelled control was correct: it does not, and `InviteCaregiver.tsx` never did.
+
+**It is excluded by identity, not by being small, unnamed or intermittent.** Any of those would
+hide the defects `SHEET-3` and `SHEET-4` exist to find - `DEV-046` was a real unreachable control
+on a real sheet. The exclusion matches the LogBox container and its whole subtree, structurally,
+because the node that gives it away is the parent and the node that fails carries nothing of its
+own. `checkScreen` does the same for the five destinations, which were equally exposed. And it is
+**reported** rather than swallowed: `SHEET-1` and `A11Y-1` say when the overlay was on screen,
+because LogBox being there at all means the build logged a warning.
+
+**The instrumentation is the durable half.** The survey kept four fields per control and discarded
+the node, so a failing check could say "1 control(s)" and "(unnamed) 20x20dp" and nothing more -
+and by the time a check runs the sheet is closed and the app relaunched, so there is nothing left
+to look at. A control now carries the reading it came from: class, resource id, raw pixel bounds,
+clickable/focusable/long-clickable/focused, text and content-desc kept apart, the scroll position
+it was first seen at, its ancestry, and its attributes verbatim. An offending node is written out -
+screenshot, hierarchy dump, and its attributes on stdout - **at the moment it is on screen**,
+capped at eight captures per run.
 
 **Two defects in the survey itself were found and fixed on the way, and both were false reports.**
 
@@ -674,8 +691,8 @@ the API will not distinguish them.
 | The encrypted read projection, offline shelf and profiles      | Complete, 11 tests; no offline writes (`DEV-038`)                |
 | Medicine schedules: the write path, the editor, the reads      | Complete, 166 tests; `MANAGE_MEDICINES` to write (DEC-107)       |
 | Local reminders: plan, reconcile, exact alarms, lock screen    | Complete, 52 tests; **measured on a device** (`DEV-041`)         |
-| Device harnesses: fourteen, storage to a camera permission     | Complete, 418 tests; 13 of `19`'s 14 scenarios (`DEV-040`)       |
-| The mobile app itself: rendering, hooks, providers             | 172 tests, and `apps/**` linted at last (`DEV-043` closed)       |
+| Device harnesses: seventeen, storage to Voice Mode             | Complete, 542 tests; 13 of `19`'s 14 scenarios (`DEV-040`)       |
+| The mobile app itself: rendering, hooks, providers             | 205 tests, and `apps/**` linted at last (`DEV-043` closed)       |
 | Recording a dose: `RECORD_DOSES`, its own capability           | Complete, 47 tests; 7/7 on a device (DEC-116)                    |
 | Caregiver, export, inbox, reconciliation, add-an-item UI       | Wired; **not device-verified** (`DEV-007`)                       |
 | Retention: the matrix, the roles, the doors, the sweep         | Complete, 67 tests; deadlines measured to the microsecond        |
@@ -692,7 +709,7 @@ the API will not distinguish them.
 | The theme layer on a device: provider, preference, override    | Complete, 11 tests; `FOLLOW_SYSTEM` reaches dark now (`DEV-077`) |
 | Haptics: four intents, an adapter, and an engine behind it     | Complete, 7 tests; **Android only** by choice (DEC-139)          |
 | Safety, Care and You on the design system                      | Complete; Safety **7/7** on a device (DEC-138, 142, 143)         |
-| Agent Tool Registry: 30 tools, eight answers each, no defaults | Complete, 107 tests; what `17` forbids has no name to be called  |
+| Agent Tool Registry: 30 tools, eight answers each, no defaults | Complete, 111 tests; what `17` forbids has no name to be called  |
 | Voice Mode: gates, confirmation, Speech Gate, the shell        | Complete; **9/9 on a device**; no provider (`BLK-012`)           |
 | Voice Mode's offline dose, through the app's own journal       | Complete, 5 tests; same entity, same key, same drain (DEC-140)   |
 | What a caller may do on a profile, reported by the server      | Complete, 7 tests; voice offers what a grant carries (DEC-141)   |
@@ -743,18 +760,26 @@ deliver to (`DEV-069`). One mailbox closes all three.
 
 ## Immediate next task
 
-**First, the two-line one:** `SHEET-3` and `SHEET-4` on `Invite someone@2` failed in the full
-accessibility survey and pass in every narrowed re-run of the same sheet. An unnamed 20x20dp node
-appears once in four runs and nobody has captured it. It is above the other work here because an
-intermittent red result is the kind that teaches people to ignore red results - which is exactly
-what `DEV-079` cost this session. Make the survey dump the offending node.
+**Wire the six Voice Mode tools that are offered and cannot run** (`DEV-084`). The registry
+declares thirty tools and `createToolExecutor` defines fifteen. Seven of the absences are correct
+(`TOUCH_ONLY`, refused at gate 2) and two are correct (`BLK-007`). Six are offered, unblocked and
+unrunnable: `list_safety_state`, `describe_alert`, `list_caregiver_access`, `list_pending_changes`,
+`update_item` and `update_schedule`. The agent is told they exist, proposes one, and `dispatch`
+refuses it as `BLOCKED` with no blocker identifier - so a person asking "is there anything I should
+know about my medicines" is told that part of Kynviora is not finished, which is a journey Voice
+Mode exists for.
 
-**Then read `DEV-081`, whatever else you do.** The Speech Gate - the mechanism the whole
-conversational layer rests on - had a hole in it from the day it was written, and it was found by a
-review rather than by anything in this repository. The generalisable rule is DEC-146: **any lookup
-whose key comes from outside this repository must resolve as an own property**, because
-`Object.freeze` does not remove a prototype and `UTTERANCES['toString']` is not `undefined`. Two
-such lookups existed and both are fixed. A third would not be surprising.
+It is not a capability gap. `profileAlerts`, `alertDetail`, `listCaregiverGrants`, `updateItem` and
+`updateSchedule` all exist on the client. Do the four reads first - no confirmation, no offline
+decision - then the two writes, which need a summary sentence each and an answer to whether they
+queue. `apps/mobile/src/voice/executor.test.ts` fails the day one of them is wired without being
+taken off its list, so the list is the worklist.
+
+**While doing it, settle the `QUEUES` claim.** The registry says `create_schedule` and
+`update_schedule` queue, and only `record_dose` reaches the journal. The touch path does queue
+schedules - `OFF-1` to `OFF-5` measure it - so the mechanism exists and voice does not use it.
+Until it does, the registry is describing an intention rather than the build. `DEV-085` made the
+app tell the truth about it at the moment it happens; that is not the same as making it true.
 
 **Then a mailbox** (`BLK-010`), which is still the whole of what stands between the fourteenth
 device scenario and every one of its eleven checks passing.
@@ -779,31 +804,35 @@ decision about where mail is allowed to go, not an engineering one.
 
 1. **Finish carrying the design system into the last third of `apps/**`.** Safety, Care and You
    are done, along with the golden path, the consent list, the notification settings, the delivery
-   policy, the access list, the removal confirmation, the access history and signing out. What is
-   still on raw `FONT_SIZE` and hand-rolled borders is the second layer: `InviteCaregiver`,
-   `SetUpHousehold`, `HealthContext`, `DeleteAccount`, `PendingQueue`, `ProfileSwitcher`, the
-   reconciliation and review-inbox flows, and the alert detail. **Waiting on:** nothing.
+   policy, the access list, the removal confirmation, the access history and signing out - and as
+   of 2026-09-07 `InviteCaregiver`, `ReconciliationReview` and `ReviewInbox`, the last two of which
+   had a `ScrollView` inside the one `Screen` already draws. What is still on raw `FONT_SIZE` and
+   hand-rolled borders: `SetUpHousehold`, `HealthContext`, `DeleteAccount`, `PendingQueue`,
+   `ProfileSwitcher`, `ReconciliationFlow`, `ResolutionPrompt`, `ReviewTaskEditor` and the alert
+   detail. **Waiting on:** nothing.
 
-   `InviteCaregiver` is the one to do carefully rather than quickly. `verify:device:doseaccess`
-   `DOSE-2` measures **where a sentence falls relative to a heading** on its review step, so a
-   reordering that reads better on screen can silently reproduce `DEV-049`.
+   `InviteCaregiver` was the one to do carefully rather than quickly, and the reason is now written
+   at the top of the file: `verify:device:doseaccess` `DOSE-2` measures **where a sentence falls
+   relative to a heading** on its review step, so a reordering that reads better on screen can
+   silently reproduce `DEV-049`. The heading order and `summary.changing` are unchanged, and it
+   still needs re-measuring on a device.
 
-2. **A decision on `DEV-063`**, the retention overshoot. Not work - a decision about a security
-   boundary. Giving `purge_floor()` and the four inline intervals in `0023` a margin equal to the
-   sweep interval would make every deadline in `docs/RETENTION.md` met **at** the deadline rather
-   than shortly after it, and it changes what the RLS policies admit.
-
-3. **Making the theme check part of a harness rather than a thing somebody did once.**
+2. **Making the theme check part of a harness rather than a thing somebody did once.**
    `verify:device:a11y` should move the system into dark mode, relaunch, and assert the rendered
-   ground is `DARK_THEME.canvas.background` before it walks the destinations. What was done this
-   session was a manual measurement - one `adb shell cmd uimode night yes`, a screencap, a pixel
+   ground is `DARK_THEME.canvas.background` before it walks the destinations. What was done on
+   2026-09-07 was a manual measurement - one `adb shell cmd uimode night yes`, a screencap, a pixel
    read - and a measurement nothing repeats is not a check. The thing that made the dark theme
    unreachable was a configuration line (`DEV-077`), which is exactly the kind of change every
    unit test passes through.
 
+3. **Find out what the build is warning about.** LogBox appearing during a survey is now reported
+   on `SHEET-1` and `A11Y-1`, and it only appears because something logged a warning. Nobody has
+   read the warning - the logcat buffer had rolled over by the time it was looked for, and it does
+   not fire at launch. It is a development-only banner and not a shipped defect, but a warning
+   nobody has read is a warning nobody has ruled out.
+
 **Also open and unstarted:** `DEV-024`, and the substance-mapping review queue (`DEV-037`), which
-DEC-117 unblocked in shape - a raw household term never goes to staff by default. The arithmetic
-for `DEV-063` is in `docs/RETENTION.md` section 8.3.
+DEC-117 unblocked in shape - a raw household term never goes to staff by default.
 
 **Deliberately not next: a digest screen** (`DEV-064`). The digest is assembled and recorded; what
 a digest surface should be **instead of** the Safety Inbox, which already shows every one of these
