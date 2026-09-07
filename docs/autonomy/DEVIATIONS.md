@@ -3801,6 +3801,9 @@ reverse` tunnel produces none either - the app has offline states and uses them.
 - **Tests**: none, and deliberately. The judgement `entryControlCheck` was always right - it was
   given a reading taken too early. What changed is the driving, which is the half `19` puts on
   hardware; `scripts/device/ui.test.ts` covers `coldStart`'s contract already.
+- **Confirmed on hardware**: `verify:device:voice` is **9/9 PASS** after the change, with `VOICE-1`
+  reporting "Found on all 5 destinations, within 20dp of the same position". The step that failed
+  now takes three minutes rather than thirty seconds, which is how long the cold start actually is.
 - **Status**: **RESOLVED 2026-09-08**.
 
 ---

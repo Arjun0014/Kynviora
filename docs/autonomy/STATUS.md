@@ -607,7 +607,7 @@ proved in `packages/agent`, in Node, without React or a phone. What a phone adds
 refusal is a sentence somebody can read, whether the summary of a write is on screen before the
 write, and whether the two answers can be pressed by somebody who is not looking at them.
 
-Last run **9/9 PASS** against a Pixel 7 / Android 16 emulator:
+Last run **9/9 PASS** against a Pixel 7 / Android 16 emulator, re-run 2026-09-08:
 
 | Check     | What it showed                                                                          |
 | --------- | --------------------------------------------------------------------------------------- |

@@ -917,7 +917,9 @@ screen and the bridge; `docs/design/VOICE_MODE.md` is the source of truth for th
 | The six gates, in order, re-checked at execution  | Complete; every refusal asserted both ways   |
 | Confirmation machine - named, expiring, disarmed  | Complete                                     |
 | The Speech Gate - facts from tool results only    | Complete                                     |
-| Executor over the existing `KynvioraClient`       | Complete for 15 tools; extraction is blocked |
+| Executor over the existing `KynvioraClient`       | Complete for all 28 runnable tools           |
+| What the registry claims about being offline      | Audited against the executor (`DEV-091`)     |
+| The offline journal, reached by voice             | Dose and schedule; **`OFF-8`/`OFF-9` green** |
 | Voice Mode screen, transcript, 88dp confirmations | Complete; **9/9 on a device**                |
 | Speech recognition, a model, speech synthesis     | **`BLK-012`** - three purchases, `16` review |
 
@@ -927,6 +929,19 @@ an account, share a health record, give somebody access or record consent by voi
 `TOUCH_ONLY` and each for its own reason (DEC-133). Read a package label - there is no extraction
 provider, and a stub answering "nothing was read" would be indistinguishable from an extraction
 that ran (`BLK-007`).
+
+**What it can do with no signal, since 2026-09-08.** Record a dose, set a reminder and change one -
+into the same journal the dose sheet and the schedule sheet use, drained by the same pass, under the
+same key discipline (DEC-148). A schedule **change** queues only where a version was actually read,
+because the two ways to send a conditional write without one are the two `13` refuses. `OFF-8` and
+`OFF-9` measure both halves on hardware: the sentence a person hears, and the single row that
+arrives on the next launch.
+
+**What it cannot do with no signal, and this is honest rather than missing.** Read anything. The
+projection is applied by `useResource`, a hook a screen calls, and a tool calls the client directly -
+so the nine reads that claimed `LOCAL_PROJECTION` never touched it and now say `ONLINE_ONLY`
+(`DEV-091`). Closing that needs a spoken sentence saying how old a local copy is, which is a product
+decision rather than wiring (`DEV-093`).
 
 **What it needs next.** A provider decision, which is three of them and each one needs the `16`
 model and data privacy review first. Everything else about Voice Mode is provider-independent by

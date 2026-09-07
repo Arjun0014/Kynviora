@@ -342,6 +342,14 @@ implemented, the exact configuration required is documented, and independent wor
   microphone. `NO_PROVIDERS` is the shipped configuration, and the screen says on itself that it
   cannot listen rather than appearing to.
 
+  The fake had a gap of its own until 2026-09-08 and it is worth recording here rather than only in
+  `DEV-095`, because it bounded what the workaround established. `demonstrationScript` was handed an
+  empty item ID, so four of its rules - both doses, the missing-fields question and the reminder -
+  were refused at gate 3 as malformed and spoken as "I cannot do that by voice." Every item-scoped
+  journey was therefore **unexercised on hardware**, including the offline dose DEC-140 describes.
+  The script now leaves out a rule it cannot fill, the item comes from
+  `EXPO_PUBLIC_DEV_VOICE_ITEM_ID`, and `OFF-8`/`OFF-9` drive a full item-scoped write end to end.
+
 - **What the fake establishes, and what it does not**: it establishes that a proposal for tool X
   with arguments Y is validated, confirmed, executed and reported correctly - including when the
   proposal is hostile, which several of its scripts are. It establishes **nothing** about whether a
