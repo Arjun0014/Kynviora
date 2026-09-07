@@ -157,6 +157,17 @@ Last run on 2026-09-07, after Safety, Care and You were rebuilt on the design sy
 | Five destinations, scale 1 and 2 | **30/30 PASS** - the redesign cost nothing `18` asks for |
 | Five sheets, scale 2             | **20/20 PASS** - the run that matters, on a clean stack  |
 
+**Read as two runs, not one, and that is a real limitation of this record.** The parts above were
+measured separately with `KYNVIORA_A11Y_PARTS`, because the emulator had been driven for eight hours
+by the time the harness was fixed and a full pass was taking hours. The whole survey in one process,
+including the TalkBack pass, has **not** been green in a single run since the redesign - the one
+attempt was still going at the end of the session. The sheets at scale 1 were last green in the
+first run of the day, which had app source hot-reloading under it and is therefore not evidence
+anybody should lean on.
+
+So the first thing to do on the next session with an attached device is `npm run verify:device:a11y`
+with nothing narrowed, on a freshly booted emulator, and to record the number it gives.
+
 **Two defects in the survey itself were found and fixed on the way, and both were false reports.**
 
 `DEV-079` was a false **FAIL**: `SHEET-2/Add a medicine@2` reported "Save" as never reachable, and
