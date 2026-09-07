@@ -56,8 +56,8 @@ are fluent.
 
 ## 3. The Agent Tool Registry
 
-`packages/agent/src/registry.ts`. Every capability an agent may name, with six answers each. None
-of the six has a default: a new tool cannot compile without all of them.
+`packages/agent/src/registry.ts`. Every capability an agent may name, with eight answers each. None
+of the eight has a default: a new tool cannot compile without all of them.
 
 | Field          | Answers                                                          |
 | -------------- | ---------------------------------------------------------------- |
@@ -221,6 +221,15 @@ the work).
 
 The assembled sentence is then scanned by `findForbiddenClaims`, because a combination can say
 something neither half said and this is the only place the whole sentence exists.
+
+**One way this was not true, until 2026-09-07.** `Object.freeze` does not remove a prototype, so
+`UTTERANCES['toString']` was `Object.prototype.toString` rather than `undefined`, and a gate that
+refused only on `undefined` let every inherited name through - as
+`"function toString() { [native code] }"`. The key was a raw string off a model completion, cast
+rather than narrowed. It is resolved through `Object.hasOwn` now and narrowed by `isUtteranceKey`
+at the one place a model supplies one (`DEV-081`, DEC-146). Worth stating rather than quietly
+fixing: the claim above is what makes the rest of this design defensible, and a claim with one hole
+in it has to be re-earned rather than restated.
 
 **What this costs.** Fluency. Kynviora sounds composed rather than chatty, and it cannot answer a
 question no tool answers - it says so. **What it buys.** There is no path, including a jailbroken or

@@ -758,12 +758,24 @@ export function createServer(options: ServerOptions): FastifyInstance {
     //
     // WHY IT DISCLOSES NOTHING
     // Every answer is about the caller's own authorization, and `has_capability` consults
-    // `kynviora.current_user_id()` - there is no parameter that could name somebody else. A
-    // profile this caller cannot see answers `false` to all of them, which is the same thing an
-    // empty shelf page already tells them, so an unknown ID and a profile with no grant are
-    // indistinguishable. `13`'s rule that the API does not say "you are not allowed" is about a
-    // **refusal** carrying a reason; this is the affirmative report the same chapter requires so a
-    // screen can withhold a control rather than offer one the write would refuse.
+    // `kynviora.current_user_id()` - there is no parameter that could name somebody else. An
+    // unknown ID and a profile with no grant are indistinguishable, both answering with an empty
+    // list, which is the same thing an empty shelf page already tells them. `13`'s rule that the
+    // API does not say "you are not allowed" is about a **refusal** carrying a reason; this is the
+    // affirmative report the same chapter requires so a screen can withhold a control rather than
+    // offer one the write would refuse.
+    //
+    // THE VISIBILITY READ IS NOT BELT AND BRACES
+    // `has_capability` is `SECURITY DEFINER` and its owner branch filters `deleted_at IS NULL`
+    // while its **grant** branch does not - grants are not revoked when a profile is soft-deleted,
+    // only purged past `purge_floor()` (migration `0025`). So without this, a caregiver holding a
+    // live grant on a profile the owner had deleted would get a populated list from here while
+    // every other route on this surface answered empty, and diffing the two would distinguish
+    // "deleted" from "never had access". Nothing else on this surface makes that distinction.
+    //
+    // Asked through the caller's own connection, so `profile_select` is what decides - the same
+    // policy every other read on this profile goes through, rather than a second condition here
+    // that could drift from it.
 
     app.get('/v1/profiles/:profileId/capabilities', async (request, reply) => {
       const ctx = await contextFor(request, reply);
@@ -782,10 +794,14 @@ export function createServer(options: ServerOptions): FastifyInstance {
       // the list in the query parameters, so a capability added to `CAREGIVER_CAPABILITIES` is
       // reported here without this route changing - and a capability removed from it stops being
       // reported, rather than lingering as a string nothing can grant.
+      //
+      // The visibility read is joined into the same statement rather than made as a second one:
+      // two statements are two moments, and a profile deleted between them would be reported on.
       const held = await ctx.db((db) =>
         db.query<{ capability: string; held: boolean }>(
           `SELECT c AS capability, kynviora.has_capability($1, c) AS held
-             FROM unnest($2::text[]) AS c`,
+             FROM unnest($2::text[]) AS c
+            WHERE EXISTS (SELECT 1 FROM profile WHERE id = $1)`,
           [params.data.profileId, [...CAREGIVER_CAPABILITIES]],
         ),
       );

@@ -3067,10 +3067,17 @@ its own limit on pending local notifications, which is lower than Android's and 
   failures may be queued, and the answer - only `OFFLINE`, because a refusal replayed by a journal is
   refused again - showed that the existing single branch was answering two questions with one
   sentence.
-- **How it resolved**: three answers instead of two (DEC-140). `OFFLINE` queues and says so;
-  `UNAUTHENTICATED`, `AUTHORIZATION_LOST`, `STEP_UP_REQUIRED` and `UNAVAILABLE` say
-  `notAllowed`; everything else says `cannotDoThat`. None of them invents a reason - `13` keeps the
-  reason out of the authorization responses on purpose and this respects that.
+- **How it resolved**: more than two answers (DEC-140), and a total function over the rest
+  (DEC-144). `OFFLINE` queues and says so, and is excluded from the failure mapping because it is
+  not a failure of this kind. `utteranceForWriteFailure` then maps `STEP_UP_REQUIRED` to
+  `needsIdentity`, which points at the screen where a password can be typed; `UNAVAILABLE` to
+  `notAvailable`, because it is a `404` and `13` makes absence and refused access indistinguishable
+  on purpose, so saying "you do not have access" out loud would disclose by ear what the response
+  body was written not to say; and `UNAUTHENTICATED`, `AUTHORIZATION_LOST`, `REFUSED` and
+  `SERVER_ERROR` to `didNotGoThrough`, which reports that nothing was kept. `notAllowed` is
+  deliberately not on this path at all - it stays for the dispatcher's own capability gate, where
+  this app's own report says the caller does not hold the capability. None of them invents a
+  reason.
 - **Status**: **RESOLVED 2026-09-07**.
 
 ---
@@ -3103,4 +3110,137 @@ its own limit on pending local notifications, which is lower than Android's and 
   when a drag was consumed rather than applied. The same anchor is used by `scrollDown` everywhere,
   so any other long form of text fields could have produced the same false FAIL - and none had,
   because until this session no sheet survey had ever met a form that tall at 2x.
+- **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-080 - A survey at font scale 2 measured a screen that had not drawn yet (resolved)
+
+- **Affected specification**: `19` (a check that could not look is not a finding), DEC-102, DEC-145.
+- **Expected behaviour**: the first sheet surveyed after a font-scale change is surveyed against
+  the app.
+- **Implemented behaviour**: `SHEET-1/Invite someone@2` reported `INCONCLUSIVE` - "the taps that
+  open this sheet did not land" - against an app that was still starting.
+- **Reason**: `relaunch()` force-stopped the app, started it, and `sleep(30_000)`. Thirty seconds
+  is not a property of anything. Measured on the emulator this session, a cold start at font scale
+  2 took **longer than that**: sixteen seconds gave a hierarchy containing nothing but frame
+  layouts, and content appeared somewhere before forty. The function's own comment had named the
+  failure in advance - "a dump taken too early reports a screen with no controls - which the checks
+  correctly refuse to call a pass, and which is a wasted run" - and then slept for a fixed time
+  anyway.
+- **How it resolved**: `waitForAppReady()`, which already existed in `ui.ts` for exactly this and
+  whose own comment says it "replaces a fixed sleep". It waits on the tab bar, bounded at ninety
+  seconds, and `relaunch` now answers whether the app drew. `surveySheet` reports a false as a
+  sheet it could not open; `main` reports it as a scale it could not measure, rather than surveying
+  a blank screen and calling the missing controls accessibility defects.
+- **A second benefit that is not incidental**: it is faster. A full survey makes a dozen
+  relaunches, so a fixed thirty seconds is six minutes of a run spent waiting for something that
+  had already happened - and a survey nobody re-runs after a fix is a survey whose red results stop
+  being acted on, which is what `DEV-079` is about.
+- **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-081 - The Speech Gate would say anything named after a property of `Object.prototype` (resolved)
+
+- **Affected specification**: `17` (a model completion is untrusted input that may carry
+  instructions; the agent never establishes a fact), `15`, `18` (forbidden claims), DEC-135,
+  DEC-144.
+- **Expected behaviour**: every word Kynviora speaks either came out of a tool result or is one of
+  about fifteen sentences written in this repository. `docs/design/VOICE_MODE.md` section 6 states
+  it as an absolute: "there is no path, including a jailbroken or prompt-injected one, by which a
+  sentence about somebody's medicine reaches their ears without having been composed here."
+- **Implemented behaviour**: `gateSpeech` resolved an utterance key by indexing `UTTERANCES` and
+  refused only when the result was `undefined`. **`Object.freeze` does not remove a prototype**, so
+  `UTTERANCES['toString']` is `Object.prototype.toString` rather than `undefined` - and
+  `pieces.join(' ')` stringifies it. Measured:
+
+  ```
+  toString    => function toString() { [native code] }
+  constructor => function Object() { [native code] }
+  __proto__   => [object Object]
+  nope        => UNDEFINED (refused)
+  ```
+
+  `findForbiddenClaims` does not match any of it, so the gate returned `ok: true`.
+
+- **Why it was reachable rather than theoretical**: the key is not this repository's to choose. An
+  agent turn of kind `SAY` carries `utterance` as a **raw string off a model completion**
+  (`ports.ts`), and `VoiceProvider` cast it with `as keyof typeof UTTERANCES` - a cast changes the
+  type and checks nothing. A model returning `{ kind: 'SAY', utterance: 'toString' }` had
+  `"function toString() { [native code] }"` spoken by the synthesizer and written into the
+  transcript.
+- **What it could and could not do**: bounded. A model picks from roughly a dozen prototype names,
+  not arbitrary prose, and none of the strings says anything about a medicine. What it broke is the
+  property itself, which is the thing that made the rest of the design defensible - a gate with one
+  hole is a gate whose other claims have to be re-argued.
+- **How it was found**: not by a test and not by a device. A review of the session's diff asked
+  whether the new `utterances` channel could smuggle text, found that it could not, and then asked
+  the same question of the **existing** resolution path.
+- **How it resolved**: `utteranceFor` resolves through `Object.hasOwn` and requires the value to be
+  a string; `isUtteranceKey` is exported so the one place a model supplies a key narrows it instead
+  of casting; an unrecognised key is reported as something Kynviora did not understand, which is
+  true and is not the person's mistake. Four tests loop the inherited names, one asserts no
+  assembled sentence can contain `native code`, and a positive control asserts every real key still
+  passes - because a gate that refused everything would satisfy the first three.
+- **The same shape, found and closed with it**: `FROM_GRANT` in
+  `apps/mobile/src/voice/capabilities.ts` was an object literal indexed with names from a server
+  response, so `FROM_GRANT['constructor']` was a function rather than `undefined`. Inert - none of
+  those values is a `ToolCapability`, and `holdsCapability` only ever asks for a real one - but it
+  made the file's "an unknown name contributes nothing" false. It is a `Map` now.
+- **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-082 - The capability report answered for a profile its caller could no longer see (resolved)
+
+- **Affected specification**: `13` (absence and refused access are deliberately indistinguishable),
+  `15` A2, DEC-141.
+- **Expected behaviour**: `GET /v1/profiles/:id/capabilities` tells a caller nothing they could not
+  learn from any other route on the surface.
+- **Implemented behaviour**: for a **deleted** profile it told a caregiver more.
+- **Reason**: `kynviora.has_capability` short-circuits on ownership through `owns_profile`, which
+  filters `deleted_at IS NULL` - but its caregiver-grant branch does not, and migration `0025`
+  soft-deletes a profile **without revoking the grants hanging off it** (they are purged later,
+  past `purge_floor()`). So a caregiver's grant outlives the profile's visibility by the length of
+  the retention window. Measured directly: after `kynviora.delete_profile`, the caregiver's own
+  connection reports `has_capability = true` and `SELECT count(*) FROM profile WHERE id = $1` = 0.
+- **What that disclosed**: a caller who compared this route's answer with any other would
+  distinguish "the owner deleted this profile" from "your access was revoked" - the second answers
+  with an empty list, the first did not. Nothing else on this surface makes that distinction, and
+  `13` makes it deliberately unavailable. The owner of the same deleted profile got an empty list,
+  so the asymmetry was caregiver-only.
+- **How it was found**: a review of the session's diff, checking the route's own claim that it
+  "discloses nothing" rather than accepting it.
+- **How it resolved**: the query gained `WHERE EXISTS (SELECT 1 FROM profile WHERE id = $1)`,
+  evaluated on the caller's own connection so `profile_select` is what decides - the same policy
+  every other read on the profile goes through, rather than a second condition here that could
+  drift from it. In the same statement rather than a second one, because two statements are two
+  moments and a profile deleted between them would still be reported on. Three tests, including
+  that an owner and a stranger now get identical answers.
+- **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-083 - One profile's capabilities could be applied to another (resolved)
+
+- **Affected specification**: `13` (a profile ID narrows a result set and never grants access),
+  `14` (deny by default), DEC-141.
+- **Expected behaviour**: the capabilities Voice Mode reads are the ones the server reported **for
+  the profile being looked at**.
+- **Implemented behaviour**: `granted` was `capabilityResource.value?.capabilities`, and
+  `useResource` keeps its last successful value when a later read fails - deliberately, because
+  `18` would rather show content labelled stale than take it away. Right for a medicine list;
+  wrong for an authorization report.
+- **The failure**: a caregiver holds `MANAGE_MEDICINES` on one profile and only `VIEW_MEDICINES` on
+  another. Voice Mode open on the first; switch person with no signal; the refetch answers
+  `OFFLINE`; the resource goes `STALE` holding the first profile's list. The agent then offers
+  `add_medicine`, `update_item` and `create_schedule` on the second profile until a read succeeds -
+  which is a person completing a spoken form for nothing, the exact failure DEC-141 exists to
+  prevent, arriving from the other side of it.
+- **How it was found**: a review of the session's diff. No test covered a profile change; every
+  test in `VoiceProvider.test.tsx` uses one profile.
+- **How it resolved**: the answer carries the profile it was asked about, and a mismatch reads as
+  no answer - which narrows to the empty set, which is a person told to use the screen. `13`'s rule
+  that a profile ID narrows rather than grants, applied to the report as well as to the request.
 - **Status**: **RESOLVED 2026-09-07**.

@@ -92,6 +92,31 @@ export type UtteranceKey = keyof typeof UTTERANCES;
 const UTTERANCE_VALUES: ReadonlySet<string> = new Set(Object.values(UTTERANCES));
 
 /**
+ * Resolve an utterance key, or `null`.
+ *
+ * **`Object.freeze` does not remove a prototype**, and that is the whole reason this function
+ * exists rather than an index and a `=== undefined` check. `UTTERANCES['toString']` is not
+ * `undefined` - it is `Object.prototype.toString`, and `String()` of it is
+ * `"function toString() { [native code] }"`. The same is true of `constructor`, `valueOf`,
+ * `hasOwnProperty`, `isPrototypeOf`, `propertyIsEnumerable`, `toLocaleString` and `__proto__`.
+ *
+ * The old guard passed every one of them, and the key is **not** this repository's to choose: an
+ * agent turn of kind `SAY` carries `utterance` as a raw string off a model completion
+ * (`ports.ts`), and the shell hands it here. So a model returning `{ kind: 'SAY', utterance:
+ * 'toString' }` had a sentence spoken aloud and written into the transcript that nothing in this
+ * repository composed - which is precisely the property section 6 of `docs/design/VOICE_MODE.md`
+ * says cannot be reached "including a jailbroken or prompt-injected one".
+ *
+ * `Object.hasOwn` is the fix and the `typeof` is belt and braces: a key had to be an **own**
+ * property of the closed set, and the value it resolves to has to be a string.
+ */
+function utteranceFor(key: string): string | null {
+  if (!Object.hasOwn(UTTERANCES, key)) return null;
+  const text: unknown = (UTTERANCES as Record<string, unknown>)[key];
+  return typeof text === 'string' ? text : null;
+}
+
+/**
  * What a spoken response is made of.
  *
  * `utterance` is a key into {@link UTTERANCES}. `composed` is text a tool result carried, which
@@ -137,8 +162,10 @@ export function gateSpeech(
 
   for (const part of parts) {
     if (part.kind === 'UTTERANCE') {
-      const text = UTTERANCES[part.key] as string | undefined;
-      if (text === undefined) {
+      // Own properties only. See {@link utteranceFor} - a plain index here let
+      // `Object.prototype.toString` through, and the key comes off a model completion.
+      const text = utteranceFor(String(part.key));
+      if (text === null) {
         return { ok: false, refusal: 'UNKNOWN_UTTERANCE', detail: String(part.key) };
       }
       pieces.push(text);
@@ -174,4 +201,15 @@ export function gateSpeech(
 /** Whether a string is one of the fixed utterances. Used by tests and by the transcript view. */
 export function isUtterance(text: string): boolean {
   return UTTERANCE_VALUES.has(text);
+}
+
+/**
+ * Whether a name is a key of the closed set.
+ *
+ * Exported so the one place a **model** supplies a key - an agent turn of kind `SAY` - can narrow
+ * it before it becomes an `UtteranceKey`, rather than casting. A cast is what let
+ * `Object.prototype.toString` through: it changes the type and checks nothing.
+ */
+export function isUtteranceKey(name: string): name is UtteranceKey {
+  return utteranceFor(name) !== null;
 }

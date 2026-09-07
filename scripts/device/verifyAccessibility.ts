@@ -44,7 +44,7 @@ import {
   type UiNode,
 } from './accessibility.js';
 import { foldDump, sheetChecks, type SheetSurvey, type SurveyedControl } from './sheets.js';
-import { scrollDown, scrollDownFrom, scrollUp } from './ui.js';
+import { scrollDown, scrollDownFrom, scrollUp, waitForAppReady } from './ui.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
 
 /** TalkBack's own package, which has its own runtime permission to ask for. */
@@ -112,13 +112,30 @@ const SHEET_DRAG_BAND = Object.freeze({ top: 700, bottom: 1_900 });
  */
 const MAX_SCROLL_TO_FIND = 60;
 
-function relaunch(): void {
+/**
+ * Start the app from dead and wait until it is drawing, rather than for a fixed time.
+ *
+ * It used to `sleep(30_000)`, with a comment naming the exact failure that eventually happened: "a
+ * dump taken too early reports a screen with no controls - which the checks correctly refuse to
+ * call a pass, and which is a wasted run." Thirty seconds is not a property of anything. A cold
+ * start behind Metro takes fifteen to fifty seconds depending on whether the bundle is cached, and
+ * at font scale 2 the layout pass costs more again - so on 2026-09-07, on an emulator that had been
+ * driven for hours, the first sheet at scale 2 was surveyed against a blank screen and reported
+ * `INCONCLUSIVE` (`DEV-080`).
+ *
+ * `waitForAppReady` waits for the thing actually being waited for - the tab bar - and its own
+ * comment says it exists to replace this sleep. Bounded at ninety seconds; `false` means the app
+ * did not draw, which is a condition the caller has to report rather than measure through.
+ *
+ * It is also **faster** on a healthy machine, which matters more than it sounds: a survey makes a
+ * dozen relaunches, so a fixed thirty seconds is six minutes of a run spent waiting for something
+ * that had already happened - and a survey nobody re-runs after a fix is a survey whose red
+ * results stop being acted on.
+ */
+function relaunch(): boolean {
   adb(['shell', 'am', 'force-stop', PACKAGE]);
   adb(['shell', 'am', 'start', '-n', `${PACKAGE}/.MainActivity`]);
-  // A cold start plus a keystore round trip plus a first fetch. At the larger font scale the
-  // layout pass costs more again, and a dump taken too early reports a screen with no controls -
-  // which the checks correctly refuse to call a pass, and which is a wasted run.
-  sleep(30_000);
+  return waitForAppReady();
 }
 
 /**
@@ -245,7 +262,12 @@ function pressNamed(label: string): boolean {
  * below it, and the sheet may have been left part-way down by the taps that opened it.
  */
 function surveySheet(label: string, path: readonly string[], scale: number): SheetSurvey {
-  relaunch();
+  // An app that never drew is not a sheet that would not open, and `sheetChecks` renders both as
+  // `INCONCLUSIVE` - which is the right status and the wrong sentence. Reported as unopened here
+  // because that is all this function can honestly say; what it could not do is start.
+  if (!relaunch()) {
+    return { label, fontScale: scale, opened: false, positions: 0, controls: [] };
+  }
 
   for (const control of path) {
     if (!pressNamed(control)) {
@@ -314,6 +336,7 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
 function sheetsAt(scale: number): readonly Check[] {
   const checks: Check[] = [];
   for (const sheet of SHEETS) {
+    if (ONLY_SHEET !== null && sheet.label !== ONLY_SHEET) continue;
     checks.push(...sheetChecks(surveySheet(sheet.label, sheet.path, scale), MIN_TOUCH_TARGET_DP));
   }
   return checks;
@@ -417,9 +440,94 @@ function withTalkBack(): readonly Check[] {
   }
 }
 
+/**
+ * Which part of the survey to run, and at which scales.
+ *
+ * A full survey is twenty-two checks over ten cold starts and takes the better part of an hour on
+ * a healthy emulator - longer on one that has been driven all day. That is the right cost for a
+ * regression round and the wrong cost for **re-running the one check a fix was about**: a survey
+ * nobody re-runs after a fix is a survey whose red results stop being acted on, which is the habit
+ * `DEV-079` is a warning about.
+ *
+ * So the same affordance `verifySignIn.ts` has for its own reason (`KYNVIORA_SIGNIN_PHASES`), for
+ * a different one. The default is everything, so a plain `npm run verify:device:a11y` is unchanged
+ * and no run is narrowed by accident.
+ *
+ *   KYNVIORA_A11Y_PARTS=sheets       destinations | sheets | talkback, comma-separated
+ *   KYNVIORA_A11Y_SHEETS=Add a medicine     one sheet label, or all of them
+ *   KYNVIORA_A11Y_SCALES=2           1 | 2 | 1,2
+ *
+ * A narrowed run says so in its report, because "7/7 PASS" over a seventh of the survey is not the
+ * same claim as "7/7 PASS" and a reader two weeks later cannot tell them apart.
+ */
+/** Every part there is. Named, so an unrecognised one is a stop rather than a silent omission. */
+const ALL_PARTS = ['destinations', 'sheets', 'talkback'] as const;
+
+/**
+ * The parts asked for, or `null` where a name was not one.
+ *
+ * `null` rather than "ignore what I did not recognise": `KYNVIORA_A11Y_PARTS=destinations,sheets,x`
+ * would otherwise run two parts of three while `PARTS.size === 3` reported a full survey, and a
+ * typo would silently drop TalkBack from a regression round.
+ */
+const PARTS: ReadonlySet<string> | null = ((): ReadonlySet<string> | null => {
+  const asked = (process.env.KYNVIORA_A11Y_PARTS ?? ALL_PARTS.join(','))
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part !== '');
+  if (asked.some((part) => !(ALL_PARTS as readonly string[]).includes(part))) return null;
+  return new Set(asked);
+})();
+
+/**
+ * The scales asked for, de-duplicated.
+ *
+ * De-duplicated because the count is what says whether the run was narrowed, and
+ * `KYNVIORA_A11Y_SCALES=1,1` is a run that never reaches font scale 2 - which is the half that
+ * matters - while looking like a full one.
+ */
+const SCALES: readonly number[] = [
+  ...new Set(
+    (process.env.KYNVIORA_A11Y_SCALES ?? '1,2')
+      .split(',')
+      .map((entry) => Number(entry.trim()))
+      .filter((entry) => entry === 1 || entry === 2),
+  ),
+].map((entry) => (entry === 2 ? MAX_SUPPORTED_FONT_SCALE : 1));
+
+/** The sheet label to survey, or `null` for all of them. */
+const ONLY_SHEET: string | null = process.env.KYNVIORA_A11Y_SHEETS?.trim() || null;
+
+/**
+ * Whether this run covered less than the whole survey.
+ *
+ * Measured against what was actually run rather than against what was asked for, which is the
+ * distinction the first draft of this got wrong in both directions.
+ */
+function narrowed(): boolean {
+  return (
+    PARTS === null || PARTS.size !== ALL_PARTS.length || SCALES.length !== 2 || ONLY_SHEET !== null
+  );
+}
+
 function main(): void {
   if (!isInstalled()) {
     process.stdout.write(`${PACKAGE} is not installed on the attached device.\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (PARTS === null) {
+    process.stdout.write(
+      `KYNVIORA_A11Y_PARTS named something that is not a part of this survey. ` +
+        `The parts are: ${ALL_PARTS.join(', ')}.\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  if (SCALES.length === 0) {
+    process.stdout.write('KYNVIORA_A11Y_SCALES named no scale this survey can run at.\n');
     process.exitCode = 1;
     return;
   }
@@ -429,27 +537,51 @@ function main(): void {
   const checks: Check[] = [];
 
   try {
-    setFontScale(1);
-    relaunch();
-    checks.push(...screensAt(1, density));
-    checks.push(...sheetsAt(1));
-
-    // The largest scale the app claims to support. Beyond it `scaledFontSize` clamps, so this is
-    // the boundary rather than an arbitrary large number.
-    setFontScale(MAX_SUPPORTED_FONT_SCALE);
-    relaunch();
-    checks.push(...screensAt(MAX_SUPPORTED_FONT_SCALE, density));
-    // The sheets at the ceiling, which is the run that matters. A form's rows are sized by their
-    // content, so this is where one stops fitting - and `DEV-046` happened on a build reporting
-    // 34/34 over the five destinations alone.
-    checks.push(...sheetsAt(MAX_SUPPORTED_FONT_SCALE));
+    // Scale 2 is the largest the app claims to support - beyond it `typeStyle` clamps, so it is a
+    // boundary rather than an arbitrary large number - and the sheets at that scale are the run
+    // that matters. A form's rows are sized by their content, so that is where one stops fitting,
+    // and `DEV-046` happened on a build reporting 34/34 over the five destinations alone.
+    for (const scale of SCALES) {
+      setFontScale(scale);
+      // Reported, not measured through. `relaunch` answers `false` when the app never drew, and a
+      // destination survey run against a blank screen reports "no control named Today was found"
+      // - which reads as the app having lost its tab bar (DEC-102, `DEV-080`).
+      if (!relaunch()) {
+        checks.push({
+          id: `A11Y-0@${String(scale)}`,
+          title: `The app started at font scale ${String(scale)}`,
+          status: 'INCONCLUSIVE',
+          detail:
+            'The app did not draw its tab bar within ninety seconds of a cold start, so nothing ' +
+            'at this font scale was measured. A run that reported its controls would be ' +
+            'describing a blank screen.',
+        });
+        continue;
+      }
+      if (PARTS.has('destinations')) checks.push(...screensAt(scale, density));
+      if (PARTS.has('sheets')) checks.push(...sheetsAt(scale));
+    }
   } finally {
     setFontScale(original);
   }
 
-  checks.push(...withTalkBack());
+  if (PARTS.has('talkback')) checks.push(...withTalkBack());
 
   process.stdout.write(`${formatReport(checks)}\n`);
+
+  // Said after the report rather than before it, and said at all because a narrowed run's
+  // "PASS" is a different claim from a whole survey's. A reader two weeks later has the
+  // report and not the command line that produced it.
+  if (narrowed()) {
+    process.stdout.write(
+      '\nThis was a NARROWED run and is not a full accessibility survey.\n' +
+        `  parts:  ${[...(PARTS ?? [])].join(', ')}\n` +
+        `  scales: ${SCALES.map((scale) => String(scale)).join(', ')}\n` +
+        `  sheets: ${ONLY_SHEET ?? 'all'}\n` +
+        'Run `npm run verify:device:a11y` with no KYNVIORA_A11Y_* set for the whole thing.\n',
+    );
+  }
+
   process.exitCode = overallStatus(checks) === 'PASS' ? 0 : 1;
 }
 

@@ -3127,46 +3127,6 @@ matched, which the mapper coalesces - an item with no formulation never reaches 
 
 ---
 
-## DEC-099 - A blast radius counts only mappings somebody made, and a rule nobody wrote is still refused
-
-**Date:** 2026-09-02
-**Phase:** 6.7 (`DEV-018`)
-
-**Status:** Accepted
-
-The historical shadow dataset reached `owned_item`, `batch_or_lot` and `product_identity` and
-stopped there, so `INGREDIENT_SENSITIVITY` was refused rather than measured (`DEV-018`). Refusing
-was right while it lasted: reporting fewer matches than a rule really produces reads as "this
-affects nobody" on the screen a reviewer approves from, and a reviewer confirming an expected match
-volume against an under-count would be confirming something false.
-
-**Both halves, or neither.** Phase 5.2 supplied the fact side and the item side was still missing,
-and supplying one alone would have been worse than supplying neither - a rule matching on the
-intersection would have reported zero with a straight face. Both landed together: the declaration's
-canonical keys aggregated per item, and the profile fact's key joined through `substance_id`.
-
-**Only `EXACT` ingredients contribute a key.** An `AMBIGUOUS` or `UNRESOLVED` ingredient resolved to
-no substance, and counting it would be matching on a mapping nobody made - the same discipline
-`evaluateIngredientSensitivity` already keeps on the profile side, and the same one DEC-098 keeps at
-the point a term is recorded. A measured zero and a structural zero are different statements, and
-this is what makes the number the first kind.
-
-**`DUPLICATE_ACTIVE_INGREDIENT` stays refused, for a different reason than it was refused for.** The
-dataset can feed it now; the engine cannot evaluate it. `09` requires validated reference data and
-clinical review before that rule may exist at all (`BLK-006`), so `evaluateRule` returns a non-match
-for every item - and measuring it would produce a confident zero about a rule nobody has written.
-The refusal is the same code path and the comment says which of the two reasons applies, because a
-list whose entries are there for different reasons is a list somebody eventually clears wrongly.
-
-**The aggregation is a correlated subquery, not a second round trip.** One row per item is what the
-dataset builder expects, and a per-item query over a whole installation's shelf is the shape that
-stops being viable first. `array_agg` returns `NULL` rather than an empty array when nothing
-matched, which the mapper coalesces - an item with no formulation never reaches the subquery at all.
-
-**Sources.** `04` Phase 6.7; `09`; `DEV-018`; DEC-098; `BLK-003`; `BLK-006`.
-
----
-
 ## DEC-100 - The local projection is the last thing the server said, and an access failure deletes it
 
 **Date:** 2026-09-03
@@ -5451,3 +5411,53 @@ defect in the thing it is measuring. Both make the report untrustworthy, and the
 teaches people to disbelieve a red result, which is the more expensive habit.
 
 **Sources.** `18`, `19`, DEC-102, `DEV-046`, `DEV-079`, `scripts/device/accessibility.ts`.
+
+---
+
+## DEC-146 - A key into a closed set is resolved as an own property, and a model's string is narrowed rather than cast
+
+**Context.** `DEV-081`. The Speech Gate resolved an utterance key by indexing `UTTERANCES` and
+refusing on `undefined`. `Object.freeze` does not remove a prototype, so `UTTERANCES['toString']`
+is `Object.prototype.toString` - not `undefined` - and the assembled sentence became
+`"function toString() { [native code] }"`. `VoiceProvider` handed the gate a raw string off a model
+completion, cast with `as keyof typeof UTTERANCES`.
+
+**Options.** (a) Deny-list the prototype names. (b) `Object.create(null)` for the set. (c)
+`Object.hasOwn` at the point of resolution, plus a `typeof` on the value. (d) A `Map`.
+
+**Decision.** (c) for `UTTERANCES`, and (d) for the two other closed-set lookups this codebase had
+in the same shape (`FROM_GRANT` in `capabilities.ts`).
+
+**Rationale.** (a) is a list somebody has to keep in step with a language. (b) works and costs the
+object literal's readability, which for a set of about fifteen sentences somebody reads and edits is
+a real cost - and it leaves the same trap for the next literal anybody writes. (c) is local to the
+one function that resolves a key, is a single call, and is what the JavaScript in question is
+actually for. (d) is better still where the lookup is a mapping rather than a set of prose, which is
+why the two are not treated identically.
+
+**The narrowing matters as much as the resolution.** `isUtteranceKey` is exported so the one place a
+**model** supplies a key - an agent turn of kind `SAY` - can narrow instead of casting. A cast is
+what let this happen: `as keyof typeof UTTERANCES` changes the type and checks nothing, and this
+codebase's rule about model output being untrusted input (`17`, `15`) has to be enforced at the
+boundary rather than asserted at it.
+
+**The general rule.** **Any lookup whose key comes from outside this repository must resolve as an
+own property.** In this codebase that is three kinds of place: an utterance key from a model, a
+capability name from a server response, and any future map keyed by a wire value. It is not a style
+preference - it is the difference between "an unknown name contributes nothing", which several
+comments here claim, and "an unknown name contributes whatever `Object.prototype` has", which is
+what they meant.
+
+**Consequences.** Four tests loop the inherited names; one asserts no assembled sentence can contain
+`native code`, which is the harm rather than the mechanism; and a positive control asserts every
+real key still passes, because a gate that refused everything would satisfy the other three. An
+unrecognised key is reported to the person as something Kynviora did not understand - true, and not
+their mistake.
+
+**What this says about the review that found it.** Nothing in this repository could have caught it:
+the gate is tested, and every test used a real key. It was found by asking whether a **new** channel
+could smuggle text, finding that it could not, and then asking the same question of the path that
+had been there all along. That is the generalisable part.
+
+**Sources.** `15`, `17`, DEC-135, `DEV-081`, `packages/agent/src/speech.ts`,
+`apps/mobile/src/voice/capabilities.ts`.

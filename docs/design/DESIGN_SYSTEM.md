@@ -250,15 +250,16 @@ Rules:
 Every component below lives in `apps/mobile/src/components/` and takes a **presentation** rather
 than a colour and a string, so a caller cannot construct one that carries meaning by colour alone.
 
-| Component       | Responsibility                                                              |
-| --------------- | --------------------------------------------------------------------------- |
-| `Screen`        | The frame: heading, introduction, safe area, pull-to-refresh                |
-| `Card`          | One idea, on one surface, with an optional tone                             |
-| `PrimaryButton` | An action, at 48dp minimum, growing with the font scale                     |
-| `StatusChip`    | One status, from a `StatusPresentation` - icon, label, optional description |
-| `ScreenState`   | Loading / empty / offline / error / authorization lost, announced politely  |
-| `FieldRow`      | A labelled value, with an explicit empty state rather than a blank          |
-| `SectionHeader` | An `overline` and an optional one-line explanation                          |
+| Component       | Responsibility                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------------- |
+| `Screen`        | The frame: heading, introduction, safe area, pull-to-refresh                                    |
+| `Card`          | One idea, on one surface, with an optional tone                                                 |
+| `PrimaryButton` | An action, at 48dp minimum, growing with the font scale                                         |
+| `StatusChip`    | One status, from a `StatusPresentation` - icon, label, optional description                     |
+| `ScreenState`   | Loading / empty / offline / error / authorization lost, announced politely                      |
+| `FieldRow`      | A labelled value, with an explicit empty state rather than a blank                              |
+| `SectionHeader` | An `overline` and an optional one-line explanation                                              |
+| `Typography`    | Text in a named role - the only place the font scale is applied, with `announce` for an outcome |
 
 All five destinations render through `Screen` (DEC-142). Care was the exception until 2026-09-07 -
 its own safe area, its own scroll view, its own heading and its own padding, with a second scroll

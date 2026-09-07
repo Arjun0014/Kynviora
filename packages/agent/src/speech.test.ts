@@ -10,7 +10,14 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { UTTERANCES, gateSpeech, isUtterance, type SpeechPart } from './speech.js';
+import {
+  UTTERANCES,
+  gateSpeech,
+  isUtterance,
+  isUtteranceKey,
+  type SpeechPart,
+  type UtteranceKey,
+} from './speech.js';
 import { findForbiddenClaims } from '@kynviora/presentation';
 
 const RESULT = [
@@ -137,5 +144,65 @@ describe('the fixed utterances', () => {
     // "Is this safe?" is the question a voice interface will be asked most, and the answer has to
     // exist as a fixed sentence rather than as something composed in the moment.
     expect(UTTERANCES.notMedicalAdvice).toContain('health professional');
+  });
+});
+
+describe('an utterance key that is not one', () => {
+  /**
+   * Spec references: `17` (a model completion is untrusted input), `15`, DEC-135, `DEV-081`.
+   *
+   * **`Object.freeze` does not remove a prototype.** `UTTERANCES['toString']` is not `undefined` -
+   * it is `Object.prototype.toString`, and `String()` of it is
+   * `"function toString() { [native code] }"`. The gate's first draft resolved a key by index and
+   * refused only on `undefined`, so every inherited name passed.
+   *
+   * That mattered because **the key is not this repository's to choose**: an agent turn of kind
+   * `SAY` carries `utterance` as a raw string off a model completion (`ports.ts`). A model
+   * returning `{ kind: 'SAY', utterance: 'toString' }` had a sentence spoken aloud that nothing
+   * here composed - against a module whose stated property is that no such path exists, "including
+   * a jailbroken or prompt-injected one".
+   */
+  const INHERITED = [
+    'toString',
+    'constructor',
+    'valueOf',
+    'hasOwnProperty',
+    'isPrototypeOf',
+    'propertyIsEnumerable',
+    'toLocaleString',
+    '__proto__',
+  ] as const;
+
+  it('refuses every name inherited from Object.prototype', () => {
+    for (const name of INHERITED) {
+      const gated = gateSpeech([{ kind: 'UTTERANCE', key: name as UtteranceKey }], []);
+      expect(gated.ok, name).toBe(false);
+      if (!gated.ok) expect(gated.refusal, name).toBe('UNKNOWN_UTTERANCE');
+    }
+  });
+
+  it('never lets native code reach the assembled text', () => {
+    // The assertion that would have failed loudly. A refusal is the mechanism; a sentence
+    // containing "[native code]" is the harm, and it is worth naming separately because a future
+    // resolution that returned some other non-string would satisfy the test above and not this.
+    for (const name of INHERITED) {
+      const gated = gateSpeech([{ kind: 'UTTERANCE', key: name as UtteranceKey }], []);
+      if (gated.ok) expect(gated.text, name).not.toContain('native code');
+    }
+  });
+
+  it('still accepts every key the closed set really has', () => {
+    // The positive control. A gate that refused everything would satisfy both tests above, and it
+    // would be a voice interface that has gone silent - which is a failure rather than an answer.
+    for (const key of Object.keys(UTTERANCES) as UtteranceKey[]) {
+      expect(gateSpeech([{ kind: 'UTTERANCE', key }], []).ok, key).toBe(true);
+    }
+  });
+
+  it('narrows a name the same way it resolves one', () => {
+    // `isUtteranceKey` is what the shell uses instead of a cast, so the two must agree - a
+    // narrowing that admitted what the gate refuses would move the hole rather than close it.
+    for (const name of INHERITED) expect(isUtteranceKey(name), name).toBe(false);
+    for (const key of Object.keys(UTTERANCES)) expect(isUtteranceKey(key), key).toBe(true);
   });
 });

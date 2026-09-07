@@ -81,6 +81,19 @@ export interface ProfileCapabilitiesResponse {
   readonly serverTime: string;
 }
 
+/**
+ * The same answer, carrying the profile it is about.
+ *
+ * Not what the wire sends - the caller knows which profile it asked about and the server has no
+ * reason to repeat it. It exists because a **held** answer outlives the question: a resource keeps
+ * its last successful value when a later read fails, which is right for a medicine list and wrong
+ * for an authorization report. Stamping the answer is what lets a reader tell "this is about the
+ * person on screen" from "this is about whoever was on screen last".
+ */
+export interface ProfileCapabilitiesFor extends ProfileCapabilitiesResponse {
+  readonly profileId: string;
+}
+
 export interface ShelfItem {
   readonly id: string;
   readonly profileId: string;

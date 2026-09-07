@@ -43,14 +43,17 @@ describe('an owner', () => {
 });
 
 describe('a caregiver', () => {
-  it('is offered the reads and nothing that writes, before the server has answered', () => {
+  it('is offered nothing at all before the server has answered', () => {
     // `14` is deny by default, and an absent answer is not permission. The cost of the safe
-    // direction is a caregiver being told to use the screen - where the control is.
-    const held = capabilitiesFor({ isOwner: false });
-    expect(held.has('VIEW_MEDICINES')).toBe(true);
-    expect(held.has('VIEW_ALERTS')).toBe(true);
-    expect(held.has('RECORD_DOSES')).toBe(false);
-    expect(held.has('MANAGE_MEDICINES')).toBe(false);
+    // direction is one round trip in which a caregiver is told to use the screen - where the
+    // control is.
+    //
+    // The three read capabilities used to be added unconditionally, on the reasoning that offering
+    // a read costs nothing because row-level security answers an ungranted one with an empty page.
+    // True, and not the rule this file now claims: a caregiver holding only `VIEW_SHELF` was
+    // offered `list_medicines` and `describe_alert`, and got told there was nothing there about
+    // medicines that exist.
+    expect([...capabilitiesFor({ isOwner: false })]).toEqual([]);
   });
 
   it('reads no differently from an empty report than from no report', () => {
@@ -59,6 +62,18 @@ describe('a caregiver', () => {
     const absent = capabilitiesFor({ isOwner: false });
     const empty = capabilitiesFor({ isOwner: false, granted: [] });
     expect([...empty].sort()).toEqual([...absent].sort());
+  });
+
+  it('is offered a read only where the grant carries it', () => {
+    // The other half of deny-by-default, and the one the read capabilities used to skip.
+    // `owned_item_select` requires `VIEW_MEDICINES` for a medicine and `VIEW_SHELF` for a
+    // personal-care product, and the alert policies require `VIEW_SAFETY` - three separate grants,
+    // so three separate offers.
+    const shelfOnly = capabilitiesFor({ isOwner: false, granted: ['VIEW_SHELF'] });
+    expect([...shelfOnly]).toEqual(['VIEW_PERSONAL_CARE']);
+
+    const medicinesOnly = capabilitiesFor({ isOwner: false, granted: ['VIEW_MEDICINES'] });
+    expect([...medicinesOnly]).toEqual(['VIEW_MEDICINES']);
   });
 
   it('records a dose when the grant carries `RECORD_DOSES`', () => {
@@ -109,9 +124,24 @@ describe('a caregiver', () => {
         'EXPORT_SUMMARY',
         'MANAGE_CAREGIVERS',
         'VIEW_DOCUMENTS',
+        'RECEIVE_MISSED_DOSE',
       ],
     });
-    expect([...held].sort()).toEqual(['VIEW_ALERTS', 'VIEW_MEDICINES', 'VIEW_PERSONAL_CARE']);
+    expect([...held]).toEqual([]);
+  });
+
+  it('gains nothing from a name inherited from Object.prototype', () => {
+    // The same shape as the hole that was real in the Speech Gate (`DEV-081`): `Object.freeze`
+    // does not remove a prototype, so an object-literal lookup answers `constructor` and
+    // `toString` with functions rather than `undefined`. Inert here - none of those values is a
+    // `ToolCapability` and `holdsCapability` only ever asks for a real one - but the names arrive
+    // in a server response, and "an unknown name contributes nothing" has to be true rather than
+    // nearly true. A `Map` has no such names.
+    const held = capabilitiesFor({
+      isOwner: false,
+      granted: ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'RECORD_DOSES'],
+    });
+    expect([...held]).toEqual(['RECORD_DOSES']);
   });
 
   it('ignores a capability this build has never heard of', () => {
@@ -149,6 +179,30 @@ describe('a caregiver', () => {
       'VIEW_MEDICINES',
       'VIEW_PERSONAL_CARE',
     ]);
+  });
+
+  it('is offered no more than a fully granted caregiver, whatever else the server says', () => {
+    // The ceiling. Every capability in the grant vocabulary at once must still not reach past what
+    // the six tools ask for - and must never reach `OWNER_ONLY`, which is not a grant at all.
+    const held = capabilitiesFor({
+      isOwner: false,
+      granted: [
+        'VIEW_SAFETY',
+        'VIEW_SHELF',
+        'MANAGE_SHELF',
+        'VIEW_MEDICINES',
+        'RECORD_DOSES',
+        'MANAGE_MEDICINES',
+        'VIEW_CARE',
+        'MANAGE_CARE',
+        'VIEW_DOCUMENTS',
+        'EXPORT_SUMMARY',
+        'RECEIVE_MISSED_DOSE',
+        'MANAGE_CAREGIVERS',
+      ],
+    });
+    expect(held.size).toBe(6);
+    expect(held.has('OWNER_ONLY')).toBe(false);
   });
 
   it('never acquires `OWNER_ONLY`, whatever the server reports', () => {

@@ -42,6 +42,7 @@ import {
   dispatch,
   emptySession,
   gateSpeech,
+  isUtteranceKey,
   reduce,
   summariseProposal,
   utteranceForRefusal,
@@ -171,7 +172,13 @@ export function VoiceProvider({
     () =>
       client === null || activeProfileId === null || owns || !isOpen
         ? null
-        : () => client.profileCapabilities(activeProfileId),
+        : async () => {
+            const outcome = await client.profileCapabilities(activeProfileId);
+            // The profile the answer is **about**, carried with it. See `granted` below.
+            return outcome.kind === 'OK'
+              ? { ...outcome, value: { ...outcome.value, profileId: activeProfileId } }
+              : outcome;
+          },
     [client, activeProfileId, owns, isOpen],
   );
 
@@ -179,7 +186,23 @@ export function VoiceProvider({
     enabled: loadCapabilities !== null,
   });
 
-  const granted = capabilityResource.value?.capabilities ?? null;
+  /**
+   * What the server said, **only if it said it about the profile being looked at now**.
+   *
+   * `useResource` keeps the last successful value when a later read fails - deliberately, because
+   * `18` would rather show content labelled stale than take it away. That is right for a medicine
+   * list and wrong for an authorization report: switching person with no signal would leave one
+   * profile's grant applied to another, and a caregiver holding `MANAGE_MEDICINES` on their mother
+   * would be offered it on their father until the next successful read.
+   *
+   * So the answer carries the profile it was asked about, and a mismatch reads as no answer -
+   * which narrows to the empty set, which is a person told to use the screen. `13`'s rule that a
+   * profile ID narrows rather than grants, applied to the report as well as to the request.
+   */
+  const granted =
+    capabilityResource.value !== null && capabilityResource.value.profileId === activeProfileId
+      ? capabilityResource.value.capabilities
+      : null;
 
   const context = useMemo<DispatchContext>(
     () => ({
@@ -328,8 +351,16 @@ export function VoiceProvider({
               return;
             }
             if (turn.kind === 'SAY') {
-              const key = turn.utterance as keyof typeof UTTERANCES;
-              speak([{ kind: 'UTTERANCE', key }], []);
+              // Narrowed, never cast. `turn.utterance` is a raw string off a model completion
+              // (`ports.ts`), and a cast changes the type while checking nothing - which is how
+              // `Object.prototype.toString` came to be a sentence this app would say out loud.
+              // An unrecognised key is the model proposing something malformed, which is not the
+              // person's mistake and is reported as one Kynviora did not understand.
+              if (!isUtteranceKey(turn.utterance)) {
+                speak([{ kind: 'UTTERANCE', key: 'notUnderstood' }], []);
+                return;
+              }
+              speak([{ kind: 'UTTERANCE', key: turn.utterance }], []);
               return;
             }
 

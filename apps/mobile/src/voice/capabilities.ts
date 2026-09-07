@@ -17,13 +17,19 @@
  * gates on.
  *
  * **A caregiver** is offered what the **server** says they hold, read from
- * `GET /v1/profiles/:id/capabilities` (DEC-141). Until 2026-09-07 there was no such route, so the
- * only answers available were the ones a screen had happened to fetch - `mayRecordDoses` from a
- * shelf page, `mayEdit` from an item detail - and Voice Mode was constructed with neither. The
- * result was that a caregiver granted `MANAGE_MEDICINES` was told to use the screen for a change
- * they were entirely entitled to make, and a caregiver granted `RECORD_DOSES` could not record a
- * dose by voice at all (`DEV-074`). Voice offered less than touch for no reason anybody had
- * decided.
+ * `GET /v1/profiles/:id/capabilities` (DEC-141) - and **nothing else**. Until 2026-09-07 there was
+ * no such route, so the only answers available were the ones a screen had happened to fetch -
+ * `mayRecordDoses` from a shelf page, `mayEdit` from an item detail - and Voice Mode was
+ * constructed with neither. The result was that a caregiver granted `MANAGE_MEDICINES` was told to
+ * use the screen for a change they were entirely entitled to make, and a caregiver granted
+ * `RECORD_DOSES` could not record a dose by voice at all (`DEV-074`).
+ *
+ * The three read capabilities used to be added unconditionally, on the reasoning that offering a
+ * read costs nothing because row-level security answers an ungranted one with an empty page. That
+ * is true and it is not the rule this file now claims: with no report yet, a caregiver holding
+ * only `VIEW_SHELF` was offered `list_medicines`, `list_safety_state` and `describe_alert`, and
+ * got told there was nothing there about medicines that exist. Deny by default (`14`) is the
+ * better answer now that there is something to ask.
  *
  * WHAT IS STILL DELIBERATELY NARROWER BY VOICE, AND WHY
  * Nothing about capabilities. The remaining differences are in the registry rather than here, and
@@ -48,9 +54,10 @@ export interface CapabilityInputs {
   /**
    * What the server reported for this profile, as `caregiver_grant.capabilities` names them.
    *
-   * Absent - not merely empty - while the answer has not arrived. Both narrow to the read-only
-   * set, which is the safe direction: an agent offered nothing is a person told to use the screen,
-   * and the screen works.
+   * Absent while the answer has not arrived, and it reads the same as empty on purpose: neither is
+   * permission (`14`). The cost of the safe direction is that a caregiver who opens Voice Mode
+   * before the report lands is offered nothing for one round trip - which is a person told to use
+   * the screen, and the screen works.
    */
   readonly granted?: readonly string[];
 }
@@ -62,20 +69,6 @@ const OWNER_CAPABILITIES: readonly ToolCapability[] = [
   'RECORD_DOSES',
   'MANAGE_MEDICINES',
   'MANAGE_PERSONAL_CARE',
-  'VIEW_ALERTS',
-];
-
-/**
- * The reads a caregiver has by construction.
- *
- * A caregiver who could not read anything would not be looking at this profile at all: the shelf
- * and the safety inbox are what a grant is for, and a profile they cannot reach comes back empty
- * rather than refused. Offering the read tools costs nothing - the route answers with what row-
- * level security allows, which for a stranger is nothing.
- */
-const CAREGIVER_READS: readonly ToolCapability[] = [
-  'VIEW_MEDICINES',
-  'VIEW_PERSONAL_CARE',
   'VIEW_ALERTS',
 ];
 
@@ -92,22 +85,29 @@ const CAREGIVER_READS: readonly ToolCapability[] = [
  * `EXPORT_SUMMARY`, `MANAGE_CAREGIVERS` and the rest - contributes nothing rather than being
  * mapped to something adjacent. Everything they govern is either `OWNER_ONLY` or `TOUCH_ONLY`, and
  * a mapping that guessed would be the one place a caregiver acquired a tool nobody granted them.
+ *
+ * **A `Map`, not an object literal**, and the reason is the same one that made a hole in the
+ * Speech Gate: `Object.freeze` does not remove a prototype, so `FROM_GRANT['constructor']` on an
+ * object literal is a function rather than `undefined` - and the names are supplied by a server
+ * response. It could not escalate here, because none of those values is a `ToolCapability` and
+ * `holdsCapability` only ever asks for a real one; it made the sentence above false, which is
+ * enough. A `Map` has no such names.
  */
-const FROM_GRANT: Readonly<Record<string, ToolCapability | undefined>> = Object.freeze({
-  VIEW_MEDICINES: 'VIEW_MEDICINES',
-  VIEW_SHELF: 'VIEW_PERSONAL_CARE',
-  RECORD_DOSES: 'RECORD_DOSES',
-  MANAGE_MEDICINES: 'MANAGE_MEDICINES',
-  MANAGE_SHELF: 'MANAGE_PERSONAL_CARE',
-  VIEW_SAFETY: 'VIEW_ALERTS',
-});
+const FROM_GRANT: ReadonlyMap<string, ToolCapability> = new Map([
+  ['VIEW_MEDICINES', 'VIEW_MEDICINES'],
+  ['VIEW_SHELF', 'VIEW_PERSONAL_CARE'],
+  ['RECORD_DOSES', 'RECORD_DOSES'],
+  ['MANAGE_MEDICINES', 'MANAGE_MEDICINES'],
+  ['MANAGE_SHELF', 'MANAGE_PERSONAL_CARE'],
+  ['VIEW_SAFETY', 'VIEW_ALERTS'],
+] satisfies readonly (readonly [string, ToolCapability])[]);
 
 export function capabilitiesFor(inputs: CapabilityInputs): ReadonlySet<ToolCapability> {
   if (inputs.isOwner) return new Set(OWNER_CAPABILITIES);
 
-  const held = new Set<ToolCapability>(CAREGIVER_READS);
+  const held = new Set<ToolCapability>();
   for (const granted of inputs.granted ?? []) {
-    const mapped = FROM_GRANT[granted];
+    const mapped = FROM_GRANT.get(granted);
     if (mapped !== undefined) held.add(mapped);
   }
   return held;

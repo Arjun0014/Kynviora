@@ -505,3 +505,86 @@ describe('what this caller may do on a profile', () => {
     expect(response.statusCode).toBe(401);
   });
 });
+
+/**
+ * A profile the caller can no longer see reports nothing (DEC-141, `DEV-082`).
+ *
+ * Its own describe block because it needs a profile to destroy, and every test above depends on
+ * `PROFILE` surviving.
+ *
+ * The asymmetry this is about: `has_capability` short-circuits on ownership through
+ * `owns_profile`, which filters `deleted_at IS NULL` - but its **caregiver-grant** branch does
+ * not, and migration `0025` soft-deletes a profile without revoking the grants hanging off it
+ * (they are purged later, past `purge_floor()`). So a caregiver's grant outlives the profile's
+ * visibility by the length of the retention window.
+ *
+ * Without the visibility read in the route, that caregiver got a populated list from this one
+ * endpoint while every other route on the surface answered empty - and diffing the two would tell
+ * them "this profile was deleted" apart from "your access was revoked". Nothing else on this
+ * surface makes that distinction, and `13` is explicit that absence and refused access are
+ * deliberately indistinguishable.
+ */
+describe('a profile that has been deleted', () => {
+  const DOOMED = testUuid(40);
+  const DOOMED_CAREGIVER = testUuid(41);
+
+  async function capabilities(as: string): Promise<readonly string[]> {
+    const response = await request(principalFor(as), {
+      method: 'GET',
+      url: `/v1/profiles/${DOOMED}/capabilities`,
+    });
+    expect(response.statusCode).toBe(200);
+    return [...response.json<{ capabilities: string[] }>().capabilities].sort();
+  }
+
+  beforeAll(async () => {
+    await t.asService(async (db) => {
+      await db.query(
+        `INSERT INTO app_user (id, external_auth_id, email_normalized, email_verified_at)
+         VALUES ($1, $2, $3, now())`,
+        [DOOMED_CAREGIVER, `auth|${DOOMED_CAREGIVER}`, 'doomed@example.test'],
+      );
+      await db.query(
+        `INSERT INTO profile (id, household_id, owner_user_id, display_name)
+         VALUES ($1, $2, $3, 'Doomed (synthetic)')`,
+        [DOOMED, HOUSEHOLD, OWNER],
+      );
+      await db.query(
+        `INSERT INTO caregiver_grant
+           (profile_id, grantee_user_id, granted_by_user_id, capabilities, status, accepted_at)
+         VALUES ($1, $2, $3, ARRAY['VIEW_MEDICINES', 'RECORD_DOSES'], 'ACTIVE', now())`,
+        [DOOMED, DOOMED_CAREGIVER, OWNER],
+      );
+    });
+  });
+
+  it('reports the grant while the profile is still there', async () => {
+    // The positive control, and this block needs one more than most: everything below is an
+    // absence, and a route that answered nobody anything would satisfy all of it.
+    expect(await capabilities(DOOMED_CAREGIVER)).toEqual(['RECORD_DOSES', 'VIEW_MEDICINES']);
+  });
+
+  it('reports nothing once the profile is deleted, though the grant is still on the row', async () => {
+    await t.asService((db) => db.query(`SELECT kynviora.delete_profile($1, $2)`, [DOOMED, OWNER]));
+
+    // The grant is untouched - that is the whole reason this check exists rather than being
+    // implied by the grant going away.
+    const grants = await t.asService((db) =>
+      db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM caregiver_grant
+          WHERE profile_id = $1 AND status = 'ACTIVE' AND revoked_at IS NULL`,
+        [DOOMED],
+      ),
+    );
+    expect(grants.rows[0]?.n).toBe(1);
+
+    expect(await capabilities(DOOMED_CAREGIVER)).toEqual([]);
+  });
+
+  it('answers the owner and a stranger identically, which is the point', async () => {
+    // The owner of a deleted profile and somebody who never had access get the same empty list, so
+    // the response says nothing about which of the two the caller is.
+    expect(await capabilities(OWNER)).toEqual([]);
+    expect(await capabilities(STRANGER)).toEqual([]);
+  });
+});
