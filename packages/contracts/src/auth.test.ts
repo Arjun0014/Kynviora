@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { ALL_AUTH_FAILURES, authRefusal } from '@kynviora/presentation';
 import {
+  authFailureFor,
   msUntilRefresh,
   needsRefresh,
   readTokens,
@@ -373,5 +375,57 @@ describe('signing out', () => {
     expect(await signOut(ENDPOINT(refusing(new Error('offline'))), 'token')).toBe(false);
     const { impl } = answering(500, {});
     expect(await signOut(ENDPOINT(impl), 'token')).toBe(false);
+  });
+});
+
+/**
+ * DEC-146, at the one key in this repository that Kynviora does not choose.
+ *
+ * `error_code` is a string off the **provider's** response body. A plain index answered every name
+ * on `Object.prototype`, so `authFailureFor(400, 'toString')` returned a function rather than an
+ * `AuthFailure` - a return type that was a lie at runtime. `authRefusal` then indexed its own
+ * table with that function, got `undefined`, and `SignInScreen` dereferenced it: a sign-in screen
+ * that crashes instead of saying why a credential was refused.
+ */
+describe('authFailureFor, keyed by the provider (DEC-146)', () => {
+  const INHERITED = [
+    'toString',
+    'constructor',
+    'valueOf',
+    'hasOwnProperty',
+    'isPrototypeOf',
+    'propertyIsEnumerable',
+    'toLocaleString',
+    '__proto__',
+  ];
+
+  it.each(INHERITED)('falls through to the status reading for %s', (name) => {
+    const failure = authFailureFor(400, name);
+    expect(typeof failure).toBe('string');
+    expect(ALL_AUTH_FAILURES).toContain(failure);
+    expect(authRefusal(failure)).toBeDefined();
+  });
+
+  /**
+   * The `REFRESH` overrides are a second, nested table and had the same hole. Checked separately
+   * because it is reached by a different branch.
+   */
+  it.each(INHERITED)('falls through on a renewal for %s', (name) => {
+    const failure = authFailureFor(400, name, 'REFRESH');
+    expect(ALL_AUTH_FAILURES).toContain(failure);
+    expect(authRefusal(failure)).toBeDefined();
+  });
+
+  it('still maps the codes it knows, on both branches', () => {
+    expect(authFailureFor(400, 'validation_failed', 'REFRESH')).toBe('SESSION_EXPIRED');
+    expect(authFailureFor(400, 'validation_failed', 'SIGN_UP')).not.toBe('SESSION_EXPIRED');
+  });
+
+  it('never yields a refusal a person cannot read', () => {
+    for (const name of [...INHERITED, 'nonsense']) {
+      const refusal = authRefusal(authFailureFor(401, name));
+      expect(typeof refusal.message).toBe('string');
+      expect(refusal.message).not.toContain('native code');
+    }
   });
 });

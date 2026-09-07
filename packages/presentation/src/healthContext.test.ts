@@ -200,3 +200,39 @@ describe('the two ways of not being matched (04 Phase 5.2)', () => {
     expect(HEALTH_CONTEXT_COPY.ambiguousNote).not.toMatch(/did you mean|for example|such as/i);
   });
 });
+
+/**
+ * DEC-146. `line.provenance` reaches `presentProvenance` off a health-context response, guarded
+ * only by `typeof === 'string'`, so a prototype name resolved to a function and became the
+ * `provenanceLabel` beside somebody's allergy - on the screen whose job is saying who recorded a
+ * fact and how far it can be trusted.
+ */
+describe('presentProvenance, keyed from outside (DEC-146)', () => {
+  const INHERITED = [
+    'toString',
+    'constructor',
+    'valueOf',
+    'hasOwnProperty',
+    'isPrototypeOf',
+    'propertyIsEnumerable',
+    'toLocaleString',
+    '__proto__',
+  ];
+
+  it.each(INHERITED)('refuses the inherited name %s', (name) => {
+    expect(presentProvenance(name)).toBeNull();
+  });
+
+  it('still names every provenance it has a sentence for', () => {
+    for (const provenance of HOUSEHOLD_FACT_PROVENANCE) {
+      expect(typeof presentProvenance(provenance)).toBe('string');
+    }
+  });
+
+  it('never returns anything but a string or null', () => {
+    for (const name of [...INHERITED, 'USER_REPORTED', 'nonsense']) {
+      const answer = presentProvenance(name);
+      expect(answer === null || typeof answer === 'string').toBe(true);
+    }
+  });
+});

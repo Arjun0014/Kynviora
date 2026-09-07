@@ -25,7 +25,7 @@
  */
 
 import type { FactCertainty, HealthFactKind } from '@kynviora/domain';
-import { FACT_CERTAINTIES, HEALTH_FACT_KINDS } from '@kynviora/domain';
+import { FACT_CERTAINTIES, HEALTH_FACT_KINDS, ownEntry } from '@kynviora/domain';
 
 // ---------------------------------------------------------------------------
 // The two kinds
@@ -134,9 +134,14 @@ export const PROVENANCE_PRESENTATION: Readonly<Record<string, string>> = Object.
  * `null` rather than the code. A provenance beside somebody's allergy is a field value, not a
  * phrase, and `REVIEWER_CONFIRMED` rendered raw would read as a system state nobody can interpret
  * (trap 129).
+ *
+ * An **own** property (DEC-146). The key reaches here as `line.provenance` off a health-context
+ * response, guarded only by `typeof === 'string'`, so a plain index answered every name on
+ * `Object.prototype` and put a function where the label goes - beside somebody's allergy, on the
+ * screen whose whole job is saying who recorded a fact and how far it can be trusted.
  */
 export function presentProvenance(provenance: string): string | null {
-  return PROVENANCE_PRESENTATION[provenance] ?? null;
+  return ownEntry(PROVENANCE_PRESENTATION, provenance);
 }
 
 // ---------------------------------------------------------------------------

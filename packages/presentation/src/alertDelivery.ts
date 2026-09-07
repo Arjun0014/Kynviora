@@ -18,6 +18,7 @@ import {
   GENERIC_NOTIFICATION_BODY,
   NOTIFICATION_DETAIL_LEVELS,
   notificationFor,
+  ownEntry,
   type NotificationDetailLevel,
   type Recipient,
   type UserId,
@@ -172,9 +173,17 @@ const RESOLUTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
 
 export const UNRESOLVED_LABEL = 'Not resolved yet';
 
+/**
+ * The label for an outcome, or the neutral "Resolved" where this build has no words for it.
+ *
+ * An **own** property (DEC-146). `resolution` arrives off a caregiver alert response as an open
+ * string, and a plain index answered `Object.prototype` names - so a row whose resolution this
+ * build does not recognise rendered a function instead of falling back to the one neutral word
+ * `18` allows here.
+ */
 export function describeResolution(resolution: string | null): string {
   if (resolution === null) return UNRESOLVED_LABEL;
-  return RESOLUTION_LABELS[resolution] ?? 'Resolved';
+  return ownEntry(RESOLUTION_LABELS, resolution) ?? 'Resolved';
 }
 
 export interface CaregiverAlertLine {

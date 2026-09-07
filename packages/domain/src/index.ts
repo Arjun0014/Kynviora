@@ -11,6 +11,7 @@ export * from './ids.js';
 export * from './ports.js';
 export * from './result.js';
 export * from './untrusted.js';
+export * from './lookup.js';
 export * from './authToken.js';
 export * from './barcodeScan.js';
 export * from './personalExport.js';

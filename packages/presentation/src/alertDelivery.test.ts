@@ -207,3 +207,48 @@ describe('copy', () => {
     }
   });
 });
+
+/**
+ * DEC-146. `resolution` arrives on a caregiver alert row as an open string, and a plain index
+ * answered every name on `Object.prototype` - so a resolution this build does not recognise
+ * rendered a function instead of falling back to the one neutral word `18` allows here.
+ */
+describe('describeResolution, keyed from outside (DEC-146)', () => {
+  const INHERITED = [
+    'toString',
+    'constructor',
+    'valueOf',
+    'hasOwnProperty',
+    'isPrototypeOf',
+    'propertyIsEnumerable',
+    'toLocaleString',
+    '__proto__',
+  ];
+
+  it.each(INHERITED)('falls back to the neutral label for the inherited name %s', (name) => {
+    expect(describeResolution(name)).toBe('Resolved');
+  });
+
+  it('never returns anything but a string', () => {
+    for (const name of [...INHERITED, 'REVIEWED', 'nonsense']) {
+      expect(typeof describeResolution(name)).toBe('string');
+    }
+  });
+
+  it('still labels an outcome it has words for', () => {
+    expect(describeResolution('REVIEWED')).toBe('Reviewed');
+    expect(describeResolution('QUARANTINED')).toBe('Set aside');
+  });
+
+  it('a whole caregiver line survives an unrecognised resolution', () => {
+    const line = caregiverAlertLine({
+      alertId: 'a1',
+      itemDisplayName: 'Synthetic Tablet A',
+      resolution: 'toString',
+      resolutionNote: null,
+      resolutionNoteWithheld: false,
+    });
+    expect(line.resolutionLabel).toBe('Resolved');
+    expect(String(line.resolutionLabel)).not.toContain('native code');
+  });
+});

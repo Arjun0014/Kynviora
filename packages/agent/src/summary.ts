@@ -15,12 +15,24 @@
  * The arguments have already been through `validateArguments`, so an enum is one of its listed
  * values and a string is non-empty - which is what makes it safe to put them in a sentence.
  *
+ * AND THE TABLES BELOW DO NOT RELY ON THAT
+ * The three word-tables here are keyed by an argument off a model completion, and they resolve as
+ * **own** properties (DEC-146) even though `validateArguments` has already refused anything not in
+ * the tool's `values` list. Said plainly because the distinction matters: this was **not**
+ * reachable - `eventKind`, `panel` and `screen` are all declared `type: 'enum'` and gate 3 checks
+ * membership with `Array.includes`, so `'toString'` is refused before this file is called. It is
+ * defence in depth, and the reason it is worth having is that the sentence above - "which is what
+ * makes it safe" - is a dependency on a gate three files away. `DEV-081` was a gate whose
+ * correctness rested on exactly that kind of distant invariant, and the cheapest way to stop the
+ * next one is for the fallback here to mean what it says on its own.
+ *
  * THE ONE PLACE AN ARGUMENT IS QUOTED BACK
  * A free-text argument - a dose note, a medicine's name as spoken - is the person's own words and
  * is read back verbatim. That is the same rule the dose note and the ingredient declaration
  * already follow: this app does not tidy what somebody wrote about their own treatment.
  */
 
+import { ownEntry } from '@kynviora/domain';
 import type { ToolCall, ToolDefinition, ToolRefusal } from './tools.js';
 
 /** A string argument, or `null` where there is none. Never a coerced number or object. */
@@ -77,7 +89,7 @@ export function summariseProposal(
   switch (tool.name) {
     case 'record_dose': {
       const kind = text(call, 'eventKind') ?? '';
-      const what = DOSE_WORDS[kind] ?? 'what happened';
+      const what = ownEntry(DOSE_WORDS, kind) ?? 'what happened';
       const note = text(call, 'note');
       const base = `Record ${what}, for ${subject}.`;
       // The note verbatim, in quotation marks, because it is the person's own words about their
@@ -125,7 +137,7 @@ export function summariseProposal(
 
     case 'start_package_capture': {
       const panel = text(call, 'panel') ?? '';
-      const where = PANEL_WORDS[panel] ?? 'the pack';
+      const where = ownEntry(PANEL_WORDS, panel) ?? 'the pack';
       return `Open the camera, and guide you through photographing ${where}.`;
     }
 
@@ -137,7 +149,7 @@ export function summariseProposal(
 
     case 'open_screen': {
       const screen = text(call, 'screen') ?? '';
-      return `Open ${SCREEN_WORDS[screen] ?? 'that screen'}.`;
+      return `Open ${ownEntry(SCREEN_WORDS, screen) ?? 'that screen'}.`;
     }
 
     // Everything else. A tool reaching here either needs no confirmation - in which case the

@@ -371,3 +371,67 @@ describe('minutesSinceSync (spec 06 Journey 10 staleness banner)', () => {
     expect(minutesSinceSync(T1, T0)).toBe(0);
   });
 });
+
+/**
+ * The direction an unclassified entity type is answered in.
+ *
+ * `12` phrases this as a prohibition - "do not optimistically change caregiver grants or safety
+ * severity/publication state" - and a prohibition has to fail closed. It did not:
+ * `conflictPolicyFor` resolved an unrecognised type to `undefined`, and
+ * `undefined !== 'SERVER_WINS'` is `true`, so the one gate that decides whether a change may be
+ * queued at all answered "yes" for every input nobody had thought about.
+ *
+ * Not reachable from any call site today - every caller passes a literal - but the journal these
+ * policies govern is persisted in the encrypted store, and `DEV-042` records that the store has no
+ * schema migration. A row written by another build carries whatever type that build knew.
+ */
+describe('an entity type this build has no policy for (DEC-146)', () => {
+  const UNCLASSIFIED = [
+    'toString',
+    'constructor',
+    'valueOf',
+    'hasOwnProperty',
+    '__proto__',
+    'something_a_newer_build_wrote',
+  ] as const;
+
+  it.each(UNCLASSIFIED)('has no policy: %s', (name) => {
+    expect(conflictPolicyFor(name as never)).toBeNull();
+  });
+
+  it.each(UNCLASSIFIED)('is refused optimistic application: %s', (name) => {
+    expect(isOptimisticallyApplicable(name as never)).toBe(false);
+  });
+
+  it('still admits and refuses the types it knows', () => {
+    expect(isOptimisticallyApplicable('dose_event')).toBe(true);
+    expect(isOptimisticallyApplicable('owned_item')).toBe(true);
+    expect(isOptimisticallyApplicable('caregiver_grant')).toBe(false);
+    expect(isOptimisticallyApplicable('alert_publication')).toBe(false);
+  });
+
+  /**
+   * `resolveConflict` is typed to return a `ConflictOutcome` and returned `undefined` at runtime
+   * for these, because the switch had no arm for them.
+   */
+  it.each(UNCLASSIFIED)('resolves to the server rather than to nothing: %s', (name) => {
+    const outcome = resolveConflict({
+      entityType: name as never,
+      entityId: 'x',
+      localValue: 'local',
+      serverValue: 'server',
+      localUpdatedAt: instantFrom('2026-01-01T00:00:00.000Z'),
+      serverUpdatedAt: instantFrom('2026-01-02T00:00:00.000Z'),
+    });
+    expect(outcome).toBeDefined();
+    expect(outcome.resolution).toBe('TAKE_SERVER');
+    expect(outcome.resolvedValue).toBe('server');
+    expect(outcome.requiresUserAction).toBe(true);
+  });
+
+  it('every classified type still has a policy', () => {
+    for (const entityType of SYNC_ENTITY_TYPES) {
+      expect(conflictPolicyFor(entityType)).not.toBeNull();
+    }
+  });
+});

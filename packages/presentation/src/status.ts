@@ -25,6 +25,7 @@ import type {
   RegulatoryApplicability,
   RegulatoryStatus,
 } from '@kynviora/domain';
+import { ownEntry } from '@kynviora/domain';
 import type { ThemeToneToken } from './tokens.js';
 
 /**
@@ -612,9 +613,17 @@ export const UNRESOLVED_CONDITION_COPY: Readonly<Record<string, string>> = Objec
  * `null` rather than a fallback sentence: an unresolved condition this build cannot name has no
  * words anybody wrote, and a generic "some information is missing" would be worse than saying
  * nothing - it reads as a complete answer.
+ *
+ * Resolved as an **own** property (DEC-146), because the key arrives on
+ * `LensEntryResponse.unresolvedConditions` - parsed JSON off the network - and a plain index
+ * answers every name on `Object.prototype`. `UNRESOLVED_CONDITION_COPY['toString']` is not
+ * `undefined`, so `?? null` did not fire and `lens.ts` did not drop it: the Lens rendered
+ * `"function toString() { [native code] }"` as its explanation of why a regulatory rule could not
+ * be resolved. The sentence above is the whole reason the fallback exists, and an inherited
+ * property was the one input that walked past it.
  */
 export function describeUnresolvedCondition(condition: string): string | null {
-  return UNRESOLVED_CONDITION_COPY[condition] ?? null;
+  return ownEntry(UNRESOLVED_CONDITION_COPY, condition);
 }
 
 /**

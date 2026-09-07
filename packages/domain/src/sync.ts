@@ -24,6 +24,7 @@ import type { Instant } from './ports.js';
 import type { OperationId } from './ids.js';
 import type { DomainError } from './result.js';
 import { compareInstants } from './ports.js';
+import { ownEntry } from './lookup.js';
 
 /** Entity types that participate in sync. */
 export const SYNC_ENTITY_TYPES = [
@@ -88,8 +89,19 @@ export const CONFLICT_POLICY_BY_ENTITY: Readonly<Record<SyncEntityType, Conflict
     marketed_formulation: 'CREATE_NEW_VERSION',
   });
 
-export function conflictPolicyFor(entityType: SyncEntityType): ConflictPolicy {
-  return CONFLICT_POLICY_BY_ENTITY[entityType];
+/**
+ * The policy for an entity type, or `null` where this build has none for it.
+ *
+ * `null` rather than an index (DEC-146), and the direction is the point rather than the
+ * prototype. `SyncEntityType` is a compile-time narrowing and every caller today passes a literal,
+ * so an unrecognised value is not reachable now - but the queue these policies govern is
+ * **persisted in the encrypted local store**, and `DEV-042` records that the store has no schema
+ * migration. A journal row written by a different build carries whatever entity type that build
+ * knew, and the type system has nothing to say about a string that was on disk before this binary
+ * existed.
+ */
+export function conflictPolicyFor(entityType: SyncEntityType): ConflictPolicy | null {
+  return ownEntry(CONFLICT_POLICY_BY_ENTITY, entityType);
 }
 
 /**
@@ -98,9 +110,21 @@ export function conflictPolicyFor(entityType: SyncEntityType): ConflictPolicy {
  * `12`: only low-risk user-owned changes. A client that optimistically showed a caregiver grant
  * as active, or a safety alert as resolved, would be displaying an authorization or safety
  * outcome the server has not agreed to.
+ *
+ * **Deny is the answer for a type this build does not know**, and it used to be admit. The old
+ * form was `conflictPolicyFor(entityType) !== 'SERVER_WINS'`, and an unrecognised type resolved to
+ * `undefined`, which is not `'SERVER_WINS'` - so the one question `12` phrases as a prohibition
+ * was answered "yes" for every input nobody had thought about. `PendingSyncProvider.queue` is the
+ * live caller and treats `true` as permission to write a change into the journal and show it as
+ * kept.
+ *
+ * A rule stated as a prohibition has to fail closed, for the same reason `holdsCapability` reads
+ * `OWNER_ONLY` from `isOwner` rather than from the capability set: the safe direction for an
+ * unknown is the one that refuses.
  */
 export function isOptimisticallyApplicable(entityType: SyncEntityType): boolean {
-  return conflictPolicyFor(entityType) !== 'SERVER_WINS';
+  const policy = conflictPolicyFor(entityType);
+  return policy !== null && policy !== 'SERVER_WINS';
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +365,25 @@ export function resolveConflict<TValue>(input: ConflictInput<TValue>): ConflictO
         resolution: 'PROMPT_USER',
         resolvedValue: null,
         reasonCode: 'user_resolution_required',
+        requiresUserAction: true,
+      };
+
+    case null:
+      // An entity type this build has no policy for. The switch used to have no such arm and
+      // `conflictPolicyFor` used to return whatever an index gave it, so this function - typed to
+      // return a `ConflictOutcome` - returned `undefined` at runtime and the caller dereferenced
+      // it.
+      //
+      // The server's value, because the client must not win a disagreement about something
+      // nobody has classified: `12` forbids optimistically applying an authorization or safety
+      // outcome, and an unknown type cannot be shown not to be one. `requiresUserAction` is true
+      // even so - discarding somebody's change is not something to do quietly, and this arm can
+      // only be reached by a journal row written by a build that knew a type this one does not
+      // (`DEV-042`).
+      return {
+        resolution: 'TAKE_SERVER',
+        resolvedValue: input.serverValue,
+        reasonCode: 'unclassified_entity_type',
         requiresUserAction: true,
       };
   }

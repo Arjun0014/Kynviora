@@ -31,6 +31,7 @@
 // The failure vocabulary lives in `@kynviora/domain`, because `@kynviora/presentation` has to
 // word each member and cannot import this package - it is already a dependency of it.
 import type { AuthFailure } from '@kynviora/domain';
+import { ownEntry } from '@kynviora/domain';
 
 export type { AuthFailure };
 
@@ -172,10 +173,18 @@ function failureFor(
   kind: AuthRequestKind = 'CREDENTIALS',
 ): AuthFailure {
   const code = typeof body['error_code'] === 'string' ? body['error_code'] : '';
-  const overridden = FAILURE_BY_KIND[kind]?.[code];
-  if (overridden !== undefined) return overridden;
-  const mapped = FAILURE_BY_PROVIDER_CODE[code];
-  if (mapped !== undefined) return mapped;
+  // Own properties only (DEC-146). `code` is a string off the **provider's** response body - the
+  // one key in this repository that no part of Kynviora chooses - and a plain index answers every
+  // name on `Object.prototype`. `FAILURE_BY_PROVIDER_CODE['toString']` is a function, which is not
+  // `undefined`, so it was returned as an `AuthFailure`; `authRefusal` then indexed `REFUSALS` with
+  // it, got `undefined`, and the sign-in screen dereferenced that. A provider answering an
+  // unrecognised code must fall through to the status-only reading below, which is what these two
+  // guards were written to do.
+  const byKind = FAILURE_BY_KIND[kind];
+  const overridden = byKind === undefined ? null : ownEntry(byKind, code);
+  if (overridden !== null) return overridden;
+  const mapped = ownEntry(FAILURE_BY_PROVIDER_CODE, code);
+  if (mapped !== null) return mapped;
   // A status-only fallback, and only for the two that are unambiguous. 429 is a rate limit
   // whatever it says; 400 and 401 on a credential exchange are a refusal of the credential.
   if (status === 429) return 'RATE_LIMITED';
