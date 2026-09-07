@@ -295,9 +295,19 @@ export function createToolExecutor(
         body,
         newIdempotencyKey(),
       );
+      if (outcome.kind === 'OK') {
+        return { spoken: [], focusId: argument(call, 'itemId') } satisfies ToolResult;
+      }
+      // A write that failed says so. This used to return an empty result for every outcome, and
+      // `run` speaks "Done." when a tool says nothing at all - so a schedule that was never
+      // created was reported as created. `offline` rather than `queued` because nothing here
+      // queues: the registry declares this tool `QUEUES` and only `record_dose` is wired to the
+      // journal, so the sentence that can be kept is the one that promises nothing (`DEV-085`).
       return {
         spoken: [],
-        ...(outcome.kind === 'OK' ? { focusId: argument(call, 'itemId') } : {}),
+        utterances: [
+          outcome.kind === 'OFFLINE' ? 'offline' : utteranceForWriteFailure(outcome.kind),
+        ],
       } satisfies ToolResult;
     },
 
@@ -318,10 +328,17 @@ export function createToolExecutor(
         },
         newIdempotencyKey(),
       );
-      return {
+      if (outcome.kind === 'OK') {
         // The server's own words about what it cannot yet do with this pack (DEC-010).
-        spoken: outcome.kind === 'OK' ? outcome.value.limits : [],
-        ...(outcome.kind === 'OK' ? { focusId: outcome.value.id } : {}),
+        return { spoken: outcome.value.limits, focusId: outcome.value.id } satisfies ToolResult;
+      }
+      // Said rather than swallowed. An item that was not created must not be reported as created
+      // (`DEV-085`).
+      return {
+        spoken: [],
+        utterances: [
+          outcome.kind === 'OFFLINE' ? 'offline' : utteranceForWriteFailure(outcome.kind),
+        ],
       } satisfies ToolResult;
     },
 
@@ -335,9 +352,14 @@ export function createToolExecutor(
         },
         newIdempotencyKey(),
       );
+      if (outcome.kind === 'OK') {
+        return { spoken: outcome.value.limits, focusId: outcome.value.id } satisfies ToolResult;
+      }
       return {
-        spoken: outcome.kind === 'OK' ? outcome.value.limits : [],
-        ...(outcome.kind === 'OK' ? { focusId: outcome.value.id } : {}),
+        spoken: [],
+        utterances: [
+          outcome.kind === 'OFFLINE' ? 'offline' : utteranceForWriteFailure(outcome.kind),
+        ],
       } satisfies ToolResult;
     },
 

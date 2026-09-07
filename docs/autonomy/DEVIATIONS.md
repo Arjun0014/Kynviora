@@ -3244,3 +3244,102 @@ its own limit on pending local notifications, which is lower than Android's and 
   no answer - which narrows to the empty set, which is a person told to use the screen. `13`'s rule
   that a profile ID narrows rather than grants, applied to the report as well as to the request.
 - **Status**: **RESOLVED 2026-09-07**.
+
+---
+
+## DEV-084 - Six tools the agent is offered and the executor cannot run
+
+- **Affected specification**: `17`, `docs/design/VOICE_MODE.md` sections 3 and 8, DEC-136.
+- **Expected behaviour**: "the agent's reach is the app's reach". The registry is the list a
+  provider is handed - `voiceCallableTools()` - so a tool in it that is not `blockedBy` anything
+  is a capability Voice Mode is claiming.
+- **Implemented behaviour**: `createToolExecutor` defines **15 of the 30** tools. Seven of the
+  fifteen absences are correct (`TOUCH_ONLY`, refused at gate 2 before any executor is consulted)
+  and two are correct (`read_extracted_fields` and `confirm_extracted_item`, refused on
+  `BLK-007`). The remaining **six are offered, unblocked and unrunnable**:
+
+  | Tool                    | The client method that already exists |
+  | ----------------------- | ------------------------------------- |
+  | `list_safety_state`     | `profileAlerts` / `safetyInbox`       |
+  | `describe_alert`        | `alertDetail`                         |
+  | `list_caregiver_access` | `listCaregiverGrants`                 |
+  | `update_item`           | `updateItem`                          |
+  | `update_schedule`       | `updateSchedule`                      |
+  | `list_pending_changes`  | the local journal, not the client     |
+
+- **The failure**: `dispatch` reaches its last step, finds no executor, and returns `BLOCKED` with
+  **no blocker identifier** - so the agent says "that part of Kynviora is not finished yet" for a
+  capability the registry and the design document both present as working. `list_safety_state` is
+  the one that matters: "is there anything I should know about my medicines" is a journey Voice
+  Mode exists for, and it is answered with a refusal that names nothing.
+- **How it was found**: diffing `TOOL_NAMES` against the keys of `createToolExecutor`. Nothing had
+  ever compared the two - `everyToolNameIsDefined()` asserts the registry is complete against
+  itself, and no test looked at the executor at all.
+- **Risk**: low and in the safe direction. It is a refusal, never a wrong action; nothing is
+  written, nothing is spoken that did not pass the Speech Gate, and no capability is exceeded.
+  What it costs is a person being told a thing does not work when the app can do it by touch.
+- **Temporary or permanent**: temporary. It is not a capability gap - every client method exists -
+  so the work is wiring, a summary sentence for the two writes, and a decision about whether
+  `update_item` and `update_schedule` queue or stay `ONLINE_ONLY` (the registry currently says
+  `queues` for `update_schedule` and `online` for `update_item`).
+- **Required future work**: wire the four reads first, which need no confirmation and no offline
+  decision, then the two writes with device verification through `verify:device:voice`.
+- **Interim**: `apps/mobile/src/voice/executor.test.ts` asserts the two lists agree, with these six
+  named as a known gap. It fails the day a seventh appears, and it fails if one of the six is
+  wired without being taken off the list - so the allowlist cannot quietly become a list of things
+  that used to be broken.
+- **Status**: OPEN, not blocked.
+
+---
+
+## DEV-085 - A write that never happened was spoken as "Done."
+
+- **Affected specification**: `18` (a person is told what actually happened), `12` (a queued change
+  is visible rather than assumed), `13`, `docs/design/VOICE_MODE.md` section 8, DEC-140.
+- **Expected behaviour**: the report says what happened. `queued` where the phone kept it, a
+  refusal where it did not, and "Done." only where the write actually landed.
+- **Implemented behaviour**: `VoiceProvider.run` speaks `done` when a tool returns no sentences at
+  all -
+
+  ```ts
+  speak(parts.length === 0 ? [{ kind: 'UTTERANCE', key: 'done' }] : parts, lines);
+  ```
+
+  which is right for a tool that succeeded quietly. Three of the four writes -
+  `create_schedule`, `add_medicine` and `add_personal_care_item` - returned `{ spoken: [] }` for
+  **every** non-OK outcome: offline, refused, unavailable, server error, session lost, step-up
+  required. So each of those was spoken as **"Done."**
+
+- **The failure**: "set a reminder for my tablet at eight o'clock" with no signal. Gate 5 does not
+  refuse it - the registry declares `create_schedule` as `QUEUES`, so being offline is not a
+  reason to stop - the request fails, nothing is queued, nothing is created, and Kynviora says
+  "Done." The person stops thinking about it. There is no later moment at which they find out, and
+  what is missing is a medication reminder.
+
+  This is the exact failure `OFF-6` measures on hardware for the dose sheet - "Recorded." versus
+  the offline note, where the shorter sentence is the one that stops somebody recording it again -
+  arriving on a different surface.
+
+- **Why the harnesses did not catch it**: `record_dose` was the only write wired correctly, and it
+  is the one the device scenarios drive. `utteranceForWriteFailure` already existed in the same
+  file and had exactly one caller.
+- **How it was found**: reading the executor against `run` while auditing Voice Mode for places
+  where it reports success before the authoritative operation succeeded.
+- **How it resolved**: all three now answer with `utteranceForWriteFailure` for a failure and
+  `offline` for no connection. `offline` rather than `queued`, because **nothing queues a schedule
+  by voice**: "This phone has no connection at the moment, so I cannot ask the server about that"
+  promises nothing, and `queued` would promise something no journal is holding.
+- **What this does not close**: the registry still declares `create_schedule` and `update_schedule`
+  as `QUEUES` while only `record_dose` reaches the journal. The touch path does queue schedules
+  (`OFF-1` to `OFF-5` measure it), so the mechanism exists and voice does not use it. Wiring it is
+  the work; until then the person is told honestly that it did not happen rather than being told
+  it did.
+- **Risk before the fix**: high for `create_schedule` and low for the two creates, which are
+  `ONLINE_ONLY` and therefore refused by gate 5 when the app knows it is offline - they were
+  reachable only when a request failed for another reason, or when the network dropped between the
+  gate and the send.
+- **Tests**: 22 assertions in `apps/mobile/src/voice/executor.test.ts`, run against the old code
+  first and failing there - three tools by seven failure kinds, plus that offline is reported as no
+  connection rather than as kept, plus a positive control that a successful write still says
+  nothing so `run` still says "Done."
+- **Status**: **RESOLVED 2026-09-07**. The `QUEUES` mismatch is carried under `DEV-084`.
