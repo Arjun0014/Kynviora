@@ -5982,3 +5982,50 @@ both font scales, and later the emulator hung under memory pressure with 4GB fre
 machine. `npm run verify` also failed twice with heap exhaustion while Metro was running, and
 passed cleanly at 5183/197 once it was stopped. None of that is a finding about the product, and
 none of it is recorded as one.
+
+### The survey went green, and found a regression on the way
+
+Three full runs were needed and the first two measured almost nothing, for reasons that were the
+environment rather than the code: Metro and the API had died with an earlier session so the app
+could not load its bundle, and then the emulator hung under memory pressure and had to be
+reprovisioned. Both were reported as `INCONCLUSIVE` by the harness, which is the right answer and
+is why they were not mistaken for results.
+
+The third run, on a clean stack, found something real: `SHEET-2/Invite someone@2` reported two
+controls as unreachable, deterministically. Checking out the pre-migration file and re-running the
+same narrowed survey passed 4/4, so it was this session's regression and not something older.
+
+Two causes, and only one was the product's. The migration put the capability rows inside a `Card`,
+which applies `SPACING.lg` of its own, and left `lg` horizontal padding on each row - every row
+padded twice, which at font scale 2 was enough to matter. And `MAX_SURVEY_STEPS` was 12 while the
+survey reported 13 positions, meaning it had exited on the loop bound rather than on the sheet
+having stopped moving: it had never seen the bottom of the form. With the budget raised it takes
+20 positions and finds **13 controls where it used to find 10**. Three of that form's controls had
+never been surveyed at all.
+
+`SHEET-2` can no longer make that mistake. A survey that ran out of steps records the fact, and an
+unreachable control found by one is `INCONCLUSIVE` rather than `FAIL`, because "never fully on
+screen" and "further down than we looked" are the same reading and the harness cannot tell them
+apart. It still fails the run - it says the survey needs more steps rather than blaming a screen.
+
+**74 PASS, 0 FAIL, 0 INCONCLUSIVE** afterwards, which the survey has never reported before.
+
+### The device round
+
+| Harness      | Result    | What it covered                                                       |
+| ------------ | --------- | --------------------------------------------------------------------- |
+| `a11y`       | **74/74** | full and unnarrowed, five destinations and five sheets at 1x and 2x   |
+| `doseaccess` | **7/7**   | `DOSE-2`, the ordering the migrated invitation form could have broken |
+| `voice`      | **9/9**   | the executor changed under it                                         |
+| `offline`    | **8/8**   | the queue gate that now fails closed on an unknown entity type        |
+| `safety`     | **7/7**   | unchanged, re-run because the design layer moved                      |
+| `caregiver`  | **5/5**   | unchanged                                                             |
+| `camera`     | **5/5**   | the check most likely to break by accident, and did not               |
+
+`offline` took two runs. The first came back with `OFF-6` and `OFF-7` inconclusive because the
+harness typed "offline dose WCRR" and read back "Offline dose WCRR" - the note field has no
+`autoCapitalize`, so React Native's `"sentences"` default applies. That is not a defect in the
+field: capitalisation is part of what the person typed and they can backspace it. The harness was
+assuming otherwise, and it only surfaced because the emulator had been reprovisioned and came back
+with the platform default. A nonce that already starts with a capital has nothing left to disagree
+about.

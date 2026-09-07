@@ -13,13 +13,29 @@ Last updated: 2026-09-07
 | ------------------ | ----------------------------------------------------------------------- |
 | **Current stage**  | Stage 4 complete; the design layer carried past the golden path         |
 | **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work                  |
-| **Last completed** | A reference Safety screen, three blockers that were not, a gate hole    |
+| **Last completed** | The accessibility survey all-green, and four writes that told the truth |
 | **Branch**         | `master`                                                                |
-| **Latest commit**  | `fix(voice,api): the Speech Gate would say anything named after Obj...` |
+| **Latest commit**  | `fix(device): the offline note the keyboard rewrote...`                 |
 | **Baseline tag**   | `baseline-spec-only`                                                    |
 
-This session carried the design system past the golden path and **closed three deviations whose
-recorded blockers turned out not to exist**.
+**The full accessibility survey is green for the first time: 74 PASS, 0 FAIL, 0 INCONCLUSIVE.**
+The intermittent failure that had survived three sessions was captured and turned out to be React
+Native's LogBox banner rather than the text-selection handle this document had hypothesised, and
+the same run then found a genuine regression in the screen migrated an hour earlier.
+
+Three findings this session were things the repository claimed and the code did not do:
+
+- **Four lookups keyed from outside** resolved inherited properties, so a Regulatory Lens
+  explanation, a provenance label beside an allergy, a caregiver alert outcome and an
+  authentication refusal could each come back as `function toString() { [native code] }`. DEC-146
+  predicted a third; there were four. The rule is one function now (DEC-147).
+- **Three of the four Voice Mode writes reported failure as "Done."** A schedule created with no
+  signal queued nothing, created nothing, and said it was done (`DEV-085`).
+- **Six tools the registry offers cannot run at all**, because no executor was ever written for
+  them and nothing compared the two lists (`DEV-084`).
+
+The 2026-09-07 session before this one carried the design system past the golden path and closed
+three deviations whose recorded blockers turned out not to exist.
 
 **Safety is the reference screen now.** The change that matters is where the coverage statement
 went: it sat under the list, and on a shelf of five identical "not enough information" lines the
@@ -56,7 +72,7 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5183 tests passing**, 0 failing, across 197 files.
+- **5186 tests passing**, 0 failing, across 197 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -150,12 +166,16 @@ The five destinations are excluded from a sheet's survey. They are drawn over ev
 not part of one, and the leftmost and rightmost tabs cannot pass by construction - their outer
 edges _are_ the screen's, which `isFullyVisible` reads as clipped.
 
-Last run on 2026-09-07, after Safety, Care and You were rebuilt on the design system:
+**Last run 2026-09-07: the whole survey, unnarrowed, is `74 PASS, 0 FAIL, 0 INCONCLUSIVE`.**
 
-| Part                             | Result                                                   |
-| -------------------------------- | -------------------------------------------------------- |
-| Five destinations, scale 1 and 2 | **30/30 PASS** - the redesign cost nothing `18` asks for |
-| Five sheets, scale 2             | **20/20 PASS** - the run that matters, on a clean stack  |
+| Part                             | Result                                       |
+| -------------------------------- | -------------------------------------------- |
+| Five destinations, scale 1 and 2 | **30/30 PASS**                               |
+| Five sheets, scale 1 and 2       | **40/40 PASS** - the half that stops fitting |
+| TalkBack smoke                   | **4/4 PASS**                                 |
+
+It has never been all-green before. The previous best was 72/74, and the two it failed are
+explained below - they were not the app's.
 
 **The intermittent failure is solved, and the hypothesis this document recorded was wrong.**
 
