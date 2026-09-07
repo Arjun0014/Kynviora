@@ -157,16 +157,34 @@ Last run on 2026-09-07, after Safety, Care and You were rebuilt on the design sy
 | Five destinations, scale 1 and 2 | **30/30 PASS** - the redesign cost nothing `18` asks for |
 | Five sheets, scale 2             | **20/20 PASS** - the run that matters, on a clean stack  |
 
-**Read as two runs, not one, and that is a real limitation of this record.** The parts above were
-measured separately with `KYNVIORA_A11Y_PARTS`, because the emulator had been driven for eight hours
-by the time the harness was fixed and a full pass was taking hours. The whole survey in one process,
-including the TalkBack pass, has **not** been green in a single run since the redesign - the one
-attempt was still going at the end of the session. The sheets at scale 1 were last green in the
-first run of the day, which had app source hot-reloading under it and is therefore not evidence
-anybody should lean on.
+The whole survey then ran in one process, with the fixed harness, and finished: **72 PASS, 2 FAIL,
+no `INCONCLUSIVE`** over 74 checks. The TalkBack pass is green again - it was the `DEV-080` blank
+screen that had made it inconclusive.
 
-So the first thing to do on the next session with an attached device is `npm run verify:device:a11y`
-with nothing narrowed, on a freshly booted emulator, and to record the number it gives.
+**The two failures are an open question and are not explained here.** Both are on
+`Invite someone@2`, and both are the same node: `SHEET-3` "1 control(s) have no accessible name at
+all" and `SHEET-4` "1 control(s) are under 48dp: (unnamed) 20x20dp".
+
+What is known:
+
+- **It does not reproduce in isolation.** The same sheet at the same font scale, run on its own
+  immediately afterwards, is **4/4 PASS**. So is the run of all five sheets at scale 2 taken before
+  the full survey. Three narrowed runs, three passes; one full run, two failures.
+- It is therefore **state-dependent** - something about what the survey did before reaching that
+  sheet, not something about the sheet.
+- A 20x20dp unnamed clickable node is the shape of a **text-selection handle**, which Android
+  raises when a drag begins inside a field. The survey now retries a stalled scroll from a
+  different anchor (DEC-145), and the invitation form at scale 2 is mostly fields. That is a
+  hypothesis with a mechanism, and it is **not** evidence: nobody has captured the node.
+
+What must not be concluded from it: that the invitation form has an unlabelled control. Three runs
+say it does not, and no such control exists in `InviteCaregiver.tsx`. What also must not be
+concluded: that the failure is noise. A check that fails one run in four is a check nobody will
+trust, which is the same cost as a check that is wrong.
+
+**The next run should capture it.** `captureFailure` already writes a screenshot and a hierarchy
+dump beside a failed check; pointing it at this one, and printing the offending node's bounds and
+class, turns a hypothesis into a reading.
 
 **Two defects in the survey itself were found and fixed on the way, and both were false reports.**
 
@@ -725,7 +743,13 @@ deliver to (`DEV-069`). One mailbox closes all three.
 
 ## Immediate next task
 
-**Read `DEV-081` first, whatever you do next.** The Speech Gate - the mechanism the whole
+**First, the two-line one:** `SHEET-3` and `SHEET-4` on `Invite someone@2` failed in the full
+accessibility survey and pass in every narrowed re-run of the same sheet. An unnamed 20x20dp node
+appears once in four runs and nobody has captured it. It is above the other work here because an
+intermittent red result is the kind that teaches people to ignore red results - which is exactly
+what `DEV-079` cost this session. Make the survey dump the offending node.
+
+**Then read `DEV-081`, whatever else you do.** The Speech Gate - the mechanism the whole
 conversational layer rests on - had a hole in it from the day it was written, and it was found by a
 review rather than by anything in this repository. The generalisable rule is DEC-146: **any lookup
 whose key comes from outside this repository must resolve as an own property**, because

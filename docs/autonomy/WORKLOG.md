@@ -5865,3 +5865,26 @@ one - a device run reading a shelf of **zero** items reported a Voice Mode failu
 the dead API. And a run that force-kills a process holding a single-writer store should expect to
 recreate it; the store is synthetic and gitignored, and treating it as precious costs more than
 rebuilding it.
+
+### The full survey did finish, and it left one question open
+
+With both harness fixes in, `npm run verify:device:a11y` ran end to end for the first time since the
+redesign: **72 PASS, 2 FAIL, no `INCONCLUSIVE`** over 74 checks. The TalkBack pass came back green -
+it had been inconclusive because `relaunch()`'s fixed sleep left it reading a blank screen
+(`DEV-080`).
+
+The two failures are both on `Invite someone@2` and both describe one node: no accessible name, and
+20x20dp. **They do not reproduce.** That sheet run on its own, immediately afterwards, is 4/4 PASS;
+so was the run of all five sheets at scale 2 taken before the full survey. Three narrowed runs pass
+and one full run fails, which makes it state-dependent rather than a property of the screen - and
+`InviteCaregiver.tsx` has no unlabelled control in it.
+
+A 20x20dp unnamed clickable node is the shape of a text-selection handle, which Android raises when
+a drag begins inside a field, and the survey now retries a stalled scroll from a different anchor on
+a form that is mostly fields. That is a mechanism, not a reading: nobody captured the node.
+
+Left open deliberately, and named as the first thing to do next. The temptation is to call it noise
+because three runs disagree with it, and that is the wrong instinct twice over: a check that fails
+one run in four is a check nobody will trust, and this session already spent an hour on `DEV-079`
+learning what a red result nobody believes costs. `captureFailure` already writes a screenshot and a
+hierarchy dump beside a failing check; pointing it at this one turns the hypothesis into evidence.
