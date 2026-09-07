@@ -3343,3 +3343,47 @@ its own limit on pending local notifications, which is lower than Android's and 
   connection rather than as kept, plus a positive control that a successful write still says
   nothing so `run` still says "Done."
 - **Status**: **RESOLVED 2026-09-07**. The `QUEUES` mismatch is carried under `DEV-084`.
+
+---
+
+## DEV-086 - A migrated form padded twice, and a survey that stopped before the end of it
+
+- **Affected specification**: `18` (system font scaling supported without clipping a critical
+  action; 48dp minimum), `docs/design/DESIGN_SYSTEM.md` section 4, `DEV-046`, `DEV-079`, DEC-102.
+- **Expected behaviour**: every control on the invitation form can be brought fully into view at
+  font scale 2, and the survey that says so has seen the whole form.
+- **Implemented behaviour**: `SHEET-2/Invite someone@2` reported **two** controls - "Medicines" and
+  "Missed dose alerts" - as never fully on screen at any scroll position. It reproduced on every
+  run, narrowed or full.
+
+- **Two causes, and only one of them was the product's.**
+
+  **The product's.** The migrated screen put the capability rows inside a `Card`, which applies
+  `padding: SPACING.lg` of its own, and kept `paddingHorizontal: SPACING.lg` and
+  `paddingVertical: SPACING.md` on each row. Every row was therefore padded twice. At font scale 2,
+  where each row is already two lines of scaled text, that was enough that the survey never caught
+  the first and last rows wholly inside the viewport. Reduced to `sm`/`md`, which is what the
+  pre-migration screen used; the 48dp floor is `minHeight` and is untouched.
+
+  **The harness's.** `MAX_SURVEY_STEPS` was 12 and the survey reported 13 positions - it had
+  exited on the loop bound, not on the sheet having stopped moving, so it had **never seen the
+  bottom of the form**. With the budget raised it takes 20 positions and finds **13 controls where
+  it used to find 10**: three of the form's controls had never been surveyed at all, and one of
+  them was being reported as unreachable.
+
+- **How it was found**: the full survey, on the design migration made in the same session. The
+  regression was confirmed by checking out the pre-migration file and re-running the same narrowed
+  survey, which passed 4/4 - so the failure was this session's and not pre-existing.
+- **How it resolved**: both. Neither alone was sufficient - the padding fix took it from two
+  unreachable controls to one, and the scroll budget took it to none.
+- **What it changed structurally, and this is the durable part**: `SHEET-2` can no longer report a
+  false FAIL of this shape. `SheetSurvey.reachedEnd` records whether the survey ended because the
+  sheet stopped moving or because it ran out of steps, and an unreachable control found by a survey
+  that never reached the end is now `INCONCLUSIVE` rather than `FAIL` - because "never fully on
+  screen" and "further down than we looked" are the same reading, and choosing between them is
+  precisely what the harness cannot do (DEC-102). An inconclusive check still fails the run, so it
+  is not a quiet pass; it says the survey needs more steps rather than blaming a screen.
+- **Risk**: the padding was a real defect at 2x and a real one for `18`'s audience. The harness half
+  was a false FAIL, which is the more expensive kind - `DEV-079` cost a session, and an intermittent
+  red result is what teaches people to ignore red results.
+- **Status**: **RESOLVED 2026-09-07**.

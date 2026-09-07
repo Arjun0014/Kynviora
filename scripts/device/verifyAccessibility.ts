@@ -102,8 +102,20 @@ const SHEETS: readonly {
   { label: 'Voice Mode', path: ['Talk to Kynviora'] },
 ];
 
-/** How many scroll steps a survey will take before deciding it has seen the whole sheet. */
-const MAX_SURVEY_STEPS = 12;
+/**
+ * How many scroll steps a survey will take before giving up on reaching the bottom.
+ *
+ * A safety net, not a budget: a survey normally ends when a dump matches the previous one, which
+ * is the sheet having stopped moving. Reaching this number instead means the survey **never saw
+ * the end of the form**, and that is reported rather than treated as the end (see
+ * {@link SheetSurvey.reachedEnd}).
+ *
+ * Twelve was too few. The invitation form at font scale 2 is six cards of scaled text, and a
+ * survey that stopped part-way down reported its last control as one nobody can reach - which is
+ * `DEV-079` exactly: a harness parameter too small for a form, rendered as a product defect. The
+ * cost of a larger number is seconds on a run that converges long before it.
+ */
+const MAX_SURVEY_STEPS = 30;
 
 /**
  * Where a retry drag may begin, as screen pixels.
@@ -377,6 +389,7 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
       positions: 0,
       controls: [],
       developmentOverlaySeen: false,
+      reachedEnd: false,
     };
   }
 
@@ -389,6 +402,7 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
         positions: 0,
         controls: [],
         developmentOverlaySeen: false,
+        reachedEnd: false,
       };
     }
   }
@@ -404,6 +418,8 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
   let developmentOverlaySeen = false;
   /** Whether the standard anchor has already failed to move this position. See the note below. */
   let retried = false;
+  /** Whether the sheet stopped moving, rather than the survey running out of steps. */
+  let reachedEnd = false;
 
   for (let step = 0; step <= MAX_SURVEY_STEPS; step += 1) {
     const xml = dumpUiHierarchy();
@@ -451,10 +467,16 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
       .map((node) => `${accessibleNameOf(node)}@${String(node.bounds.top)}`)
       .join('|');
     if (signature === previous) {
-      if (retried) break;
+      if (retried) {
+        reachedEnd = true;
+        break;
+      }
       retried = true;
       const anchor = dragAnchorAvoidingFields(nodes, PACKAGE, SHEET_DRAG_BAND);
-      if (anchor === null) break;
+      if (anchor === null) {
+        reachedEnd = true;
+        break;
+      }
       scrollDownFrom(anchor);
       sleep(1_200);
       continue;
@@ -466,7 +488,15 @@ function surveySheet(label: string, path: readonly string[], scale: number): She
     sleep(1_200);
   }
 
-  return { label, fontScale: scale, opened: true, positions, controls, developmentOverlaySeen };
+  return {
+    label,
+    fontScale: scale,
+    opened: true,
+    positions,
+    controls,
+    developmentOverlaySeen,
+    reachedEnd,
+  };
 }
 
 function sheetsAt(scale: number): readonly Check[] {

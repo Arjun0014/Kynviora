@@ -68,6 +68,7 @@ function survey(overrides: Partial<SheetSurvey> = {}): SheetSurvey {
     positions: 4,
     controls: [control()],
     developmentOverlaySeen: false,
+    reachedEnd: true,
     ...overrides,
   };
 }
@@ -200,6 +201,51 @@ describe('SHEET-2, reachability', () => {
 
   it('passes when every control was seen whole at some point', () => {
     expect(reachabilityCheck(survey()).status).toBe('PASS');
+  });
+
+  /**
+   * The other half of `DEV-079`, and the reason this is not a FAIL.
+   *
+   * A survey that ran out of scroll steps never saw the bottom of the form, so "never fully on
+   * screen" and "further down than we looked" are the same reading. Deciding between them is what
+   * the harness cannot do, and DEC-102 says a check that could not be performed says so.
+   */
+  it('refuses to decide when the survey never reached the end of the form', () => {
+    const check = reachabilityCheck(
+      survey({
+        reachedEnd: false,
+        positions: 31,
+        controls: [
+          control(),
+          control({
+            name: 'Missed dose alerts',
+            everFullyVisible: false,
+            widthDp: null,
+            heightDp: null,
+          }),
+        ],
+      }),
+    );
+    expect(check.status).toBe('INCONCLUSIVE');
+    expect(check.detail).toContain('ran out of');
+    expect(check.detail).toContain('Missed dose alerts');
+  });
+
+  it('still fails when the form did stop moving and a control was never seen', () => {
+    const check = reachabilityCheck(
+      survey({
+        reachedEnd: true,
+        controls: [
+          control({ name: 'Send', everFullyVisible: false, widthDp: null, heightDp: null }),
+        ],
+      }),
+    );
+    expect(check.status).toBe('FAIL');
+  });
+
+  it('passes a completed survey even if it used every step', () => {
+    // Running to the cap is only a problem when something was also unreachable.
+    expect(reachabilityCheck(survey({ reachedEnd: false })).status).toBe('PASS');
   });
 });
 

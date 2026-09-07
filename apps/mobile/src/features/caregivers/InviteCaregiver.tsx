@@ -387,8 +387,13 @@ const makeStyles = (theme: Theme) =>
       minHeight: MIN_TOUCH_TARGET_DP,
       justifyContent: 'center',
       gap: SPACING.xxs,
-      paddingVertical: SPACING.md,
-      paddingHorizontal: SPACING.lg,
+      // `sm`/`md`, not `lg`. `Card` already applies `SPACING.lg` around its contents, so a row
+      // adding `lg` of its own is padded twice - and at font scale 2, where each row is already
+      // two lines of scaled text, that made the block tall enough that `SHEET-2` could never
+      // catch the first and last rows wholly inside the viewport at any scroll position
+      // (`DEV-086`). The 48dp floor is `minHeight` and is unaffected by this.
+      paddingVertical: SPACING.sm,
+      paddingHorizontal: SPACING.md,
       borderWidth: 1,
       borderRadius: RADIUS.md,
       borderColor: theme.line.strong,

@@ -168,6 +168,16 @@ export interface SheetSurvey {
    * failure that cost three sessions.
    */
   readonly developmentOverlaySeen: boolean;
+  /**
+   * Whether the survey saw the sheet stop moving, rather than running out of scroll steps.
+   *
+   * `SHEET-2` asks whether every control can be brought into view, and a survey that stopped
+   * part-way down cannot answer it: "never fully on screen" and "further down than we looked" are
+   * the same reading. Reported so the check can refuse to decide (DEC-102) instead of calling the
+   * last control unreachable, which is `DEV-079`'s failure - a harness parameter rendered as a
+   * product defect.
+   */
+  readonly reachedEnd: boolean;
 }
 
 /**
@@ -400,6 +410,27 @@ export function reachabilityCheck(survey: SheetSurvey): Check {
   }
 
   const unreachable = survey.controls.filter((control) => !control.everFullyVisible);
+
+  // A survey that ran out of scroll steps never saw the bottom of the form, and "never fully on
+  // screen" then means "further down than we looked". Those are different findings and only one
+  // of them is the product's. Refusing to decide is the honest answer and it fails the run
+  // (DEC-102), so it is not a way of passing quietly - it says the survey needs more steps.
+  if (unreachable.length > 0 && !survey.reachedEnd) {
+    return {
+      id,
+      title,
+      status: 'INCONCLUSIVE',
+      detail:
+        `The survey stopped after ${String(survey.positions)} scroll position(s) without the ` +
+        'sheet having stopped moving, so it never saw the end of the form. ' +
+        `${String(unreachable.length)} control(s) had not been seen whole by then: ` +
+        `${JSON.stringify(unreachable.map((control) => control.name || '(unnamed)'))}. ` +
+        'That is not evidence they cannot be reached - it is evidence the survey ran out of ' +
+        'steps, which is `DEV-079`: a harness parameter reported as a product defect. Raise ' +
+        'MAX_SURVEY_STEPS and run it again.',
+    };
+  }
+
   if (unreachable.length > 0) {
     return {
       id,
