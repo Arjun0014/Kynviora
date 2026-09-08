@@ -75,6 +75,15 @@ const TABS = ['Today', 'Shelf', 'Health', 'Care', 'You'] as const;
 const USER_ID = '00000000-0000-4000-8000-00000000d001';
 const PROFILE_ID = '00000000-0000-4000-8000-00000000d020';
 const ENTRY = 'Talk to Kynviora';
+/**
+ * The control that opens the full conversation, from the panel the bar raises.
+ *
+ * Two taps rather than one since V3 (DEC-156). The bar is persistent and stateful now, and V3 is
+ * explicit that tapping it must **not** open a chat sheet: the screen stays visible and a panel
+ * rises above the bar. The full Voice Mode screen - the transcript, the typing field, the
+ * confirmation - is reached from that panel, and this harness reaches it the way a person does.
+ */
+const OPEN_FULL = 'Open the full conversation';
 const FIELD = 'Type what you would say';
 const ASK = 'Ask Kynviora';
 
@@ -344,15 +353,32 @@ async function run(): Promise<readonly Check[]> {
   checks.push(entryControlCheck(positions, [...TABS]));
 
   step('opening Voice Mode');
+  // The bar, then the panel's own control. A failure at either step is INCONCLUSIVE rather than a
+  // finding, and it names which of the two did not happen - because "the bar is gone" and "the
+  // panel does not offer the conversation" are different defects and would otherwise both arrive
+  // as "Voice Mode could not be opened".
   if (!relaunch() || !pressNamed(ENTRY)) {
     checks.push({
       id: 'VOICE-2',
       title: 'The state is said in a word, not only drawn',
       status: 'INCONCLUSIVE',
-      detail: 'Voice Mode could not be opened, so nothing below it could be measured.',
+      detail: 'The Talk bar could not be pressed, so nothing below it could be measured.',
     });
     return checks;
   }
+  sleep(1_500);
+  if (!pressNamed(OPEN_FULL)) {
+    checks.push({
+      id: 'VOICE-2',
+      title: 'The state is said in a word, not only drawn',
+      status: 'INCONCLUSIVE',
+      detail:
+        'The Talk bar opened its panel and the panel did not offer the full conversation, so ' +
+        'nothing below it could be measured.',
+    });
+    return checks;
+  }
+  sleep(1_500);
 
   const opened = screenLines();
   checks.push(statedStateCheck(opened));

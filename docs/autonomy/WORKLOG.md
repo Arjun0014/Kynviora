@@ -6901,3 +6901,67 @@ declaring.
 `apps/mobile/src/voice/ScreenContextProvider.tsx`, `apps/mobile/src/voice/VoiceProvider.tsx`,
 `apps/mobile/src/components/Screen.tsx`, `apps/mobile/test/reactNativeStub.tsx`,
 the five destinations and the Coverage Center.
+
+## 2026-09-08 (V3, device) - Every V3 change, on a Pixel 7
+
+The two structural V3 changes were verified on hardware rather than left as a claim, and one of
+them found a harness that needed re-pointing before it could measure anything.
+
+### The tab bar, and the bar above it
+
+```
+PASS  A11Y-1/2/3  Today  @1
+PASS  A11Y-1/2/3  Shelf  @1
+PASS  A11Y-1/2/3  Health @1
+PASS  A11Y-1/2/3  Care   @1
+PASS  A11Y-1/2/3  You    @1
+```
+
+**15/15**, on the five destinations `06` now names. Health draws 10 interactive nodes, all named,
+all at least 48dp where they are fully visible.
+
+A hierarchy dump of the running app reads, in order: `Talk to Kynviora. Ask for something on this
+screen. Open.` and then `Today`, `Shelf`, `Health`, `Care`, `You`. The accessible name is the
+presentation's own, unchanged, and the tab bar has the destination DEC-151 put in it.
+
+### The Coverage Center, reached the way a person reaches it
+
+```
+PASS  SAF-0 .. SAF-6     7/7
+```
+
+`verify:device:safety` no longer taps a tab that does not exist. It presses **Shelf**, then the
+control that asks the question - _What Kynviora has checked_ - and every one of the seven checks
+still passes against the screen it finds there. That is a strictly better harness than the one it
+replaced: remove the entry point and it now fails at the step that says so, rather than reporting
+an empty screen.
+
+### The Talk bar, measured rather than described
+
+```
+PASS  VOICE-0 .. VOICE-8  9/9
+PASS  VOICE-1  Found on all 5 destinations, within 0dp of the same position.
+```
+
+`VOICE-1` is the one worth quoting. "Persistent" was a claim about placement, and it is now a
+measurement: **0dp** of variation across five screens. The per-screen control it replaced was
+inside the scroll view and would have moved with the content.
+
+### And the harness the change broke first
+
+`verify:device:voice` pressed `Talk to Kynviora` and expected the full Voice Mode screen. Under V3
+that press opens a **panel** - the design brief is explicit that tapping the bar must not open a
+chat sheet - so the harness would have found no typing field and reported every check below it as
+inconclusive.
+
+Re-pointed the same way the safety one was: press the bar, press `Open the full conversation`, then
+measure. The two failure paths are separated on purpose, because "the bar is gone" and "the panel
+does not offer the conversation" are different defects and would otherwise both have arrived as
+"Voice Mode could not be opened".
+
+### Setup, for the next person
+
+Emulator `Kynviora_Pixel_7_API_36`, then `adb kill-server && adb start-server` (trap 184/197),
+then both `adb reverse` tunnels, then `KYNVIORA_DEV_AUTH=1 KYNVIORA_DEV_SEED=1 npm run dev` and
+`npm --prefix apps/mobile run start`. The app was already installed; Metro rebuilt the bundle with
+the new navigation on the first cold start.
