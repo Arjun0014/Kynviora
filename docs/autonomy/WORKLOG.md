@@ -6557,3 +6557,75 @@ in it. That is `DEV-096`'s lesson in miniature, so it is `DEV-097` and it is fix
 
 `vitest.config.ts`, `eslint.config.js`, `package.json`, `scripts/checks/moduleResolution.ts`,
 `scripts/checks/moduleResolution.test.ts`, `scripts/verifyRepeat.ts`.
+
+---
+
+## 2026-09-08 (continued) - The theme a phone actually paints, and the check the plan got wrong
+
+**Starting commit** `b6929a0`.
+
+`DEV-077` was one line of `app.json`. `"userInterfaceStyle": "light"` makes Expo call
+`setDefaultNightMode(MODE_NIGHT_NO)` at every activity create, so `useColorScheme()` returned
+`'light'` on a phone in dark mode and `FOLLOW_SYSTEM` could only ever resolve to light. Every unit
+test asserting both themes at AA passed over that build, and always would have. It was found by
+reading configuration and measured by hand: one `adb shell cmd uimode night yes`, a screencap, a
+pixel read. A measurement nothing repeats is not a check, and that is what this makes it.
+
+### The plan for it was wrong, and the device said so
+
+Two sessions of this document have said the check should "assert the rendered ground is
+`DARK_THEME.canvas.background`". Measured on the Pixel 7:
+
+| System | Most common                               | Second                        |
+| ------ | ----------------------------------------- | ----------------------------- |
+| dark   | `#161A21` at 54.5% - `surface.background` | `#0E1116` at 38.2% - `canvas` |
+| light  | `#FFFFFF` at 54.5% - `surface.background` | `#F7F9FB` at 37.0% - `canvas` |
+
+A screen is mostly its **cards**. The planned assertion would have failed on a correct app, and
+which token wins moves with the screen, the font scale and the data anyway.
+
+So the question the check asks is which **palette** the colours belong to, not which token the
+ground is. `THEME-2` reports the most common colour, the palette it is from, and the share of each
+palette beside it - "97.2% DARK theme colours and 0.0% LIGHT" is a sentence somebody can act on and
+one that survives a token changing, which the V2 design pass may well do (DEC-150, trap 210).
+
+The property that makes any of it decidable is that the two themes share no colour at all.
+`theme.test.ts` asserts that rather than assuming it.
+
+### Both directions, because one of them is not a check
+
+An app hard-coded to dark passes a dark-mode check exactly as happily as one that follows the
+system. `DEV-077` is that failure with the sign reversed. So the harness moves the system to light
+**and** to dark, relaunches into each, and reads both - and it puts the setting back as itself
+afterwards, because `auto` and `custom_schedule` are choices somebody made and restoring `no` over
+one of them would be a harness changing a device on its way out.
+
+### Reading a frame without a PNG decoder
+
+`adb exec-out screencap -p` would need a decoder this repository does not have and does not want.
+Raw `screencap` is a header and packed pixels. The header is three or four little-endian 32-bit
+words - width, height, format, and since Android 13 a colour space - and which one a device sends
+is not something a harness can ask. It is not guessed: the length is arithmetic, and the header is
+whichever size makes `length - header === width * height * 4`. A buffer matching neither comes back
+`null` and the check reports `INCONCLUSIVE` with the byte count, because a guessed header is a
+confident colour reading about the wrong bytes.
+
+### On the device
+
+```
+PASS  THEME-1@LIGHT  Night mode is no and the app relaunched into it.
+PASS  THEME-2@LIGHT  ground #FFFFFF - 0.0% DARK, 96.0% LIGHT
+PASS  THEME-1@DARK   Night mode is yes and the app relaunched into it.
+PASS  THEME-2@DARK   ground #161A21 - 97.2% DARK, 0.0% LIGHT
+```
+
+**4/4 PASS** against a Pixel 7 / Android 16 emulator, with Metro and the API up and both `adb
+reverse` tunnels registered. `KYNVIORA_A11Y_PARTS=destinations KYNVIORA_A11Y_SCALES=1` was run
+afterwards and is **15/15 PASS**, which is the evidence that adding a part did not disturb the
+survey around it. The whole survey has not been re-run since, so the standing 74/74 is a count
+without this part in it.
+
+### Files
+
+`scripts/device/theme.ts`, `scripts/device/theme.test.ts`,
+`scripts/device/verifyAccessibility.ts`, `scripts/device/adb.ts`.

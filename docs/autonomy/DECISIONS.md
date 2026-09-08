@@ -5677,3 +5677,64 @@ that it is gone, not by catching a red run and curing it.
 `scripts/checks/moduleResolution.ts`, `scripts/verifyRepeat.ts`,
 `node_modules/vite/dist/node/chunks/node.js` (`transformWithOxc`, `oxcPlugin`, `viteResolvePlugin`),
 `oxc_resolver-11.24.3/src/tsconfig_resolver.rs` (`find_tsconfig_auto`).
+
+---
+
+## DEC-150 - A theme is read off the whole frame, and the system is moved both ways
+
+**Context.** `DEV-077` was one line of `app.json` - `"userInterfaceStyle": "light"` - which makes
+Expo call `setDefaultNightMode(MODE_NIGHT_NO)` at every activity create, so `useColorScheme()`
+returned `'light'` on a phone in dark mode and the dark theme could not be reached at all. Every
+unit test asserting both themes at AA passed over that build, and always would have: the theme is a
+property of what a phone paints. It was measured by hand on 2026-09-07 - one
+`adb shell cmd uimode night yes`, a screencap, a pixel read - and a measurement nothing repeats is
+not a check.
+
+This document's own plan for turning it into one said: assert that the rendered ground is
+`DARK_THEME.canvas.background`.
+
+**Options.** (a) One pixel at a fixed point, against `canvas.background`. (b) One pixel, against any
+background token of the expected theme. (c) The whole frame, sampled, judged on which theme the
+most common colour belongs to. (d) Read `useColorScheme()` out of the app instead of reading the
+screen.
+
+**Decision.** (c), in **both** directions, with the share of each palette reported beside the
+verdict.
+
+- `THEME-1@LIGHT` / `THEME-1@DARK`: the device accepted the mode and the app came back. Anything
+  else is `INCONCLUSIVE`, never a reading.
+- `THEME-2@LIGHT` / `THEME-2@DARK`: the most common colour in the sampled area, which palette it
+  belongs to, and how much of the screen each palette covers.
+- The night-mode setting is read before it is moved and restored **as itself** - `auto` and
+  `custom_schedule` are choices a person made.
+- The frame comes from raw `adb exec-out screencap`, decoded by arithmetic: the header is three or
+  four little-endian words depending on the platform, and the one that is used is whichever makes
+  `length - header === width * height * 4`. A buffer matching neither is `null`, not pixels.
+
+**Rationale.** (a) is what the plan said and it is **wrong about a correct app**. Measured on a
+Pixel 7: in dark mode the most common colour on Today is `#161A21` at 54.5%, which is
+`surface.background` - the cards - and `canvas` is second at 38.2%. In light mode, `#FFFFFF` at
+54.5% and `#F7F9FB` at 37.0%. A screen is mostly its cards, and which token wins moves with the
+screen, the font scale and the data. A fixed pixel has the same problem in a worse form: it needs
+somewhere the ground shows through, and that moves too.
+
+(b) fixes the token and leaves the coordinate. (c) is indifferent to both, because the app's
+surfaces are flat token colours, so the most common colour on any screen **is** a token and which
+palette it is from is the answer. The two palettes share no colour - asserted, not assumed - which
+is what makes a frame decidable at all.
+
+(d) would be testing the app's opinion of the theme rather than the phone's rendering of it, and
+`DEV-077` is precisely a case where those two disagreed.
+
+**Both directions, because one is not a check.** An app hard-coded to dark passes a dark-mode check
+exactly as happily as one that follows the system. `DEV-077` was that failure with the sign
+reversed, and a check that could only find it in one direction would have to be written again the
+first time somebody made the mirror mistake.
+
+**What is reported and not swallowed.** The share of each palette, and the three most common
+colours. "97.2% DARK and 0.0% LIGHT" is a sentence somebody can act on; "the ground was not the
+colour I expected" is not, and it stops being true the moment a token changes - which the Claude
+Design V2 pass may well do.
+
+**Sources.** `18`, `19`, DEC-102, DEC-137, `DEV-077`, trap 210, `scripts/device/theme.ts`,
+`scripts/device/theme.test.ts`, `scripts/device/verifyAccessibility.ts`.

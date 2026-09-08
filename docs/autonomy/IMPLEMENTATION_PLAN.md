@@ -82,6 +82,19 @@ is marked `BLOCKED_EXTERNAL` even when all buildable work is finished - it is no
   is the finding worth remembering, because every unit here was correct and the product still had
   one theme.
 
+- **And a check for that finding, on 2026-09-08** (DEC-150). `KYNVIORA_A11Y_PARTS=theme` moves the
+  system into light mode and then into dark, relaunches into each, and reads the colours the phone
+  actually painted - `THEME-1` that the mode was accepted and the app came back, `THEME-2` which
+  palette the screen's colours belong to and how much of the screen each covers. **4/4 PASS** on a
+  Pixel 7 / Android 16 emulator: light ground `#FFFFFF`, 96.0% LIGHT and 0.0% DARK; dark ground
+  `#161A21`, 97.2% DARK and 0.0% LIGHT. Both directions, because an app hard-coded to dark passes a
+  dark-mode check as happily as one that follows the system.
+
+  It is judged on which **palette** the colours belong to rather than on one token, because a
+  screen is mostly its cards: the most common colour is `surface.background`, not `canvas` (trap
+  210). The plan this document had carried - assert the ground is `DARK_THEME.canvas.background` -
+  would have failed on a correct app.
+
   What is still on raw `FONT_SIZE` is the second layer of features: `InviteCaregiver`,
   `SetUpHousehold`, `HealthContext`, `DeleteAccount`, `PendingQueue`, `ProfileSwitcher`, the
   reconciliation and review-inbox flows, and the alert detail.

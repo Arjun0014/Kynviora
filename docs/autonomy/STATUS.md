@@ -9,14 +9,14 @@ Last updated: 2026-09-08
 
 ## Current position
 
-|                    |                                                                     |
-| ------------------ | ------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; the design layer carried past the golden path     |
-| **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work              |
-| **Last completed** | `DEV-096`: the walk under every import, and the gate it was costing |
-| **Branch**         | `master`                                                            |
-| **Latest commit**  | `fix(verify): the walk under every import, and the gate it cost`    |
-| **Baseline tag**   | `baseline-spec-only`                                                |
+|                    |                                                                  |
+| ------------------ | ---------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; the design layer carried past the golden path  |
+| **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work           |
+| **Last completed** | The theme a phone actually paints, checked on hardware, 4/4      |
+| **Branch**         | `master`                                                         |
+| **Latest commit**  | `fix(verify): the walk under every import, and the gate it cost` |
+| **Baseline tag**   | `baseline-spec-only`                                             |
 
 **`npm run verify` is a gate again** (`DEV-096`, closed 2026-09-08, DEC-149). It had been failing a
 _transform_ at random - one to four suites, about one run in two at twelve workers, green at four
@@ -85,7 +85,7 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5272 tests passing**, 0 failing, across 198 files.
+- **5301 tests passing**, 0 failing, across 199 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -168,6 +168,22 @@ Every control on all five destinations at font scale 1 and at 2, measured agains
 and against having a name a screen reader can announce; a TalkBack smoke test; and **five sheets**
 surveyed at both scales - the invitation form, the record-a-dose sheet, the schedule editor, manual
 entry, and **Voice Mode** since 2026-09-07.
+
+**And since 2026-09-08 the theme, on hardware, in both directions.** `KYNVIORA_A11Y_PARTS=theme`
+puts the system into light mode and then into dark, relaunches into each, and reads the colours the
+phone actually painted - `THEME-1` that the mode was accepted and the app came back, `THEME-2`
+which palette the screen's colours belong to. **4/4 PASS on 2026-09-08**: light ground `#FFFFFF`,
+96.0% LIGHT colours and 0.0% DARK; dark ground `#161A21`, 97.2% DARK and 0.0% LIGHT. The setting is
+read first and put back as itself, `auto` included.
+
+It exists because `DEV-077` was one line of `app.json` that made a whole theme unreachable while
+every unit test asserting that theme at AA passed. Both directions are measured because an app
+hard-coded to dark passes a dark-mode check as happily as one that follows the system. What the
+plan in this document said to assert - that the ground is `DARK_THEME.canvas.background` - would
+have failed on a correct app, and trap 210 says why.
+
+The whole survey has **not** been re-run since this part was added, so the standing 74/74 is a
+count of the survey without it.
 
 Voice Mode is surveyed as a sheet although it is not one: it is a full screen whose controls are
 sized by their content, which is the property that makes a sheet worth surveying. It is also where
@@ -832,19 +848,19 @@ deliver to (`DEV-069`). One mailbox closes all three.
 
 ## Immediate next task
 
-**Make the theme check a harness rather than something somebody did once.**
-`verify:device:a11y` should put the system into dark mode, relaunch, and assert the rendered ground
-is `DARK_THEME.canvas.background` before it walks the destinations. What was done on 2026-09-07 was
-one `adb shell cmd uimode night yes`, a screencap and a pixel read - and a measurement nothing
-repeats is not a check. The thing that made the dark theme unreachable was a **configuration line**
-(`DEV-077`, `"userInterfaceStyle": "light"` in `app.json`), which is exactly the kind of change
-every unit test passes through: both themes were asserted at AA in Node while one of them could not
-be reached on a phone. It reads the token from `@kynviora/presentation`, so it survives a change to
-what the token is - which matters, because the Claude Design V2 pass may well change it.
+**Find out what the build is warning about.** LogBox appearing during a survey is reported on
+`SHEET-1` and `A11Y-1`, and it only appears because something logged a warning. Nobody has read the
+warning - the logcat buffer had rolled over by the time it was looked for, and it does not fire at
+launch. It is a development-only banner and not a shipped defect, but a warning nobody has read is
+a warning nobody has ruled out, and it is the only thing left in the accessibility survey that
+nobody can explain. Everything it needs is a device and `logcat -b all` from before the launch.
 
-`DEV-096` is closed as of 2026-09-08 and no longer heads this list: `npm run verify` was failing a
-transform at random because of one line of its own configuration, not because of a race in somebody
-else's cache (DEC-149, trap 208). A red run is a finding again.
+Two things came off this list on 2026-09-08. `DEV-096` is closed: `npm run verify` was failing a
+transform at random because of one line of its own configuration, not a race in somebody else's
+cache (DEC-149, trap 208), and a red run is a finding again. And the theme check is a harness now
+rather than something somebody did once - `KYNVIORA_A11Y_PARTS=theme`, both directions, **4/4 PASS
+on hardware** (DEC-150). What this document had said to assert - that the ground is
+`DARK_THEME.canvas.background` - would have failed on a correct app, and trap 210 says why.
 
 **Then let somebody keep a change the server refused** (`DEV-092`'s remainder). The control that could
 not work is gone - a conflicted row offers `DISCARD` only, and the copy says the change was not
@@ -879,11 +895,11 @@ decision about where mail is allowed to go, not an engineering one.
 
 ## Next three planned tasks
 
-1. **Find out what the build is warning about.** LogBox appearing during a survey is now reported
-   on `SHEET-1` and `A11Y-1`, and it only appears because something logged a warning. Nobody has
-   read the warning - the logcat buffer had rolled over by the time it was looked for, and it does
-   not fire at launch. It is a development-only banner and not a shipped defect, but a warning
-   nobody has read is a warning nobody has ruled out. **Waiting on:** nothing.
+1. **Re-run the whole accessibility survey, now that it has a fifth part.** The standing 74/74 is
+   a count of the survey without `theme` in it, and the two parts run on 2026-09-08 were narrowed
+   ones - `theme` 4/4 and `destinations` at scale 1, 15/15. An unnarrowed run is about eighteen
+   minutes and is the only thing that can say the whole number. **Waiting on:** a device, and a
+   machine not also running a full test suite (trap 208).
 
 2. **Re-measure `verify:device:doseaccess` after the `InviteCaregiver` migration.** `DOSE-2`
    measures where a sentence falls relative to a heading on the review step, so a reordering that
@@ -2256,3 +2272,24 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      what the speaker actually said - `VoiceScreen` announces its turns as `Kynviora said. <text>`,
      and the prefix is the whole difference. This is trap 193 in a second place, and both times the
      shape was the same: the screen's own furniture carrying the string a check was looking for.
+
+210. **The ground of a screen is not the `canvas` token, and a check that asserts it is fails on a
+     correct app.** The plan carried here for two sessions was that `verify:device:a11y` should
+     "assert the rendered ground is `DARK_THEME.canvas.background`". Measured, on a real Pixel 7 in
+     dark mode: the most common colour on Today is `#161A21` at 54.5%, which is
+     `DARK_THEME.surface.background` - the cards - and `canvas` is second at 38.2%. In light mode
+     the same shape: `#FFFFFF` at 54.5% and `#F7F9FB` at 37.0%. A screen is mostly its cards, and
+     which token wins moves with the screen and the data.
+
+     So the question a theme check can actually answer is **which theme** the colours belong to,
+     not which token the ground is: `THEME-2` reads the most common colour, says which palette it
+     is from, and reports the share of each palette beside it. That is also what makes the failure
+     legible - "97.2% DARK and 0.0% LIGHT" is a different sentence from "the ground was not the
+     colour I expected", and only the first one survives somebody changing a token.
+
+     The two themes share no colour at all, which is what makes any of this decidable, and
+     `theme.test.ts` asserts that rather than assuming it.
+
+     One more thing it has to do: move the system **both** ways. An app hard-coded to dark passes a
+     dark-mode check exactly as happily as one that follows the system, and `DEV-077` was the same
+     failure in its other direction.
