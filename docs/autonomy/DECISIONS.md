@@ -5586,3 +5586,94 @@ refusal rather than a gap: there is nothing safe to queue.
 `DEV-085`, `DEV-089`, `apps/mobile/src/voice/executor.ts`,
 `apps/mobile/src/voice/VoiceProvider.tsx`, `packages/agent/src/registry.ts`,
 `services/api/src/schedule.test.ts`.
+
+---
+
+## DEC-149 - A workspace specifier is resolved by the workspace, not discovered from a tsconfig
+
+**Context.** `npm run verify` failed a **transform** at random - about one run in two at the
+default twelve workers, one to four suites, a different file each time, and every affected file
+green on its own (`DEV-096`). The errors named a tsconfig:
+
+```
+Error: Tsconfig not found C:/Web UI/KYNVIORA/packages/contracts/src/consent.ts\tsconfig.json
+[TSCONFIG_ERROR] Failed to load tsconfig 'packages/contracts/src/pendingUpload.ts/tsconfig.json'
+```
+
+Both name a **source file** with `/tsconfig.json` appended, which is not a path anything should be
+looking for - and the root `tsconfig.json`, four levels above, is found on every other run.
+
+`vitest.config.ts` set `resolve.tsconfigPaths: true` on the `server` project, described in its own
+comment as "native tsconfig `paths` resolution (Vite 7+), replacing the vite-tsconfig-paths
+plugin". What that option actually does is put Rolldown's resolver into tsconfig **auto-discovery**
+(`ResolveOptions { tsconfig: Some(Auto) }`), and auto-discovery is a filesystem walk **per
+specifier, keyed on the importing file**. `oxc_resolver`'s walk begins at the importing file
+itself, so its first candidate is `<the importing file>/tsconfig.json`: a path that can never
+exist, whose miss has to be classified as an IO error every single time for the walk to carry on up
+to the root. Any other answer, from that candidate or any other on the way up, aborts the transform
+naming that candidate - which is what these two messages are.
+
+Two measurements decided it. A run of **one** test file did **218** `load_tsconfig` reads with the
+flag and **2** without. And the resolver's walks run on Rolldown's own thread pool rather than on
+the JavaScript thread, so the number in flight is a function of how many Vitest workers are asking
+for modules at once - which is the whole of why `--maxWorkers=4` hid it and twelve did not.
+
+**Options.** (a) Pin `maxWorkers` in `vitest.config.ts`. (b) Keep the flag and teach the gate to
+retry a transform error. (c) Supply a literal `tsconfigRaw` so the transform skips the lookup.
+(d) Drop `resolve.tsconfigPaths` and let the workspace resolve its own packages. (e) Drop it and
+add explicit `resolve.alias` entries generated from `tsconfig.base.json`.
+
+**Decision.** (d), with the two answers held to each other by a test.
+
+- `resolve.tsconfigPaths` is gone from the `server` project. The resolver runs with
+  `tsconfig: None`, and the same one-file run now does **2** `load_tsconfig` reads and **zero**
+  auto-discovery walks.
+- Nothing replaces it, because every `@kynviora/*` package is an npm workspace: symlinked into
+  `node_modules/@kynviora/`, named after the specifier in its own manifest, and pointing `main` and
+  `exports['.']` at the same `src/index.ts` the `paths` entry names.
+- `scripts/checks/moduleResolution.ts` and its test compare the two sides entry by entry - the
+  `paths` target `npm run typecheck` uses against the manifest entry point the suite now uses -
+  over every specifier the repository actually imports, and refuse a configuration that turns
+  auto-discovery back on.
+- `npm run verify:repeat` runs the suite N times and stops at the first red one. It is not part of
+  `verify`.
+
+**Rationale.** (a) and (b) are the failure `24` is about. Pinning workers makes a red run less
+likely without making it mean anything, and a gate that retries its own transform errors has been
+taught to disbelieve itself - which is precisely the habit `DEV-096` was already creating in the
+people running it.
+
+(c) was this file's own standing candidate and it was **wrong about the code**. It came from
+reading `transformWithEsbuild`, which does call `resolveTsconfig` only when `tsconfigRaw` is not a
+string. Vite 8 does not use that path: `transformWithOxc` passes a `TsconfigCache` to Rolldown's
+`transformSync`, and Vite's public `OxcOptions` deliberately omits `tsconfig` altogether, so there
+is no supported way to hand it a literal. Worse, it addressed the wrong consumer: the transform's
+lookup is memoised and runs on the JavaScript thread, and the walks that scaled with worker count
+were the **resolver's**.
+
+(e) was rejected for adding a third source of truth. An alias table generated from
+`tsconfig.base.json` would be a second copy of the mapping sitting beside the manifests that
+already declare it, and `apps/mobile` had been demonstrating for weeks that the manifests are
+enough - it imports four of these packages 159 times, its Vitest project has never had
+`tsconfigPaths` or an alias for any of them, and its 217 tests have never failed to resolve one.
+
+What the check exists for is the risk (d) actually carries, which is not resolution failing loudly
+but resolution succeeding **differently**. `npm run typecheck` resolves these specifiers through
+`paths`; the suite now resolves them through the workspace. If a manifest's `main` ever moved, the
+two would answer different files and the suite would be running code the typechecker never looked
+at - green, and meaningless. That is a comparison, not a flag, and it is the half of this decision
+worth keeping.
+
+**What is not claimed.** The failure was not reproduced on this machine. Ten consecutive runs at
+the default worker count - idle, under synthetic memory pressure, and with the Pixel 7 emulator
+resident - were all green, and at twenty workers the machine produced the _other_ failure trap 208
+records (`Fatal process out of memory: Zone`) rather than this one. What was reproduced, and
+deterministically, is the mechanism: a candidate on the walk that answers with anything other than
+"not there" aborts the transform with `Failed to load tsconfig '<that candidate>'`, character for
+character the recorded error. So this closes `DEV-096` by removing the code path and by measuring
+that it is gone, not by catching a red run and curing it.
+
+**Sources.** `04` Phase 0.3, `24`, DEC-102, `DEV-096`, trap 208, `vitest.config.ts`,
+`scripts/checks/moduleResolution.ts`, `scripts/verifyRepeat.ts`,
+`node_modules/vite/dist/node/chunks/node.js` (`transformWithOxc`, `oxcPlugin`, `viteResolvePlugin`),
+`oxc_resolver-11.24.3/src/tsconfig_resolver.rs` (`find_tsconfig_auto`).

@@ -6450,3 +6450,110 @@ either side of a common word is not a process identity. Match the executable and
 `scripts/device/ui.ts`, `packages/agent/src/scriptedAgent.ts`,
 `packages/agent/src/conversation.test.ts`, `apps/mobile/src/voice/devScript.ts`,
 `apps/mobile/src/voice/VoiceProvider.tsx`.
+
+---
+
+## 2026-09-08 (continued) - The walk under every import, and the gate it was costing
+
+**Starting commit** `8fbd677`.
+
+`DEV-096` was the only thing on this list that made every other thing on it worth less. `npm run
+verify` failed a **transform** at random - one to four suites, about one run in two at the default
+twelve workers, a different file each time, and every affected file green in under a second alone.
+Three sessions had recorded it, each concluding it was somebody else's race, and the standing
+advice was to confirm a red run at four workers before believing it. That advice is the failure:
+a gate you re-run before reading is a gate that has stopped being one.
+
+### What the error was actually naming
+
+Two messages, from two sessions:
+
+```
+Error: Tsconfig not found C:/Web UI/KYNVIORA/packages/contracts/src/consent.ts\tsconfig.json
+[TSCONFIG_ERROR] Failed to load tsconfig 'packages/contracts/src/pendingUpload.ts/tsconfig.json'
+```
+
+Both had been read as "the source file treated as a directory, which is oxc walking up from a file
+and finding nothing". That is the right observation and the wrong conclusion. `oxc_resolver`'s
+`find_tsconfig_auto` starts its walk **at the file itself**, so `<the importing file>/tsconfig.json`
+is not a symptom of the walk failing - it is the walk's **first candidate**, every time, for every
+file. It can never exist. The whole pipeline depends on its miss coming back as an IO error, which
+is the one kind the walk swallows before continuing to the parent; any other answer aborts the
+transform naming that candidate.
+
+That is reproducible on demand, and was: put a malformed `tsconfig.json` at any candidate on the
+walk and `transformSync` returns
+`[TSCONFIG_ERROR] Failed to load tsconfig '<that candidate>'` - character for character the second
+message above.
+
+### The two numbers that decided it
+
+`RD_LOG=oxc_resolver=trace` over a run of **one** test file:
+
+|                                    | `load_tsconfig` reads | resolver in `tsconfig: Some(Auto)` |
+| ---------------------------------- | --------------------- | ---------------------------------- |
+| with `resolve.tsconfigPaths: true` | **218**               | 125                                |
+| without it                         | **2**                 | 0                                  |
+
+`resolve.tsconfigPaths: true` had been in `vitest.config.ts` since the first commit, described as
+"native tsconfig `paths` resolution (Vite 7+), replacing the vite-tsconfig-paths plugin". What it
+actually does is put Rolldown's resolver into tsconfig **auto-discovery**, and auto-discovery is a
+walk **per specifier, keyed on the importing file** - not one lookup per file, memoised, which is
+what the transform does. Those walks run on Rolldown's own thread pool rather than on the
+JavaScript thread, so how many are in flight is a function of how many Vitest workers are asking
+for modules at once. That is the whole of why `--maxWorkers=4` hid it and twelve did not, and it is
+why three sessions looking for a race in a cache Vite hands to oxc were looking at the right shape
+and the wrong owner.
+
+### Nothing replaced it
+
+Every `@kynviora/*` package is an npm workspace: symlinked into `node_modules/@kynviora/`, named
+after the specifier in its own manifest, with `main` and `exports['.']` pointing at the same
+`src/index.ts` the `paths` entry names. The repository imports eleven of them and not one subpath.
+
+`apps/mobile` had been proving this for weeks. It imports four of these packages 159 times, its
+Vitest project has never had `tsconfigPaths` or an alias for any of them, and its 217 tests have
+never failed to resolve one. Generating `resolve.alias` entries from `tsconfig.base.json` was
+considered and refused for adding a third copy of a mapping two places already declare (DEC-149).
+
+### What the check is really guarding
+
+Not the flag - though it does read the real `vitest.config.ts` and refuse a configuration that
+turns auto-discovery back on, and that assertion was confirmed to fail by putting the flag back.
+
+The risk this change carries is not resolution failing loudly. It is resolution succeeding
+**differently**: `npm run typecheck` resolves these specifiers through `paths`, the suite now
+resolves them through the workspace, and if a manifest's `main` ever moved the two would answer
+different files - green, and meaningless. So `scripts/checks/moduleResolution.test.ts` compares
+them entry by entry, over every specifier the repository actually imports, and treats a manifest
+that cannot answer as a failure rather than as agreement. 26 tests.
+
+`npm run verify:repeat [n]` runs the suite N times and stops at the first red one. It is
+deliberately not part of `verify`: it answers a question about the gate rather than about the code,
+and a twenty-minute gate is a skipped gate.
+
+### What was not reproduced, and is not claimed
+
+The failure itself. Ten consecutive runs at the default worker count - idle, under synthetic memory
+pressure holding free memory near 1GB, and with the Pixel 7 emulator resident - were all green. At
+twenty workers with ~0.4GB free the machine produced the **other** failure trap 208 records
+(`Fatal process out of memory: Zone`, several workers dead inside thirty seconds) rather than this
+one, which says the machine is at that edge and not much else.
+
+So this closes `DEV-096` by removing the code path and measuring that it is gone, not by catching a
+red run and curing it. The mechanism was demonstrated deterministically instead, and trap 208 has
+been rewritten to say which half of it is fixed and which half is still the machine.
+
+### A second gate defect, found by running the gate
+
+The run meant to confirm the fix failed on **lint**, with twelve `Parsing error: ... was not found
+by the project service` - every one of them a probe script in `scratchpad/`. `.gitignore` has
+always said that directory is not project content; `eslint.config.js` had never been told. It had
+never fired because what the device harnesses leave there is screenshots and logs, and the first
+`.ts` file put there made the gate red about the repository on the strength of a file that is not
+in it. That is `DEV-096`'s lesson in miniature, so it is `DEV-097` and it is fixed.
+
+### Files
+
+`vitest.config.ts`, `eslint.config.js`, `package.json`, `scripts/checks/moduleResolution.ts`,
+`scripts/checks/moduleResolution.test.ts`, `scripts/verifyRepeat.ts`.

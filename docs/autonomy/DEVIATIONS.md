@@ -3720,8 +3720,17 @@ reverse` tunnel produces none either - the app has offline states and uses them.
   costs is that re-making the change is done from memory.
 - **Tests**: 3 in `packages/presentation/src/pendingQueue.test.ts`, including the rule over the
   whole state vocabulary rather than the two members it happens to catch today.
+- **Waiting on the V2 design direction, explicitly** (2026-09-08). A Kynviora V2 redesign is being
+  developed separately in Claude Design, and the missing half of this entry is a **screen** rather
+  than a rule: two versions of a record side by side, with a choice made while looking at both.
+  Building that against the current aesthetic would be building it twice, and inventing a
+  comparison surface now would prejudge a navigation the redesign may not have. So this is not
+  "not got to yet": it is deliberately held, and the half that could be resolved without a design -
+  a control that could not work, and copy that did not say the change was unsaved - already has
+  been. The honest statement of what a person gets today is that their change is kept, visible,
+  counted, and re-made from memory.
 - **Status**: **PARTIALLY RESOLVED 2026-09-08**. The control that could not work is gone; the
-  review that would let somebody keep their change is open.
+  review that would let somebody keep their change is open and waiting on the V2 design.
 
 ---
 
@@ -3744,9 +3753,14 @@ reverse` tunnel produces none either - the app has offline states and uses them.
   product decisions about what an old answer sounds like out loud rather than wiring.
 
 - **Risk**: low. A refusal, and an honest one since `DEV-091`.
-- **Status**: **OPEN**. Not blocked on anything external; waiting on a decision about the wording,
-  which is a good candidate for the Claude Design pass since it is the same question the `STALE`
-  badge answers on a screen.
+- **Waiting on the V2 design direction, explicitly** (2026-09-08). Not blocked on anything
+  external, and the wiring is a morning's work - what is missing is a **sentence** in the Speech
+  Gate's closed set that says how old a cached answer is, and a projection that records when it was
+  written. Both are product decisions about what an old answer sounds like out loud, and they are
+  the same decision the `STALE` badge makes on a screen, so the two should be answered together by
+  the V2 pass rather than separately and differently. Until then the refusal stands and it is an
+  honest one: since `DEV-091` the registry no longer claims otherwise.
+- **Status**: **OPEN**, held for the V2 design direction rather than for anything external.
 
 ---
 
@@ -3897,19 +3911,75 @@ reverse` tunnel produces none either - the app has offline states and uses them.
   machine had 1.5GB free with an emulator resident, and a second run died with
   `Fatal process out of memory: Zone` - but it recurred later with the emulator idle and nothing
   else running, which rules that out as the whole story.
-- **Where the fault is**: not in this repository. `resolveTsconfig` is called through a
-  `TsconfigCache` that Vite creates per config and hands to oxc, and the failure is a race in it
-  that twelve workers contend and four do not.
-- **Risk**: none to the product. It costs a re-run and, worse, it costs the gate its authority.
-- **Candidate fix, and why it is not applied yet**: `transformWithOxc` calls `resolveTsconfig`
-  **only when `tsconfigRaw` is not a string** - so supplying a literal one in the Vite config skips
-  the lookup entirely and the race with it. It is a real fix rather than a workaround. It is also
-  not a tail-end edit: a string `tsconfigRaw` **replaces** the resolved compiler options rather than
-  merging with them, so `target: "ES2023"`, `verbatimModuleSyntax: true` and the
-  `useDefineForClassFields` default have to be reproduced exactly against `tsconfig.base.json` or
-  five thousand tests quietly change semantics. It deserves its own unit, with the transform output
-  diffed before and after on a file that uses each of those features.
-- **Interim**: trap 208 says to confirm a red `verify` with `npx vitest run --maxWorkers=4` before
-  believing it, and to re-run a **transform** error narrowed before investigating it at all. Every
-  count reported this session is from a four-worker run.
-- **Status**: **OPEN**.
+- **Where the fault is, corrected**: in `vitest.config.ts`, and it is one line.
+  `resolve.tsconfigPaths: true` on the `server` project puts Rolldown's resolver into tsconfig
+  **auto-discovery** (`ResolveOptions { tsconfig: Some(Auto) }`), which is a filesystem walk **per
+  specifier, keyed on the importing file**. `oxc_resolver`'s `find_tsconfig_auto` starts that walk
+  at the importing file itself, so its first candidate is `<the importing file>/tsconfig.json` -
+  which is the path in both messages above, exactly. It can never exist, and its miss has to come
+  back as an IO error every single time for the walk to reach the root; a candidate that answers
+  any other way aborts the transform naming that candidate.
+
+  Two numbers made it decidable. `RD_LOG=oxc_resolver=trace` over a run of **one** test file counts
+  **218** `load_tsconfig` reads with the flag and **2** without it. And those walks run on
+  Rolldown's own thread pool rather than on the JavaScript thread, so how many are in flight is a
+  function of how many Vitest workers are asking for modules - which is the whole of why
+  `--maxWorkers=4` hid it and twelve did not. The earlier reading, "a race in a cache Vite hands to
+  oxc", had the right shape and the wrong owner.
+
+- **Risk**: none to the product. It cost a re-run and, worse, it cost the gate its authority.
+- **How it was resolved**: `resolve.tsconfigPaths` is gone, and nothing replaced it (DEC-149).
+  Every `@kynviora/*` package is an npm workspace whose manifest is named after the specifier and
+  whose `main` and `exports['.']` name the same `src/index.ts` the `paths` entry does - and
+  `apps/mobile` had been proving that for weeks, importing four of them 159 times with no
+  `tsconfigPaths` and no alias. After the change the same one-file run does 2 `load_tsconfig` reads
+  and **zero** auto-discovery walks.
+
+  The candidate fix this entry used to carry - a literal `tsconfigRaw` - was **wrong about the
+  code**. It described `transformWithEsbuild`; Vite 8 transforms through `transformWithOxc`, whose
+  public `OxcOptions` omits `tsconfig` entirely, and it would in any case have addressed the
+  transform's lookup rather than the resolver's, which is the one that scaled with worker count.
+
+- **What was not reproduced, and is not claimed**: the failure itself. Ten consecutive runs at the
+  default worker count on 2026-09-08 - idle, under synthetic memory pressure, and with the Pixel 7
+  emulator resident - were all green, and at twenty workers the machine produced the other failure
+  trap 208 records (`Fatal process out of memory: Zone`) instead. What **was** reproduced, and
+  deterministically, is the mechanism: put a malformed `tsconfig.json` at any candidate on the
+  walk, and `transformSync` fails with
+  `[TSCONFIG_ERROR] Failed to load tsconfig '<that candidate>'` - character for character the
+  second message above. So this is closed by removing the code path and measuring that it is gone,
+  not by catching a red run and curing it.
+- **Tests**: 26 in `scripts/checks/moduleResolution.test.ts`. The one that guards the mechanism
+  reads the real `vitest.config.ts` and refuses a configuration that turns auto-discovery back on -
+  confirmed to fail by re-adding the flag. The rest compare, entry by entry, the `paths` target
+  `npm run typecheck` resolves against the manifest entry point the suite now resolves, over every
+  specifier the repository actually imports: the risk this change carries is not resolution failing
+  loudly but resolution succeeding **differently**.
+- **Also**: `npm run verify:repeat [n]` runs the suite N times and stops at the first red one. It
+  is deliberately not part of `verify`.
+- **Status**: **RESOLVED 2026-09-08**.
+
+---
+
+## DEV-097 - `npm run verify` goes red over files the repository says are not its content
+
+- **Affected specification**: `04` Phase 0.3 (one CI gate over the whole graph), `24` (a gate whose
+  red results are not acted on is not a gate), `DEV-096`, DEC-149.
+- **Expected behaviour**: the gate is red when the repository is wrong, and at no other time.
+- **Implemented behaviour**: `eslint.config.js` did not ignore `scratchpad/`, which `.gitignore`
+  has declared is not project content since it was added - "working output from the device
+  harnesses and from verification runs". Nothing in it is in any `tsconfig`, so
+  `projectService: { allowDefaultProject: [] }` reports every TypeScript or ESM file there as
+  `Parsing error: ... was not found by the project service`.
+- **The failure**: twelve of those in one run, and `npm run verify` exit 1, over probe scripts
+  written while investigating `DEV-096` and committed nowhere. It had never fired because what the
+  harnesses normally leave in `scratchpad/` is screenshots, hierarchy dumps and logs; the first
+  `.ts` file put there made the gate red about the repository on the strength of a file that is not
+  in it.
+- **How it was found**: by doing it - the run that was meant to confirm `DEV-096`'s fix failed on
+  lint instead, with every error naming a scratchpad file.
+- **Risk**: none to the product, and the same cost `DEV-096` had: a person who has seen the gate go
+  red for something that is not the code has been given a reason to disbelieve the next red run.
+- **Resolution**: `scratchpad/**` is in the ESLint ignore list, next to the other things that are
+  generated rather than written, with the reason beside it.
+- **Status**: **RESOLVED 2026-09-08**.

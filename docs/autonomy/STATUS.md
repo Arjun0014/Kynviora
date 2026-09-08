@@ -9,14 +9,27 @@ Last updated: 2026-09-08
 
 ## Current position
 
-|                    |                                                                   |
-| ------------------ | ----------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; the design layer carried past the golden path   |
-| **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work            |
-| **Last completed** | A reminder set by voice with no signal, proven on hardware, 10/10 |
-| **Branch**         | `master`                                                          |
-| **Latest commit**  | `test(device,agent): the claim on hardware, and three defects...` |
-| **Baseline tag**   | `baseline-spec-only`                                              |
+|                    |                                                                     |
+| ------------------ | ------------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; the design layer carried past the golden path     |
+| **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work              |
+| **Last completed** | `DEV-096`: the walk under every import, and the gate it was costing |
+| **Branch**         | `master`                                                            |
+| **Latest commit**  | `fix(verify): the walk under every import, and the gate it cost`    |
+| **Baseline tag**   | `baseline-spec-only`                                                |
+
+**`npm run verify` is a gate again** (`DEV-096`, closed 2026-09-08, DEC-149). It had been failing a
+_transform_ at random - one to four suites, about one run in two at twelve workers, green at four
+and green on every affected file alone - and the cause was one line of this repository's own
+configuration rather than a race in somebody else's cache. `resolve.tsconfigPaths: true` asked
+Rolldown's resolver for a tsconfig **auto-discovery walk per specifier**, on its own thread pool,
+and every one of those walks begins at the importing file, whose first candidate is
+`<the importing file>/tsconfig.json` - the exact path both recorded errors named. One test file's
+run made **218** `load_tsconfig` reads with the flag and **2** without it. Nothing needed it: every
+`@kynviora/*` package is an npm workspace whose manifest already names the same entry point, which
+`apps/mobile` had been demonstrating for weeks. A second, smaller gate defect fell out of fixing
+the first: `npm run verify` went red over `scratchpad/` files that `.gitignore` already declares
+are not project content (`DEV-097`).
 
 **The full accessibility survey is green for the first time: 74 PASS, 0 FAIL, 0 INCONCLUSIVE.**
 The intermittent failure that had survived three sessions was captured and turned out to be React
@@ -72,7 +85,7 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5246 tests passing**, 0 failing, across 197 files.
+- **5272 tests passing**, 0 failing, across 198 files.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
@@ -89,10 +102,19 @@ made a notification failure hide it (DEC-143).
 npm run verify
 ```
 
-**Confirm a red run at four workers before believing it** (`DEV-096`, trap 208). At the default
-worker count this suite fails one to four suites with a _transform_ error - a tsconfig lookup that
-treats a source file as a directory - about one run in two, and every affected file passes alone.
-Every count in this document is from `npx vitest run --maxWorkers=4`.
+**A red run means something again** (`DEV-096`, closed 2026-09-08, DEC-149). The gate used to fail
+a _transform_ at random, one to four suites, about one run in two at the default worker count - and
+the cause was one line of this repository's own configuration: `resolve.tsconfigPaths: true` asked
+Rolldown's resolver for a tsconfig **auto-discovery walk per specifier**, on its own thread pool, so
+the failure rate tracked the worker count. It is gone, nothing replaced it, and
+`scripts/checks/moduleResolution.test.ts` is what keeps it gone. Every count in this document is
+from a default-worker run again.
+
+What is still a property of this machine and not of the code: at twelve workers with an emulator
+resident, ~50 files booting their own PGlite can exhaust 11.4GB and die with
+`Fatal process out of memory: Zone` (trap 208). That is legible as itself. `npm run verify:repeat`
+runs the suite N times and stops at the first red one, which is the question to ask before
+believing the gate is flaky.
 
 - Database tests execute against real PostgreSQL 18.3 via PGlite as a non-superuser role.
 - **The retention worker has been run as a real process, twice, not only in tests.** Standalone
@@ -772,8 +794,9 @@ their own general suites, not the per-feature ones. Per-file counts are reproduc
 
 ## Known failing tests
 
-None. `npm run verify` at its default worker count fails a **transform** at random and that is not
-a failing test - see `DEV-096` and trap 208, and confirm at `--maxWorkers=4`.
+None, and as of 2026-09-08 that sentence is worth more than it was: the **transform** failure that
+used to make a default-worker run unreliable was `DEV-096`, it was this repository's own
+configuration, and it is closed. A red `npm run verify` is now a finding.
 
 ## Active blockers
 
@@ -809,14 +832,19 @@ deliver to (`DEV-069`). One mailbox closes all three.
 
 ## Immediate next task
 
-**Make `npm run verify` a gate again** (`DEV-096`). It fails a transform at random, about one run in
-two, on a different file each time - and a person who has learned that re-running fixes it has
-learned to ignore a red gate, which is the one failure a gate cannot survive. The fix follows from
-the mechanism rather than from guesswork: `transformWithOxc` skips the tsconfig lookup entirely when
-`tsconfigRaw` is a string, so supplying a literal one removes the race. It needs its own unit
-because a literal replaces the resolved compiler options rather than merging with them - `target`,
-`verbatimModuleSyntax` and `useDefineForClassFields` have to be reproduced exactly against
-`tsconfig.base.json`, and the transform output diffed before and after on a file using each.
+**Make the theme check a harness rather than something somebody did once.**
+`verify:device:a11y` should put the system into dark mode, relaunch, and assert the rendered ground
+is `DARK_THEME.canvas.background` before it walks the destinations. What was done on 2026-09-07 was
+one `adb shell cmd uimode night yes`, a screencap and a pixel read - and a measurement nothing
+repeats is not a check. The thing that made the dark theme unreachable was a **configuration line**
+(`DEV-077`, `"userInterfaceStyle": "light"` in `app.json`), which is exactly the kind of change
+every unit test passes through: both themes were asserted at AA in Node while one of them could not
+be reached on a phone. It reads the token from `@kynviora/presentation`, so it survives a change to
+what the token is - which matters, because the Claude Design V2 pass may well change it.
+
+`DEV-096` is closed as of 2026-09-08 and no longer heads this list: `npm run verify` was failing a
+transform at random because of one line of its own configuration, not because of a race in somebody
+else's cache (DEC-149, trap 208). A red run is a finding again.
 
 **Then let somebody keep a change the server refused** (`DEV-092`'s remainder). The control that could
 not work is gone - a conflicted row offers `DISCARD` only, and the copy says the change was not
@@ -851,14 +879,29 @@ decision about where mail is allowed to go, not an engineering one.
 
 ## Next three planned tasks
 
-1. **Finish carrying the design system into the last third of `apps/**`.** Safety, Care and You
+1. **Find out what the build is warning about.** LogBox appearing during a survey is now reported
+   on `SHEET-1` and `A11Y-1`, and it only appears because something logged a warning. Nobody has
+   read the warning - the logcat buffer had rolled over by the time it was looked for, and it does
+   not fire at launch. It is a development-only banner and not a shipped defect, but a warning
+   nobody has read is a warning nobody has ruled out. **Waiting on:** nothing.
+
+2. **Re-measure `verify:device:doseaccess` after the `InviteCaregiver` migration.** `DOSE-2`
+   measures where a sentence falls relative to a heading on the review step, so a reordering that
+   reads better on screen can silently reproduce `DEV-049`. The heading order and
+   `summary.changing` were left unchanged deliberately and the reason is at the top of the file -
+   but unchanged-on-purpose is a claim, and this check is the only thing that reads it on a phone.
+   **Waiting on:** a device.
+
+3. **Finish carrying the design system into the last third of `apps/**`.** Safety, Care and You
    are done, along with the golden path, the consent list, the notification settings, the delivery
    policy, the access list, the removal confirmation, the access history and signing out - and as
    of 2026-09-07 `InviteCaregiver`, `ReconciliationReview` and `ReviewInbox`, the last two of which
    had a `ScrollView` inside the one `Screen` already draws. What is still on raw `FONT_SIZE` and
    hand-rolled borders: `SetUpHousehold`, `HealthContext`, `DeleteAccount`, `PendingQueue`,
    `ProfileSwitcher`, `ReconciliationFlow`, `ResolutionPrompt`, `ReviewTaskEditor` and the alert
-   detail. **Waiting on:** nothing.
+   detail. **Waiting on:** the Claude Design V2 direction - see below. Carrying the current system
+   into nine more screens is not a redesign, but it is nine screens' worth of work against an
+   aesthetic that is being replaced, and doing it now is doing it twice.
 
    `InviteCaregiver` was the one to do carefully rather than quickly, and the reason is now written
    at the top of the file: `verify:device:doseaccess` `DOSE-2` measures **where a sentence falls
@@ -866,19 +909,28 @@ decision about where mail is allowed to go, not an engineering one.
    silently reproduce `DEV-049`. The heading order and `summary.changing` are unchanged, and it
    still needs re-measuring on a device.
 
-2. **Making the theme check part of a harness rather than a thing somebody did once.**
-   `verify:device:a11y` should move the system into dark mode, relaunch, and assert the rendered
-   ground is `DARK_THEME.canvas.background` before it walks the destinations. What was done on
-   2026-09-07 was a manual measurement - one `adb shell cmd uimode night yes`, a screencap, a pixel
-   read - and a measurement nothing repeats is not a check. The thing that made the dark theme
-   unreachable was a configuration line (`DEV-077`), which is exactly the kind of change every
-   unit test passes through.
+## What is explicitly waiting for Claude Design
 
-3. **Find out what the build is warning about.** LogBox appearing during a survey is now reported
-   on `SHEET-1` and `A11Y-1`, and it only appears because something logged a warning. Nobody has
-   read the warning - the logcat buffer had rolled over by the time it was looked for, and it does
-   not fire at launch. It is a development-only banner and not a shipped defect, but a warning
-   nobody has read is a warning nobody has ruled out.
+A Kynviora **V2 product redesign is being developed separately in Claude Design**. Nothing in this
+list is blocked in the sense `BLOCKERS.md` uses the word - each is buildable today - and each would
+be built twice if it were built now. None of them is started, and none should be until the V2
+direction is approved.
+
+| Waiting                                                     | Why it waits, and what it is waiting for                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DEV-092`'s remainder - keeping a change the server refused | The half that is missing is a **two-version comparison surface**: the record as it stands beside the queued change, with the choice made while looking at both. That is a screen nobody has designed. The half that could be fixed without one - a control that could not work - is already gone. |
+| `DEV-093` - reading the shelf out loud with no signal       | The refusal is honest and the wiring is trivial. What is missing is a **sentence** that says how old a cached answer is, in the Speech Gate's closed set. It is the same question the `STALE` badge answers on a screen, and both answers should be given at once.                                |
+| The last third of the design system in `apps/**`            | Nine screens on raw `FONT_SIZE` and hand-rolled borders. Real work, and work against an aesthetic that is being replaced.                                                                                                                                                                         |
+| A digest surface (`DEV-064`)                                | Already deliberately not next, and for the same reason: what a digest should be **instead of** the Safety Inbox is a product question.                                                                                                                                                            |
+
+**Named as V2 and deliberately not begun:** Shelf/Considering, Compare, Health, Agent Jobs,
+contextual agent control in the UI, and any broad navigation change. None of these has an entry in
+`IMPLEMENTATION_PLAN.md`, none is referenced by a test, and nothing in the repository points at
+them - which is the state they should stay in until the design direction is approved.
+
+**What does not wait**, and is what this position keeps working on: correctness, security and
+verification. `DEV-096` and `DEV-097` were both of that kind, both were found by running the gate,
+and neither touched a pixel.
 
 **Also open and unstarted:** `DEV-024`, and the substance-mapping review queue (`DEV-037`), which
 DEC-117 unblocked in shape - a raw household term never goes to staff by default.
@@ -2161,35 +2213,38 @@ text`. The field stays empty, nothing errors, and the run reads as a form that i
      and an unrelated dev server on 5173 belonging to somebody else's work. Free a port by its
      owning process: `Get-NetTCPConnection -LocalPort <n> -State Listen` then `Stop-Process` on
      `OwningProcess`, and refuse to continue if it is still held.
-208. `npm run verify` at default concurrency is not a reliable gate on a loaded machine, and it
-     fails in two ways that both look like findings about the code. Vitest runs one worker per
-     core - twelve here - and around fifty test files boot their own PGlite, so on a machine with
-     11.4GB and an emulator, a Playwright run and half a dozen MCP servers resident the suite
-     either dies with `Fatal process out of memory: Zone` before a single test reports, or comes
-     back with suites that failed to **transform**:
-     `[TSCONFIG_ERROR] Failed to load tsconfig 'packages/contracts/src/pendingUpload.ts/tsconfig.json'`.
-     That path is the source file treated as a directory, which is oxc walking up from a file and
-     finding nothing - and the root `tsconfig.json` three levels above it plainly exists, so it is
-     memory pressure surfacing as a resolution failure rather than a real one. The same two suites
-     ran alone in 839ms, green, and the whole suite at `--maxWorkers=4` was `5201 passed | 197
-files`, exit 0. Re-run narrowed before believing a transform error, and re-run the whole suite
-     with `npx vitest run --maxWorkers=4` before believing anything about the gate. Not pinned in
-     `vitest.config.ts`, because the right worker count is a property of the machine and a low one
-     would slow a CI runner that has the memory - but a green `npm run verify` on a busy
-     workstation is worth one confirming pass at four workers.
+208. `npm run verify` at default concurrency used to fail in **two** ways on a loaded machine, and
+     both looked like findings about the code. One of them was ours and is fixed; the other is the
+     machine and is not.
 
-     **It recurred with memory free, so it is not only pressure.** A later run - emulator idle,
-     nothing else on the machine - failed one suite with
-     `Error: Tsconfig not found C:/Web UI/KYNVIORA/packages/contracts/src/consent.ts	sconfig.json`,
-     a different file from the first two, and that file passed alone with 145 tests. Three runs,
-     three different files, always a **transform** failure and never an assertion: it is a race in
-     the tsconfig resolution cache Vite hands to oxc, which the twelve-worker default contends and
-     four workers do not. The mechanism is worth carrying because the fix follows from it -
-     `transformWithOxc` calls `resolveTsconfig` only when `tsconfigRaw` is not a **string**, so
-     supplying one in the Vite config skips the lookup entirely. That is a real fix and not a
-     tail-end edit: a literal `tsconfigRaw` replaces the resolved compiler options rather than
-     merging with them, so `target`, `useDefineForClassFields` and `verbatimModuleSyntax` have to be
-     reproduced exactly or five thousand tests change semantics quietly (`DEV-096`).
+     **The transform failure was ours, and it is closed** (`DEV-096`, DEC-149). Suites came back
+     having failed to **transform**, one to four of them, about one run in two, naming a tsconfig:
+     `[TSCONFIG_ERROR] Failed to load tsconfig 'packages/contracts/src/pendingUpload.ts/tsconfig.json'`
+     and `Error: Tsconfig not found C:/Web UI/KYNVIORA/packages/contracts/src/consent.ts\tsconfig.json`.
+     Both name a **source file** with `/tsconfig.json` appended, and that is not oxc failing to find
+     anything: it is the **first candidate** of a tsconfig auto-discovery walk, which
+     `oxc_resolver` starts at the importing file itself. `resolve.tsconfigPaths: true` in
+     `vitest.config.ts` was asking for one of those walks **per specifier**, on Rolldown's own
+     thread pool - 218 `load_tsconfig` reads for a run of one test file, against 2 without it -
+     which is why the number of Vitest workers changed how often it happened. The flag is gone,
+     nothing replaced it, and the guard is `scripts/checks/moduleResolution.test.ts`. The reading
+     this trap used to carry, that it was a race in a cache Vite hands to oxc, had the right shape
+     and the wrong owner.
+
+     **The out-of-memory failure is the machine and stands.** Vitest runs one worker per core -
+     twelve here - and around fifty test files boot their own PGlite, so on 11.4GB with an emulator,
+     a Playwright run and half a dozen MCP servers resident the suite can die with
+     `Fatal process out of memory: Zone` before a single test reports. It was reproduced again on
+     2026-09-08 by asking for twenty workers with the emulator up and ~0.4GB free: several workers
+     died that way in the first thirty seconds. Worker count is still not pinned in
+     `vitest.config.ts`, because the right number is a property of the machine and a low one would
+     slow a CI runner that has the memory - but on a busy workstation `npx vitest run
+--maxWorkers=4` is the way to get an answer rather than a symptom.
+
+     **What to do with a red run now.** Read it. A transform error naming a tsconfig is no longer
+     expected and is a finding; an `out of memory` is a finding about this machine, not this
+     repository. `npm run verify:repeat` asks the underlying question - is the gate deterministic
+     here - by running the suite N times and stopping at the first red one.
 
 209. A screen carries sentences nobody spoke, and a check that searches all of it will find them.
      `verify:device:offline`'s `OFF-8` looks for `Done.` - the sentence the voice shell speaks when
