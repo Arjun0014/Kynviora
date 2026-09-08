@@ -1,7 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestDb, type TestDb } from './harness/harness.js';
 import { PURGE_CATEGORY_NAMES } from './src/retention.js';
-import { CHANNEL_REASONS, DELIVERY_CHANNELS, REVALIDATION_OUTCOMES } from '@kynviora/domain';
+import {
+  CHANNEL_REASONS,
+  DELIVERY_CHANNELS,
+  EXTRACTION_STATES,
+  HEALTH_METRICS,
+  HEALTH_RECORD_KINDS,
+  HEALTH_SOURCE_KINDS,
+  HEALTH_SOURCE_STATES,
+  REVALIDATION_OUTCOMES,
+  SOURCE_FLAGS,
+} from '@kynviora/domain';
 import { RETENTION_RUN_OUTCOMES } from '@kynviora/worker';
 
 /**
@@ -118,5 +128,37 @@ describe('a digest entry’s revalidation outcome', () => {
     expect(await acceptedBy('notification_digest_entry_outcome_valid')).toEqual(
       sorted(REVALIDATION_OUTCOMES),
     );
+  });
+});
+
+describe('the Health record’s five vocabularies', () => {
+  // Five sets declared twice: a `const` array in `packages/domain/src/healthRecord.ts` and a
+  // CHECK in `0032`. The quiet direction is the one that matters here - a member added to the
+  // constraint and not to the domain is a value the database accepts and no screen can render,
+  // and on a lab result that means a row appearing with no label beside it.
+
+  it('agree about what kind a record may be', async () => {
+    expect(await acceptedBy('health_record_kind_valid')).toEqual(sorted(HEALTH_RECORD_KINDS));
+  });
+
+  it('agree about how a record was extracted', async () => {
+    expect(await acceptedBy('health_record_extraction_valid')).toEqual(sorted(EXTRACTION_STATES));
+  });
+
+  it('agree about what a source is and what state it is in', async () => {
+    expect(await acceptedBy('health_source_kind_valid')).toEqual(sorted(HEALTH_SOURCE_KINDS));
+    // The state list is spread across two constraints - one enumerates, the other excludes two
+    // members - so this reads the enumerating one by name rather than whichever matched first.
+    expect(await acceptedBy('health_source_state_valid')).toEqual(sorted(HEALTH_SOURCE_STATES));
+  });
+
+  it('agree about which words a report may have used', async () => {
+    // The set a report is quoted from. A member added to the schema and not the domain would be
+    // a flag stored with no sentence to render it, which on a lab result is a chip with no words.
+    expect(await acceptedBy('health_observation_flag_valid')).toEqual(sorted(SOURCE_FLAGS));
+  });
+
+  it('agree about which metrics a trend may be drawn for', async () => {
+    expect(await acceptedBy('health_measurement_metric_valid')).toEqual(sorted(HEALTH_METRICS));
   });
 });

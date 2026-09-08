@@ -70,6 +70,7 @@ import { registerReviewerConsoleRoutes } from './reviewerConsole.js';
 import { registerOperationsRoutes } from './operations.js';
 import { registerSafetyInboxRoutes } from './safetyInbox.js';
 import { registerScheduleRoutes } from './schedule.js';
+import { registerHealthRecordRoutes } from './healthRecords.js';
 import { registerItemDeletionRoutes, registerProfileDeletionRoutes } from './itemDeletion.js';
 import { registerPersonalExportRoutes } from './personalExport.js';
 import { registerShadowModeRoutes } from './shadowMode.js';
@@ -2749,6 +2750,17 @@ export function createServer(options: ServerOptions): FastifyInstance {
     // their reminders.
 
     registerScheduleRoutes(app, { contextFor, fail });
+
+    // -------------------------------------------------------------------------
+    // The Health record (`0032`, DEC-151, DEC-154)
+    // -------------------------------------------------------------------------
+    // Health became a primary destination when Safety stopped being one, and the four tables
+    // behind it are the most sensitive personal data in the product. Nothing here checks a
+    // capability: `0032`'s policies require `VIEW_HEALTH_RECORDS` to read and
+    // `MANAGE_HEALTH_RECORDS` to write, no existing grant was backfilled either, and a handler
+    // that re-checked would be a second opinion able to disagree with the first.
+
+    registerHealthRecordRoutes(app, { contextFor, fail });
 
     // -------------------------------------------------------------------------
     // DELETE /v1/items/:itemId  (`16` deletion, DEC-117)

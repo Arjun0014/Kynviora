@@ -5915,3 +5915,115 @@ are read from tables keyed by the same interval, so they cannot drift apart.
 **Sources.** `Kynviora V3 Design Language.dc.html` §01 and §04, `KYNVIORA_V3_DESIGN_BRIEF.md` §11
 and §14, `02`, `18`, DEC-130, DEC-147, `packages/domain/src/changeLens.ts`,
 `packages/presentation/src/changeLens.ts`.
+
+---
+
+## DEC-154 - A health record is its own capability, and no grant that exists acquires it
+
+**Date.** 2026-09-08
+**Status.** Accepted. Migration `0032`.
+**Context.** V3 makes Health a primary destination (DEC-151) and gives it a real record: lab
+reports, structured results, measurements and the sources they came from. Four new tables, holding
+what is now the most sensitive personal data in the product.
+
+`VIEW_DOCUMENTS` already exists and is the near miss. It was designed so a caregiver can open a
+package label or a Visit Pack at a pharmacy counter.
+
+**Options.** (a) Read health records under `VIEW_DOCUMENTS`. (b) Under `VIEW_MEDICINES`. (c) A new
+`VIEW_HEALTH_RECORDS` / `MANAGE_HEALTH_RECORDS` pair, backfilled to nobody.
+
+**Decision.** (c), which is DEC-116's shape applied to a second question.
+
+- Both capabilities join `CAREGIVER_CAPABILITIES` and both CHECK constraints.
+- `0032` **backfills nothing**. Every grant keeps exactly the capabilities its owner chose, so no
+  existing caregiver silently gains a lab history.
+- Read needs `VIEW_HEALTH_RECORDS`, write needs `MANAGE_HEALTH_RECORDS`, on all four tables.
+- No route handler checks either. RLS decides, per access, so revocation is immediate.
+
+**Rationale.** (a) and (b) each make one grant mean two things, which is the failure `DEV-049` was
+and which `18` asks the review screen to prevent. Somebody handing over "documents" so a
+pharmacist can see a package is not handing over a thyroid history, and the screen that took that
+consent said nothing about one.
+
+Migrating grants forward would be unsound in the way DEC-116 records: the set of people who would
+have chosen a capability is not derivable from a list that never offered it.
+
+**What the schema refuses, and why each refusal is in the schema rather than in a handler.**
+
+| Constraint                                | What it stops                                                                                                                                       |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No column for a Kynviora verdict          | An `is_abnormal boolean` computed on write. One line, right most of the time, and it makes Kynviora the author of a clinical claim (DEC-155).       |
+| `health_observation_has_a_value`          | A row saying a test was done and carrying no result - an absence dressed as a measurement.                                                          |
+| `health_measurement_pairing`              | A systolic with no diastolic. Two rows can be separated by a filter or a partial import and re-paired by a join, which is a fabricated measurement. |
+| `health_measurement_pair_ordered`         | A transcription error that draws a bar pointing the wrong way rather than an obviously wrong number.                                                |
+| `health_source_state_needs_history`       | A source called STALE or IMPORTED_ONCE that has never received anything. Both words claim a history.                                                |
+| `health_record_extraction_needs_document` | A record claiming a document was extracted with no document to extract from (`04` Phase 1.3).                                                       |
+| `UNIQUE (record_id, analyte_code)`        | Two results for one analyte in one report, which makes a comparison ambiguous.                                                                      |
+
+**Retention.** All four tables follow the profile's deadline, are granted to `kynviora_retention`,
+and are swept by **explicit statements in dependency order** rather than by the foreign key.
+`0023`'s reason applies: a referential action is issued by the referencing table's owner rather
+than by the retention role, so a cascade removes rows this role's own policy never admitted. The
+first version of the test found this - `health_record` deleted first took the observations with it
+and the sweep then reported having removed none.
+
+**Export.** Four new sections in `PERSONAL_EXPORT_SECTIONS`, including the reference interval and
+the source flag on every result: `16` asks for a copy of the personal data, and a value without the
+interval the report printed beside it is a number nobody can check against their own report.
+
+**Sources.** `0032`, DEC-116, DEC-151, `DEV-049`, `db/healthRecords.test.ts` (29),
+`services/api/src/healthRecords.test.ts` (34), `16`, `14`, `08.2`.
+
+---
+
+## DEC-155 - Kynviora says where a number sits relative to the interval the report printed, and never that a value is high
+
+**Date.** 2026-09-08
+**Status.** Accepted.
+**Context.** V3 calls Labs "the flagship, and the strictest screen in the app", and the strictness
+is a specific claim: the band on a result row is the interval _the report gave_, the amber chip
+appears _only when the report itself flagged the result_, and it says so in those words.
+
+Implementing that needs a decision about one function. Given a value and an interval, something has
+to say where the value sits - and the obvious name for the answer is `HIGH` / `LOW` / `NORMAL`.
+
+**Options.** (a) Compute `HIGH`/`NORMAL`/`LOW` from the interval. (b) Store nothing and show only
+the report's own flag. (c) Compute a position and name it for what it is.
+
+**Decision.** (c). `referenceComparison(value, interval)` returns one of `WITHIN`, `OUTSIDE_ABOVE`,
+`OUTSIDE_BELOW`, `NO_INTERVAL`, `NOT_COMPARABLE`, and the wire field is called
+`referenceComparison`. The report's own word travels separately as `sourceFlag`, rendered through
+`sourceFlagSentence`, whose every sentence has the report as its subject: "Flagged high by the
+source report".
+
+**Rationale.** (a) is a clinical judgement about a person and `10` does not allow Kynviora to make
+one. A value outside a reference interval is a fact about arithmetic on two numbers a lab printed.
+"High" depends on age, medication, time of day and why the test was ordered, and Kynviora knows
+none of that. The distance between those two sentences is the whole of `10`, and it is preserved
+here by the vocabulary rather than by a comment: a test asserts no member of
+`REFERENCE_COMPARISONS` is `HIGH`, `LOW`, `NORMAL` or `ABNORMAL`.
+
+(b) throws away something real. A person looking at a report can see the value is outside the
+printed band; refusing to draw it does not protect them, it just makes the screen worse than the
+paper.
+
+**The four refusals that come with it.**
+
+- **Bounds are inclusive.** A lab printing `0.4 - 4.0` considers 4.0 normal. An exclusive bound
+  puts a value the report accepts outside its own range.
+- **A text interval is never parsed.** `< 5.0` becomes `NOT_COMPARABLE`, not `high: 5`. Parsing it
+  invents a bound the lab did not print and a lower bound of zero it certainly did not.
+- **`NO_INTERVAL` is a real answer.** Not "fine", not "unknown risk" - the plain fact that this
+  report printed no range, which is the common case for anything hand-entered.
+- **A reference interval never reaches the Change Lens.** Two values outside their interval that
+  did not move are `SIMILAR`. A comparison that folded the interval in would be reporting the
+  interval rather than the difference, on a screen whose heading says what changed.
+
+**And the flag vocabulary is a quotation, not a scale.** `SOURCE_FLAGS` is `HIGH`, `LOW`,
+`ABNORMAL`, `CRITICAL`, `BORDERLINE`, `FLAGGED` - the words reports print. There is no `DANGEROUS`,
+no `URGENT`, no `SEVERE`, and - because `02` forbids an all-clear outright - no `NORMAL`, `SAFE`,
+`CLEAR` or `OK`. A missing flag is not approval.
+
+**Sources.** `Kynviora V3 Design Language.dc.html` §04, `KYNVIORA_V3_DESIGN_BRIEF.md` §8 and §22,
+`09`, `10`, `02`, DEC-153, `packages/domain/src/healthRecord.ts`,
+`services/api/src/healthRecords.ts`.

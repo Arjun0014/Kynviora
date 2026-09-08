@@ -169,6 +169,13 @@ describe('the retention role', () => {
       'dose_event',
       'evidence_asset',
       'extraction_run',
+      // The Health record (`0032`). All four follow the profile's deadline, and all four are on
+      // this list rather than left to a cascade: `16` promises the most sensitive personal data
+      // in the product is physically gone within thirty days, and a table nothing sweeps keeps it.
+      'health_measurement',
+      'health_observation',
+      'health_record',
+      'health_source',
       'medicine_schedule',
       // A digest is a derived projection of `alert_delivery` and inherits its deadline (`0029`):
       // an entry goes with the delivery it references, and the digest goes once it has none left.

@@ -124,6 +124,14 @@ export const PERSONAL_EXPORT_SECTIONS = [
   'doseEvents',
   'allergies',
   'conditions',
+  // The Health record (`0032`). Four sections rather than one, because a person checking their
+  // copy is checking against four different things they can see in the app - their sources, their
+  // records, the results inside them, and their measurements - and a single merged count could not
+  // be checked against any of them.
+  'healthSources',
+  'healthRecords',
+  'healthObservations',
+  'healthMeasurements',
   'reviewTasks',
   'reconciliations',
   'caregiverAccess',

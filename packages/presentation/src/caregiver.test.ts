@@ -54,6 +54,7 @@ describe('capability descriptions', () => {
       'EXPORT_SUMMARY',
       'MANAGE_CARE',
       'MANAGE_CAREGIVERS',
+      'MANAGE_HEALTH_RECORDS',
       'MANAGE_MEDICINES',
       'MANAGE_SHELF',
       'RECORD_DOSES',

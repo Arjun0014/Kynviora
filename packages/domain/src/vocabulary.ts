@@ -570,6 +570,14 @@ export const CAREGIVER_CAPABILITIES = [
   'EXPORT_SUMMARY',
   'RECEIVE_MISSED_DOSE',
   'MANAGE_CAREGIVERS',
+  // Health records (`0032`, DEC-154). Their own pair rather than `VIEW_DOCUMENTS`, which is the
+  // near miss: that one is granted so a caregiver can help with a pharmacy visit, and a grant
+  // made for that reason must not silently become the right to read a lab history. Migration
+  // `0032` backfills nothing, so no grant that exists holds either of these - the same rule
+  // DEC-116 established for `RECORD_DOSES`, and for the same reason: the set of people who would
+  // have chosen a capability is not derivable from a list that never offered it.
+  'VIEW_HEALTH_RECORDS',
+  'MANAGE_HEALTH_RECORDS',
 ] as const;
 export type CaregiverCapability = Member<typeof CAREGIVER_CAPABILITIES>;
 export const isCaregiverCapability = makeGuard(CAREGIVER_CAPABILITIES);

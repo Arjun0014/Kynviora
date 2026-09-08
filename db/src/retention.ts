@@ -77,6 +77,14 @@ export interface PurgeReport {
   readonly reviewTasksByProfile: number;
   readonly allergies: number;
   readonly conditions: number;
+  // The Health record (`0032`). Four counts rather than one, because the sweep deletes them as
+  // four statements in dependency order rather than leaning on the foreign key: a referential
+  // action is issued by the referencing table's owner rather than by the retention role, so a
+  // cascade would remove rows this role's own policy never admitted.
+  readonly healthObservations: number;
+  readonly healthRecords: number;
+  readonly healthMeasurements: number;
+  readonly healthSources: number;
   readonly alertDeliveries: number;
   readonly alertPublications: number;
   readonly safetyReceipts: number;
@@ -106,6 +114,10 @@ export const EMPTY_PURGE_REPORT: PurgeReport = Object.freeze({
   reviewTasksByProfile: 0,
   allergies: 0,
   conditions: 0,
+  healthObservations: 0,
+  healthRecords: 0,
+  healthMeasurements: 0,
+  healthSources: 0,
   alertDeliveries: 0,
   alertPublications: 0,
   safetyReceipts: 0,
@@ -278,6 +290,31 @@ const PLAN = [
         step: 'condition_record',
         field: 'conditions',
         sql: `DELETE FROM condition_record WHERE ${DUE_PROFILE}`,
+      },
+      // The Health record, children first. `health_observation` before `health_record` because
+      // it references it, and `health_record`/`health_measurement` before `health_source` for
+      // the same reason - even though both of those references are `ON DELETE SET NULL` and
+      // would not cascade. The order is written out rather than inferred from the foreign keys,
+      // which is `0023`'s rule and the reason a sweep is auditable at all.
+      {
+        step: 'health_observation',
+        field: 'healthObservations',
+        sql: `DELETE FROM health_observation WHERE ${DUE_PROFILE}`,
+      },
+      {
+        step: 'health_record',
+        field: 'healthRecords',
+        sql: `DELETE FROM health_record WHERE ${DUE_PROFILE}`,
+      },
+      {
+        step: 'health_measurement',
+        field: 'healthMeasurements',
+        sql: `DELETE FROM health_measurement WHERE ${DUE_PROFILE}`,
+      },
+      {
+        step: 'health_source',
+        field: 'healthSources',
+        sql: `DELETE FROM health_source WHERE ${DUE_PROFILE}`,
       },
       {
         step: 'reconciliation',

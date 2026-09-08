@@ -122,6 +122,10 @@ export function registerPersonalExportRoutes(
         doseEvents,
         allergies,
         conditions,
+        healthSources,
+        healthRecords,
+        healthObservations,
+        healthMeasurements,
         reviewTasks,
         reconciliations,
         caregiverAccess,
@@ -184,6 +188,35 @@ export function registerPersonalExportRoutes(
              FROM condition_record WHERE deleted_at IS NULL ORDER BY created_at`,
         ),
         read(
+          'healthSources',
+          `SELECT id, profile_id, source_kind, display_name, connection_state, last_received_at,
+                  stale_after, version, created_at, updated_at
+             FROM health_source WHERE deleted_at IS NULL ORDER BY created_at`,
+        ),
+        read(
+          'healthRecords',
+          `SELECT id, profile_id, record_kind, title, provider_name, recorded_on, source_id,
+                  document_asset_id, extraction_state, provenance, note, version,
+                  created_at, updated_at
+             FROM health_record WHERE deleted_at IS NULL ORDER BY created_at`,
+        ),
+        read(
+          'healthObservations',
+          // Every column, reference interval and source flag included. `16` asks for a copy of
+          // the personal data, and a result without the interval the report printed beside it is
+          // a number somebody cannot check against their own report.
+          `SELECT id, record_id, profile_id, analyte_code, display_name, sequence, value_numeric,
+                  value_text, unit, decimals, reference_low, reference_high, reference_text,
+                  source_flag, created_at, updated_at
+             FROM health_observation WHERE deleted_at IS NULL ORDER BY record_id, sequence`,
+        ),
+        read(
+          'healthMeasurements',
+          `SELECT id, profile_id, metric, measured_at, value_numeric, value_secondary, unit,
+                  source_id, device_name, created_at, updated_at
+             FROM health_measurement WHERE deleted_at IS NULL ORDER BY measured_at`,
+        ),
+        read(
           'reviewTasks',
           `SELECT id, profile_id, owned_item_id, task_kind, state, created_at, completed_at
              FROM review_task ORDER BY created_at`,
@@ -231,6 +264,10 @@ export function registerPersonalExportRoutes(
         doseEvents,
         allergies,
         conditions,
+        healthSources,
+        healthRecords,
+        healthObservations,
+        healthMeasurements,
         reviewTasks,
         reconciliations,
         caregiverAccess,

@@ -142,6 +142,26 @@ export const CAPABILITY_DESCRIPTIONS: Readonly<Record<CaregiverCapability, Capab
       allowsChanges: true,
       delegatesAdministration: true,
     },
+    // Kept apart from `VIEW_DOCUMENTS`, and the sentence has to say what it covers rather than
+    // naming a screen. "Health" is the name of a tab; "lab results, medical records and
+    // measurements" is what somebody is actually handing over, and a person approving access
+    // reads the second one and not the first (`18`).
+    VIEW_HEALTH_RECORDS: {
+      label: 'Health records',
+      meaning:
+        'They can see lab results, medical records and health measurements recorded for this ' +
+        'person, including the original documents. They cannot change anything.',
+      allowsChanges: false,
+      delegatesAdministration: false,
+    },
+    MANAGE_HEALTH_RECORDS: {
+      label: 'Edit health records',
+      meaning:
+        'They can add, correct and remove health records, lab results and measurements for this ' +
+        'person.',
+      allowsChanges: true,
+      delegatesAdministration: false,
+    },
   });
 
 export function describeCapability(capability: CaregiverCapability): CapabilityDescription {
