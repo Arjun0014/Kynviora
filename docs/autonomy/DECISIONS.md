@@ -6273,3 +6273,82 @@ list and history. Both are recorded as remaining V3 work rather than approximate
 
 **Sources.** `KYNVIORA_V3_DESIGN_BRIEF.md` §12, `Kynviora V3 Design Language.dc.html` §06, `06`
 Journey 6, `08.2`, `16`, `15`, `02`, `18`, DEC-138, DEC-142, `packages/presentation/src/careCircle.ts`.
+
+---
+
+## DEC-160 - The shelf is two collections, and only a personal-care product may be considered
+
+**Date.** 2026-09-09
+**Status.** Accepted. Migration `0033`.
+**Context.** V3 preserves V2's Shelf and asks for one thing it does not have: **My Shelf** and
+**Considering** as two collections a person moves products between, with the category grouping, the
+selection mode and the Compare tray built on top of them. Nothing in the repository could express
+it - `owned_item` has a lifecycle and a kind and no notion of whether somebody _has_ the thing.
+
+**Options.** (a) A client-side flag or a naming convention. (b) A fourth `lifecycle_state`. (c) A
+column of its own.
+
+**Decision.** (c), with a CHECK that confines it.
+
+**Why not the lifecycle.** `lifecycle_state` answers "is this record current" - ACTIVE, STOPPED,
+ARCHIVED - and the reminder engine, the safety sweep, the retention plan and `shelfAttention` all
+read it. `shelfAttention` in particular treats everything that is not ACTIVE as finished with, so a
+CONSIDERING member would silently stop Kynviora asking about a product somebody is actively
+evaluating - which is the one moment the questions are most useful. The two are orthogonal: a
+considered product is a live record, and what differs is that nobody is using it.
+
+**Why not a client-side flag.** Because the interesting sentence is a _server_ sentence. A
+sensitivity match on something somebody is considering is a different statement from one on
+something they use, and V3's own copy makes exactly that distinction - _"Declared in Oralux Enamel
+Care and Nera Scalp Balance, both in Considering. Not declared in the 8 items in use."_ That is not
+composable from a filter a client applied after the fact.
+
+**Only a personal-care item may be considered, and that is what makes the concept safe rather than
+merely labelled.**
+
+It is not an invention. In V3's own design every product in Considering is personal care and every
+medicine is on the shelf - four medicines, all `coll:'shelf'`, and eight considered products, none
+of them a medicine.
+
+The reason it matters is that everything this app does with a medicine presumes it is being taken.
+`medicine_schedule` fires reminders; `dose_event` is an append-only record of what happened;
+adherence is read off both. A medicine in Considering would either carry reminders to take
+something nobody has started, or need every one of those paths taught a new exception - and the
+failure mode of getting that wrong is somebody taking a tablet because their phone told them to.
+
+**It is a CHECK rather than a rule in a route**, because it is then true of the data rather than
+true of the code that happens to write it. And it is table-local by construction: both tables that
+would otherwise have to be consulted are already medicine-scoped (`0004` and `0020` refuse a
+schedule or a dose on a personal-care item), so forbidding a medicine in Considering forecloses the
+whole class without a trigger and without a cross-table subquery on every insert.
+`mayBeInCollection` states the same rule in TypeScript so a route can refuse with a sentence; the
+two are checked against each other in `db/schemaVocabulary.test.ts`.
+
+**What this deliberately does not model** is "a medicine I might ask about". It is a real thing and
+it is a different feature with its own safety story - not this column widened.
+
+**The default is `IN_USE` and the backfill is `IN_USE`,** which is true rather than convenient: no
+route in this build could have created an item meaning anything else.
+
+**The screen shows one collection at a time, and says which.** Not a filter over one list: an
+unfiltered shelf that mixed the two would show somebody the shampoo they are thinking about beside
+the one they use, which is the confusion the column exists to prevent. Nothing disappears by that on
+upgrade, because every existing row is `IN_USE`, and the switcher names the collection on screen at
+all times - `18` will not let a collection that is elsewhere read as an absence, so each one has its
+own empty sentence.
+
+**"Considering" says nothing about safety.** A product being considered has been checked exactly as
+much as one in use, which for most of them is "not enough information", and copy that let the word
+read as a state Kynviora had assessed would be `23` D-014 arriving through a filter name.
+`shelfCollections.test.ts` asserts it over every string the module can put on a screen.
+
+**The move is a change to the record, not a route of its own.** It carries the same
+`expectedVersion` precondition as every other change to `owned_item` (`13`, `ASK_USER`), lands in
+the same audit row, and is queued when there is no signal for the reason DEC-148 gives - a move that
+silently vanished would put a product back among the ones somebody uses without saying it had.
+
+**The control names its destination and is withheld where the move is impossible.** DEC-045 applied
+to a rule rather than to a capability: a greyed-out "Move to Considering" on a medicine would tell
+somebody the app has a place for it that it is not letting them use. The way _out_ of Considering is
+offered whatever the kind rule says, because a rule that constrains what may go in must not leave
+anything stuck - the same shape as `12`'s requirement that a failure state be resolvable.

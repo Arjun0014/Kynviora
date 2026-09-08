@@ -45,7 +45,12 @@ import {
   type ManualEntry,
   type NormalizedManualEntry,
 } from './manualEntry.js';
-import type { ItemKind } from './vocabulary.js';
+import {
+  isShelfCollection,
+  mayBeInCollection,
+  type ItemKind,
+  type ShelfCollection,
+} from './vocabulary.js';
 
 /**
  * What an item's lifecycle can be.
@@ -67,6 +72,7 @@ export interface StoredItem extends NormalizedManualEntry {
   readonly version: number;
   readonly lifecycleState: ItemLifecycleState;
   readonly stoppedOn: string | null;
+  readonly shelfCollection: ShelfCollection;
 }
 
 /**
@@ -100,6 +106,15 @@ export interface ItemUpdate {
 
   readonly lifecycleState?: string | undefined;
   readonly stoppedOn?: string | null | undefined;
+  /**
+   * Moving between the shelf's two collections (`0033`, DEC-160).
+   *
+   * A patch field rather than a route of its own: it is a change to the record, it takes the same
+   * version precondition as every other change, and it belongs in the same audit row. `13` sets
+   * `owned_item` to `ASK_USER`, and a move made against a copy somebody else has since edited is
+   * the same stale write as any other.
+   */
+  readonly shelfCollection?: string | undefined;
   /** A request that the server stamp "last looked at" as now. Never a supplied timestamp. */
   readonly markReviewed?: boolean | undefined;
 }
@@ -109,6 +124,7 @@ export interface ItemUpdateOutcome {
   readonly fields: NormalizedManualEntry;
   readonly lifecycleState: ItemLifecycleState;
   readonly stoppedOn: string | null;
+  readonly shelfCollection: ShelfCollection;
   /** True where the server should stamp `last_reviewed_at`. */
   readonly stampReviewed: boolean;
   /**
@@ -237,6 +253,34 @@ export function normalizeItemUpdate(
     return err(invalid('An item cannot be stopped before it was started.', 'stoppedOn'));
   }
 
+  // ---------------------------------------------------------------------
+  // Collection
+  // ---------------------------------------------------------------------
+
+  let shelfCollection = stored.shelfCollection;
+  if (patch.shelfCollection !== undefined) {
+    if (!isShelfCollection(patch.shelfCollection)) {
+      // A closed vocabulary, for the reason the lifecycle is one: the shelf groups by this, and a
+      // value nothing has a rule for would be an item in neither collection - which on a screen
+      // that shows one at a time is an item that has disappeared.
+      return err(invalid('That is not a collection the shelf has.', 'shelfCollection'));
+    }
+    if (!mayBeInCollection(itemKind, patch.shelfCollection)) {
+      // The schema says the same thing (`owned_item_considering_is_personal_care`) and this is
+      // what makes the refusal a sentence rather than a constraint violation. The reason is in
+      // `0033`: everything this app does with a medicine presumes it is being taken.
+      return err(
+        invalid(
+          'Considering is for products you are thinking about, not for medicines. Everything ' +
+            'Kynviora does with a medicine - reminders, doses, what you have taken - assumes you ' +
+            'are taking it.',
+          'shelfCollection',
+        ),
+      );
+    }
+    shelfCollection = patch.shelfCollection;
+  }
+
   if (lifecycleState === 'ARCHIVED' && patch.stoppedOn !== undefined && patch.stoppedOn !== null) {
     // Archiving is about the record; stopping is about the medicine. Somebody who stopped taking
     // something and then archived it does both, in that order, and the date belongs to the first.
@@ -254,6 +298,7 @@ export function normalizeItemUpdate(
   }
   if (lifecycleState !== stored.lifecycleState) changedFields.push('lifecycleState');
   if (stoppedOn !== stored.stoppedOn) changedFields.push('stoppedOn');
+  if (shelfCollection !== stored.shelfCollection) changedFields.push('shelfCollection');
   if (patch.markReviewed === true) changedFields.push('lastReviewedAt');
 
   if (changedFields.length === 0) {
@@ -269,6 +314,7 @@ export function normalizeItemUpdate(
     fields,
     lifecycleState,
     stoppedOn,
+    shelfCollection,
     stampReviewed: patch.markReviewed === true,
     changedFields,
   });

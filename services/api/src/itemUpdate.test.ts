@@ -618,3 +618,82 @@ describe('the prefill the edit form reads', () => {
     ).toBe('no_change');
   });
 });
+
+describe('moving between the shelf’s two collections (`0033`, DEC-160)', () => {
+  it('starts everything in IN_USE, including rows created before the column', async () => {
+    const row = await storedRow(SHAMPOO);
+    expect(row?.['shelf_collection']).toBe('IN_USE');
+  });
+
+  it('moves a personal-care product to Considering, and says that is what changed', async () => {
+    const before = (await detail(principalFor(OWNER), SHAMPOO)).json<DetailBody>();
+    const response = await patch(principalFor(OWNER), SHAMPOO, {
+      expectedVersion: before.version,
+      shelfCollection: 'CONSIDERING',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<UpdatedBody>().changedFields).toEqual(['shelfCollection']);
+    expect((await storedRow(SHAMPOO))?.['shelf_collection']).toBe('CONSIDERING');
+
+    // And back, so the rest of this file sees the shelf it expects.
+    const moved = (await detail(principalFor(OWNER), SHAMPOO)).json<DetailBody>();
+    await patch(principalFor(OWNER), SHAMPOO, {
+      expectedVersion: moved.version,
+      shelfCollection: 'IN_USE',
+    });
+  });
+
+  it('refuses a medicine, with the reason rather than with a constraint violation', async () => {
+    // The schema refuses it too (`owned_item_considering_is_personal_care`), and this is the half
+    // a person reads. Everything this app does with a medicine presumes it is being taken.
+    const before = (await detail(principalFor(OWNER), MEDICINE)).json<DetailBody>();
+    const response = await patch(principalFor(OWNER), MEDICINE, {
+      expectedVersion: before.version,
+      shelfCollection: 'CONSIDERING',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json<{ error: { message: string } }>().error.message).toMatch(
+      /Considering is for products/i,
+    );
+    expect((await storedRow(MEDICINE))?.['shelf_collection']).toBe('IN_USE');
+  });
+
+  it('refuses a collection nobody declared', async () => {
+    const before = (await detail(principalFor(OWNER), SHAMPOO)).json<DetailBody>();
+    const response = await patch(principalFor(OWNER), SHAMPOO, {
+      expectedVersion: before.version,
+      shelfCollection: 'WISHLIST',
+    });
+    expect(response.statusCode).toBe(400);
+    expect((await storedRow(SHAMPOO))?.['shelf_collection']).toBe('IN_USE');
+  });
+
+  it('takes the same version precondition as every other change', async () => {
+    // `13` sets `owned_item` to ASK_USER. A move is a change to the record, so a stale one is the
+    // same stale write as any other and must not silently win.
+    //
+    // The stale version is produced rather than assumed: this file shares one row across its
+    // describes, so a hard-coded 1 would be measuring whichever test happened to run first.
+    const stale = (await detail(principalFor(OWNER), SHAMPOO)).json<DetailBody>().version;
+    const moved = await patch(principalFor(OWNER), SHAMPOO, {
+      expectedVersion: stale,
+      shelfCollection: 'CONSIDERING',
+    });
+    expect(moved.statusCode).toBe(200);
+
+    const again = await patch(principalFor(OWNER), SHAMPOO, {
+      expectedVersion: stale,
+      shelfCollection: 'IN_USE',
+    });
+    expect(again.statusCode).toBe(409);
+    expect((await storedRow(SHAMPOO))?.['shelf_collection']).toBe('CONSIDERING');
+
+    const now = (await detail(principalFor(OWNER), SHAMPOO)).json<DetailBody>().version;
+    await patch(principalFor(OWNER), SHAMPOO, {
+      expectedVersion: now,
+      shelfCollection: 'IN_USE',
+    });
+  });
+});

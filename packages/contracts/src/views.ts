@@ -32,6 +32,7 @@ import {
   isValidQuietHours,
   isItemVerification,
   isMatchConfidence,
+  isShelfCollection,
   type ActionUrgency,
   type EvidenceLevel,
   type ItemKind,
@@ -43,6 +44,7 @@ import {
   type ProductSafetyState,
   type QuietHours,
   type ReviewTaskKind,
+  type ShelfCollection,
 } from '@kynviora/domain';
 import {
   ICON_NAMES,
@@ -122,6 +124,8 @@ export interface ShelfItemView {
   readonly brand: string | null;
   readonly itemKind: ItemKind;
   readonly lifecycleState: string;
+  /** Which collection the row is in, so a screen can group without asking the server twice. */
+  readonly shelfCollection: ShelfCollection;
   /**
    * Three separate presentations, in a fixed order, and never merged.
    *
@@ -153,6 +157,10 @@ export function shelfItemView(item: ShelfItem): ShelfItemView {
     brand: item.brand,
     itemKind: asItemKind(item.itemKind),
     lifecycleState: item.lifecycleState,
+    // Narrowed rather than trusted, and narrowed to the value every row had before the column
+    // existed. An older server sends nothing here and a corrupted one could send anything; both
+    // mean "this is on the shelf", which is the answer that shows the item rather than hiding it.
+    shelfCollection: isShelfCollection(item.shelfCollection) ? item.shelfCollection : 'IN_USE',
     identity: presentVerification(asItemVerification(item.identityVerification), 'identity'),
     formulation: presentVerification(
       asItemVerification(item.formulationVerification),
@@ -170,6 +178,16 @@ export interface ShelfView {
   readonly items: readonly ShelfItemView[];
   readonly medicineCount: number;
   readonly personalCareCount: number;
+  /**
+   * How many of these rows are in each collection.
+   *
+   * Counts of what came back, not of what exists: a filtered request returns one collection and
+   * the other count is then zero, which is the truthful reading of the page in hand. A screen that
+   * needs both totals asks for both collections. Like the two kind counts above, this is not a
+   * score and not an ordering - `02` forbids both.
+   */
+  readonly inUseCount: number;
+  readonly consideringCount: number;
   /** `true` when the server said there is another page. */
   readonly hasMore: boolean;
   /**
@@ -199,6 +217,8 @@ export function shelfView(
     // forbids the badge. Phase 2.1 added a per-item reason list and did not add a total.
     medicineCount: views.filter((view) => view.itemKind === 'MEDICINE').length,
     personalCareCount: views.filter((view) => view.itemKind === 'PERSONAL_CARE').length,
+    inUseCount: views.filter((view) => view.shelfCollection === 'IN_USE').length,
+    consideringCount: views.filter((view) => view.shelfCollection === 'CONSIDERING').length,
     hasMore: nextCursor !== null,
   };
 }
@@ -910,6 +930,15 @@ export interface ItemDetailScreenView {
   readonly attention: ItemDetailResponse['attention'];
   /** Narrowed, so an unreadable state offers no lifecycle controls rather than the wrong ones. */
   readonly lifecycleState: ItemLifecycleState | null;
+  /** Which of the shelf's two collections it is in (`0033`, DEC-160). */
+  readonly shelfCollection: ShelfCollection;
+  /**
+   * Whether the other collection is a place this item could go.
+   *
+   * The server's answer, defaulted to `false` where it did not give one - deny by default (`14`)
+   * applied to a control, so an older server offers no move rather than one the write refuses.
+   */
+  readonly mayBeConsidered: boolean;
   /** What a change has to be sent against (`13`, `ASK_USER`). */
   readonly version: number;
   /**
@@ -973,6 +1002,10 @@ export function itemDetailScreenView(response: ItemDetailResponse): ItemDetailSc
     sharedFields: response.sharedFields,
     attention: response.attention,
     lifecycleState: isItemLifecycleState(response.lifecycleState) ? response.lifecycleState : null,
+    shelfCollection: isShelfCollection(response.shelfCollection)
+      ? response.shelfCollection
+      : 'IN_USE',
+    mayBeConsidered: response.mayBeConsidered === true,
     version: Number.isInteger(response.version) ? response.version : 0,
     mayEdit: response.mayEdit === true,
     mayRecordDoses: response.mayRecordDoses === true,

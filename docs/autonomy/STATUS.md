@@ -9,14 +9,14 @@ Last updated: 2026-09-09
 
 ## Current position
 
-|                    |                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; **V3 implementation under way** (DEC-151)                           |
-| **Current phase**  | V3: Health, Talk bar, You and Care are in; Shelf's V3 is next                         |
-| **Last completed** | The sheets survey finished: **40/40 PASS on hardware**, three defects                 |
-| **Branch**         | `master`                                                                              |
-| **Latest commit**  | `fix(care,device): the action under the history, and the row the survey stepped over` |
-| **Baseline tag**   | `baseline-spec-only`                                                                  |
+|                    |                                                                           |
+| ------------------ | ------------------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; **V3 implementation under way** (DEC-151)               |
+| **Current phase**  | V3: Health, Talk bar, You and Care are in; Shelf's V3 is next             |
+| **Last completed** | The sheets survey finished: **40/40 PASS on hardware**, three defects     |
+| **Branch**         | `master`                                                                  |
+| **Latest commit**  | `feat(shelf): two collections, and the CHECK that makes one of them safe` |
+| **Baseline tag**   | `baseline-spec-only`                                                      |
 
 ## Handoff - 2026-09-09, after the first V3 session
 
@@ -78,7 +78,9 @@ Nothing implemented is a mock: every screen here reads real routes and renders r
 **not** been implemented at all:
 
 - Today's reordering (needs input / reports / jobs / since you last looked).
-- Shelf's image-led tiles, category grouping, Considering, selection mode and Compare.
+- Shelf's image-led tiles, category grouping, selection mode and Compare. **Considering is in**
+  (`0033`, DEC-160): two collections, a switcher, a move with the same version precondition as any
+  other change, and a CHECK that keeps medicines out of it.
 - Saved comparison reports.
 - The permission editor's per-row matrix, and the care activity timeline.
 - The caregiver relationship label ("Anita · Daughter") - **needs a column that does not exist**,
@@ -224,8 +226,8 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5581 tests passing**, 0 failing, across 211 files. 32 migrations. `npm run verify` green
-  at default workers on an idle machine with the emulator shut down, 2026-09-09 03:55.
+- **5611 tests passing**, 0 failing, across 213 files. **33 migrations.** `npm run verify` green
+  at default workers on an idle machine with the emulator shut down, 2026-09-09 04:18.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is

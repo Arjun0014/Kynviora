@@ -29,6 +29,8 @@ import {
   isItemLifecycleState,
   isItemVerification,
   isPersonalCareCategory,
+  isShelfCollection,
+  mayBeInCollection,
   manualEntryLimits,
   normalizeItemUpdate,
   normalizeManualEntry,
@@ -156,6 +158,7 @@ interface StoredItemRow {
   readonly personal_care_category: string | null;
   readonly ingredient_declaration_raw: string | null;
   readonly label_version_note: string | null;
+  readonly shelf_collection: string;
 }
 
 /**
@@ -175,6 +178,10 @@ function storedItemFromRow(row: StoredItemRow): StoredItem {
     version: row.version,
     lifecycleState: isItemLifecycleState(row.lifecycle_state) ? row.lifecycle_state : 'ARCHIVED',
     stoppedOn: dateOrNull(row.stopped_on),
+    // Narrowed the same way and to `IN_USE`, which is the member that claims least and is what
+    // every row meant before `0033` existed: an item nobody can read the collection of is one on
+    // the shelf, not one hidden in a collection this build does not know about.
+    shelfCollection: isShelfCollection(row.shelf_collection) ? row.shelf_collection : 'IN_USE',
     itemKind: row.item_kind === 'MEDICINE' ? 'MEDICINE' : 'PERSONAL_CARE',
     displayName: row.display_name,
     brand: row.brand,
@@ -302,6 +309,15 @@ const shelfQuerySchema = cursorQuerySchema.extend({
     .enum(['CONFIRMED', 'PROBABLE', 'PARTIAL', 'CONFLICTING', 'UNVERIFIED'])
     .optional(),
   attention: z.enum(['NEEDS_VERIFICATION', 'NEEDS_REVIEW', 'ANY']).optional(),
+  /**
+   * Which of the shelf's two collections to return (`0033`, DEC-160).
+   *
+   * Omitted returns both, which is what every caller written before the column asked for and what
+   * they still mean. An unrecognised value is a validation failure rather than an ignored one, for
+   * the reason above it: a filter that quietly widened its own result set would show somebody
+   * things they are only considering among the things they use.
+   */
+  collection: z.enum(['IN_USE', 'CONSIDERING']).optional(),
 });
 
 const itemParamsSchema = z.object({ itemId: uuidSchema });
@@ -470,6 +486,15 @@ const itemUpdateBodySchema = z
     labelVersionNote: z.string().nullish(),
     lifecycleState: z.string().optional(),
     stoppedOn: z.string().nullish(),
+    /**
+     * Moving between the shelf's two collections (`0033`, DEC-160).
+     *
+     * A free string here rather than an enum, on purpose: the domain owns the vocabulary and the
+     * rule about which kinds may be in which collection, and a Zod enum would answer "Invalid
+     * request body" where `normalizeItemUpdate` answers with the sentence explaining why a
+     * medicine cannot be considered.
+     */
+    shelfCollection: z.string().optional(),
     /** A request, never a timestamp. The server stamps the time. */
     markReviewed: z.boolean().optional(),
   })
@@ -512,6 +537,8 @@ const shelfItemSchema = z.object({
   displayName: z.string(),
   brand: z.string().nullable(),
   lifecycleState: z.enum(['ACTIVE', 'STOPPED', 'ARCHIVED']),
+  /** `0033`, DEC-160. A different question from the lifecycle: has it, or is thinking about it. */
+  shelfCollection: z.enum(['IN_USE', 'CONSIDERING']),
   identityVerification: z.string(),
   formulationVerification: z.string(),
   batchVerification: z.string(),
@@ -1074,8 +1101,16 @@ export function createServer(options: ServerOptions): FastifyInstance {
         );
       }
 
-      const { profileId, itemKind, lifecycleState, verification, attention, limit, cursor } =
-        parsed.data;
+      const {
+        profileId,
+        itemKind,
+        lifecycleState,
+        verification,
+        attention,
+        collection,
+        limit,
+        cursor,
+      } = parsed.data;
 
       // The profile ID narrows the result set; it does not grant access. If the user cannot see
       // that profile, RLS returns nothing and the response is an empty page - the same as a
@@ -1090,6 +1125,10 @@ export function createServer(options: ServerOptions): FastifyInstance {
       if (lifecycleState) {
         params.push(lifecycleState);
         conditions.push(`lifecycle_state = $${params.length}`);
+      }
+      if (collection) {
+        params.push(collection);
+        conditions.push(`shelf_collection = $${params.length}`);
       }
       if (verification) {
         // Any of the three axes in that state. `08` keeps them separate and this filter does not
@@ -1140,6 +1179,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
           display_name: string;
           brand: string | null;
           lifecycle_state: string;
+          shelf_collection: string;
           identity_verification: string;
           formulation_verification: string;
           batch_verification: string;
@@ -1149,6 +1189,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
           last_safety_checked_at: Date | string | null;
         }>(
           `SELECT id, profile_id, item_kind, display_name, brand, lifecycle_state,
+                  shelf_collection,
                   identity_verification, formulation_verification, batch_verification,
                   last_reviewed_at, last_safety_checked_at
            FROM owned_item
@@ -1169,6 +1210,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
         displayName: row.display_name,
         brand: row.brand,
         lifecycleState: row.lifecycle_state as ShelfItem['lifecycleState'],
+        shelfCollection: row.shelf_collection as ShelfItem['shelfCollection'],
         identityVerification: row.identity_verification,
         formulationVerification: row.formulation_verification,
         batchVerification: row.batch_verification,
@@ -1428,6 +1470,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
           recorded_gtin: string | null;
           recorded_lot_code: string | null;
           lifecycle_state: string;
+          shelf_collection: string;
           version: number;
           may_edit: boolean;
           may_record_doses: boolean;
@@ -1453,7 +1496,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
           // and for the ingredient declaration that is Phase 2.3's second exit criterion failing
           // on the read path.
           `SELECT id, item_kind, display_name, brand, manufacturer, market,
-                  recorded_gtin, recorded_lot_code, lifecycle_state, version,
+                  recorded_gtin, recorded_lot_code, lifecycle_state, shelf_collection, version,
                   identity_verification, formulation_verification, batch_verification,
                   strength_text, dosage_form, directions_text, personal_care_category,
                   ingredient_declaration_raw, label_version_note,
@@ -1530,6 +1573,15 @@ export function createServer(options: ServerOptions): FastifyInstance {
           attentionReasons: reasons,
         }),
         attentionReasonCodes: reasons,
+        // Which collection it is in, and whether it could be in the other one (`0033`, DEC-160).
+        // Both answered here rather than derived on the client: the second is a rule about item
+        // kinds that the schema also holds, and a screen that worked it out itself would be a
+        // second copy of it.
+        shelfCollection: row.shelf_collection,
+        mayBeConsidered: mayBeInCollection(
+          row.item_kind === 'MEDICINE' ? 'MEDICINE' : 'PERSONAL_CARE',
+          'CONSIDERING',
+        ),
         // What an edit has to send back, and whether to offer one at all.
         version: row.version,
         mayEdit: row.may_edit,
@@ -1613,7 +1665,8 @@ export function createServer(options: ServerOptions): FastifyInstance {
       const readStored = () =>
         ctx.db((db) =>
           db.query<StoredItemRow>(
-            `SELECT id, profile_id, item_kind, version, lifecycle_state, display_name, brand,
+            `SELECT id, profile_id, item_kind, version, lifecycle_state, shelf_collection,
+                    display_name, brand,
                     manufacturer, market, recorded_gtin, recorded_lot_code,
                     expires_on, started_on, stopped_on, notes,
                     strength_text, dosage_form, directions_text,
@@ -1656,6 +1709,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
                   label_version_note = $17,
                   lifecycle_state = $18,
                   stopped_on = $19,
+                  shelf_collection = $21,
                   -- Stamped by the server, never supplied. A client-set timestamp would let a
                   -- screen claim somebody looked at a medicine at a moment they did not.
                   last_reviewed_at = CASE WHEN $20 THEN now() ELSE last_reviewed_at END,
@@ -1683,6 +1737,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
             next.lifecycleState,
             next.stoppedOn,
             next.stampReviewed,
+            next.shelfCollection,
           ],
         ),
       );

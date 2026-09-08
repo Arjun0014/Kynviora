@@ -13,6 +13,7 @@ const MEDICINE: StoredItem = {
   version: 3,
   lifecycleState: 'ACTIVE',
   stoppedOn: null,
+  shelfCollection: 'IN_USE',
   itemKind: 'MEDICINE',
   displayName: 'Synthetic Tablet',
   brand: 'Synthetic Brand',

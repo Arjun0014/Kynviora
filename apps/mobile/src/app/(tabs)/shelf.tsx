@@ -41,13 +41,16 @@ import {
   FONT_SIZE,
   LINE_HEIGHT_MULTIPLIER,
   MIN_TOUCH_TARGET_DP,
+  SHELF_COLLECTION_ORDER,
   manualEntryForm,
+  presentShelfCollection,
   type ScreenState as ScreenStateKind,
   type Theme,
 } from '@kynviora/presentation';
 import {
   DEFAULT_NOTIFICATION_DETAIL,
   ITEM_KINDS,
+  type ShelfCollection,
   isNotificationDetailLevel,
   type DoseEventKind,
   type ItemKind,
@@ -182,6 +185,20 @@ export default function ShelfScreen() {
    */
   const [attention, setAttention] = useState<'NEEDS_VERIFICATION' | 'NEEDS_REVIEW' | null>(null);
 
+  /**
+   * Which collection is on screen (`0033`, DEC-160).
+   *
+   * Always one of the two, never both. A collection is what a person is looking at rather than a
+   * filter over one list - which is why this does not follow the `attention` rule above it: an
+   * unfiltered shelf that mixed the two would show somebody the shampoo they are thinking about
+   * beside the one they use, and the whole reason the column exists is that those are different
+   * facts about a product.
+   *
+   * `IN_USE` on open, and nothing disappears by that: every row that existed before `0033` is in
+   * it, and the switcher names the collection on screen at all times.
+   */
+  const [collection, setCollection] = useState<ShelfCollection>('IN_USE');
+
   const load = useMemo(
     () =>
       client === null || activeProfileId === null
@@ -189,9 +206,10 @@ export default function ShelfScreen() {
         : () =>
             client.listItems({
               profileId: activeProfileId,
+              collection,
               ...(attention === null ? {} : { attention }),
             }),
-    [client, activeProfileId, attention],
+    [client, activeProfileId, attention, collection],
   );
 
   const { resource, reload, refreshing } = useResource(load, {
@@ -203,7 +221,7 @@ export default function ShelfScreen() {
     // one as the other.
     ...(activeProfileId === null
       ? {}
-      : { projectionKey: `items:${activeProfileId}:${attention ?? 'all'}` }),
+      : { projectionKey: `items:${activeProfileId}:${collection}:${attention ?? 'all'}` }),
   });
 
   const view = useMemo(
@@ -451,6 +469,64 @@ export default function ShelfScreen() {
       );
     },
     [client, reloadHistory, queueEdit],
+  );
+
+  /** What the last move said, or `null`. Cleared when the detail is closed. */
+  const [moveNote, setMoveNote] = useState<string | null>(null);
+
+  /**
+   * Move the open item to the shelf's other collection (`0033`, DEC-160).
+   *
+   * The same three outcomes every write on this screen has, and the middle one is the reason this
+   * is not two lines: `12` and DEC-148 require a change made with no signal to be kept rather than
+   * lost, and a move that silently vanished would put a product back among the ones somebody uses
+   * without saying it had.
+   *
+   * `owned_item` resolves `ASK_USER` under `13`, so the queued payload carries the version this
+   * screen read - a replay either lands once or comes back as a conflict, and the conflict is
+   * shown rather than merged.
+   */
+  const onMoveCollection = useCallback(
+    (to: ShelfCollection) => {
+      if (client === null || detailView === null) return;
+      const body = { expectedVersion: detailView.version, shelfCollection: to };
+      setMoveNote(null);
+
+      void client.updateItem(detailView.id, body).then(
+        (outcome) => {
+          if (outcome.kind === 'OK') {
+            // Re-read rather than patched: what stands after a write is the server's answer, and
+            // the version this screen holds has moved. Both lists, because the shelf now shows a
+            // different collection's worth of rows than it did a moment ago.
+            reloadDetail();
+            reload();
+            return;
+          }
+          if (outcome.kind === 'OFFLINE') {
+            void queueEdit({
+              entityType: 'owned_item',
+              entityId: detailView.id,
+              mutation: 'UPDATE',
+              payload: body,
+              baseVersion: body.expectedVersion,
+            }).then((queued) => {
+              setMoveNote(
+                queued
+                  ? 'This move is on this phone and will be sent when Kynviora can reach the ' +
+                      'server.'
+                  : messageForFailure(outcome),
+              );
+            });
+            return;
+          }
+          setMoveNote(outcome.kind === 'REFUSED' ? outcome.message : messageForFailure(outcome));
+        },
+        () => {
+          setMoveNote(messageForFailure({ kind: 'UNAVAILABLE' }));
+        },
+      );
+    },
+    [client, detailView, reload, reloadDetail, queueEdit],
   );
 
   /**
@@ -727,6 +803,8 @@ export default function ShelfScreen() {
         <ItemDetail
           view={detailView}
           state={detailResource.state}
+          onMove={onMoveCollection}
+          moveNote={moveNote}
           onEdit={() => {
             setEditing(true);
           }}
@@ -743,6 +821,7 @@ export default function ShelfScreen() {
           onClose={() => {
             setDetailFor(null);
             setEditing(false);
+            setMoveNote(null);
           }}
         />
       </Screen>
@@ -854,6 +933,42 @@ export default function ShelfScreen() {
         </View>
       )}
 
+      {/* The two collections (`0033`, DEC-160). A switcher rather than a filter, and above the
+          filters because it decides what the filters are narrowing: one is what somebody has and
+          the other is what they are thinking about, and the two answer different questions about
+          the same product.
+
+          The collection on screen is named whether or not it is the default, because the other
+          one is not empty from here - it is elsewhere, and `18` will not let that pass as an
+          absence. */}
+      <View style={styles.filters}>
+        {SHELF_COLLECTION_ORDER.map((value) => {
+          const presented = presentShelfCollection(value);
+          const active = collection === value;
+          return (
+            <Pressable
+              key={value}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={
+                active
+                  ? `${presented.label}, showing. ${presented.meaning}`
+                  : `${presented.label}. ${presented.meaning}`
+              }
+              onPress={() => {
+                setCollection(value);
+              }}
+              style={[styles.filter, active ? styles.filterOn : null]}
+            >
+              {/* The state is in the label as well as in the styling (`18`). */}
+              <Text style={[styles.filterLabel, active ? styles.filterLabelOn : null]}>
+                {active ? `${presented.label} - showing` : presented.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       {/* Two filters, each named as the question it asks. They narrow and they do not rank -
           which of two people's medicines matters more is not a judgement this screen makes.
           A chosen filter carries `selection`, which is the one hue in this app that is about the
@@ -893,6 +1008,13 @@ export default function ShelfScreen() {
           This is a filtered list. Items Kynviora has nothing outstanding about are not shown.
         </Text>
       )}
+
+      {/* An empty collection says which one it is. "Nothing here yet" over both would describe a
+          person who has recorded nothing and a person who is evaluating nothing as the same
+          situation - and only one of those is a shelf somebody needs to do something about. */}
+      {view !== null && view.items.length === 0 && attention === null ? (
+        <Text style={styles.note}>{presentShelfCollection(collection).emptyNote}</Text>
+      ) : null}
 
       {view === null
         ? null

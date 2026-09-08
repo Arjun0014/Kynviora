@@ -486,6 +486,39 @@ export const ITEM_KINDS = ['MEDICINE', 'PERSONAL_CARE'] as const;
 export type ItemKind = Member<typeof ITEM_KINDS>;
 export const isItemKind = makeGuard(ITEM_KINDS);
 
+/**
+ * Which of the shelf's two collections an item is in (`0033`, DEC-160).
+ *
+ * Orthogonal to `ITEM_LIFECYCLE_STATES`, which says whether the record is current. This says
+ * whether the person **has** the thing or is evaluating it, and the distinction is worth a
+ * vocabulary because a safety statement about something somebody is considering is a different
+ * statement from one about something they use.
+ *
+ * `IN_USE` is the default in the schema and the backfill for every row that existed before it,
+ * which is true rather than convenient: no route in this build could have created an item meaning
+ * anything else.
+ */
+export const SHELF_COLLECTIONS = ['IN_USE', 'CONSIDERING'] as const;
+export type ShelfCollection = Member<typeof SHELF_COLLECTIONS>;
+export const isShelfCollection = makeGuard(SHELF_COLLECTIONS);
+
+/**
+ * Whether an item of this kind may be in this collection.
+ *
+ * The rule the schema holds as `owned_item_considering_is_personal_care`, in TypeScript so a route
+ * can refuse with a sentence rather than surfacing a constraint violation. Both exist on purpose:
+ * the constraint is what makes it true of the data, and this is what makes the refusal readable.
+ *
+ * Only a personal-care item may be considered. Everything this app does with a medicine presumes
+ * it is being taken - reminders fire from `medicine_schedule`, `dose_event` is an append-only
+ * record of what happened - and a medicine in Considering would either carry reminders to take
+ * something nobody has started, or need every one of those paths taught a new exception. V3's own
+ * design has no medicine in Considering either.
+ */
+export function mayBeInCollection(kind: ItemKind, collection: ShelfCollection): boolean {
+  return collection === 'IN_USE' || kind === 'PERSONAL_CARE';
+}
+
 /** Personal-care categories in initial MVP scope (`03`). */
 export const PERSONAL_CARE_CATEGORIES = [
   'SKIN_CARE',

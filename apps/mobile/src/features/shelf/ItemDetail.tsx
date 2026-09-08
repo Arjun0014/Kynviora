@@ -33,9 +33,12 @@ import { View, StyleSheet } from 'react-native';
 import {
   SPACING,
   ITEM_DELETION_COPY,
+  presentShelfCollection,
+  shelfMoveControl,
   type ScreenState as ScreenStateKind,
   type Theme,
 } from '@kynviora/presentation';
+import type { ShelfCollection } from '@kynviora/domain';
 import type { ItemDetailScreenView } from '@kynviora/contracts';
 import { Card } from '@/components/Card';
 import { FieldRow } from '@/components/FieldRow';
@@ -67,10 +70,37 @@ export interface ItemDetailProps {
    * there is sees the edit control and not this one.
    */
   readonly onDelete?: () => void;
+  /**
+   * Moves the item to the shelf's other collection (`0033`, DEC-160).
+   *
+   * The destination is not a parameter: {@link shelfMoveControl} decides it from where the item
+   * is, so the label a person read and the write that happens cannot describe different moves.
+   * Offered only where the same caller may edit - it is a change to the record and takes the same
+   * version precondition - and only where the move exists at all, which for a medicine it does
+   * not.
+   */
+  readonly onMove?: (to: ShelfCollection) => void;
+  /**
+   * What happened to the last move, or `null`.
+   *
+   * A sentence rather than a state, and drawn beside the control that produced it: a move is one
+   * tap with no form behind it, so a refusal shown anywhere else would be a message about
+   * something the person has already stopped looking at.
+   */
+  readonly moveNote?: string | null;
 }
 
-export function ItemDetail({ view, state, onClose, onEdit, onDelete }: ItemDetailProps) {
+export function ItemDetail({
+  view,
+  state,
+  onClose,
+  onEdit,
+  onDelete,
+  onMove,
+  moveNote,
+}: ItemDetailProps) {
   const styles = useThemedStyles(makeStyles);
+  const move = view === null ? null : shelfMoveControl(view.shelfCollection, view.mayBeConsidered);
   return (
     <View style={styles.container}>
       <ScreenState state={state} />
@@ -96,6 +126,42 @@ export function ItemDetail({ view, state, onClose, onEdit, onDelete }: ItemDetai
               {view.formulation === null ? null : <StatusChip presentation={view.formulation} />}
               {view.batch === null ? null : <StatusChip presentation={view.batch} />}
             </View>
+          </Card>
+
+          {/* Which collection it is in, and the way out of it.
+
+              It sits with the name rather than beside the primary action because it qualifies
+              what the whole screen is about: everything below reads differently for something a
+              person is thinking about than for something they take. The sentence is on screen in
+              both collections - an item in Considering that only said so by the absence of a
+              control would be an absence nobody can read (`18`).
+
+              The move is a change to the record like any other, so it is offered only where this
+              caller may change it, and the write carries the same version precondition. */}
+          <Card>
+            <Typography role="label">
+              {presentShelfCollection(view.shelfCollection).label}
+            </Typography>
+            <Typography role="caption" colour="secondary">
+              {presentShelfCollection(view.shelfCollection).meaning}
+            </Typography>
+            {move === null || onMove === undefined || !view.mayEdit ? null : (
+              <>
+                <Typography role="caption" colour="secondary">
+                  {move.note}
+                </Typography>
+                <PrimaryButton
+                  label={move.label}
+                  variant="secondary"
+                  onPress={() => {
+                    onMove(move.to);
+                  }}
+                />
+              </>
+            )}
+            {moveNote === null || moveNote === undefined ? null : (
+              <Typography role="body">{moveNote}</Typography>
+            )}
           </Card>
 
           {/* An item somebody has finished with says so, and says Kynviora will stop asking. */}

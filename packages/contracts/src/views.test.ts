@@ -33,6 +33,7 @@ const ITEM: ShelfItem = {
   displayName: 'Synthetic Tablet A',
   brand: null,
   lifecycleState: 'ACTIVE',
+  shelfCollection: 'IN_USE',
   identityVerification: 'CONFIRMED',
   formulationVerification: 'PARTIAL',
   batchVerification: 'UNVERIFIED',

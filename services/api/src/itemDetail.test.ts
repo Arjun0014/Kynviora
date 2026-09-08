@@ -189,6 +189,7 @@ interface DetailBody {
 interface ShelfBody {
   readonly items: readonly {
     readonly id: string;
+    readonly shelfCollection: string;
     readonly attentionReasons: readonly string[];
   }[];
 }
@@ -426,5 +427,49 @@ describe('who may read an item', () => {
     // no items gives, which avoids confirming the profile exists.
     expect(response.statusCode).toBe(200);
     expect(response.json<ShelfBody>().items).toEqual([]);
+  });
+});
+
+describe('the shelf’s two collections, over the wire (`0033`, DEC-160)', () => {
+  async function move(itemId: string, collection: string) {
+    const version = (await detail(principalFor(OWNER), itemId)).json<{ version: number }>().version;
+    return request(principalFor(OWNER), {
+      method: 'PATCH',
+      url: `/v1/items/${itemId}`,
+      payload: { expectedVersion: version, shelfCollection: collection },
+    });
+  }
+
+  it('says which collection every row is in', async () => {
+    const body = (await shelf(principalFor(OWNER))).json<ShelfBody>();
+    expect(body.items.length).toBeGreaterThan(0);
+    for (const item of body.items) expect(item.shelfCollection).toBe('IN_USE');
+  });
+
+  it('returns both collections when none was asked for', async () => {
+    // What every caller written before the column asked for, and what they still mean. A default
+    // that quietly narrowed to one collection would hide half somebody’s shelf on upgrade.
+    expect((await move(PERSONAL_CARE, 'CONSIDERING')).statusCode).toBe(200);
+    const all = (await shelf(principalFor(OWNER))).json<ShelfBody>();
+    expect(all.items.map((item) => item.id)).toContain(PERSONAL_CARE);
+    expect(all.items.map((item) => item.id)).toContain(MEDICINE);
+  });
+
+  it('narrows to one collection when asked', async () => {
+    const considering = (
+      await shelf(principalFor(OWNER), '&collection=CONSIDERING')
+    ).json<ShelfBody>();
+    expect(considering.items.map((item) => item.id)).toEqual([PERSONAL_CARE]);
+
+    const inUse = (await shelf(principalFor(OWNER), '&collection=IN_USE')).json<ShelfBody>();
+    expect(inUse.items.map((item) => item.id)).toContain(MEDICINE);
+    expect(inUse.items.map((item) => item.id)).not.toContain(PERSONAL_CARE);
+  });
+
+  it('refuses a collection nobody declared rather than ignoring it', async () => {
+    // Trap 79: a filter that quietly widened its own result set would show somebody the things
+    // they are only considering among the things they use.
+    expect((await shelf(principalFor(OWNER), '&collection=WISHLIST')).statusCode).toBe(400);
+    await move(PERSONAL_CARE, 'IN_USE');
   });
 });

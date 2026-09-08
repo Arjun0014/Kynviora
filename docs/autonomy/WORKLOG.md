@@ -7328,3 +7328,113 @@ It had not. None of those rows is an interactive target: they are `CaregiverAcce
 ended grant's capabilities as text, followed by its status. The tell was in the dump the whole time
 and the check took a second - which is the argument for keeping the reading a control came from
 rather than for being careful.
+
+## 2026-09-09 (V3, Shelf) - two collections, and the CHECK that makes one of them safe
+
+V3 preserves V2's Shelf and asks for one thing it does not have: **My Shelf** and **Considering** as
+two collections a person moves products between. Everything else V3 wants on that screen - category
+grouping, selection mode, the Compare tray - is built on top of them, so this is the slice that has
+to exist first.
+
+Nothing in the repository could express it. `owned_item` has a lifecycle and a kind and no notion of
+whether somebody actually **has** the thing.
+
+### Why it is a column and not a lifecycle state
+
+`lifecycle_state` answers "is this record current" - ACTIVE, STOPPED, ARCHIVED - and the reminder
+engine, the safety sweep, the retention plan and `shelfAttention` all read it. `shelfAttention`
+treats everything that is not ACTIVE as finished with, so a CONSIDERING member would have quietly
+stopped Kynviora asking about a product somebody is actively evaluating - which is the one moment
+those questions are most useful.
+
+The two are orthogonal. A considered product is a live record; what differs is that nobody is using
+it.
+
+### Why it is a column and not a client-side flag
+
+Because the sentence worth having is a server sentence. A sensitivity match on something somebody is
+considering is a **different statement** from one on something they use, and V3's own copy makes
+exactly that distinction: _"Declared in Oralux Enamel Care and Nera Scalp Balance, both in
+Considering. Not declared in the 8 items in use."_ That is not composable from a filter a client
+applied after the fact.
+
+### The constraint that makes the concept safe rather than labelled
+
+```sql
+CONSTRAINT owned_item_considering_is_personal_care
+  CHECK (shelf_collection = 'IN_USE' OR item_kind = 'PERSONAL_CARE')
+```
+
+Only a personal-care product may be considered. It is not an invention: counted out of V3's own
+design file, every product in Considering is personal care and every medicine is on the shelf - four
+medicines, all `coll:'shelf'`, eight considered products, none of them a medicine.
+
+The reason it matters is that everything this app does with a medicine presumes it is being taken.
+`medicine_schedule` fires reminders, `dose_event` is an append-only record of what happened, and
+adherence is read off both. A medicine in Considering would either carry reminders to take something
+nobody has started, or need every one of those paths taught a new exception - and the failure mode of
+getting that wrong is somebody taking a tablet because their phone told them to.
+
+It is a CHECK rather than a rule in a route because it is then true of the **data**. And it is
+table-local by construction: both tables that would otherwise have to be consulted are already
+medicine-scoped (`0004` and `0020` refuse a schedule or a dose on a personal-care item), so
+forbidding a medicine in Considering forecloses the whole class without a trigger and without a
+cross-table subquery on every insert. `mayBeInCollection` states the same rule in TypeScript so a
+route can refuse with a sentence rather than surface a constraint violation, and
+`db/schemaVocabulary.test.ts` reads the constraint out of `pg_get_constraintdef` so the two cannot
+drift.
+
+What this deliberately does not model is "a medicine I might ask about". That is a real thing and a
+different feature with its own safety story - not this column widened.
+
+### The screen shows one collection, and says which
+
+Not a filter over one list. An unfiltered shelf that mixed the two would show somebody the shampoo
+they are thinking about beside the one they use, which is the confusion the column exists to
+prevent. Nothing disappears by that on upgrade - every row that existed before `0033` is `IN_USE` -
+and the switcher names the collection on screen at all times, because `18` will not let a collection
+that is _elsewhere_ read as an absence. Each one has its own empty sentence for the same reason:
+"Nothing here yet" over both would describe a person who has recorded nothing and a person who is
+evaluating nothing as the same situation.
+
+### "Considering" says nothing about safety
+
+A product being considered has been checked exactly as much as one in use, which for most of them is
+"not enough information". Copy that let the word read as a state Kynviora had assessed would be `23`
+D-014 arriving through a filter name, so `shelfCollections.test.ts` asserts it over **every** string
+the module can put on a screen rather than over the ones that looked risky.
+
+### The move
+
+A change to the record, not a route of its own: same `expectedVersion` precondition as every other
+change to `owned_item` (`13`, `ASK_USER`), same audit row, queued when there is no signal for the
+reason DEC-148 gives - a move that silently vanished would put a product back among the ones
+somebody uses without saying it had.
+
+The control names its **destination** rather than the act, and is withheld entirely where the move
+is impossible - DEC-045 applied to a rule rather than to a capability, because a greyed-out "Move to
+Considering" on a medicine tells somebody the app has a place for it that it is not letting them
+use. The way _out_ of Considering is offered whatever the kind rule says: a rule that constrains
+what may go in must not leave anything stuck, which is `12`'s "a failure state has to be resolvable"
+in a second place.
+
+### Verification
+
+- `npm run verify` green. **5581 -> 5611 tests, 211 -> 213 files. 33 migrations.**
+- New: `shelfCollections` 8, `ItemCollection` 6, `db/shelf` 5, `schemaVocabulary` 2, API 9.
+
+### Files
+
+`db/migrations/0033_shelf_collection.sql`, `packages/domain/src/vocabulary.ts`,
+`packages/domain/src/itemUpdate.ts`, `packages/presentation/src/shelfCollections.ts`,
+`packages/contracts/src/client.ts`, `packages/contracts/src/views.ts`,
+`services/api/src/server.ts`, `apps/mobile/src/app/(tabs)/shelf.tsx`,
+`apps/mobile/src/features/shelf/ItemDetail.tsx`.
+
+### What is next on this screen
+
+Category grouping is the next slice and it needs no schema: `item_kind` plus
+`personal_care_category` is already the taxonomy V3 draws, minus the two categories its mock happens
+not to use. After that, image-led tiles - which need a decision about where a product image comes
+from, because the only honest source is a `FRONT_PANEL` evidence asset somebody captured, and a
+stock photograph would be a fabricated fact about a package.

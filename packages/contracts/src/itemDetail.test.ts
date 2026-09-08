@@ -65,6 +65,7 @@ function item(overrides: Partial<ShelfItem> = {}): ShelfItem {
     displayName: 'Synthetic Tablet',
     brand: null,
     lifecycleState: 'ACTIVE',
+    shelfCollection: 'IN_USE',
     identityVerification: 'CONFIRMED',
     formulationVerification: 'CONFIRMED',
     batchVerification: 'CONFIRMED',

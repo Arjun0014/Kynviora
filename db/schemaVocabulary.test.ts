@@ -10,6 +10,7 @@ import {
   HEALTH_SOURCE_KINDS,
   HEALTH_SOURCE_STATES,
   REVALIDATION_OUTCOMES,
+  SHELF_COLLECTIONS,
   SOURCE_FLAGS,
 } from '@kynviora/domain';
 import { RETENTION_RUN_OUTCOMES } from '@kynviora/worker';
@@ -160,5 +161,27 @@ describe('the Health record’s five vocabularies', () => {
 
   it('agree about which metrics a trend may be drawn for', async () => {
     expect(await acceptedBy('health_measurement_metric_valid')).toEqual(sorted(HEALTH_METRICS));
+  });
+});
+
+describe('the shelf’s two collections', () => {
+  it('are the same two in the vocabulary and in the schema', async () => {
+    expect(await acceptedBy('owned_item_shelf_collection_valid')).toEqual(
+      sorted(SHELF_COLLECTIONS),
+    );
+  });
+
+  it('carry the rule that only a personal-care item may be considered', async () => {
+    // Read off the constraint rather than by attempting an insert, so a migration that widened it
+    // back fails here rather than in a route six months later. `mayBeInCollection` says the same
+    // thing in TypeScript and `db/shelf.test.ts` measures the refusal.
+    const definition = await t.asOwner((db) =>
+      db.query<{ def: string }>(
+        `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
+          WHERE conname = 'owned_item_considering_is_personal_care'`,
+      ),
+    );
+    expect(definition.rows[0]?.def).toContain("'IN_USE'");
+    expect(definition.rows[0]?.def).toContain("'PERSONAL_CARE'");
   });
 });

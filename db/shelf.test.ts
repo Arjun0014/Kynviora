@@ -478,3 +478,75 @@ describe('the shape of the dose idempotency guarantee (DEV-031)', () => {
     expect(index.rows[0]?.definition).toMatch(/client_operation_id/);
   });
 });
+
+describe('the shelf’s two collections (`0033`, DEC-160)', () => {
+  it('puts every row that existed before the column in IN_USE', async () => {
+    // The backfill is a claim about what the old rows meant, so it is asserted rather than
+    // assumed: no route in this build could have created an item meaning anything else.
+    const res = await t.asOwner((db) =>
+      db.query<{ shelf_collection: string }>(
+        `SELECT shelf_collection FROM owned_item WHERE id = ANY($1::uuid[])`,
+        [[SHAMPOO, MEDICINE]],
+      ),
+    );
+    expect(res.rows.map((row) => row.shelf_collection)).toEqual(['IN_USE', 'IN_USE']);
+  });
+
+  it('lets a personal-care item be considered', async () => {
+    await t.asUser(OWNER, (db) =>
+      db.query(`UPDATE owned_item SET shelf_collection = 'CONSIDERING' WHERE id = $1`, [SHAMPOO]),
+    );
+    const res = await t.asUser(OWNER, (db) =>
+      db.query<{ shelf_collection: string }>(
+        `SELECT shelf_collection FROM owned_item WHERE id = $1`,
+        [SHAMPOO],
+      ),
+    );
+    expect(res.rows[0]?.shelf_collection).toBe('CONSIDERING');
+    await t.asUser(OWNER, (db) =>
+      db.query(`UPDATE owned_item SET shelf_collection = 'IN_USE' WHERE id = $1`, [SHAMPOO]),
+    );
+  });
+
+  it('refuses a medicine in Considering, in the database', async () => {
+    // The rule that makes the concept safe rather than merely labelled, and the reason it is a
+    // CHECK: everything this app does with a medicine presumes it is being taken, and a route is
+    // not where that should be true. `mayBeInCollection` says the same thing in TypeScript so a
+    // refusal can carry a sentence; this is what makes it true of the data.
+    const message = await expectDenied(() =>
+      t.asService((db) =>
+        db.query(`UPDATE owned_item SET shelf_collection = 'CONSIDERING' WHERE id = $1`, [
+          MEDICINE,
+        ]),
+      ),
+    );
+    expect(message).toMatch(/considering_is_personal_care/i);
+  });
+
+  it('refuses a collection nobody declared', async () => {
+    const message = await expectDenied(() =>
+      t.asService((db) =>
+        db.query(`UPDATE owned_item SET shelf_collection = 'WISHLIST' WHERE id = $1`, [SHAMPOO]),
+      ),
+    );
+    expect(message).toMatch(/shelf_collection_valid/i);
+  });
+
+  it('leaves the lifecycle alone, because the two are different questions', async () => {
+    // A considered item is a live record - ACTIVE - and what differs is that nobody is using it.
+    // If this ever starts failing, something has begun treating the collection as a lifecycle.
+    await t.asUser(OWNER, (db) =>
+      db.query(`UPDATE owned_item SET shelf_collection = 'CONSIDERING' WHERE id = $1`, [SHAMPOO]),
+    );
+    const res = await t.asUser(OWNER, (db) =>
+      db.query<{ lifecycle_state: string }>(
+        `SELECT lifecycle_state FROM owned_item WHERE id = $1`,
+        [SHAMPOO],
+      ),
+    );
+    expect(res.rows[0]?.lifecycle_state).toBe('ACTIVE');
+    await t.asUser(OWNER, (db) =>
+      db.query(`UPDATE owned_item SET shelf_collection = 'IN_USE' WHERE id = $1`, [SHAMPOO]),
+    );
+  });
+});

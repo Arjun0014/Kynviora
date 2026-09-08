@@ -110,6 +110,14 @@ export interface ShelfItem {
   readonly displayName: string;
   readonly brand: string | null;
   readonly lifecycleState: 'ACTIVE' | 'STOPPED' | 'ARCHIVED';
+  /**
+   * Which of the shelf's two collections this is in (`0033`, DEC-160).
+   *
+   * A separate question from the lifecycle: `lifecycleState` says whether the record is current,
+   * this says whether the person has the thing or is evaluating it. Narrowed to `IN_USE` where an
+   * older server sends nothing, which is what every row meant before the column existed.
+   */
+  readonly shelfCollection: 'IN_USE' | 'CONSIDERING';
   /** Three separate axes. `02` forbids collapsing them into one "verified" badge. */
   readonly identityVerification: string;
   readonly formulationVerification: string;
@@ -165,6 +173,15 @@ export interface ItemDetailResponse {
     readonly settledNote: string | null;
   };
   readonly attentionReasonCodes: readonly string[];
+  /** Which of the shelf's two collections this is in (`0033`, DEC-160). */
+  readonly shelfCollection?: string;
+  /**
+   * Whether this item could be in the other collection at all.
+   *
+   * The server's answer to a rule the schema also holds - only a personal-care item may be
+   * considered - so a screen withholds the control rather than offering a move the write refuses.
+   */
+  readonly mayBeConsidered?: boolean;
   /**
    * The version this detail was read at.
    *
@@ -549,6 +566,8 @@ export interface ItemUpdateBody {
   readonly labelVersionNote?: string | null;
   readonly lifecycleState?: string;
   readonly stoppedOn?: string | null;
+  /** Moving between the shelf's two collections (`0033`, DEC-160). */
+  readonly shelfCollection?: string;
   readonly markReviewed?: boolean;
 }
 
@@ -1285,6 +1304,13 @@ export interface ItemsQuery {
   readonly verification?: 'CONFIRMED' | 'PROBABLE' | 'PARTIAL' | 'CONFLICTING' | 'UNVERIFIED';
   /** Items with something outstanding. A filter, never a ranking or a count. */
   readonly attention?: 'NEEDS_VERIFICATION' | 'NEEDS_REVIEW' | 'ANY';
+  /**
+   * One of the shelf's two collections (`0033`, DEC-160).
+   *
+   * Omitted returns both, which is what every caller written before the column meant. The server
+   * refuses a value it does not know rather than ignoring it.
+   */
+  readonly collection?: 'IN_USE' | 'CONSIDERING';
   readonly cursor?: string;
   readonly limit?: number;
 }
@@ -1830,6 +1856,7 @@ export function createClient(options: ClientOptions): KynvioraClient {
         lifecycleState: query.lifecycleState,
         verification: query.verification,
         attention: query.attention,
+        collection: query.collection,
         cursor: query.cursor,
         limit: query.limit,
       }),
