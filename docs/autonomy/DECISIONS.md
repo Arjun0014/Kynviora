@@ -5738,3 +5738,110 @@ Design V2 pass may well do.
 
 **Sources.** `18`, `19`, DEC-102, DEC-137, `DEV-077`, trap 210, `scripts/device/theme.ts`,
 `scripts/device/theme.test.ts`, `scripts/device/verifyAccessibility.ts`.
+
+---
+
+## DEC-151 - Health takes the fifth slot, Safety becomes a lens with an address, and `06` is amended rather than drifted from
+
+**Date.** 2026-09-08
+**Status.** Accepted. Supersedes the navigation table in `06_USER_JOURNEYS_AND_INFORMATION_ARCHITECTURE.md`
+and in `docs/design/DESIGN_SYSTEM.md` §2.
+**Context.** The Kynviora V3 design is approved as the implementation direction. Its first
+structural claim is that the five primary destinations are **Today / Shelf / Health / Care / You**,
+and that Safety is a cross-cutting lens rather than a tab.
+
+`06` says the opposite in as many words - "Safety - current assessments, alerts, evidence changes,
+resolved history" is the third of five - and `DESIGN_SYSTEM.md` §2 goes further: "This is not a
+layout choice and cannot be renegotiated to free a slot." That sentence was written to stop a
+destination being dropped to make room for something more exciting, and it did its job for four
+stages. It now stands in front of a change that is not the thing it was guarding against, so the
+honest move is to amend it in the open rather than to implement past it.
+
+**Options.** (a) Keep six destinations. (b) Keep Safety as a tab and put Health under You. (c) Move
+Safety's content to a secondary destination reachable from where safety is actually noticed, and
+give the freed slot to Health. (d) Merge Safety into Shelf entirely.
+
+**Decision.** (c).
+
+- The five primary destinations become **Today, Shelf, Health, Care, You**.
+- Safety keeps every screen, every sentence and every rule it has. What it loses is a **tab**, and
+  what it gains is entry points at the places a person is actually looking when safety matters:
+  the Safety Lens toggle on Shelf, the evidence block inside item detail, the changed/notice rows
+  on Today, and a **Coverage Center** - the current Safety screen, unchanged in substance - as a
+  secondary destination addressed from both.
+- `06`'s requirement that "the Safety screen clearly states last synchronization time and coverage
+  limitation" moves **with the screen**. It is a property of the screen, not of the tab bar, and
+  DEC-138 - the coverage statement is a card at the same rank as the results, first - is unaffected.
+
+**Rationale.** (a) is refused by `06` for a reason that has not changed: five is what fits a tab bar
+at the 2x font scale this app supports, and `_layout.tsx` already sizes its labels to the slot it
+has. A sixth slot makes every label smaller for everybody.
+
+(b) buries the entire new Health record - records, labs, trends, history - under a settings hub. It
+is the option that changes the least code and the most product.
+
+(d) loses the one thing the Safety screen does that no item row can: it is where somebody goes to
+ask _what has Kynviora actually checked, and what has it not_. DEC-138 made that question the first
+card on it. Folding it into Shelf turns it back into a property of individual items.
+
+(c) is chosen because Safety was never a destination people _went_ to; it was a destination people
+arrived at because something happened. The V2/V3 reading is that a tab is the wrong shape for that
+
+- a tab is for a subject you return to, and the subjects a person returns to are their day, their
+  things, their health, their household and their account. Safety is a **lens over four of those**,
+  which is exactly what a lens toggle and an evidence drawer are for.
+
+**What this decision does not license.** Nothing about the safety _content_ rules is renegotiated
+by moving where they are reached from. `02`'s five rules stand verbatim: no score, evidence and
+urgency in separate geometry, absence of a matched rule is never approval, no meaning by colour
+alone, one primary action. `09`'s evidence model, `10`'s clinical governance and `25`'s coverage
+statements are untouched. A visual mock that conflicts with any of them loses.
+
+**Consequences.**
+
+- `apps/mobile/src/app/(tabs)/safety.tsx` becomes a non-tab route; the tab slot becomes Health.
+- `06` and `DESIGN_SYSTEM.md` §2 are edited in place with a pointer here, so a reader of either
+  finds the amendment rather than a contradiction.
+- Every device harness that navigates by the tab named "Safety" has to be re-pointed. That is a
+  real cost and it is the second reason to record this loudly.
+
+**Sources.** `KYNVIORA_V3_DESIGN_BRIEF.md` §2, `Kynviora V3 Design Language.dc.html` §07,
+`06_USER_JOURNEYS_AND_INFORMATION_ARCHITECTURE.md`, `docs/design/DESIGN_SYSTEM.md` §2, DEC-138,
+`02_DIFFERENTIATION_AND_PRODUCT_PRINCIPLES.md`.
+
+---
+
+## DEC-152 - The design handoff bundle is evidence, so no gate reads it and no formatter rewrites it
+
+**Date.** 2026-09-08
+**Status.** Accepted.
+**Context.** `docs/kynviora-premium-mobile-experience/` is the Claude Design export of the approved
+V3 direction: three `.dc.html` prototypes, the brief, the design tool's own `support.js` runtime,
+and the reference images the brief was written against. Copying it into the repository turned
+`npm run verify` red on the first run, in the lint stage, over `support.js` - a file nobody here
+wrote, in no `tsconfig`, reported by the type-aware rules as outside the project service.
+
+**Options.** (a) Keep the bundle out of the repository. (b) Keep it and let the gates lint and
+format it. (c) Keep it and exclude it from both gates.
+
+**Decision.** (c). `docs/kynviora-premium-mobile-experience/**` is in `eslint.config.js`'s ignore
+list and in `.prettierignore`.
+
+**Rationale.** (a) loses the only artefact that says what was approved. Six weeks from now the
+question "was this screen in the design or did somebody invent it" has to have an answer that is
+not a memory.
+
+(b) is the `DEV-097` mistake with a new file: a gate that goes red over content that is not project
+source teaches people to distrust the gate. Worse here than there, because the fix prettier would
+apply is a _rewrite_: the bundle is evidence of what was approved, and evidence a formatter has
+reflowed is a weaker record than evidence it has not touched.
+
+(c) costs nothing. Nothing imports it, nothing builds it, and its `.md` files are read by people.
+
+**What is deliberately not done.** The bundle is not treated as a source of truth for behaviour. It
+is a mock: where it conflicts with safety, evidence, authorization, provenance, retention, offline
+truthfulness, caregiver least privilege or medication boundaries, those win and the conflict is
+recorded as a deviation.
+
+**Sources.** `DEV-097`, DEC-149, `eslint.config.js`, `.prettierignore`,
+`docs/kynviora-premium-mobile-experience/README.md`.

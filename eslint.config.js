@@ -30,6 +30,15 @@ export default tseslint.config(
       // `npm run verify` over a file nobody had committed. A gate that goes red for what is not
       // in the repository teaches the same lesson `DEV-096` did.
       'scratchpad/**',
+      // The Claude Design handoff bundle. `docs/kynviora-premium-mobile-experience/` is an
+      // export from claude.ai/design: HTML/CSS/JS prototypes plus the design brief, kept in the
+      // repository so the approved V3 direction is auditable against what was actually built. It
+      // is a *reference artifact*, not source. Its `support.js` is the design tool's own runtime
+      // and is in no `tsconfig`, so the type-aware rules report it as outside the project service
+      // - which is how a bundle nobody wrote failed `npm run verify` the moment it was copied in.
+      // The same reason it is ignored is the reason it must not be reformatted: it is evidence of
+      // what was approved, and evidence that a formatter has rewritten is a weaker record.
+      'docs/kynviora-premium-mobile-experience/**',
       'eslint.config.js',
       'vitest.config.ts',
       'vitest.mobile.config.ts',

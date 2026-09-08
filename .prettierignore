@@ -7,3 +7,6 @@ apps/mobile/.expo
 apps/mobile/android
 apps/mobile/ios
 apps/mobile/expo-env.d.ts
+
+# The Claude Design handoff bundle - a reference artifact, not source. See eslint.config.js.
+docs/kynviora-premium-mobile-experience

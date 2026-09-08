@@ -46,15 +46,24 @@ break:
 ## 2. Information architecture
 
 `06` fixes five primary destinations. This is not a layout choice and cannot be renegotiated to
-free a slot.
+free a slot - which is why the one change that has been made to the set was made **in the open**,
+as DEC-151, rather than by a screen quietly appearing. Safety was the third row here until
+2026-09-08. It keeps every screen and every rule; what it lost is the tab.
 
-| Destination | The question it answers                                           | Never                           |
-| ----------- | ----------------------------------------------------------------- | ------------------------------- |
-| **Today**   | What is worth my attention today, and what can I prepare?         | A due-medicine list (see below) |
-| **Shelf**   | What do we have, and how well does Kynviora know each thing?      | A ranking of items by risk      |
-| **Safety**  | Is there a reviewed, relevant concern, and what is the next step? | A clearance, a count, a score   |
-| **Care**    | Who is in this household, who may see what, what can I share?     | A silent-owner caregiver view   |
-| **You**     | Account, privacy, consent, accessibility, notifications, export   | A place safety copy also lives  |
+| Destination | The question it answers                                                  | Never                           |
+| ----------- | ------------------------------------------------------------------------ | ------------------------------- |
+| **Today**   | What is worth my attention today, and what can I prepare?                | A due-medicine list (see below) |
+| **Shelf**   | What do we have, and how well does Kynviora know each thing?             | A ranking of items by risk      |
+| **Health**  | What does Kynviora know about this person, from where, and what changed? | A health score, a grade, a ring |
+| **Care**    | Who is in this household, who may see what, what can I share?            | A silent-owner caregiver view   |
+| **You**     | Account, privacy, consent, accessibility, notifications, export          | A place safety copy also lives  |
+
+**Safety is a lens with an address, not a destination.** It is reached from the Safety Lens on
+Shelf, from evidence and coverage inside item detail, from a change or a notice on Today, and - for
+the question "what has Kynviora actually checked, and what has it not" - from the **Coverage
+Center**, which is the Safety screen under a name that says what it answers. Its rule is unchanged:
+"Is there a reviewed, relevant concern, and what is the next step?", never a clearance, a count or
+a score.
 
 Adding an item and scanning are **actions available from Today and Shelf**, not a sixth
 destination.

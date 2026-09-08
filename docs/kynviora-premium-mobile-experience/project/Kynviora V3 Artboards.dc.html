@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#07090C;-webkit-font-smoothing:antialiased}
+a{color:#6FDCE4;text-decoration:none}a:hover{color:#5AD1DC}
+</style>
+</helmet>
+<div style="font-family:'Schibsted Grotesk',system-ui,sans-serif;color:#F2F5F8;padding:48px 40px 120px;display:flex;flex-direction:column;gap:56px">
+
+<div style="display:flex;flex-direction:column;gap:12px;max-width:820px">
+<span style="font:500 11px/1 'DM Mono',monospace;letter-spacing:.2em;text-transform:uppercase;color:#B4BECC">Kynviora V3 · artboards</span>
+<h1 style="font:700 44px/1.05 'Schibsted Grotesk',sans-serif;letter-spacing:-.03em;margin:0">The V3 refinement, board by board</h1>
+<p style="font:400 18px/1.55 'Schibsted Grotesk',sans-serif;color:#B4BECC;margin:0;text-wrap:pretty">Every board is the V3 prototype held at one state, so a change to the prototype moves every board. Each one mounts the whole app, so give the page a moment to settle, then tap into any of them.</p>
+<div style="display:flex;gap:10px;flex-wrap:wrap;padding-top:6px"><a href="Kynviora V3 Mobile.dc.html" style="display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:12px;background:#E8EDF3;color:#0E1116;font:600 14px 'Schibsted Grotesk',sans-serif">Open the V3 prototype</a><a href="Kynviora V3 Design Language.dc.html" style="display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:12px;border:1px solid #677484;color:#F2F5F8;font:600 14px 'Schibsted Grotesk',sans-serif">V3 design language</a><a href="Kynviora V2 Artboards.dc.html" style="display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:12px;border:1px solid #39424F;color:#B4BECC;font:600 14px 'Schibsted Grotesk',sans-serif">V2 boards, for comparison</a></div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;align-items:center;gap:14px"><span style="font:500 11px/1 'DM Mono',monospace;letter-spacing:.14em;color:#6FDCE4">01</span><h2 style="font:700 24px/1.15 'Schibsted Grotesk',sans-serif;letter-spacing:-.02em;margin:0">Talk to Kynviora · a persistent bar, not a chatbot</h2><span style="flex:1;height:1px;background:#232935"></span></div>
+<div style="display:flex;flex-wrap:wrap;gap:28px">
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Idle · quiet, above the navigation</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Listening · the screen stays put</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="shelf" talk="listening" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Understanding · before anything moves</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="health" talk="understanding" transcript="Show my blood pressure over six months" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Applied in place · the UI is the answer</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="trend" metric="bp" range="6M" talk="done" transcript="Show my blood pressure over six months" response="Blood pressure, last six months. Systolic and diastolic, from the home monitor." hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Needs confirmation · spoken and shown</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="product" product-id="apixaban" talk="confirm" transcript="Record that I took it" confirm-text="Record that Rukmini took Apixaban 5 mg now?" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Could not do that · touch only</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" talk="failed" transcript="Delete my account" response="That one is touch only. It lives in You, inside Account Center. I can take you there but I cannot do it." hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;align-items:center;gap:14px"><span style="font:500 11px/1 'DM Mono',monospace;letter-spacing:.14em;color:#6FDCE4">02</span><h2 style="font:700 24px/1.15 'Schibsted Grotesk',sans-serif;letter-spacing:-.02em;margin:0">Health · a record, not a dashboard</h2><span style="flex:1;height:1px;background:#232935"></span></div>
+<div style="display:flex;flex-wrap:wrap;gap:28px">
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Health profile · what changed first</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="health" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Records · structured summaries</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="health" health-layer="records" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Records · not everything is a document</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="health" health-layer="records" rec-filter="Conditions" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Trends · grouped by domain</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="health" health-layer="trends" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">History · one longitudinal timeline</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="health" health-layer="history" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Sources · six honest states</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="sources" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;align-items:center;gap:14px"><span style="font:500 11px/1 'DM Mono',monospace;letter-spacing:.14em;color:#6FDCE4">03</span><h2 style="font:700 24px/1.15 'Schibsted Grotesk',sans-serif;letter-spacing:-.02em;margin:0">Labs and checkups · the flagship</h2><span style="flex:1;height:1px;background:#232935"></span></div>
+<div style="display:flex;flex-wrap:wrap;gap:28px">
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Lab report · reference bands and deltas</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="labReport" report-id="r_thy" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Lab result · sparse longitudinal points</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="labResult" analyte-id="tsh" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Latest against previous · the Change Lens</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="labCompare" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Annual check · 2026 against 2025</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="checkup" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Lab result · light</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" theme="light" screen="labResult" analyte-id="vitd" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;align-items:center;gap:14px"><span style="font:500 11px/1 'DM Mono',monospace;letter-spacing:.14em;color:#6FDCE4">04</span><h2 style="font:700 24px/1.15 'Schibsted Grotesk',sans-serif;letter-spacing:-.02em;margin:0">Trends · the visual matches the data</h2><span style="flex:1;height:1px;background:#232935"></span></div>
+<div style="display:flex;flex-wrap:wrap;gap:28px">
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Blood pressure · paired readings</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="trend" metric="bp" range="3M" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Sleep · stages, then duration</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="trend" metric="sleep" range="30D" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Blood oxygen · four days not worn</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="trend" metric="spo2" range="30D" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Resting heart rate · a year</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="trend" metric="rhr" range="1Y" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;align-items:center;gap:14px"><span style="font:500 11px/1 'DM Mono',monospace;letter-spacing:.14em;color:#6FDCE4">05</span><h2 style="font:700 24px/1.15 'Schibsted Grotesk',sans-serif;letter-spacing:-.02em;margin:0">Care · a household, not a permissions grid</h2><span style="flex:1;height:1px;background:#232935"></span></div>
+<div style="display:flex;flex-wrap:wrap;gap:28px">
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Care circle · four states at a glance</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="care" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Person · three separate grants</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="person" person-id="anita" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Expiring access</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="person" person-id="sanjay" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Invitation pending</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="person" person-id="priya" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Permission editor · one grant at a time</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="permEdit" person-id="anita" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Care activity · every action keeps its name</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="careActivity" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;align-items:center;gap:14px"><span style="font:500 11px/1 'DM Mono',monospace;letter-spacing:.14em;color:#6FDCE4">06</span><h2 style="font:700 24px/1.15 'Schibsted Grotesk',sans-serif;letter-spacing:-.02em;margin:0">You · a settings hub with an address for everything</h2><span style="flex:1;height:1px;background:#232935"></span></div>
+<div style="display:flex;flex-wrap:wrap;gap:28px">
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">You · eight groups, no loose controls</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="you" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Account Center · deletion lives at the bottom</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="settings" set-page="account" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Privacy & Data</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="settings" set-page="privacy" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Kynviora Agent</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="settings" set-page="agent" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Connections · designed, not pretended</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="settings" set-page="connections" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Appearance · tint against state</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="settings" set-page="appearance" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;align-items:center;gap:14px"><span style="font:500 11px/1 'DM Mono',monospace;letter-spacing:.14em;color:#6FDCE4">07</span><h2 style="font:700 24px/1.15 'Schibsted Grotesk',sans-serif;letter-spacing:-.02em;margin:0">Preserved from V2 · Today, Shelf, Compare, Elder</h2><span style="flex:1;height:1px;background:#232935"></span></div>
+<div style="display:flex;flex-wrap:wrap;gap:28px">
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Today · needs you, then reports, then jobs</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="today" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Shelf · safety lens on</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" tab="shelf" lens="true" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Compare · infographic, not prose</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="compare" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Product · formula change diff</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" screen="product" product-id="silka" product-tab="ingredients" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+<div style="display:flex;flex-direction:column;gap:10px"><span style="font:500 11px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4BECC">Elder Mode · one task at a time</span><dc-import name="Kynviora V3 Mobile" reduce-motion="true" elder="true" hint-size="460px,940px" style="width:460px;height:940px"></dc-import></div>
+</div>
+</div>
+
+</div>
+</x-dc>
+</body>
+</html>

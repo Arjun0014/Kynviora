@@ -5,13 +5,24 @@ Last reviewed: 2026-08-29
 
 ## Navigation model
 
+**Amended 2026-09-08 by DEC-151.** The five destinations below were Today / Shelf / **Safety** /
+Care / You. Under the approved Kynviora V3 direction, Safety keeps every screen and every rule and
+loses its tab: it becomes a cross-cutting lens reached from where safety is actually noticed, and
+the freed slot goes to Health. The reasoning, and what the amendment does *not* license, is in
+DEC-151.
+
 Use five primary destinations:
 
 - Today - due medicines, appointments/tasks, urgent review items, quick add/scan.
 - Shelf - medicines and personal-care products.
-- Safety - current assessments, alerts, evidence changes, resolved history.
+- Health - health profile, medical records, lab results, trends, longitudinal history.
 - Care - profiles, caregivers, Visit Pack, appointments, review workflows.
 - You - account, privacy, consent, accessibility, notifications, exports/deletion.
+
+Safety is cross-cutting rather than primary: the Safety Lens on Shelf, evidence and coverage inside
+item detail, changes and notices on Today, and the **Coverage Center** - current assessments,
+alerts, evidence changes and resolved history - as a secondary destination addressed from Shelf and
+Today. Everything this document says about the Safety screen still binds that screen.
 
 Scan/add is an action available from Today and Shelf, not a sixth navigation destination.
 
