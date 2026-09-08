@@ -34,6 +34,7 @@ const ITEM: ShelfItem = {
   brand: null,
   lifecycleState: 'ACTIVE',
   shelfCollection: 'IN_USE',
+  personalCareCategory: null,
   identityVerification: 'CONFIRMED',
   formulationVerification: 'PARTIAL',
   batchVerification: 'UNVERIFIED',

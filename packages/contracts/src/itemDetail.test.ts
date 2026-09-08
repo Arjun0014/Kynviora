@@ -66,6 +66,7 @@ function item(overrides: Partial<ShelfItem> = {}): ShelfItem {
     brand: null,
     lifecycleState: 'ACTIVE',
     shelfCollection: 'IN_USE',
+    personalCareCategory: null,
     identityVerification: 'CONFIRMED',
     formulationVerification: 'CONFIRMED',
     batchVerification: 'CONFIRMED',

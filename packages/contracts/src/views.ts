@@ -32,6 +32,7 @@ import {
   isValidQuietHours,
   isItemVerification,
   isMatchConfidence,
+  isPersonalCareCategory,
   isShelfCollection,
   type ActionUrgency,
   type EvidenceLevel,
@@ -126,6 +127,8 @@ export interface ShelfItemView {
   readonly lifecycleState: string;
   /** Which collection the row is in, so a screen can group without asking the server twice. */
   readonly shelfCollection: ShelfCollection;
+  /** What kind of personal-care product it is, or `null`. The shelf groups by it (DEC-161). */
+  readonly personalCareCategory: string | null;
   /**
    * Three separate presentations, in a fixed order, and never merged.
    *
@@ -161,6 +164,14 @@ export function shelfItemView(item: ShelfItem): ShelfItemView {
     // existed. An older server sends nothing here and a corrupted one could send anything; both
     // mean "this is on the shelf", which is the answer that shows the item rather than hiding it.
     shelfCollection: isShelfCollection(item.shelfCollection) ? item.shelfCollection : 'IN_USE',
+    // Narrowed to `null` rather than passed through: a value this build does not recognise groups
+    // under "Other products", which is where a product with no category goes anyway - and is the
+    // reading that draws the row rather than dropping it.
+    personalCareCategory:
+      typeof item.personalCareCategory === 'string' &&
+      isPersonalCareCategory(item.personalCareCategory)
+        ? item.personalCareCategory
+        : null,
     identity: presentVerification(asItemVerification(item.identityVerification), 'identity'),
     formulation: presentVerification(
       asItemVerification(item.formulationVerification),

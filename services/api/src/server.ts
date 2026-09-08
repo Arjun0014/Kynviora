@@ -539,6 +539,8 @@ const shelfItemSchema = z.object({
   lifecycleState: z.enum(['ACTIVE', 'STOPPED', 'ARCHIVED']),
   /** `0033`, DEC-160. A different question from the lifecycle: has it, or is thinking about it. */
   shelfCollection: z.enum(['IN_USE', 'CONSIDERING']),
+  /** What kind of personal-care product it is, or `null`. The shelf groups by it (DEC-161). */
+  personalCareCategory: z.string().nullable(),
   identityVerification: z.string(),
   formulationVerification: z.string(),
   batchVerification: z.string(),
@@ -1180,6 +1182,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
           brand: string | null;
           lifecycle_state: string;
           shelf_collection: string;
+          personal_care_category: string | null;
           identity_verification: string;
           formulation_verification: string;
           batch_verification: string;
@@ -1189,7 +1192,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
           last_safety_checked_at: Date | string | null;
         }>(
           `SELECT id, profile_id, item_kind, display_name, brand, lifecycle_state,
-                  shelf_collection,
+                  shelf_collection, personal_care_category,
                   identity_verification, formulation_verification, batch_verification,
                   last_reviewed_at, last_safety_checked_at
            FROM owned_item
@@ -1211,6 +1214,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
         brand: row.brand,
         lifecycleState: row.lifecycle_state as ShelfItem['lifecycleState'],
         shelfCollection: row.shelf_collection as ShelfItem['shelfCollection'],
+        personalCareCategory: row.personal_care_category,
         identityVerification: row.identity_verification,
         formulationVerification: row.formulation_verification,
         batchVerification: row.batch_verification,

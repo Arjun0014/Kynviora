@@ -7438,3 +7438,69 @@ Category grouping is the next slice and it needs no schema: `item_kind` plus
 not to use. After that, image-led tiles - which need a decision about where a product image comes
 from, because the only honest source is a `FRONT_PANEL` evidence asset somebody captured, and a
 stock photograph would be a fabricated fact about a package.
+
+## 2026-09-09 (V3, Shelf) - the groups the schema already had, and the sentence DEC-157 could not offer
+
+The second half of Shelf's V3 slice. V3 asks for "clearer category sections" and draws five groups -
+Medicines, Oral care, Hair care, Sun care, Skin care - and it asks for the Talk bar to be able to
+say _"Show only toothpaste"_, which DEC-157 recorded as deliberately unbuilt:
+
+> "Show only toothpaste" from the V3 brief is **not** here yet, and its absence is deliberate rather
+> than an omission: this shelf has no category filter to drive, so an action offering one would be a
+> sentence that does nothing.
+
+It has one now.
+
+### No new classification, and two groups V3 does not draw
+
+Every group V3 asks for already exists in the schema: `item_kind` plus the six-member
+`personal_care_category` from `0004`. So this adds no column and invents no taxonomy.
+
+`BODY_CLEANSER` and `COSMETIC_TOPICAL` are drawn anyway, although the mock has neither: they are
+values the database accepts, and a group that could not be rendered would be items missing from a
+screen that claims to be a shelf. There is an eighth - products with no category at all - because
+`04` Phase 2.2 requires a record to be creatable with missing fields staying explicitly unknown. It
+is called **Other products** rather than "Uncategorised", which is a database word and reads as a
+fault in somebody's record.
+
+### The order is fixed, and that is the `02` decision in this slice
+
+The obvious ordering for a grouped list is by size. It reads as "this is the important one", and it
+reorders under somebody's feet as they add things. So the order is a fixed taxonomy order, and rows
+keep the server's order **inside** a group for the same reason: sorting there would be this layer
+deciding which of two people's medicines matters more.
+
+### A chip keeps its count while its own filter is on
+
+The counts are of the collection, not of the filtered view - which is the mistake that would have
+been easy to make and hard to see. A count that dropped to the size of what is on screen would say
+"Oral care (2)" over a two-row list while "All" also said 2: three numbers that agree and describe
+nothing.
+
+### The category filter is client-side and the collection is not
+
+Deliberately different. A collection is a fact about the product that the server holds and the
+safety layer will need (DEC-160); a category grouping is a way of reading the page in hand, and
+narrowing it on the server would make the counts on the chips describe a set nobody can see.
+
+### The agent gets one action per group that exists
+
+Derived from the rows rather than listed. A hard-coded action per category would offer _"Show only
+the sun care"_ to somebody who owns no sunscreen - a phrasing the panel prints and the screen
+answers with an empty list, which is `DEV-084`'s shape: a registry offering something nothing can
+perform. The sentence Kynviora says afterwards carries the count, because that is the half that says
+the filter did something.
+
+The collection switch is offered by name too, so a person who can see the two collections can ask
+for either.
+
+### Verification
+
+- `npm run verify` green. **5611 -> 5630 tests, 213 -> 214 files.**
+- New: `shelfCategories` 19.
+
+### Files
+
+`packages/presentation/src/shelfCategories.ts`, `packages/contracts/src/client.ts`,
+`packages/contracts/src/views.ts`, `services/api/src/server.ts`,
+`apps/mobile/src/app/(tabs)/shelf.tsx`.

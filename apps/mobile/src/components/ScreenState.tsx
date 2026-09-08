@@ -90,15 +90,34 @@ export function ScreenState({ state, message, onRetry }: ScreenStateProps) {
 export function ResourceState({
   resource,
   onRetry,
+  emptyMessage,
 }: {
   readonly resource: Resource<unknown>;
   readonly onRetry?: () => void;
+  /**
+   * What to say instead of the generic "nothing to show" when the resource is empty.
+   *
+   * The generic sentence is right for a screen with one list. It is wrong for a screen that shows
+   * one of several - Shelf shows a collection at a time (DEC-160), and "Nothing here yet. There is
+   * nothing to show on this screen at the moment." over Considering says exactly what it says over
+   * My Shelf, while the two absences mean different things: one is a person who has recorded
+   * nothing, the other a person who is not evaluating anything. `18` will not let those read the
+   * same.
+   *
+   * Only consulted on `EMPTY`. A failed request is not an empty one, and `resourceFor` keeps them
+   * apart precisely so a permission problem never renders as an empty shelf.
+   */
+  readonly emptyMessage?: string | null;
 }) {
   if (resource.state === 'READY') return null;
+  const message =
+    resource.state === 'EMPTY' && emptyMessage !== undefined && emptyMessage !== null
+      ? emptyMessage
+      : resource.message;
   return (
     <ScreenState
       state={resource.state}
-      message={resource.message}
+      message={message}
       {...(onRetry === undefined ? {} : { onRetry })}
     />
   );

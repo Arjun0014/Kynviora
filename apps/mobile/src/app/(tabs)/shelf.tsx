@@ -44,6 +44,10 @@ import {
   SHELF_COLLECTION_ORDER,
   manualEntryForm,
   presentShelfCollection,
+  shelfCategoryChips,
+  shelfCategoryGroups,
+  shelfCategoryOf,
+  type ShelfCategory,
   type ScreenState as ScreenStateKind,
   type Theme,
 } from '@kynviora/presentation';
@@ -75,6 +79,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { ResourceState } from '@/components/ScreenState';
 import { StatusChip } from '@/components/StatusChip';
 import { Card } from '@/components/Card';
+import { SectionHeader } from '@/components/SectionHeader';
 import { Typography } from '@/components/Typography';
 import { RecordDose } from '@/features/doses/RecordDose';
 import { AddItem } from '@/features/shelf/AddItem';
@@ -199,6 +204,19 @@ export default function ShelfScreen() {
    */
   const [collection, setCollection] = useState<ShelfCollection>('IN_USE');
 
+  /**
+   * Which category is on screen, or `null` for all of them (DEC-161).
+   *
+   * Client-side, unlike the collection, and the difference is not an oversight. A collection is a
+   * fact about the product that the server holds and the safety layer will need; a category
+   * grouping is a way of reading the page in hand, and narrowing it on the server would make the
+   * counts on the chips describe a set nobody can see.
+   *
+   * `null` on open, and on every change of collection: a chip for a category the other collection
+   * does not have would be a filter narrowing to nothing.
+   */
+  const [category, setCategory] = useState<ShelfCategory | null>(null);
+
   const load = useMemo(
     () =>
       client === null || activeProfileId === null
@@ -230,6 +248,42 @@ export default function ShelfScreen() {
         ? null
         : shelfView(resource.value.items, resource.value.nextCursor, resource.value.mayRecordDoses),
     [resource.value],
+  );
+
+  /**
+   * The categories this collection holds, for the actions the screen offers the agent.
+   *
+   * Derived from the rows rather than from the vocabulary: an action naming a category nobody owns
+   * is a phrasing the panel prints and the screen answers with nothing.
+   */
+  const categoriesOnShelf = useMemo(
+    () => (view === null ? [] : shelfCategoryGroups(view.items)),
+    [view],
+  );
+
+  /**
+   * The chips, and the rows under them.
+   *
+   * The chips are computed over the **whole** collection and the groups over the filtered set, so
+   * a chip keeps its count while its own filter is on - a count that dropped to the size of the
+   * filtered list would tell somebody there is one Oral care product the moment they pressed a
+   * chip saying there are four.
+   */
+  const chips = useMemo(
+    () => (view === null ? [] : shelfCategoryChips(view.items, category)),
+    [view, category],
+  );
+
+  const groups = useMemo(
+    () =>
+      view === null
+        ? []
+        : shelfCategoryGroups(
+            category === null
+              ? view.items
+              : view.items.filter((item) => shelfCategoryOf(item) === category),
+          ),
+    [view, category],
   );
 
   /**
@@ -348,12 +402,36 @@ export default function ShelfScreen() {
    * which is here because it is the one thing V3 moved off the tab bar, and a person who used to
    * find Safety by looking at the row of tabs should be able to ask for it by name.
    *
-   * "Show only toothpaste" from the V3 brief is **not** here yet, and its absence is deliberate
-   * rather than an omission: this shelf has no category filter to drive, so an action offering one
-   * would be a sentence that does nothing. It arrives with the category grouping.
+   * "Show only toothpaste" from the V3 brief is here now, and it is **derived from what is on the
+   * shelf** rather than listed. DEC-157 makes a screen declare the named actions the agent may
+   * invoke, and a hard-coded action per category would offer "Show only the sun care" to somebody
+   * who owns no sunscreen - a phrasing the panel would print and the screen would answer with an
+   * empty list. One action per category actually present, and the collection switch too, because
+   * a person who can see the two collections should be able to ask for either by name.
    */
   const screenActions = useMemo<readonly ScreenActionBinding[]>(
     () => [
+      ...SHELF_COLLECTION_ORDER.map((value) => ({
+        id: `shelf.collection.${value}`,
+        label: `Show ${presentShelfCollection(value).label}`,
+        says: `Showing ${presentShelfCollection(value).label}.`,
+        run: () => {
+          setCollection(value);
+          setCategory(null);
+        },
+      })),
+      // Only the categories this collection actually holds. `categoriesOnShelf` is the chip list
+      // without its "All" entry, which is the same set for the same reason.
+      ...categoriesOnShelf.map((entry) => ({
+        id: `shelf.category.${entry.category}`,
+        label: `Show only ${entry.label.toLowerCase()}`,
+        // The count is in the sentence because it is the thing that says the filter did something.
+        // It is a count of what is on screen, not a score and not a ranking (`02`).
+        says: `Showing ${String(entry.count)} in ${entry.label.toLowerCase()}.`,
+        run: () => {
+          setCategory(entry.category);
+        },
+      })),
       {
         id: 'shelf.needsVerification',
         label: 'Show what is not yet confirmed',
@@ -376,6 +454,7 @@ export default function ShelfScreen() {
         says: 'Showing everything on the shelf.',
         run: () => {
           setAttention(null);
+          setCategory(null);
         },
       },
       {
@@ -387,7 +466,7 @@ export default function ShelfScreen() {
         },
       },
     ],
-    [router],
+    [router, categoriesOnShelf],
   );
 
   useDeclareScreen(
@@ -888,7 +967,15 @@ export default function ShelfScreen() {
       refreshing={refreshing}
       footer={<TalkBar />}
     >
-      <ResourceState resource={resource} onRetry={onRetry} />
+      {/* The empty sentence is the collection's own (DEC-160). Passed here rather than drawn
+          below the switcher, because `resourceFor` sets `value` to `null` on EMPTY - so a note
+          conditioned on the view would never render at all, which is how the generic sentence
+          survived the first draft of this screen. */}
+      <ResourceState
+        resource={resource}
+        onRetry={onRetry}
+        emptyMessage={attention === null ? presentShelfCollection(collection).emptyNote : null}
+      />
 
       {/*
         The Coverage Center (DEC-151).
@@ -957,6 +1044,7 @@ export default function ShelfScreen() {
               }
               onPress={() => {
                 setCollection(value);
+                setCategory(null);
               }}
               style={[styles.filter, active ? styles.filterOn : null]}
             >
@@ -1009,30 +1097,57 @@ export default function ShelfScreen() {
         </Text>
       )}
 
-      {/* An empty collection says which one it is. "Nothing here yet" over both would describe a
-          person who has recorded nothing and a person who is evaluating nothing as the same
-          situation - and only one of those is a shelf somebody needs to do something about. */}
-      {view !== null && view.items.length === 0 && attention === null ? (
-        <Text style={styles.note}>{presentShelfCollection(collection).emptyNote}</Text>
+      {/* The categories in this collection, with a count each and the way back to all of them.
+          Drawn only where there is more than one to choose between: a single chip beside an "All"
+          chip is two controls that do the same thing. */}
+      {chips.length > 2 ? (
+        <View style={styles.filters}>
+          {chips.map((chip) => (
+            <Pressable
+              key={chip.category ?? 'ALL'}
+              accessibilityRole="button"
+              accessibilityState={{ selected: chip.selected }}
+              accessibilityLabel={chip.accessibilityLabel}
+              onPress={() => {
+                setCategory(chip.category);
+              }}
+              style={[styles.filter, chip.selected ? styles.filterOn : null]}
+            >
+              {/* The count is drawn beside the label rather than replacing it, and the state is a
+                  word as well as a tint (`18`). */}
+              <Text style={[styles.filterLabel, chip.selected ? styles.filterLabelOn : null]}>
+                {chip.selected ? `${chip.label} - showing` : chip.label} ({chip.count})
+              </Text>
+            </Pressable>
+          ))}
+        </View>
       ) : null}
 
+      {/* Grouped in a fixed taxonomy order, never by size. Ordering groups by how many things are
+          in them reads as "this is the important one" and reorders under somebody's feet as they
+          add things - which `02` forbids and `18` would make unreadable. */}
       {view === null
         ? null
-        : view.items.map((item) => (
-            <ShelfRow
-              key={item.id}
-              item={item}
-              mayRecordDoses={view.mayRecordDoses}
-              onOpen={() => {
-                setDetailFor(item);
-              }}
-              onRecord={() => {
-                setRecording(item);
-              }}
-              onSchedule={() => {
-                setScheduling(item);
-              }}
-            />
+        : groups.map((group) => (
+            <View key={group.category}>
+              <SectionHeader title={`${group.label} (${String(group.count)})`} />
+              {group.items.map((item) => (
+                <ShelfRow
+                  key={item.id}
+                  item={item}
+                  mayRecordDoses={view.mayRecordDoses}
+                  onOpen={() => {
+                    setDetailFor(item);
+                  }}
+                  onRecord={() => {
+                    setRecording(item);
+                  }}
+                  onSchedule={() => {
+                    setScheduling(item);
+                  }}
+                />
+              ))}
+            </View>
           ))}
 
       {view !== null && view.hasMore ? (

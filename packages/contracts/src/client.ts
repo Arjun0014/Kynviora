@@ -118,6 +118,15 @@ export interface ShelfItem {
    * older server sends nothing, which is what every row meant before the column existed.
    */
   readonly shelfCollection: 'IN_USE' | 'CONSIDERING';
+  /**
+   * What kind of personal-care product it is, or `null`.
+   *
+   * On the list because the shelf groups by it (DEC-161). `null` on every medicine by construction
+   * - `owned_item_category_matches_kind` refuses a category on one - and `null` is also an
+   * ordinary answer for a product somebody recorded without saying what it was, which `04` Phase
+   * 2.2 explicitly allows.
+   */
+  readonly personalCareCategory: string | null;
   /** Three separate axes. `02` forbids collapsing them into one "verified" badge. */
   readonly identityVerification: string;
   readonly formulationVerification: string;

@@ -9,14 +9,14 @@ Last updated: 2026-09-09
 
 ## Current position
 
-|                    |                                                                           |
-| ------------------ | ------------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; **V3 implementation under way** (DEC-151)               |
-| **Current phase**  | V3: Health, Talk bar, You and Care are in; Shelf's V3 is next             |
-| **Last completed** | The sheets survey finished: **40/40 PASS on hardware**, three defects     |
-| **Branch**         | `master`                                                                  |
-| **Latest commit**  | `feat(shelf): two collections, and the CHECK that makes one of them safe` |
-| **Baseline tag**   | `baseline-spec-only`                                                      |
+|                    |                                                                          |
+| ------------------ | ------------------------------------------------------------------------ |
+| **Current stage**  | Stage 4 complete; **V3 implementation under way** (DEC-151)              |
+| **Current phase**  | V3: Health, Talk bar, You and Care are in; Shelf's V3 is next            |
+| **Last completed** | The sheets survey finished: **40/40 PASS on hardware**, three defects    |
+| **Branch**         | `master`                                                                 |
+| **Latest commit**  | `feat(shelf): category groups, and the sentence DEC-157 could not offer` |
+| **Baseline tag**   | `baseline-spec-only`                                                     |
 
 ## Handoff - 2026-09-09, after the first V3 session
 
@@ -78,9 +78,11 @@ Nothing implemented is a mock: every screen here reads real routes and renders r
 **not** been implemented at all:
 
 - Today's reordering (needs input / reports / jobs / since you last looked).
-- Shelf's image-led tiles, category grouping, selection mode and Compare. **Considering is in**
-  (`0033`, DEC-160): two collections, a switcher, a move with the same version precondition as any
-  other change, and a CHECK that keeps medicines out of it.
+- Shelf's image-led tiles, selection mode and Compare. **Considering and the category grouping are
+  in** (`0033`, DEC-160, DEC-161): two collections with a switcher, a move with the same version
+  precondition as any other change and a CHECK that keeps medicines out of Considering; eight
+  category groups in a fixed taxonomy order with chips and counts; and one agent action per
+  category actually on the shelf, which is the "Show only toothpaste" DEC-157 recorded as unbuilt.
 - Saved comparison reports.
 - The permission editor's per-row matrix, and the care activity timeline.
 - The caregiver relationship label ("Anita · Daughter") - **needs a column that does not exist**,
@@ -154,10 +156,11 @@ end-to-end - schema, RLS, retention, export, API, contracts, screen - and has no
 it: a profile with no measurements gets a sentence and no chart, and Apple Health reads
 `Designed, not built`.
 
-**The sheets half of the survey has been run against the current build: 40/40 PASS, 2026-09-09.**
-The destinations and TalkBack halves have not, and the 7/7 safety run has not: both were last taken
-against a build with a destination this one does not have. Those harnesses are re-pointed and are
-the next device work after the open deviations.
+**Both large halves of the survey have been run against the current build on 2026-09-09: sheets
+40/40 PASS and destinations 30/30 PASS.** The destinations run was taken after Shelf gained its
+collection switcher, its category chips and its grouped sections, so it measures those. TalkBack has
+not been re-run, and neither has the 7/7 safety run: both were last taken against a build with a
+destination this one does not have. Those harnesses are re-pointed and are the next device work.
 
 **`npm run verify` is a gate again** (`DEV-096`, closed 2026-09-08, DEC-149). It had been failing a
 _transform_ at random - one to four suites, about one run in two at twelve workers, green at four
@@ -226,8 +229,8 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5611 tests passing**, 0 failing, across 213 files. **33 migrations.** `npm run verify` green
-  at default workers on an idle machine with the emulator shut down, 2026-09-09 04:18.
+- **5635 tests passing**, 0 failing, across 215 files. **33 migrations.** `npm run verify` green
+  at default workers on an idle machine with the emulator shut down, 2026-09-09 04:39.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is

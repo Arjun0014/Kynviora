@@ -6352,3 +6352,61 @@ to a rule rather than to a capability: a greyed-out "Move to Considering" on a m
 somebody the app has a place for it that it is not letting them use. The way _out_ of Considering is
 offered whatever the kind rule says, because a rule that constrains what may go in must not leave
 anything stuck - the same shape as `12`'s requirement that a failure state be resolvable.
+
+---
+
+## DEC-161 - The shelf groups by the taxonomy it already has, in a fixed order, and the agent gets one action per group that exists
+
+**Date.** 2026-09-09
+**Status.** Accepted. Extends DEC-160 and DEC-157.
+**Context.** V3 asks for "clearer category sections" on Shelf and draws five groups: Medicines, Oral
+care, Hair care, Sun care, Skin care. It also asks for the Talk bar to be able to say
+_"Show only toothpaste"_ - which DEC-157 recorded as deliberately unbuilt, because the shelf had no
+category filter to drive and an action offering one would have been a sentence that does nothing.
+
+**Options.** (a) A new classification column. (b) Group by `item_kind` alone. (c) Group by
+`item_kind` plus the `personal_care_category` that `0004` already has.
+
+**Decision.** (c). No column, no new vocabulary. Every group V3 draws already exists in the schema.
+
+**The two categories V3's mock does not draw are drawn anyway.** `BODY_CLEANSER` and
+`COSMETIC_TOPICAL` are values the database accepts, and a group that could not be rendered would be
+items missing from a screen that claims to be a shelf. There is an eighth group as well - products
+whose category is `null` - because `04` Phase 2.2 requires a record to be creatable with missing
+fields staying explicitly unknown, so a product with no category is an ordinary record rather than a
+defect. It is called **Other products**: "Uncategorised" is a database word and reads as a fault in
+somebody's record.
+
+**The order is fixed and it is not a ranking.** `02` forbids ranking, and the obvious ordering for a
+grouped list is by size - which reads as "this is the important one" and, worse, reorders under
+somebody's feet as they add things. Medicines first, then V3's own order, then the two it does not
+draw, then the products with no category. Rows keep the server's order **inside** a group for the
+same reason: sorting there would be this layer deciding which of two people's medicines matters
+more.
+
+**An empty group is not drawn, and that is not an absence `18` needs labelled.** Nothing is missing;
+the person owns no sunscreen. What must stay legible is a _filtered_ list, which is why the chip row
+always offers the way back to everything, including while a filter is on.
+
+**A chip keeps its count while its own filter is on.** The counts are of the collection, not of the
+filtered view. A count that dropped to the size of what is on screen would say "Oral care (2)" over
+a two-row list while "All" also said 2 - three numbers that agree and describe nothing.
+
+**The category filter is client-side and the collection is not.** The difference is not an
+oversight. A collection is a fact about the product that the server holds and the safety layer will
+need (DEC-160); a category grouping is a way of reading the page in hand, and narrowing it on the
+server would make the counts on the chips describe a set nobody can see.
+
+**The agent's actions are derived from what is on the shelf.** One per category actually present,
+plus one per collection. A hard-coded action per category would offer _"Show only the sun care"_ to
+somebody who owns no sunscreen - a phrasing the panel prints and the screen answers with an empty
+list, which is the same defect `DEV-084` was: a registry offering something nothing can perform.
+The sentence Kynviora says afterwards carries the count, because that is the half that says the
+filter did something.
+
+**A category is never a verdict.** `08` and `02`: "Oral care" says what a thing is, not what
+Kynviora thinks of it. `shelfCategories.test.ts` asserts that over every string the module can
+produce rather than over the ones that looked risky, and asserts separately that every kind and
+category the domain has reaches a group - the failure that would otherwise be silent is a category
+added to `03`'s vocabulary and not to this one, which would draw those products under "Other
+products" for ever.
