@@ -6781,3 +6781,123 @@ in March and a weight in September nobody measured whether it did.
 `apps/mobile/src/app/(tabs)/health.tsx`, `apps/mobile/src/app/(tabs)/_layout.tsx`,
 `apps/mobile/src/features/health/HealthPieces.tsx`, `scripts/checks/mobileGlobals.ts`,
 `scripts/device/verifySafetyScreen.ts`.
+
+## 2026-09-08 (V3, second) - Eight states, and the sentence a screen offers the agent
+
+The persistent Talk to Kynviora bar, and the contextual control V3 wants it to carry. Both are
+real: the bar is on all five destinations and reports what the agent is doing, and asking a screen
+for something it declared actually changes that screen - today, with no model and no recogniser.
+
+### The bar is stateful, and every state is a word
+
+V2's control was a button that opened an overlay. V3 keeps it a full-width bar and makes it report,
+and the design language states the rule that makes it a module rather than a style: _the bar's label
+is the state, so nothing rests on the animation, and the sub-line says what happens next rather than
+what is happening now_.
+
+Eight states. Three of them - Done, Could not do that, Needs more information - are not states at
+all: they are what the last turn **came to**, and every one of them is `IDLE` by the time it is
+true. So `VoiceSession` gained `lastOutcome`, and `talkBarStateFor` consults it **only in `IDLE`**
+(DEC-156).
+
+That last rule is the whole design and `SPEAKING` is what makes it concrete. A turn there is still
+in progress, the sentence is still being read out, and putting "Done" on the bar announces an
+outcome the person has not been given yet. A test asserts that no state which is not `IDLE` can
+produce `COULD_NOT`.
+
+The bar never turns red. `action` is a reviewed concern with a next step; a bar going red because a
+sentence was not understood would be dramatising a refusal, which `02` forbids. `Could not do that`
+is neutral and its sub-line says where the control is rather than apologising.
+
+And the stop control is offered while listening and understanding and **not** while working: a
+confirmed write is already in flight, and a stop that cannot stop it is a control that lies about
+what it does.
+
+### Where it is drawn, and the option that was rejected
+
+`Screen` gained a `footer` slot, outside the scroll view, above the navigation. That is what
+"persistent" means here and it is the thing the per-screen control it replaced could not do - the
+old one scrolled away with the first card.
+
+The navigator was the other candidate. Rejected because expo-router's `href: null` is what keeps
+the Coverage Center reachable and out of the five slots (DEC-151), and a hand-rolled `tabBar` would
+have had to reimplement that filtering along with the safe-area handling and accessibility roles
+that come with the real one. A slot on the frame gets the same placement and reimplements nothing -
+and it expresses "no bar here" by a caller passing no footer, which is exactly what camera capture
+and a critical confirmation need.
+
+### A screen offers the agent named actions
+
+"Show only toothpaste" is not a domain tool. It is a change to a screen's own state, and there are
+three ways to let an agent make one:
+
+1. Give it the screen's data and a general "set state" tool. That is DEC-132 undone - arbitrary
+   reach into any component, and handing over the record.
+2. Hard-code every screen's filters into the agent. Then every new filter is a change in two
+   packages, and a filter that was removed is an action the agent still offers.
+3. Have each screen **declare** a small named set; the agent may invoke only those names; the
+   screen's own handler performs it.
+
+The third, which is the tool registry's own shape one level up: a closed set, declared by the side
+that can perform the work, resolved as an own property so a proposed id of `constructor` cannot
+reach through the prototype, and refused before any handler runs when it was never offered
+(DEC-157).
+
+### The snapshot is identifiers, and the footer is why
+
+`ScreenContext` is `{ route, profileId, focusId, selectedCount, actions }` and nothing else. No
+`title`, no `displayName`, no `text`, no `items` - those are the fields a medicine name or a lab
+value would arrive in - and a test asserts the object's own key list rather than trusting the
+comment above it.
+
+`selectedCount` is a count and not a list on purpose: a list of identifiers is still a list, and a
+snapshot carrying one is a channel for "which seven things is this person looking at".
+
+The design language promises the panel footer shows _the exact context snapshot that left the
+phone... because that is the whole of what was sent_. That is only honest if the footer renders the
+same object a request would carry, so `describeScreenContext` walks the snapshot field by field and
+its test walks the keys - a field added to one and not the other fails.
+
+### What works with no model at all
+
+`BLK-012` stands. There is no recogniser, no model and no voice, and nothing here pretends
+otherwise.
+
+What the panel does is show the phrasings the current route declared, and a sentence matching one
+of them **exactly** runs it. That is not understanding and is not described as any - the phrasings
+are on screen precisely so a person is choosing from what works. Contextual control is therefore
+real today: Health's four layers and Shelf's two filters, its way out of them, and the Coverage
+Center are all driveable from the bar, and each reports the sentence **the screen** composed rather
+than one the agent wrote.
+
+Shelf deliberately does **not** offer "Show only toothpaste" yet, and the absence is recorded rather
+than silent: this shelf has no category filter to drive, so an action offering one would be a
+sentence that does nothing. It arrives with the category grouping.
+
+### The stub gained an `Animated`, and said what it cannot measure
+
+The React Native stub had no `Animated`, so the bar could not render under test at all. The added
+one holds a number, renders an ordinary `View`, and resolves timings immediately - and its docstring
+says the thing that keeps it honest: it can measure nothing about how an animation looks, and the
+reason that is acceptable here is that a component putting meaning in an animation would be one
+whose _text_ is missing, and every one of these tests reads text. If the pulse were the only thing
+distinguishing Listening from Working, the stub would render two identical bars and the test would
+fail.
+
+`@kynviora/agent` also joined `apps/mobile`'s dependencies, which it had been importing without
+declaring.
+
+### Verification
+
+- `npm run verify` green at default workers.
+- **5479 -> 5517 tests, 205 -> 208 files.**
+- New: `talkBar` 13, `screenContext` 12, `TalkBar.test.tsx` 9.
+- No device run yet.
+
+### Files
+
+`packages/agent/src/talkBar.ts`, `packages/agent/src/screenContext.ts`,
+`packages/agent/src/session.ts`, `apps/mobile/src/voice/TalkBar.tsx`,
+`apps/mobile/src/voice/ScreenContextProvider.tsx`, `apps/mobile/src/voice/VoiceProvider.tsx`,
+`apps/mobile/src/components/Screen.tsx`, `apps/mobile/test/reactNativeStub.tsx`,
+the five destinations and the Coverage Center.

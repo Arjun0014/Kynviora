@@ -55,7 +55,8 @@ import { ResourceState } from '@/components/ScreenState';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Typography } from '@/components/Typography';
 import { useThemedStyles } from '@/theme/ThemeProvider';
-import { VoiceBar } from '@/voice/VoiceHost';
+import { TalkBar } from '@/voice/TalkBar';
+import { useDeclareScreen, type ScreenActionBinding } from '@/voice/ScreenContextProvider';
 import {
   ChangeSection,
   HealthLayerPicker,
@@ -204,6 +205,68 @@ export default function HealthScreen() {
     [comparison.value],
   );
 
+  /**
+   * What Kynviora can do on this screen (DEC-157).
+   *
+   * The four layers, and nothing else. Each action is a change to this screen's own state and is
+   * performed by this screen's own handler; the agent learns the names and the labels and never
+   * the contents. "Open my latest lab report" is deliberately **not** here - it would need a
+   * record id, which is data, and the way to reach a report is the row that names it.
+   *
+   * Memoised, because `useDeclareScreen` re-declares whenever this object changes and a fresh
+   * array every render is the `exhaustive-deps` failure `DEV-044` and `DEV-045` were.
+   */
+  const screenActions = useMemo<readonly ScreenActionBinding[]>(
+    () => [
+      {
+        id: 'health.profile',
+        label: 'Show the health profile',
+        says: 'Showing the health profile.',
+        run: () => {
+          setLayer('PROFILE');
+        },
+      },
+      {
+        id: 'health.records',
+        label: 'Show my records',
+        says: 'Showing records.',
+        run: () => {
+          setLayer('RECORDS');
+        },
+      },
+      {
+        id: 'health.trends',
+        label: 'Show my measurements',
+        says: 'Showing measurements.',
+        run: () => {
+          setLayer('TRENDS');
+        },
+      },
+      {
+        id: 'health.history',
+        label: 'Show the health timeline',
+        says: 'Showing the health timeline.',
+        run: () => {
+          setLayer('HISTORY');
+        },
+      },
+    ],
+    [],
+  );
+
+  useDeclareScreen(
+    useMemo(
+      () => ({
+        route: 'HEALTH' as const,
+        profileId: activeProfileId,
+        // The record being read, as an identifier. Never its title.
+        focusId: openRecordId,
+        actions: screenActions,
+      }),
+      [activeProfileId, openRecordId, screenActions],
+    ),
+  );
+
   const closeRecord = useCallback(() => {
     setOpenRecordId(null);
     setComparing(false);
@@ -342,7 +405,6 @@ export default function HealthScreen() {
             </>
           )}
         </Screen>
-        <VoiceBar />
       </>
     );
   }
@@ -358,6 +420,7 @@ export default function HealthScreen() {
         intro="What has been recorded about this person, where it came from, and what changed."
         onRefresh={reloadRecords}
         refreshing={refreshing}
+        footer={<TalkBar />}
       >
         {/*
           First, at the same rank as the content, in every state (DEC-138). A Health screen with
@@ -501,7 +564,6 @@ export default function HealthScreen() {
           </View>
         ) : null}
       </Screen>
-      <VoiceBar />
     </>
   );
 }

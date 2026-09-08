@@ -9,14 +9,14 @@ Last updated: 2026-09-08
 
 ## Current position
 
-|                    |                                                                             |
-| ------------------ | --------------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; **V3 implementation started** (DEC-151)                   |
-| **Current phase**  | V3: the colour language and the Health record are in; Talk bar next         |
-| **Last completed** | Health became a destination and a record, 127 tests                         |
-| **Branch**         | `master`                                                                    |
-| **Latest commit**  | `feat(health): the record V3 asks for, and the verdict it must never write` |
-| **Baseline tag**   | `baseline-spec-only`                                                        |
+|                    |                                                                         |
+| ------------------ | ----------------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; **V3 implementation started** (DEC-151)               |
+| **Current phase**  | V3: the colour language and the Health record are in; Talk bar next     |
+| **Last completed** | Health became a destination and a record, 127 tests                     |
+| **Branch**         | `master`                                                                |
+| **Latest commit**  | `feat(voice): eight states, and the sentence a screen offers the agent` |
+| **Baseline tag**   | `baseline-spec-only`                                                    |
 
 **The Kynviora V3 design is approved and being implemented.** The handoff bundle is in the
 repository at `docs/kynviora-premium-mobile-experience/`, excluded from both gates because it is
@@ -36,8 +36,15 @@ evidence rather than source (DEC-152). Three structural decisions have been reco
   instead is `referenceComparison`, which answers where a number sits relative to the interval _the
   report printed_ and is named for exactly that.
 
-**What is V3 and not yet built**: the persistent Talk bar, Care V3, You V3, Today's reordering,
-Shelf's image-led tiles and Compare, and the Agent Jobs surface. The Health screen is real
+- **DEC-156 / DEC-157.** The Talk bar is persistent, reports eight states each of which is a word,
+  and never turns red. A screen **declares** the named actions the agent may invoke, and the
+  snapshot that would leave the phone is identifiers only - no field a medicine name could arrive
+  in, asserted by walking the object's own keys. With no model wired (`BLK-012`), a phrasing the
+  screen offered and a person said back exactly still runs it, which makes contextual control real
+  today without pretending anything listens.
+
+**What is V3 and not yet built**: Care V3, You V3, Today's reordering, Shelf's image-led tiles and
+Compare, and the Agent Jobs surface. The Health screen is real
 end-to-end - schema, RLS, retention, export, API, contracts, screen - and has no fabricated data in
 it: a profile with no measurements gets a sentence and no chart, and Apple Health reads
 `Designed, not built`.
@@ -113,7 +120,7 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5479 tests passing**, 0 failing, across 205 files. 32 migrations.
+- **5517 tests passing**, 0 failing, across 208 files. 32 migrations.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is

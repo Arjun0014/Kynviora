@@ -102,7 +102,7 @@ import { RegulatoryLens } from '@/features/lens/RegulatoryLens';
 import { AlertDetail } from '@/features/safety/AlertDetail';
 import { SafetyReceipt } from '@/features/safety/SafetyReceipt';
 import { useThemedStyles } from '@/theme/ThemeProvider';
-import { VoiceBar } from '@/voice/VoiceHost';
+import { TalkBar } from '@/voice/TalkBar';
 import { haptic } from '@/platform/haptics';
 
 const EMPTY = { lines: [], totalItems: 0 } as const;
@@ -384,9 +384,8 @@ export default function SafetyScreen() {
       intro="Every item on this shelf, and what Kynviora can say about it today."
       onRefresh={onRetry}
       refreshing={refreshing}
+      footer={<TalkBar />}
     >
-      <VoiceBar />
-
       <ResourceState resource={resource} onRetry={onRetry} />
 
       {/* The coverage statement, first and at the same rank as the results (DEC-138). Drawn in

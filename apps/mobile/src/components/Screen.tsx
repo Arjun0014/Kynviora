@@ -19,6 +19,16 @@
  * the navigator - the screen's first line was drawn under the status bar. The inset belongs to
  * whatever is outermost, and that is now this.
  *
+ * WHAT `footer` IS FOR
+ * The persistent Talk to Kynviora bar, and nothing else so far. It is rendered **outside** the
+ * scroll view, so it stays where it is while the content moves under it - which is the whole of
+ * what "persistent" means here, and what the per-screen control it replaced could not do.
+ *
+ * A slot rather than the bar itself, for two reasons. `Screen` is a plain component with no
+ * dependency on the voice provider, and half its tests render it without one. And the bar has to
+ * be *absent* on some screens - camera capture, a critical confirmation - which a slot expresses
+ * by the caller not passing one, and a hard-wired bar would need a prop to switch off.
+ *
  * WHAT `eyebrow` IS FOR
  * `06` requires any screen showing medicine, product, alert or care information to make the
  * current person clear. It sits **above** the heading rather than below it, because that is where
@@ -44,6 +54,8 @@ export interface ScreenProps {
   readonly onRefresh?: () => void;
   readonly refreshing?: boolean;
   readonly contentStyle?: ViewStyle;
+  /** Pinned below the scroll view, above the navigation. The Talk bar, on the screens that have one. */
+  readonly footer?: ReactNode;
 }
 
 export function Screen({
@@ -54,6 +66,7 @@ export function Screen({
   onRefresh,
   refreshing = false,
   contentStyle,
+  footer,
 }: ScreenProps) {
   const styles = useThemedStyles(makeStyles);
   const named = eyebrow !== undefined && eyebrow !== null && eyebrow.trim() !== '';
@@ -89,6 +102,7 @@ export function Screen({
         </View>
         {children}
       </ScrollView>
+      {footer === undefined ? null : <View style={styles.footer}>{footer}</View>}
     </SafeAreaView>
   );
 }
@@ -99,4 +113,7 @@ const makeStyles = (theme: Theme) =>
     content: { padding: SPACING.lg, gap: SPACING.lg, paddingBottom: SPACING.xxl },
     // The heading block is one idea, so its parts sit closer to each other than to what follows.
     header: { gap: SPACING.xxs, marginBottom: SPACING.xs },
+    // No padding of its own: what goes here brings its own, and a footer that had to fight the
+    // frame's would be one whose edges depend on which screen it is on.
+    footer: { borderTopWidth: 1, borderTopColor: theme.line.hairline },
   });

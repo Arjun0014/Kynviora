@@ -61,7 +61,7 @@ import { InviteCaregiver } from '@/features/caregivers/InviteCaregiver';
 import { RemoveCaregiverAccess } from '@/features/caregivers/RemoveCaregiverAccess';
 import { newIdempotencyKey } from '@/platform/ids';
 import { Screen } from '@/components/Screen';
-import { VoiceBar } from '@/voice/VoiceHost';
+import { TalkBar } from '@/voice/TalkBar';
 
 /** Matches `DEFAULT_INVITATION_TTL_DAYS` on the server. Shown, not sent. */
 const INVITATION_TTL_DAYS = 7;
@@ -360,10 +360,10 @@ export default function CareScreen() {
       eyebrow={activeProfile?.displayName ?? null}
       intro="Who is in this household, who may see what, and what you can share."
       onRefresh={onRetry}
+      footer={<TalkBar />}
     >
       {/* Only on the list, not over a sheet. A conversation started from inside a half-filled
           invitation form would lose the form; Voice Mode has no way to put it back. */}
-      <VoiceBar />
 
       <CaregiverAccessList
         // EMPTY and PARTIAL both render the list: EMPTY so it can say "no one else has access to

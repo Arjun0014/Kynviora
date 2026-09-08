@@ -23,3 +23,5 @@ export * from './ports.js';
 export * from './dispatcher.js';
 export * from './scriptedAgent.js';
 export * from './summary.js';
+export * from './talkBar.js';
+export * from './screenContext.js';

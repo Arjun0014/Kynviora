@@ -41,6 +41,7 @@ import { PendingSyncProvider } from '@/sync/PendingSyncProvider';
 import { PendingSenders } from '@/sync/PendingSenders';
 import { VoiceProvider } from '@/voice/VoiceProvider';
 import { VoiceHost } from '@/voice/VoiceHost';
+import { ScreenContextProvider } from '@/voice/ScreenContextProvider';
 import { installHapticEngine } from '@/platform/haptics';
 import { createVibrationHapticEngine } from '@/platform/vibrationHaptics';
 
@@ -108,13 +109,20 @@ export default function RootLayout() {
                                 navigator, because Voice Mode is drawn over the whole app rather
                                 than inside one destination - `06` fixes the five and will not
                                 give one up (DEC-136). */}
-                            <VoiceProvider>
-                              <VoiceHost>
-                                <Stack screenOptions={{ headerShown: false }}>
-                                  <Stack.Screen name="(tabs)" />
-                                </Stack>
-                              </VoiceHost>
-                            </VoiceProvider>
+                            {/* Outside the voice provider, because the provider reads it: a
+                                screen declares what it can do, and the agent is told only that.
+                                Inside the gate for the same reason the conversation is - there is
+                                no screen worth describing until somebody has signed in
+                                (DEC-157). */}
+                            <ScreenContextProvider>
+                              <VoiceProvider>
+                                <VoiceHost>
+                                  <Stack screenOptions={{ headerShown: false }}>
+                                    <Stack.Screen name="(tabs)" />
+                                  </Stack>
+                                </VoiceHost>
+                              </VoiceProvider>
+                            </ScreenContextProvider>
                           </AuthGate>
                         </ReminderProvider>
                       </PendingSyncProvider>

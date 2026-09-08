@@ -55,7 +55,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { Card } from '@/components/Card';
 import { SectionHeader } from '@/components/SectionHeader';
 import { useThemedStyles } from '@/theme/ThemeProvider';
-import { VoiceBar } from '@/voice/VoiceHost';
+import { TalkBar } from '@/voice/TalkBar';
 
 export default function TodayScreen() {
   const styles = useThemedStyles(makeStyles);
@@ -161,9 +161,8 @@ export default function TodayScreen() {
         : { intro: 'What would make what Kynviora can say about your shelf more exact.' })}
       onRefresh={onRetry}
       refreshing={refreshing}
+      footer={<TalkBar />}
     >
-      <VoiceBar />
-
       {preparingPack ? (
         <VisitPackFlow
           onClose={() => {

@@ -6027,3 +6027,126 @@ no `URGENT`, no `SEVERE`, and - because `02` forbids an all-clear outright - no 
 **Sources.** `Kynviora V3 Design Language.dc.html` §04, `KYNVIORA_V3_DESIGN_BRIEF.md` §8 and §22,
 `09`, `10`, `02`, DEC-153, `packages/domain/src/healthRecord.ts`,
 `services/api/src/healthRecords.ts`.
+
+---
+
+## DEC-156 - The Talk bar shows eight states, every one of them a word, and three of them are outcomes rather than states
+
+**Date.** 2026-09-08
+**Status.** Accepted.
+**Context.** V3 replaces V2's button-that-opens-an-overlay with a persistent bar above the
+navigation, and states the rule that makes it a module rather than a style: _the bar's label is the
+state, so nothing rests on the animation, and the sub-line says what happens next rather than what
+is happening now_. Eight states are named: Talk to Kynviora, Listening, Understanding, Working,
+Needs your confirmation, Done, Could not do that, Needs more information.
+
+`VoiceState` has six members and three of the eight are not among them. Done, Could not do that and
+Needs more information describe what the last turn **came to**, and every one of them is `IDLE` by
+the time it is true.
+
+**Options.** (a) Add three members to `VoiceState`. (b) Derive the bar from the transcript's last
+line. (c) Add a `lastOutcome` to the session and make the bar a function of state **and** outcome.
+
+**Decision.** (c). `TURN_OUTCOMES` is `COMPLETED | REFUSED | NEEDS_MORE`, `VoiceSession` carries
+`lastOutcome`, the `DONE` event may name one, and `talkBarStateFor` consults the outcome **only in
+`IDLE`**.
+
+**Rationale.** (a) breaks the state machine's meaning. `VoiceState` answers "what is happening", and
+"nothing is happening, and the last thing that did failed" is not a member of that question - a
+sixth state called `REFUSED` would have no transitions out of it that `IDLE` does not already have.
+
+(b) is the tempting one and is wrong in a way that only shows up later: the last transcript line is
+_text_, so classifying it means matching on sentences, and the classification would drift the first
+time somebody rephrased a refusal.
+
+**The `IDLE`-only rule is the whole of the design.** Every turn passes through `IDLE` at its end, so
+an outcome read in any other state is the **previous** turn reported over the top of the current
+one. `SPEAKING` is the case that makes it concrete: a turn is still in progress, the sentence is
+still being read out, and putting "Done" on the bar there announces an outcome before the person has
+been given it. A test asserts no non-`IDLE` state can produce `COULD_NOT`.
+
+**`NEEDS_MORE` is separate from `REFUSED` for one reason.** "I cannot do that" ends the exchange;
+"which medicine did you mean" continues it. A bar that said the first when it meant the second would
+stop somebody who was one word away from being understood.
+
+**What the bar refuses to do.**
+
+- **No `action` tone, ever.** A bar turning red because a sentence was not understood would be
+  dramatising a refusal, which `02` forbids. `COULD_NOT` is `neutral`, and its sub-line says where
+  the control is rather than apologising.
+- **No stop while working.** A confirmed write is already in flight and a stop that cannot stop it
+  is a control that lies about what it does. `stoppable` is `LISTENING` and `UNDERSTANDING` only.
+- **Nothing rests on the pulse.** `live` drives an opacity and nothing else; the waveform's four
+  bars are fixed heights so the shape is identical with motion off, and reduce-motion collapses the
+  animation to zero rather than slowing it.
+
+**Where it is drawn, and where it is not.** In `Screen`'s new `footer` slot - outside the scroll
+view, above the navigation. The navigator was the other candidate and was rejected: expo-router's
+`href: null` is what keeps the Coverage Center reachable and out of the five slots (DEC-151), and a
+hand-rolled `tabBar` would have had to reimplement that filtering along with the safe-area handling
+and accessibility roles that come with the real one. A slot on the frame gets the same placement and
+reimplements nothing - and it also expresses "no bar here" by a caller passing no footer, which is
+what camera capture and a critical confirmation need.
+
+**Sources.** `Kynviora V3 Design Language.dc.html` §02, `KYNVIORA_V3_DESIGN_BRIEF.md` §3, `18`,
+`02`, DEC-130, DEC-136, `packages/agent/src/talkBar.ts`, `apps/mobile/src/voice/TalkBar.tsx`.
+
+---
+
+## DEC-157 - A screen offers the agent named actions, and the snapshot that leaves the phone carries no content
+
+**Date.** 2026-09-08
+**Status.** Accepted.
+**Context.** V3 wants the agent to work in context - _"Show only toothpaste"_, _"Show my blood
+pressure over the last six months"_, _"Take me to Anita's permissions"_ - and says the visible screen
+should respond in place. None of those is a domain tool: they are changes to a screen's own state.
+
+DEC-132 says the agent gets tools and never data, and `AgentTurnRequest` has no field for a session,
+a token, a profile or any record content. Contextual control must not become that field under
+another name.
+
+**Options.** (a) Give the agent the screen's data and a general "set state" tool. (b) Hard-code
+every screen's filters into the agent. (c) Have each screen **declare** a small set of named actions;
+the agent may invoke only those names; the screen's own handler performs it.
+
+**Decision.** (c), with the context snapshot deliberately made of identifiers.
+
+`ScreenContext` is `{ route, profileId, focusId, selectedCount, actions }` and nothing else. Every
+field is an identifier, a count, or a member of a closed set. There is no `title`, no `displayName`,
+no `text` and no `items` - those are the fields a medicine name or a lab value would arrive in - and
+a test asserts the object's own key list.
+
+**Rationale.** (a) is DEC-132 undone. A general state-setting tool is arbitrary reach into any
+component, and handing over the screen's data is handing over the record.
+
+(b) puts the knowledge of what Shelf can do inside the agent, so every new filter is a change in two
+packages and a filter that was removed is an action the agent still offers.
+
+(c) is the tool registry's own shape one level up: a closed set, declared by the side that can
+actually perform the work, resolved as an **own property** so a proposed id of `constructor` cannot
+reach through the prototype (DEC-147), and refused before any handler runs when it was never
+offered.
+
+**`selectedCount` is a count and not a list, on purpose.** A list of identifiers is still a list, and
+a snapshot carrying one is a channel for "which seven things is this person looking at".
+
+**The footer is why the snapshot is shaped this way.** The design language promises the panel shows
+_the exact context snapshot that left the phone... because that is the whole of what was sent_. That
+sentence can only be true if the footer renders the same object a request would carry, so
+`describeScreenContext` walks the snapshot field by field and a test walks its keys - a field added
+to one and not the other fails.
+
+**What works today, with no model.** `BLK-012` stands: there is no recogniser, no model and no
+voice. The panel shows the phrasings the current route declared, and a sentence matching one of them
+**exactly** runs it. That is not understanding and is not described as any - the phrasings are on
+screen precisely so a person is choosing from what works. It means contextual control is real now,
+and a model, when there is one, reaches the same handlers through the same validation.
+
+**What Kynviora says afterwards is the screen's sentence.** Each action carries a `says`, composed
+by the screen and passed to the Speech Gate as a composed line citing itself. A model's description
+of what a screen did would be a sentence nobody in this repository wrote, and DEC-135 exists to
+refuse those.
+
+**Sources.** `Kynviora V3 Design Language.dc.html` §02, `KYNVIORA_V3_DESIGN_BRIEF.md` §3, DEC-132,
+DEC-135, DEC-147, `15`, `16`, `17`, `packages/agent/src/screenContext.ts`,
+`apps/mobile/src/voice/ScreenContextProvider.tsx`.

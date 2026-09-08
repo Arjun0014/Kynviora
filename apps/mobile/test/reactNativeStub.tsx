@@ -70,6 +70,61 @@ export const Pressable = (props: AnyProps) => {
 };
 Pressable.displayName = 'Pressable';
 
+/**
+ * `Animated`, reduced to the part a test can meaningfully ask about.
+ *
+ * A value that holds a number, a `View` that renders as an ordinary one, and timings and loops
+ * that resolve immediately without scheduling anything. Nothing here interpolates over time and
+ * nothing drives the native driver, because neither exists in Node.
+ *
+ * WHAT THIS THEREFORE CANNOT MEASURE
+ * Whether an animation looks right, how long it takes, or whether it actually stops when
+ * reduce-motion is on. What it *can* measure is the thing that matters for `18`: a component that
+ * put meaning in the animation would be a component whose text is missing here, and every one of
+ * these tests reads text. The Talk bar's states are asserted through their labels for exactly
+ * that reason - if the pulse were the only thing distinguishing Listening from Working, this stub
+ * would render two identical bars and the test would fail.
+ */
+class AnimatedValue {
+  private current: number;
+  constructor(value: number) {
+    this.current = value;
+  }
+  setValue(next: number): void {
+    this.current = next;
+  }
+  /** What a style would be given. Returned as the value itself, since nothing here animates. */
+  interpolate(_config: unknown): number {
+    return this.current;
+  }
+}
+
+interface AnimationHandle {
+  start: (callback?: () => void) => void;
+  stop: () => void;
+}
+
+function immediate(): AnimationHandle {
+  return {
+    start: (callback) => {
+      if (callback !== undefined) callback();
+    },
+    stop: () => undefined,
+  };
+}
+
+export const Animated = {
+  Value: AnimatedValue,
+  View: host('View'),
+  Text: host('Text'),
+  timing: (_value: unknown, _config: unknown): AnimationHandle => immediate(),
+  sequence: (_animations: readonly AnimationHandle[]): AnimationHandle => immediate(),
+  // Deliberately does **not** loop. A loop that actually looped here would run forever inside
+  // `act`, and the thing under test is whether the component asked for one, not whether Node can
+  // run it.
+  loop: (_animation: AnimationHandle): AnimationHandle => immediate(),
+};
+
 export const StyleSheet = {
   /** Identity. Style objects are not what any of these tests are about. */
   create: <T extends Record<string, unknown>>(styles: T): T => styles,

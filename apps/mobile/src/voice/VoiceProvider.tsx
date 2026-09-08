@@ -39,6 +39,7 @@ import {
 } from 'react';
 import {
   checkCall,
+  describeScreenContext,
   dispatch,
   emptySession,
   gateSpeech,
@@ -47,6 +48,7 @@ import {
   summariseProposal,
   utteranceForRefusal,
   UTTERANCES,
+  screenPhrasings,
   voiceCallableTools,
   type DispatchContext,
   type PendingProposal,
@@ -70,6 +72,7 @@ import {
 import { resolveVoiceProviders } from './devScript';
 import { capabilitiesFor } from './capabilities';
 import { newIdempotencyKey } from '@/platform/ids';
+import { useScreenContext } from './ScreenContextProvider';
 
 export interface VoiceContextValue {
   readonly session: VoiceSession;
@@ -92,6 +95,34 @@ export interface VoiceContextValue {
   /** Whether a provider is wired. `false` in this build, everywhere (`BLK-012`). */
   readonly canListen: boolean;
   readonly canSpeak: boolean;
+
+  // -------------------------------------------------------------------------
+  // The screen the bar is sitting on (DEC-157)
+  // -------------------------------------------------------------------------
+
+  /**
+   * The sentences this screen offers, in its own order.
+   *
+   * What the panel shows instead of a chat history. A screen that declares nothing offers
+   * nothing, and the panel says so - an honest empty state, not a bug.
+   */
+  readonly phrasings: readonly string[];
+  /**
+   * The context snapshot, rendered.
+   *
+   * Shown in the panel footer, and it is the **whole** of what a request would carry: route,
+   * profile, what is focused, how many things are selected, how many actions were offered. No
+   * medicine name, no lab value, no field one could arrive in (DEC-132).
+   */
+  readonly contextSummary: string;
+  /**
+   * Ask the screen to do one of the things it offered.
+   *
+   * The only way the agent reaches the interface, and it goes through the same shape as a tool
+   * call one level down: a closed set declared by the side that can perform the work, resolved as
+   * an own property, refused when it was never offered.
+   */
+  readonly runScreenAction: (actionId: string) => void;
 }
 
 const VoiceContext = createContext<VoiceContextValue | null>(null);
@@ -134,6 +165,7 @@ export function VoiceProvider({
 }: VoiceProviderProps) {
   const { client } = useApi();
   const { activeProfile, activeProfileId } = useProfiles();
+  const screen = useScreenContext();
   // The server's own answer. `false` where the profile list has not arrived, which is the safe
   // direction: an agent offered nothing is a person told to use the screen, and the screen works.
   const owns = isOwner ?? activeProfile?.isOwner ?? false;
@@ -320,7 +352,7 @@ export function VoiceProvider({
       const outcome = await dispatch(call, { ...context, confirmed }, executor);
       if (outcome.kind === 'REFUSED') {
         speak([{ kind: 'UTTERANCE', key: utteranceForRefusal(outcome.refusal) }], []);
-        setSession((current) => reduce(current, { kind: 'DONE' }).session);
+        setSession((current) => reduce(current, { kind: 'DONE', outcome: 'REFUSED' }).session);
         return;
       }
       const result = outcome.value as ToolResult | undefined;
@@ -339,7 +371,9 @@ export function VoiceProvider({
       // already said what happened, and appending "Done." to it would be two sentences describing
       // one outcome and disagreeing about it.
       speak(parts.length === 0 ? [{ kind: 'UTTERANCE', key: 'done' }] : parts, lines);
-      setSession((current) => reduce(current, { kind: 'DONE' }).session);
+      // The bar reports what the turn came to, and a turn that reached a tool and executed it
+      // came to `COMPLETED` (DEC-156). A refusal has already returned above with `REFUSED`.
+      setSession((current) => reduce(current, { kind: 'DONE', outcome: 'COMPLETED' }).session);
     },
     [context, executor, speak],
   );
@@ -349,11 +383,28 @@ export function VoiceProvider({
       const at = now();
       setSession((current) => reduce(current, { kind: 'HEARD', text, at, id: nextId() }).session);
 
+      // The screen's own sentences first, and matched **exactly**.
+      //
+      // This is not understanding and is not described as any: the panel shows the phrasings this
+      // route offers, and saying one of them back word for word runs it. What it buys is that
+      // contextual control works today, with no model and no recogniser (`BLK-012`) - "Show only
+      // toothpaste" typed into the bar filters the shelf, because the shelf declared that action
+      // and offered that sentence. A model, when there is one, reaches the same handler through
+      // the same validation.
+      const offered = screen.snapshot.actions.find(
+        (action) => action.label.toLowerCase() === text.trim().toLowerCase(),
+      );
+      if (offered !== undefined) {
+        runScreenActionRef.current(offered.id);
+        return;
+      }
+
       const agent = resolvedProviders.agent;
       if (agent === null) {
         // No model, so nothing is understood. Said rather than silently ignored, and it points at
         // the screen - which is the whole app and is working.
         speak([{ kind: 'UTTERANCE', key: 'notUnderstood' }], []);
+        setSession((current) => reduce(current, { kind: 'DONE', outcome: 'REFUSED' }).session);
         return;
       }
 
@@ -407,6 +458,11 @@ export function VoiceProvider({
             const checked = checkCall(call, context);
             if (checked.kind === 'REFUSED') {
               speak([{ kind: 'UTTERANCE', key: utteranceForRefusal(checked.refusal) }], []);
+              // A gate refusal is a turn that came to nothing, and the bar has to say so rather
+              // than sitting on `Understanding` until the next sentence.
+              setSession(
+                (current) => reduce(current, { kind: 'DONE', outcome: 'REFUSED' }).session,
+              );
               return;
             }
             if (checked.tool.confirmation === 'NONE') {
@@ -430,7 +486,7 @@ export function VoiceProvider({
           },
         );
     },
-    [resolvedProviders, session.transcript, context, speak, run, now, nextId],
+    [resolvedProviders, session.transcript, context, speak, run, now, nextId, screen.snapshot],
   );
 
   const confirm = useCallback(
@@ -452,6 +508,36 @@ export function VoiceProvider({
     setSession((current) => reduce(current, { kind: 'CANCEL' }).session);
     speak([{ kind: 'UTTERANCE', key: 'cancelled' }], []);
   }, [speak]);
+
+  /**
+   * Ask the screen to do one of the things it offered (DEC-157).
+   *
+   * The sentence Kynviora says afterwards is the **screen's** `says`, composed by the screen and
+   * passed to the Speech Gate as a composed line citing itself - which is exactly what
+   * `composedFrom` is for. A model's description of what a screen did would be a sentence nobody
+   * in this repository wrote, and the gate exists to refuse those (DEC-135).
+   */
+  const runScreenAction = useCallback(
+    (actionId: string) => {
+      const ran = screen.runAction(actionId);
+      if (ran === null) {
+        // Never offered, or offered and then withdrawn while the panel was open. Either way this
+        // screen cannot do it now, and the honest answer is the same one a refused tool gets.
+        speak([{ kind: 'UTTERANCE', key: 'cannotDoThat' }], []);
+        setSession((current) => reduce(current, { kind: 'DONE', outcome: 'REFUSED' }).session);
+        return;
+      }
+      speak([{ kind: 'COMPOSED', text: ran.says }], [ran.says]);
+      setSession((current) => reduce(current, { kind: 'DONE', outcome: 'COMPLETED' }).session);
+    },
+    [screen, speak],
+  );
+
+  // `say` runs before `runScreenAction` is declared and needs to reach it, so it goes through a
+  // ref rather than through a reordering that would put the action runner above the thing it
+  // reports into. Assigned on every render, read only inside a callback.
+  const runScreenActionRef = useRef(runScreenAction);
+  runScreenActionRef.current = runScreenAction;
 
   const open = useCallback(() => {
     setIsOpen(true);
@@ -475,8 +561,22 @@ export function VoiceProvider({
       close,
       canListen: resolvedProviders.recognizer !== null,
       canSpeak: resolvedProviders.synthesizer !== null,
+      phrasings: screenPhrasings(screen.snapshot),
+      contextSummary: describeScreenContext(screen.snapshot),
+      runScreenAction,
     }),
-    [session, isOpen, open, say, confirm, cancel, close, resolvedProviders],
+    [
+      session,
+      isOpen,
+      open,
+      say,
+      confirm,
+      cancel,
+      close,
+      resolvedProviders,
+      screen.snapshot,
+      runScreenAction,
+    ],
   );
 
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>;

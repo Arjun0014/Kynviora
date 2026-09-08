@@ -87,6 +87,22 @@ export interface TranscriptEntry {
   readonly spoken: boolean;
 }
 
+/**
+ * How the last turn ended, once it has ended.
+ *
+ * `VoiceState` says what the conversation is *doing*; this says what the last thing it did came
+ * to. The two are different questions and the persistent Talk bar needs both: it returns to
+ * `IDLE` after every turn, and "idle having just recorded a dose", "idle having refused", and
+ * "idle having asked for a missing detail" are three different sentences to put on a bar
+ * (DEC-156).
+ *
+ * `NEEDS_MORE` is the one worth naming separately from `REFUSED`. "I cannot do that" ends the
+ * exchange; "which medicine did you mean" continues it, and a bar that said the first when it
+ * meant the second would stop a person who was one word away from being understood.
+ */
+export const TURN_OUTCOMES = ['COMPLETED', 'REFUSED', 'NEEDS_MORE'] as const;
+export type TurnOutcome = (typeof TURN_OUTCOMES)[number];
+
 export interface VoiceSession {
   readonly state: VoiceState;
   readonly transcript: readonly TranscriptEntry[];
@@ -94,10 +110,17 @@ export interface VoiceSession {
   readonly pending: PendingProposal | null;
   /** Which profile the conversation is about, so a tool call cannot silently change subject. */
   readonly profileId: string | null;
+  /**
+   * How the last completed turn ended, or `null` before there has been one.
+   *
+   * Cleared the moment a new turn starts, because a bar still reporting the previous outcome
+   * while a new sentence is being heard is describing something that is no longer happening.
+   */
+  readonly lastOutcome: TurnOutcome | null;
 }
 
 export function emptySession(profileId: string | null): VoiceSession {
-  return { state: 'IDLE', transcript: [], pending: null, profileId };
+  return { state: 'IDLE', transcript: [], pending: null, profileId, lastOutcome: null };
 }
 
 /** Everything that can happen to a conversation. Closed, so nothing arrives unhandled. */
@@ -117,7 +140,7 @@ export type VoiceEvent =
   | { readonly kind: 'CONFIRM'; readonly proposalId: string; readonly at: number }
   | { readonly kind: 'CANCEL' }
   | { readonly kind: 'WORKING' }
-  | { readonly kind: 'DONE' }
+  | { readonly kind: 'DONE'; readonly outcome?: TurnOutcome }
   | { readonly kind: 'END' };
 
 /** Why an event did not do what it looked like it would. */
@@ -166,7 +189,7 @@ export function reduce(session: VoiceSession, event: VoiceEvent): Transition {
       // changed the subject, and a proposal that survived that is one waiting to catch a "yes"
       // meant for something else.
       return {
-        session: { ...session, state: 'LISTENING', pending: null },
+        session: { ...session, state: 'LISTENING', pending: null, lastOutcome: null },
         released: null,
         refusal: null,
       };
@@ -181,7 +204,7 @@ export function reduce(session: VoiceSession, event: VoiceEvent): Transition {
     case 'HEARD':
       return {
         session: withTranscript(
-          { ...session, state: 'THINKING' },
+          { ...session, state: 'THINKING', lastOutcome: null },
           { id: event.id, speaker: 'PERSON', text: event.text, at: event.at, spoken: false },
         ),
         released: null,
@@ -255,7 +278,18 @@ export function reduce(session: VoiceSession, event: VoiceEvent): Transition {
       return { session: { ...session, state: 'WORKING' }, released: null, refusal: null };
 
     case 'DONE':
-      return { session: { ...session, state: 'IDLE' }, released: null, refusal: null };
+      return {
+        // An outcome the caller did not name leaves the previous one alone rather than clearing
+        // it. `DONE` is issued from several places and only some of them know how the turn went;
+        // overwriting with `null` there would erase a report a person has not read yet.
+        session: {
+          ...session,
+          state: 'IDLE',
+          ...(event.outcome === undefined ? {} : { lastOutcome: event.outcome }),
+        },
+        released: null,
+        refusal: null,
+      };
 
     case 'END':
       // The transcript survives ending a conversation: it is the accessible record of what was

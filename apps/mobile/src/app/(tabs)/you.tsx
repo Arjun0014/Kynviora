@@ -68,7 +68,7 @@ import { ProfileSwitcher } from '@/features/profiles/ProfileSwitcher';
 import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
 import { PendingQueue } from '@/features/sync/PendingQueue';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
-import { VoiceBar } from '@/voice/VoiceHost';
+import { TalkBar } from '@/voice/TalkBar';
 
 export default function YouScreen() {
   const { client, session, configurationError, elevate } = useApi();
@@ -304,9 +304,8 @@ export default function YouScreen() {
       intro="Account, privacy, consent, accessibility and notifications."
       onRefresh={onRetry}
       refreshing={refreshing}
+      footer={<TalkBar />}
     >
-      <VoiceBar />
-
       {/* Who the app is acting as, in a card rather than as a grey line under the heading: this is
           the answer to "which account am I looking at", which is the first question when a screen
           shows less than expected. Never a token, a header value or an email address (`14`). */}

@@ -84,8 +84,9 @@ import { useReminders } from '@/reminders/ReminderProvider';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
 import { newIdempotencyKey } from '@/platform/ids';
 import { useThemedStyles } from '@/theme/ThemeProvider';
+import { TalkBar } from '@/voice/TalkBar';
+import { useDeclareScreen, type ScreenActionBinding } from '@/voice/ScreenContextProvider';
 import { useRouter } from 'expo-router';
-import { VoiceBar } from '@/voice/VoiceHost';
 
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
 
@@ -321,6 +322,71 @@ export default function ShelfScreen() {
   const onRetry = useCallback(() => {
     reload();
   }, [reload]);
+
+  /**
+   * What Kynviora can do on Shelf (DEC-157).
+   *
+   * The two filters this screen already has, plus the way out of them, plus the Coverage Center -
+   * which is here because it is the one thing V3 moved off the tab bar, and a person who used to
+   * find Safety by looking at the row of tabs should be able to ask for it by name.
+   *
+   * "Show only toothpaste" from the V3 brief is **not** here yet, and its absence is deliberate
+   * rather than an omission: this shelf has no category filter to drive, so an action offering one
+   * would be a sentence that does nothing. It arrives with the category grouping.
+   */
+  const screenActions = useMemo<readonly ScreenActionBinding[]>(
+    () => [
+      {
+        id: 'shelf.needsVerification',
+        label: 'Show what is not yet confirmed',
+        says: 'Showing the items that are not yet confirmed.',
+        run: () => {
+          setAttention('NEEDS_VERIFICATION');
+        },
+      },
+      {
+        id: 'shelf.needsReview',
+        label: 'Show what is not yet looked at',
+        says: 'Showing the items nobody has looked at yet.',
+        run: () => {
+          setAttention('NEEDS_REVIEW');
+        },
+      },
+      {
+        id: 'shelf.all',
+        label: 'Show everything',
+        says: 'Showing everything on the shelf.',
+        run: () => {
+          setAttention(null);
+        },
+      },
+      {
+        id: 'shelf.coverage',
+        label: 'What Kynviora has checked',
+        says: 'Opening what Kynviora has checked.',
+        run: () => {
+          router.push('/safety');
+        },
+      },
+    ],
+    [router],
+  );
+
+  useDeclareScreen(
+    useMemo(
+      () => ({
+        route: 'SHELF' as const,
+        profileId: activeProfileId,
+        // The item whose detail is open, as an identifier. Never its name.
+        focusId: detailFor?.id ?? null,
+        actions: screenActions,
+        // The three places the design language says the bar leaves, as this screen reaches them.
+        capturing: scanning,
+        sheetOpen: adding !== null || recording !== null || scheduling !== null,
+      }),
+      [activeProfileId, detailFor, screenActions, scanning, adding, recording, scheduling],
+    ),
+  );
 
   const onRecord = useCallback(
     (body: {
@@ -741,9 +807,8 @@ export default function ShelfScreen() {
       intro="Medicines and personal-care products, with how well Kynviora knows each one."
       onRefresh={onRetry}
       refreshing={refreshing}
+      footer={<TalkBar />}
     >
-      <VoiceBar />
-
       <ResourceState resource={resource} onRetry={onRetry} />
 
       {/*

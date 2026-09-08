@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@kynviora/agent": "*",
     "@kynviora/contracts": "*",
     "@kynviora/domain": "*",
     "@kynviora/presentation": "*",
