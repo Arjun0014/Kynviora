@@ -69,6 +69,7 @@ function survey(overrides: Partial<SheetSurvey> = {}): SheetSurvey {
     controls: [control()],
     developmentOverlaySeen: false,
     reachedEnd: true,
+    refinedPositions: 0,
     ...overrides,
   };
 }
@@ -176,6 +177,20 @@ describe('SHEET-1, the control', () => {
 
   it('passes when controls were found', () => {
     expect(sheetOpenedCheck(survey()).status).toBe('PASS');
+  });
+
+  it('says nothing about a finer pass where none was needed', () => {
+    expect(sheetOpenedCheck(survey()).detail).not.toContain('finer pass');
+  });
+
+  it('says a finer pass ran, on a PASS, because it is the sheet reporting its own geometry', () => {
+    // `DEV-103`. The pass only runs where the ordinary walk left a control it never saw whole, so
+    // its having run at all is a fact about this sheet - it holds a row taller than one step of
+    // the survey - and a run that upgraded a FAIL into a PASS in silence would have hidden it.
+    const check = sheetOpenedCheck(survey({ positions: 27, refinedPositions: 12 }));
+    expect(check.status).toBe('PASS');
+    expect(check.detail).toContain('27 scroll position(s)');
+    expect(check.detail).toContain('12 of those were a second, finer pass');
   });
 });
 

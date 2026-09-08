@@ -4023,8 +4023,10 @@ reverse` tunnel produces none either - the app has offline states and uses them.
     matching one sentence would avoid the obstacle at rest and walk into it while the agent was
     working.
   - A survey path step may be `{ startsWith }`, and Voice Mode's is.
-- **Status**: **RESOLVED 2026-09-09**. Sheets went 16/40 -> 28/40 on the anchor fix alone; the run
-  with all three was still executing at handoff.
+- **Status**: **RESOLVED 2026-09-09**, and confirmed on hardware the same day. Sheets went 16/40 ->
+  28/40 on the anchor fix alone; the run with all three finished at **39/40**, with every one of the
+  twelve checks this entry was about passing - Voice Mode at both scales included, which is the
+  prefix match. The one that still failed was not this: it is `DEV-103`.
 
 ---
 
@@ -4053,4 +4055,180 @@ reverse` tunnel produces none either - the app has offline states and uses them.
   happened." A count and not an omission: the sentence is on screen whenever there is one, and
   every row it counts is still enumerated directly beneath in `CaregiverAccessList`, which is the
   surface that exists to say what happened.
-- **Status**: **RESOLVED 2026-09-09** in code and in unit tests; not yet re-measured on hardware.
+- **Status**: **PARTIALLY RESOLVED 2026-09-09**, and the half it missed is `DEV-100`. Measured on
+  hardware after the fix: the circle does state the count, and `Invite someone` was still not
+  reachable, because it is drawn by the _other_ component on this screen. The entry claimed the
+  action was reachable and only the circle had been changed; the claim was not measured when it was
+  written and it was wrong.
+
+---
+
+## DEV-100 - The same primary action, still below seven ended grants, in the other component
+
+- **Affected specification**: `18` (system font scaling without clipping critical actions), `06`
+  Journey 6, DEC-045, DEC-159, `DEV-099`.
+- **Expected behaviour**: `Invite someone` is reachable on Care at every supported font scale, and
+  its position does not depend on how many people have _ever_ had access.
+- **Implemented behaviour**: `DEV-099` moved ended access out of `CareCircle` and left
+  `CaregiverAccessList` drawing a full card for **every** row, ended ones included, with
+  `Invite someone` rendered _after_ `rows.map(...)`. The fix moved the cards the action was buried
+  under, and did not move the action.
+- **How it was found**: while measuring the `SHEET-2/Invite someone@2` failure from the first
+  sheets run of 2026-09-09. Driving Care at font scale 2 and printing every named control at each
+  scroll position, `Invite someone` **did not appear at all** in eighteen scroll steps - roughly
+  fourteen thousand pixels - and the screen was still scrolling when the walk ran out. What is
+  there instead is seven ended-grant cards, each carrying three capability blocks; one of them
+  spans several screens on its own.
+- **Why the survey did not catch it**: it is not a question the survey asks. `SHEET-1` reports
+  whether a sheet was **reached**, and `pressNamed` scrolls up to `MAX_SCROLL_TO_FIND` steps to get
+  there - so a control fourteen thousand pixels down is a PASS with a long scroll in front of it.
+  The survey measures reachability _inside_ a sheet and presence _on_ a destination, and "how far
+  down a destination is a primary action" is neither.
+- **Risk**: real, and it is `DEV-099`'s risk unchanged - a primary action nobody reaches, for the
+  audience `18` names first. It is worse than `DEV-099` in one way: `DEV-099` was recorded as
+  resolved, so the risk was believed to be gone.
+- **Resolution**: `Invite someone` belongs to the circle. `CareCircle` takes `onInvite` and draws
+  it after the current-access cards and **above** the ended-access sentence; `CaregiverAccessList`
+  no longer draws one. Both components render under exactly the same condition - `care.tsx` maps
+  `EMPTY` and `PARTIAL` to `READY` for the list and draws the circle for those same three states -
+  so no state lost the control by the move, and exactly one is ever on screen.
+
+  The property that makes this a fix rather than a shuffle: nothing above the control grows with
+  history. Its position is bounded by how many people _currently_ have access.
+
+- **Measured on hardware, both ways, at font scale 2 on a Pixel 7**:
+
+  |        | `Invite someone`                                                   |
+  | ------ | ------------------------------------------------------------------ |
+  | Before | not found in 18 scroll steps (~14,000px), screen still scrolling   |
+  | After  | drawn at scroll step 4, `[42,1341][1038,1539]`, fully visible at 5 |
+
+  Four swipes rather than none, and the four are prose above it - the destination heading, the
+  circle's statement (DEC-138 puts it first, deliberately) and the empty-circle card - not history.
+
+- **Tests**: 4 in `apps/mobile/src/features/caregivers/CareAccess.test.tsx`, and they assert
+  **order** rather than presence, because presence passed throughout: the control's index in draw
+  order is before the first ended row and before the sentence that counts them. Draw order is what
+  a person scrolls through, which is the honest form of the question in Node; it does not replace
+  the device measurement and does not claim to.
+- **Status**: **RESOLVED 2026-09-09**, in code, in unit tests and on hardware.
+
+---
+
+## DEV-101 - An ended grant says what the person can see, in the present tense
+
+- **Affected specification**: `18` (say what is true; a limitation travels with the fact it
+  qualifies), `16` (consent is a state a person can understand and revisit), `08.2`.
+- **Expected behaviour**: a card about access that has stopped does not describe live permissions.
+- **Implemented behaviour**: `CaregiverRow` renders `summarizeAccess(row.capabilities)` regardless
+  of `row.state`, so a **revoked** grant carries, directly under the chip that says
+  _"Access removed. It stopped straight away."_, the three blocks `What they can see`,
+  `What they can change` and `Not shared with them` - the first of them reading
+  _"They can see the medicines recorded for this person, and when each one was taken. They cannot
+  change anything."_ Read from a hierarchy dump on a Pixel 7 at font scale 2, on all seven of the
+  development profile's revoked grants.
+
+  The same applies to `INVITED`, whose own status description says _"They have been invited and
+  have not accepted yet. They have no access"_ - followed immediately by three present-tense blocks
+  about what they can see.
+
+- **How it was found**: reading the dump taken while measuring `DEV-100`.
+- **Risk**: a person auditing who can see this profile reads a list of present-tense permissions
+  under every name, including names that have none. `16` rests on somebody being able to answer
+  "who can see this" from this screen, and the screen answers it wrongly for every row that is not
+  live. The direction is the unsafe one: it overstates access rather than understating it.
+- **Not yet resolved, and the shape of the fix**: the capability _meanings_ are present-tense
+  sentences by construction (`describeCapability`), and they are right where the grant is live -
+  they are what the invitation review and the active rows need. So the fix is not to rewrite the
+  copy but to stop showing it where it is untrue: a row whose access is not live states what the
+  access **covered**, as capability labels, which are tenseless, under a heading that carries the
+  tense. `Not shared with them` is dropped for such a row, because everything is - and the status
+  chip's own description already says so, which is what keeps `18`'s "state the limitation"
+  satisfied.
+- **Status**: **OPEN**, recorded 2026-09-09.
+
+---
+
+## DEV-102 - A launch with no retry reported half a survey as unmeasurable
+
+- **Affected specification**: `19` (a harness that could not look must say so, and must not spend a
+  run saying it), DEC-102, `DEV-080`, `DEV-094`.
+- **Expected behaviour**: the accessibility survey's cold start is as robust as the one every other
+  harness uses.
+- **Implemented behaviour**: `relaunch()` in `verifyAccessibility.ts` was a force-stop, a launch and
+  a ninety-second wait, with **no retry** - while `coldStart()` in `ui.ts`, one import away, does
+  the same thing twice and says in its own docstring why: _"Metro rebuilds the bundle on a cold
+  start and one hiccup leaves the app never started - and a harness that treats that as a reading
+  reports the first check it can no longer perform as a finding about the app."_
+- **How it was found**: the first sheets run of 2026-09-09 came back
+  `A11Y-0@1 INCONCLUSIVE - the app did not draw its tab bar within ninety seconds of a cold start`,
+  and **twenty of the run's forty checks did not happen**. Metro had been resident since the
+  previous session and the JavaScript had changed under it, so the first launch of the run had to
+  rebuild the bundle. Every launch after it was fine, which is exactly the shape the retry exists
+  for.
+- **Risk**: none to the product; the report was honest. The cost is a forty-minute run that measured
+  half of what it was asked for, and the standing risk that the next one does the same.
+- **Resolution**: `relaunch()` is `coldStart('a11y-relaunch')`. That is one retry and, on a second
+  failure, a screenshot and a hierarchy of the launch that did not happen - evidence this had none
+  of. The two `INCONCLUSIVE` sentences say "either of two cold starts" rather than "a cold start",
+  because a reader two weeks later has the report and not the source.
+- **Status**: **RESOLVED 2026-09-09**.
+
+---
+
+## DEV-103 - A survey that samples every 800px called a 1,450px row unreachable
+
+- **Affected specification**: `19` (a harness parameter must not be reported as a product defect),
+  `18`, DEC-102, `DEV-046` (the real finding this check exists for), `DEV-079` (the same failure in
+  the same file, one parameter earlier).
+- **Expected behaviour**: `SHEET-2` asks whether every control can be **brought fully into view**,
+  and answers that question.
+- **Implemented behaviour**: it answered a narrower one - whether a control was fully inside the
+  viewport at one of the positions an eight-hundred-pixel walk happened to stop at. For a control
+  much shorter than the screen those are the same question. For a tall one they are not: a control
+  of height `h` in a viewport of height `v` is fully inside for only `v - h` pixels of travel, and
+  a step longer than that can cross the window without ever sampling in it.
+- **Measured, on the invitation form at font scale 2 on a Pixel 7 (1080x2400)**:
+
+  ```
+  scroll view            [0,136][1080,2145]   h=2009
+  Health records         h≈1450               window = 2009 - 1450 = 559px
+    at step 14           top 778, clipped at the bottom
+    at step 15           top <=136, clipped at the top      (moved ~642px)
+  ```
+
+  Twenty-three positions, never once inside. Every other capability row on that form is about
+  850px and passes; `Edit health records` is 1,258px and passes because it happens to land.
+
+- **How it was found**: the sheets run of 2026-09-09 reported
+  `1 control(s) were never fully on screen at any scroll position: ["Health records"]`. The first
+  reading - that the row is drawn below the fold with no way to reach it - was wrong, and the
+  hierarchy said so: the row fits in the viewport with 559px to spare, and a finger has continuous
+  control and lands there without trying.
+- **Why the row is that tall, and why the copy is not the fix**: `VIEW_HEALTH_RECORDS`'s meaning is
+  the longest sentence in the capability set, because DEC-154 requires it to name what is actually
+  being handed over - _"lab results, medical records and health measurements ... including the
+  original documents"_ - rather than the tab it lives behind. Shortening a consent sentence to make
+  a row fit a harness's step is the wrong trade in both directions: `16` rests on that sentence, and
+  the next long sentence would reintroduce the same false FAIL.
+- **Risk**: the risk `DEV-079` names. A false FAIL trains a reader to discount the check, and this
+  check is the one that found a real unreachable control (`DEV-046`) on this very sheet.
+- **Resolution**: a **second pass**, shorter steps, run only where the first left a control it never
+  saw whole - so a sheet that passed pays nothing. It scrolls back to the top and walks down at
+  250px, folding into the same accumulator, and stops the moment every outstanding control has been
+  seen whole. 250px samples inside the window of any control up to about 1,750px on this phone; a
+  control taller than that still fails, and should, because it is one a person cannot see at once
+  either.
+
+  It is **reported rather than silently applied**: `SHEET-1` says how many of its positions were the
+  finer pass, on a PASS as well as on a FAIL, because the pass having run at all is a fact about the
+  sheet's geometry - it holds a row taller than one step of the survey - and a run that quietly
+  upgraded a FAIL to a PASS would have hidden exactly that.
+
+- **Measured after**: `SHEET-2/Invite someone@2` **PASS**, `All 15 control(s) were fully on screen
+at some point`, with `SHEET-1` reading _"15 control(s) found across 80 scroll position(s). 57 of
+  those were a second, finer pass at 250px per step."_
+- **Tests**: 2 in `scripts/device/sheets.test.ts`, over the reporting rather than over the walk -
+  that a survey with no finer pass says nothing about one, and that a survey with one says so on a
+  PASS.
+- **Status**: **RESOLVED 2026-09-09**, in code, in unit tests and on hardware.

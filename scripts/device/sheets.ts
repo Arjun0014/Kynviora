@@ -178,6 +178,15 @@ export interface SheetSurvey {
    * product defect.
    */
   readonly reachedEnd: boolean;
+  /**
+   * How many of {@link positions} came from the second, finer pass, or `0` where none did.
+   *
+   * The pass runs only where the first one left a control it never saw whole, so a non-zero number
+   * here says the sheet holds a control tall enough that an eight-hundred-pixel step could step
+   * over the only window it fits in (`DEV-103`). That is worth reporting on a PASS as well as on a
+   * FAIL: it is the sheet saying something about its own geometry, not about the run.
+   */
+  readonly refinedPositions: number;
 }
 
 /**
@@ -380,6 +389,15 @@ export function sheetOpenedCheck(survey: SheetSurvey): Check {
     detail:
       `${String(survey.controls.length)} control(s) found across ` +
       `${String(survey.positions)} scroll position(s).` +
+      // Said whenever it happened, PASS included. A finer pass only runs where the ordinary walk
+      // left a control it never saw whole, so this sentence is the sheet reporting its own
+      // geometry: it holds a row tall enough that an eight-hundred-pixel step can cross the only
+      // window that row fits in (`DEV-103`).
+      (survey.refinedPositions > 0
+        ? ` ${String(survey.refinedPositions)} of those were a second, finer pass at ` +
+          '250px per step, which runs only where the ordinary walk left a control it never saw ' +
+          'whole - so this sheet holds a control taller than one step of the survey.'
+        : '') +
       // Said on the PASS, because this is the one place a reader will see it. An overlay that is
       // excluded and never mentioned is indistinguishable from one nobody thought about.
       (survey.developmentOverlaySeen

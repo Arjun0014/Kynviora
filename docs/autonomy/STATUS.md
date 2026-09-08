@@ -9,14 +9,14 @@ Last updated: 2026-09-09
 
 ## Current position
 
-|                    |                                                                         |
-| ------------------ | ----------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; **V3 implementation started** (DEC-151)               |
-| **Current phase**  | V3: the colour language and the Health record are in; Talk bar next     |
-| **Last completed** | Health became a destination and a record, 127 tests                     |
-| **Branch**         | `master`                                                                |
-| **Latest commit**  | `feat(voice): eight states, and the sentence a screen offers the agent` |
-| **Baseline tag**   | `baseline-spec-only`                                                    |
+|                    |                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; **V3 implementation under way** (DEC-151)                           |
+| **Current phase**  | V3: Health, Talk bar, You and Care are in; Shelf's V3 is next                         |
+| **Last completed** | The sheets survey finished: **40/40 PASS on hardware**, three defects                 |
+| **Branch**         | `master`                                                                              |
+| **Latest commit**  | `fix(care,device): the action under the history, and the row the survey stepped over` |
+| **Baseline tag**   | `baseline-spec-only`                                                                  |
 
 ## Handoff - 2026-09-09, after the first V3 session
 
@@ -36,28 +36,40 @@ Five slices are in, each committed green, each with its decision recorded:
 | You as eight groups           | DEC-158          | Account Center holds account closure                                  |
 | The Care Circle               | DEC-159          | Four statuses, two of which the app could not previously say          |
 
-### The one thing left unfinished, precisely
+### The run that was unfinished at the last handoff, and what it found
 
-`KYNVIORA_A11Y_PARTS=sheets npm run verify:device:a11y` was **started and stopped at handoff**, not
-completed. It is the run that would confirm the three `DEV-098` fixes together.
+`KYNVIORA_A11Y_PARTS=sheets npm run verify:device:a11y` was started and stopped at the previous
+handoff. It has been run three times since, and the last of them is the standing measurement:
 
-What is known:
+| Run                              | Result                                                |
+| -------------------------------- | ----------------------------------------------------- |
+| 1, on the code as handed over    | **19 PASS, 1 FAIL, 20 unmeasured**                    |
+| 2, after `DEV-100` and `DEV-102` | **39 PASS, 1 FAIL**, both scales measured             |
+| 3, after `DEV-103`               | **40 PASS, 0 FAIL, 0 INCONCLUSIVE - `Overall: PASS`** |
 
-- Before any fix: **16 PASS / 24 INCONCLUSIVE**.
-- After the drag-anchor fix alone: **28 PASS / 12 INCONCLUSIVE** - three of four sheets recovered
-  at font scale 2.
-- The remaining twelve at that point were Voice Mode (both scales) and `Invite someone@2`. A fix
-  for each has been made and unit-tested since, and **neither has been measured on hardware**.
+The handoff expected 40/40 and the number is now 40/40, but not for the reason it expected: three
+separate defects sat between the two, and one of them was a deviation this document had already
+recorded as resolved.
 
-**This is the single best next task.** Bring the emulator up, then:
+- **`DEV-100`.** `Invite someone` was still below every ended-access card. `DEV-099` moved the
+  cards out of the circle and left the action at the bottom of `CaregiverAccessList`, which draws a
+  card per row **including access that has ended**. Measured at font scale 2: the control did not
+  appear at all in eighteen scroll steps, ~14,000px, with the screen still scrolling. It is a
+  control of the circle now, drawn above the ended-access sentence, and it appears at scroll step 4.
+- **`DEV-102`.** The survey's `relaunch()` had no retry, so the first launch of a session - the one
+  that has to rebuild Metro's bundle - reported the whole of font scale 1 as unmeasurable and
+  twenty of forty checks did not happen. It is `coldStart()` now, which is the function three
+  files away that already documented why the retry is necessary.
+- **`DEV-103`.** `SHEET-2` called a 1,450px row unreachable in a 2,009px viewport. It walks at
+  800px, and a control of height `h` is fully inside for only `v - h` pixels of travel - 559 here -
+  so twenty-three positions never sampled inside the window. A second pass at 250px runs **only**
+  where the first left a control it never saw whole, and `SHEET-1` reports how many positions it
+  took, on a PASS as well as on a FAIL.
 
-```bash
-KYNVIORA_A11Y_PARTS=sheets npm run verify:device:a11y
-```
-
-Expect 40/40. If `Invite someone@2` is still inconclusive, the thing to check first is whether the
-Care circle's ended-access count actually shortened the screen - measure it, do not reason about
-it: `adb shell uiautomator dump` and read the bounds.
+**One defect found on the way is open**: `DEV-101`. Every row on Care that is not live - the seven
+revoked grants, and any invitation nobody has accepted - states `What they can see` and the
+present-tense sentence under it, directly beneath a chip reading "Access removed. It stopped
+straight away." It overstates access rather than understating it, and it is the next thing to fix.
 
 ### What is V3 and still design-only
 
@@ -139,9 +151,10 @@ end-to-end - schema, RLS, retention, export, API, contracts, screen - and has no
 it: a profile with no measurements gets a sentence and no chart, and Apple Health reads
 `Designed, not built`.
 
-**No device run since the tab bar changed.** The standing 74/74 accessibility survey and the 7/7
-safety run were taken against a build with a destination this one does not have. Both harnesses are
-re-pointed and neither has been executed.
+**The sheets half of the survey has been run against the current build: 40/40 PASS, 2026-09-09.**
+The destinations and TalkBack halves have not, and the 7/7 safety run has not: both were last taken
+against a build with a destination this one does not have. Those harnesses are re-pointed and are
+the next device work after the open deviations.
 
 **`npm run verify` is a gate again** (`DEV-096`, closed 2026-09-08, DEC-149). It had been failing a
 _transform_ at random - one to four suites, about one run in two at twelve workers, green at four
@@ -210,8 +223,8 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5563 tests passing**, 0 failing, across 210 files. 32 migrations. `npm run verify` green
-  at default workers on an idle machine, 2026-09-09 00:33.
+- **5569 tests passing**, 0 failing, across 211 files. 32 migrations. `npm run verify` green
+  at default workers on an idle machine with the emulator shut down, 2026-09-09 03:04.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is

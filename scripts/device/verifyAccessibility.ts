@@ -57,7 +57,14 @@ import {
   type SheetSurvey,
   type SurveyedControl,
 } from './sheets.js';
-import { captureFailure, scrollDown, scrollDownFrom, scrollUp, waitForAppReady } from './ui.js';
+import {
+  captureFailure,
+  coldStart,
+  scrollDown,
+  scrollDownBy,
+  scrollDownFrom,
+  scrollUp,
+} from './ui.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
 import { colourShares, decodeScreencap, judgeTheme, parseNightMode, readTheme } from './theme.js';
 
@@ -133,6 +140,41 @@ const SHEETS: readonly {
  * cost of a larger number is seconds on a run that converges long before it.
  */
 const MAX_SURVEY_STEPS = 30;
+
+/**
+ * The step of the second pass, and why there is a second pass at all (`DEV-103`).
+ *
+ * `SHEET-2` asks whether a control can be **brought fully into view**, and the first pass answers
+ * it by sampling: eight hundred pixels at a time, and a control is judged on the positions the
+ * walk happened to stop at. That is a fair sample for a control much shorter than the screen and
+ * an unfair one for a tall row, because a control of height `h` in a viewport of height `v` is
+ * fully inside for only `v - h` pixels of travel. Step further than that in one swipe and the
+ * survey can walk straight over the only window it fits in.
+ *
+ * Measured, on the invitation form at font scale 2 on a Pixel 7: the `Health records` row is
+ * ~1,450px tall inside a 2,009px scroll view, so its window is ~559px - and the walk read it at
+ * top 778 (clipped at the bottom) and then at top <=136 (clipped at the top), having moved ~642px
+ * between the two. Twenty-three positions, never once inside. A finger has continuous control and
+ * lands there without trying; the harness reported the row unreachable.
+ *
+ * Two hundred and fifty pixels samples inside the window of any control up to `v - 250` tall,
+ * which on that phone is about 1,750px. A control taller than that still fails, and should: it is
+ * one a person cannot see at once either.
+ *
+ * It runs **only where the first pass left something it never saw whole**, so a sheet that passed
+ * pays nothing for it.
+ */
+const REFINE_STEP_PX = 250;
+
+/**
+ * How many finer steps to take before giving up.
+ *
+ * Enough to cross the longest sheet in the app at `REFINE_STEP_PX` - the invitation form at font
+ * scale 2 is about twenty-three ordinary steps, so roughly seventy-five short ones - and bounded
+ * so a sheet that scrolls for ever is a stop rather than a hang. The pass also stops the moment
+ * every outstanding control has been seen whole, which is the ordinary exit.
+ */
+const MAX_REFINE_STEPS = 80;
 
 /**
  * Where a retry drag may begin, as screen pixels.
@@ -275,11 +317,21 @@ function recordOffender(
  * dozen relaunches, so a fixed thirty seconds is six minutes of a run spent waiting for something
  * that had already happened - and a survey nobody re-runs after a fix is a survey whose red
  * results stop being acted on.
+ *
+ * WHY IT IS `coldStart` AND NOT A LAUNCH OF ITS OWN (`DEV-102`)
+ * It was a launch of its own, with no retry, and `coldStart`'s docstring already said what that
+ * costs: *"Metro rebuilds the bundle on a cold start and one hiccup leaves the app never
+ * started."* On 2026-09-09 the first launch of a session - after Metro had been idle and the
+ * JavaScript had changed under it - took longer than ninety seconds, `A11Y-0@1` reported the whole
+ * of font scale 1 as unmeasurable, and **twenty of the run's forty checks did not happen**. The
+ * report was honest; the run was wasted, and the fix was one the file next door had already
+ * written down.
+ *
+ * `coldStart` additionally captures a screenshot and a hierarchy of the launch that did not
+ * happen, which is the evidence a second failure needs and which this had none of.
  */
 function relaunch(): boolean {
-  adb(['shell', 'am', 'force-stop', PACKAGE]);
-  adb(['shell', 'am', 'start', '-n', `${PACKAGE}/.MainActivity`]);
-  return waitForAppReady();
+  return coldStart('a11y-relaunch');
 }
 
 /**
@@ -458,6 +510,7 @@ function surveySheet(label: string, path: readonly PathStep[], scale: number): S
       controls: [],
       developmentOverlaySeen: false,
       reachedEnd: false,
+      refinedPositions: 0,
     };
   }
 
@@ -471,6 +524,7 @@ function surveySheet(label: string, path: readonly PathStep[], scale: number): S
         controls: [],
         developmentOverlaySeen: false,
         reachedEnd: false,
+        refinedPositions: 0,
       };
     }
   }
@@ -556,14 +610,67 @@ function surveySheet(label: string, path: readonly PathStep[], scale: number): S
     sleep(1_200);
   }
 
+  // The second pass (`DEV-103`). Only where the first one left a control it never saw whole: the
+  // question `SHEET-2` asks is whether a control can be brought into view, and until now the
+  // answer was "at one of the positions an eight-hundred-pixel walk stopped at", which is a
+  // different question for any control taller than about half the screen.
+  //
+  // It folds into the same accumulator, so a control the finer walk sees whole is upgraded rather
+  // than recorded twice, and a control it never sees stays exactly as the first pass left it -
+  // including its evidence, which is the reading a FAIL has to show.
+  let refinedPositions = 0;
+  if (controls.some((control) => !control.everFullyVisible)) {
+    for (let up = 0; up < MAX_SURVEY_STEPS; up += 1) scrollUp();
+    sleep(1_500);
+
+    let refinedPrevious = '';
+    for (let step = 0; step <= MAX_REFINE_STEPS; step += 1) {
+      if (controls.every((control) => control.everFullyVisible)) break;
+      const xml = dumpUiHierarchy();
+      if (xml === null) {
+        sleep(1_500);
+        continue;
+      }
+      const nodes = parseUiHierarchy(xml);
+      controls = foldDump(
+        controls,
+        nodes,
+        clipRectsOf(nodes),
+        PACKAGE,
+        density,
+        TABS,
+        positions + refinedPositions,
+      );
+      refinedPositions += 1;
+
+      const signature = nodes
+        .map((node) => `${accessibleNameOf(node)}@${String(node.bounds.top)}`)
+        .join('|');
+      // A short swipe is the one most likely to be swallowed, so an unchanged dump here is not
+      // taken as the end of the sheet: the ordinary walk has already established where that is,
+      // and this pass only has to sample between the positions it stopped at.
+      if (signature === refinedPrevious) {
+        scrollDownFrom(
+          dragAnchorAvoidingFields(nodes, PACKAGE, SHEET_DRAG_BAND) ?? SHEET_DRAG_BAND.bottom,
+        );
+        sleep(1_200);
+        continue;
+      }
+      refinedPrevious = signature;
+      scrollDownBy(REFINE_STEP_PX);
+      sleep(1_000);
+    }
+  }
+
   return {
     label,
     fontScale: scale,
     opened: true,
-    positions,
+    positions: positions + refinedPositions,
     controls,
     developmentOverlaySeen,
     reachedEnd,
+    refinedPositions,
   };
 }
 
@@ -625,7 +732,7 @@ function themeChecks(): readonly Check[] {
           title: `The device accepted ${expected} mode and the app came back`,
           status: 'INCONCLUSIVE',
           detail:
-            'The app did not draw its tab bar within ninety seconds of a cold start in ' +
+            'The app did not draw its tab bar within ninety seconds of either of two cold starts in ' +
             `${expected} mode, so the frame that would have been read is of nothing (DEC-102).`,
         });
         continue;
@@ -885,7 +992,8 @@ function main(): void {
           title: `The app started at font scale ${String(scale)}`,
           status: 'INCONCLUSIVE',
           detail:
-            'The app did not draw its tab bar within ninety seconds of a cold start, so nothing ' +
+            'The app did not draw its tab bar within ninety seconds of either of two cold ' +
+            'starts, so nothing ' +
             'at this font scale was measured. A run that reported its controls would be ' +
             'describing a blank screen.',
         });

@@ -386,7 +386,21 @@ export default function CareScreen() {
         read this profile.
       */}
       {resource.state === 'READY' || resource.state === 'EMPTY' || resource.state === 'PARTIAL' ? (
-        <CareCircle rows={rows} now={circleNow} />
+        <CareCircle
+          rows={rows}
+          now={circleNow}
+          // DEC-045: a caregiver who may delegate nothing is not offered the control, rather than
+          // being asked to fill in a form whose only outcome is a refusal. The server decides
+          // again either way. It hangs off the circle rather than off the list below because of
+          // where the list put it (`DEV-100`).
+          onInvite={
+            mayInvite(authority)
+              ? () => {
+                  setInviting(true);
+                }
+              : null
+          }
+        />
       ) : null}
 
       <CaregiverAccessList
@@ -399,16 +413,6 @@ export default function CareScreen() {
         }
         rows={rows}
         onRetry={onRetry}
-        // DEC-045 one level up: a caregiver who may delegate nothing is not offered the control,
-        // rather than being asked to fill in a form whose only outcome is a refusal. The server
-        // decides again either way.
-        onInvite={
-          mayInvite(authority)
-            ? () => {
-                setInviting(true);
-              }
-            : null
-        }
         // Never applied locally. `12` forbids optimistic authorization changes, and a row that
         // vanishes on a failed request misstates who can read this profile - so this opens a
         // confirmation, and the list only changes when the server says it has.

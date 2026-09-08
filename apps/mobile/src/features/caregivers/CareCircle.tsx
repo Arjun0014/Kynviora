@@ -29,6 +29,7 @@ import {
 } from '@kynviora/presentation';
 import type { CaregiverAccessRowView } from '@kynviora/contracts';
 import { Card } from '@/components/Card';
+import { PrimaryButton } from '@/components/PrimaryButton';
 import { SectionHeader } from '@/components/SectionHeader';
 import { Typography } from '@/components/Typography';
 import { useTheme, useThemedStyles } from '@/theme/ThemeProvider';
@@ -36,6 +37,7 @@ import { useTheme, useThemedStyles } from '@/theme/ThemeProvider';
 export function CareCircle({
   rows,
   now,
+  onInvite,
 }: {
   readonly rows: readonly CaregiverAccessRowView[];
   /**
@@ -46,6 +48,23 @@ export function CareCircle({
    * component nothing can test.
    */
   readonly now: number;
+  /**
+   * Adding somebody to the circle, or `null` where this account may not delegate.
+   *
+   * It lives here rather than under the access list because of where it ended up when it did not
+   * (`DEV-100`). The list draws a card per row **including the ones that have ended**, and the
+   * control sat after all of them: on a profile carrying seven revoked grants at font scale 2 it
+   * was thousands of pixels below the fold - which is `DEV-099` again, in the second of the two
+   * components that render this screen.
+   *
+   * In the circle its position is bounded by how many people currently have access, and cannot be
+   * moved by history at all. It is also where it belongs: this surface is who is in the household,
+   * and inviting somebody is how a person joins one.
+   *
+   * DEC-045 one level up decides whether it is offered at all: a caller who may delegate nothing
+   * passes `null` rather than drawing a control whose only outcome is a refusal.
+   */
+  readonly onInvite: (() => void) | null;
 }) {
   const styles = useThemedStyles(makeStyles);
   const circle = careCircle(rows, now);
@@ -74,6 +93,12 @@ export function CareCircle({
       ) : (
         circle.current.map((card) => <CircleCard key={`${card.subject}:${card.id}`} card={card} />)
       )}
+
+      {/*
+        Above the ended-access sentence, and above the list under it, on purpose. Everything below
+        this point grows with how many people have *ever* had access; nothing above it does.
+      */}
+      {onInvite === null ? null : <PrimaryButton label="Invite someone" onPress={onInvite} />}
 
       {/*
         Access that has ended is a **count** here and a full row in the list below. Measured on a

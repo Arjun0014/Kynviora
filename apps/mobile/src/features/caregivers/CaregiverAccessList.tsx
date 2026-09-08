@@ -82,14 +82,6 @@ export interface CaregiverAccessListProps {
   readonly rows: readonly CaregiverAccessRow[];
   /** Invoked for a revoke. The caller performs the step-up prompt and the request. */
   readonly onRevoke: (id: string) => void;
-  /**
-   * Open the invitation flow, or `null` where this caller may invite nobody.
-   *
-   * Absent rather than disabled, for the same reason a capability they cannot delegate is absent
-   * from the invite screen (DEC-045): a greyed-out control states that the action exists and that
-   * this person is not trusted with it.
-   */
-  readonly onInvite: (() => void) | null;
   readonly onRetry?: () => void;
   /** `03` group H: what happened to access, which the current list cannot show. */
   readonly history?: AccessHistoryView;
@@ -99,7 +91,6 @@ export function CaregiverAccessList({
   state,
   rows,
   onRevoke,
-  onInvite,
   onRetry,
   history,
 }: CaregiverAccessListProps) {
@@ -119,7 +110,15 @@ export function CaregiverAccessList({
         rows.map((row) => <CaregiverRow key={row.id} row={row} onRevoke={onRevoke} />)
       )}
 
-      {onInvite === null ? null : <PrimaryButton label="Invite someone" onPress={onInvite} />}
+      {/* `Invite someone` used to be here, after every row, and `DEV-100` is where that put it:
+          this list draws a card per row **including access that has ended**, so on a profile with
+          seven revoked grants at font scale 2 the one primary action on the screen was thousands
+          of pixels below the fold. It is a control of the circle now (`CareCircle`), whose
+          position is bounded by how many people currently have access.
+
+          Both components render under exactly the same condition - `care.tsx` maps EMPTY and
+          PARTIAL to READY here and draws the circle for the same three states - so nothing lost a
+          state by the move. */}
 
       {/* After a removal the list is one row shorter, which is the least informative possible
           confirmation. The history is where the removal itself is visible (`03` group H). */}
