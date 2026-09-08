@@ -45,6 +45,13 @@ const ICON_GLYPH: Record<StatusPresentation['iconName'], string> = {
   scales: '⚖',
   ban: '⊘',
   'eye-off': '∅',
+  // Change (DEC-153). A lozenge for a value that moved, and signs for a value only one record
+  // has. Distinct from `alert-triangle` by shape as well as by colour, which matters because a
+  // change and a notice sit two rows apart on a lab report.
+  diff: '◆',
+  'plus-circle': '⊕',
+  'minus-circle': '⊖',
+  equals: '=',
 };
 
 export function StatusChip({ presentation, showDescription = false }: StatusChipProps) {

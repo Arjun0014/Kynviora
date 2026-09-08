@@ -5845,3 +5845,73 @@ recorded as a deviation.
 
 **Sources.** `DEV-097`, DEC-149, `eslint.config.js`, `.prettierignore`,
 `docs/kynviora-premium-mobile-experience/README.md`.
+
+---
+
+## DEC-153 - Change is a fourth kind of colour, and it is deliberately not a tone a status can take
+
+**Date.** 2026-09-08
+**Status.** Accepted.
+**Context.** V3's design language opens with the claim that the app's job is showing change, and
+names four kinds of colour where V2 had two: decorative tint, interface colour, semantic state, and
+**change**. The reason it splits change out is stated plainly and is a bug report about V2: a
+change had been drawn either as `informational`, which made a new lab value look like a footnote,
+or as `attention`, which made it look like a problem.
+
+The same pattern is wanted on the lab comparison, the annual checkup, a formulation change, a
+medicine record, a caregiver access change and a connected source - six surfaces, one meaning.
+
+**Options.** (a) Reuse `informational`. (b) Add `change` to `THEME_TONE_TOKENS` beside the seven
+semantic tones. (c) Add `change` to the theme as a colour pair but keep it **out** of
+`THEME_TONE_TOKENS`, widening the union only where a change section needs it.
+
+**Decision.** (c). `Theme.change` exists in both palettes and is in `THEME_PAIR_TOKENS`, so it is
+contrast-tested with everything else. `THEME_TONE_TOKENS` is unchanged, and
+`ChangeToneToken = ThemeToneToken | 'change'` is declared in `packages/presentation/src/changeLens.ts`
+and nowhere else.
+
+- Light `#F0ECFD` / `#4A3595` / `#BFB2E8` - 8.1:1.
+- Dark `#1E1A33` / `#C7B8FF` / `#453C70` - 9.4:1.
+- `CHANGED` and `NEW` carry it. `NOT_REPEATED` is `neutral` and `SIMILAR` is `surfaceMuted`,
+  because a list of results that did not move must not be painted in the colour that means moved.
+
+**Rationale.** (a) is the status quo and is the reported defect.
+
+(b) is one line shorter and is the dangerous one. `THEME_TONE_TOKENS` is the **codomain of
+`status.ts`** - it is what a `ProductSafetyState`, a `RegulatoryStatus` or an `ItemVerification`
+maps onto. Adding `change` to it makes "a safety status rendered in the change colour" a legal
+value: a reviewed concern that happened to be recently updated could be drawn as a difference
+rather than as a concern, and nothing in the type system would object. `02` keeps evidence and
+urgency in separate geometry; this keeps _difference_ and _state_ in separate colour, by
+construction rather than by convention.
+
+(c) costs one exported union in one file. `changeLens.test.ts` asserts the exclusion directly, so
+somebody widening the tone list to save that union fails a test that says why.
+
+**Why the arithmetic is in the domain and not in a component.** The design language states the
+rule on screen - "the value moved by more than a tenth of the previous one for year-on-year
+comparisons, or a twentieth for a short-interval repeat" - and then says the thing that makes it a
+domain concern: _every count on every screen is derived from the same rule, so no two surfaces can
+disagree_. `packages/domain/src/changeLens.ts` is that rule. A count computed inside a screen is a
+count that can contradict the rows beneath it, and "4 changed" above five rows is a false statement
+produced by arithmetic nobody reviewed. The sentence a screen prints and the number the count uses
+are read from tables keyed by the same interval, so they cannot drift apart.
+
+**What the lens refuses to do.**
+
+- **No ranking.** Entry order is the input order. "Biggest mover first" is `02`'s forbidden ranking
+  by risk wearing arithmetic.
+- **No conversion.** A unit change is reported as a change _with the reason stated_ rather than
+  converted; mg/L to µmol/L needs a molar mass this package does not have and must not guess.
+- **No division by a previous zero.** Every move away from zero is an infinite proportional
+  change, which says nothing. The absolute delta is still reported.
+- **No reference interval.** A reference interval is a fact the _report_ carries and is shown
+  beside a change, never folded into it. Nothing here decides a value is normal.
+- **"Not repeated", never "missing" or "removed".** Kynviora does not know why a test was not done
+  again, and both shorter words assert a reason. An absence is not a result.
+- **A measured zero is not an absence.** A truthiness check on the value would read `0` as "not
+  there" and report a test that was done as one that was not; the test for it is explicit.
+
+**Sources.** `Kynviora V3 Design Language.dc.html` §01 and §04, `KYNVIORA_V3_DESIGN_BRIEF.md` §11
+and §14, `02`, `18`, DEC-130, DEC-147, `packages/domain/src/changeLens.ts`,
+`packages/presentation/src/changeLens.ts`.

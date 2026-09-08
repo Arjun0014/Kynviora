@@ -75,6 +75,15 @@ export const ICON_NAMES = [
   'scales',
   'ban',
   'eye-off',
+  // Change (DEC-153). Shapes for a *difference between two records*, which is a different subject
+  // from a state: `diff` for a value that moved, `plus-circle`/`minus-circle` for one side only,
+  // `equals` for one that did not move. They are in the same vocabulary as the rest because an
+  // icon is shape and shape carries no safety meaning; what is kept apart is the *colour*, and
+  // that separation lives in `ThemeToneToken` rather than here.
+  'diff',
+  'plus-circle',
+  'minus-circle',
+  'equals',
 ] as const;
 export type IconName = (typeof ICON_NAMES)[number];
 

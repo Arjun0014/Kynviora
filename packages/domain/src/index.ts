@@ -34,6 +34,7 @@ export * from './itemUpdate.js';
 export * from './profileCreation.js';
 export * from './digest.js';
 export * from './healthContext.js';
+export * from './changeLens.js';
 export * from './consent.js';
 export * from './scheduleEntry.js';
 export * from './schedule.js';

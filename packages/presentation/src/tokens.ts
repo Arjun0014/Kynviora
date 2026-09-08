@@ -144,6 +144,25 @@ export interface Theme {
    * about your medicine" must not be the same colour, or the second stops being noticeable.
    */
   readonly selection: ColorPair;
+  /**
+   * Changed or new since the last time - and nothing else.
+   *
+   * The fourth kind of colour, added for V3 (DEC-153). Decorative tint says *which product*,
+   * interface colour says *what you are driving*, a semantic tone says *what state this is in*,
+   * and this says *this differs from the record before it*.
+   *
+   * It exists because the two colours a change had been drawn in were both wrong. Informational
+   * blue made a new lab value look like a footnote; attention amber made it look like a problem.
+   * A change is neither: a formula that changed, a value that moved, a grant that was edited are
+   * all facts about a **difference between two records**, and whether the difference matters is a
+   * separate question this colour must not answer.
+   *
+   * Deliberately absent from {@link THEME_TONE_TOKENS}. That list is the codomain of
+   * `status.ts` - what a safety status may be painted in - and a safety status resolving to
+   * "changed" would be a difference rendered as a judgement. Keeping it out makes that
+   * unrepresentable rather than merely discouraged.
+   */
+  readonly change: ColorPair;
   readonly line: LinePalette;
 }
 
@@ -182,6 +201,9 @@ export const LIGHT_THEME: Theme = Object.freeze({
   sunken: Object.freeze({ background: '#EDF0F4', foreground: '#22272E', border: '#D0D6DE' }),
   accent: Object.freeze({ background: '#1B2530', foreground: '#FFFFFF', border: '#1B2530' }),
   selection: Object.freeze({ background: '#E2F3F5', foreground: '#0B4E55', border: '#8FC7CE' }),
+  // Blue-violet: 8.1:1 on its own wash, and far enough from `informational` that a change and a
+  // fact do not read as the same kind of thing.
+  change: Object.freeze({ background: '#F0ECFD', foreground: '#4A3595', border: '#BFB2E8' }),
   line: Object.freeze({ hairline: '#DDE2E8', strong: '#828B99', focus: '#0E7C86' }),
 });
 
@@ -215,6 +237,7 @@ export const DARK_THEME: Theme = Object.freeze({
   sunken: Object.freeze({ background: '#090C10', foreground: '#DCE3EC', border: '#232935' }),
   accent: Object.freeze({ background: '#E8EDF3', foreground: '#0E1116', border: '#E8EDF3' }),
   selection: Object.freeze({ background: '#0F2B2E', foreground: '#6FDCE4', border: '#1E5A60' }),
+  change: Object.freeze({ background: '#1E1A33', foreground: '#C7B8FF', border: '#453C70' }),
   line: Object.freeze({ hairline: '#232935', strong: '#677484', focus: '#5AD1DC' }),
 });
 
@@ -230,6 +253,11 @@ export const THEMES: Readonly<Record<ThemeName, Theme>> = Object.freeze({
  * Narrowed to the seven semantic pairs rather than every key of {@link Theme}: `canvas`,
  * `accent`, `selection` and the rest are surfaces and interface colours, and a safety status
  * that resolved to one of them would be painted in a colour that means nothing.
+ *
+ * `change` is excluded for a stronger reason than the others, and it is the point of DEC-153: it
+ * is a colour that means something, just not something a *status* is allowed to say. A safety
+ * status painted violet would be announcing a difference between two records where the screen
+ * had asked what state a product is in.
  */
 export const THEME_TONE_TOKENS = [
   'surface',
@@ -257,6 +285,7 @@ export const THEME_PAIR_TOKENS = [
   'sunken',
   'accent',
   'selection',
+  'change',
 ] as const;
 
 export type ThemePairToken = (typeof THEME_PAIR_TOKENS)[number];
