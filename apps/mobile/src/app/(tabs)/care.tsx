@@ -56,6 +56,7 @@ import type { CaregiverCapability } from '@kynviora/domain';
 import { useApi } from '@/api/ApiProvider';
 import { useProfiles } from '@/api/ProfileProvider';
 import { useResource } from '@/api/useResource';
+import { CareCircle } from '@/features/caregivers/CareCircle';
 import { CaregiverAccessList } from '@/features/caregivers/CaregiverAccessList';
 import { InviteCaregiver } from '@/features/caregivers/InviteCaregiver';
 import { RemoveCaregiverAccess } from '@/features/caregivers/RemoveCaregiverAccess';
@@ -138,8 +139,20 @@ export default function CareScreen() {
     isPartial: (value) => !value.invitationsLoaded,
   });
 
-  const rows = useMemo(
-    () => accessList(resource.value?.grants ?? [], resource.value?.invitations ?? []),
+  /**
+   * The rows, and the instant the circle's statuses are computed against.
+   *
+   * One memo rather than two, so the reading is taken **when the list is**: "Ends in 9 days" is a
+   * statement about the data that arrived, and a clock read separately on every render would drift
+   * from the rows beside it. `Date.now()` rather than an injected clock, because nothing here is
+   * replayed and nothing here is a safety decision - the server re-evaluates every expiry on every
+   * access, and this is a sentence about a date.
+   */
+  const { rows, circleNow } = useMemo(
+    () => ({
+      rows: accessList(resource.value?.grants ?? [], resource.value?.invitations ?? []),
+      circleNow: Date.now(),
+    }),
     [resource.value],
   );
 
@@ -362,8 +375,19 @@ export default function CareScreen() {
       onRefresh={onRetry}
       footer={<TalkBar />}
     >
-      {/* Only on the list, not over a sheet. A conversation started from inside a half-filled
-          invitation form would lose the form; Voice Mode has no way to put it back. */}
+      {/*
+        The circle first, the list second (DEC-159). V3's complaint about Care is that it reads as
+        a settings page rather than a household, and the fix is which surface comes first: people,
+        with what their access covers and when it ends, and then the controls that change it.
+
+        `CaregiverAccessList` is unchanged underneath. Every change to access still goes through
+        it, behind step-up, applied only when the server confirms - `12` forbids an optimistic
+        authorization change and a row that vanished on a failed request would misstate who can
+        read this profile.
+      */}
+      {resource.state === 'READY' || resource.state === 'EMPTY' || resource.state === 'PARTIAL' ? (
+        <CareCircle rows={rows} now={circleNow} />
+      ) : null}
 
       <CaregiverAccessList
         // EMPTY and PARTIAL both render the list: EMPTY so it can say "no one else has access to

@@ -6150,3 +6150,126 @@ refuse those.
 **Sources.** `Kynviora V3 Design Language.dc.html` §02, `KYNVIORA_V3_DESIGN_BRIEF.md` §3, DEC-132,
 DEC-135, DEC-147, `15`, `16`, `17`, `packages/agent/src/screenContext.ts`,
 `apps/mobile/src/voice/ScreenContextProvider.tsx`.
+
+---
+
+## DEC-158 - You is eight groups, and closing an account is inside one of them
+
+**Date.** 2026-09-08
+**Status.** Accepted. Amends DEC-143.
+**Context.** DEC-143 sectioned the You screen by the five subjects `06` names, which fixed the flat
+stack of eight feature blocks it had been. V3 goes further and says why: _the You home should be a
+beautifully grouped settings hub, not a long list of raw controls_ - no switches on the first
+surface, and nothing needing a decision.
+
+The specific change V3 asks for by name is that account deletion belongs in an Account Center,
+"deep enough that it is intentional but still discoverable".
+
+**Options.** (a) Keep DEC-143's sections and stop. (b) Eight groups, with deletion still last on the
+home screen. (c) Eight groups, with deletion inside Account Center.
+
+**Decision.** (c). `SETTINGS_GROUPS` is a closed set of eight - Account Center, Privacy and data,
+Notifications and reminders, Accessibility, Appearance, Connections, Kynviora Agent, Help and about -
+each with a title, a one-line summary of its **contents**, and a shape. The home screen is a profile
+header, the person picker, the health context, and eight rows.
+
+**Rationale.** (a) leaves a screen that is still a page of controls, and V3's complaint about it is
+accurate: the first thing a person met after the appearance block was a profile switcher, then a
+consent list, then two notification dials, then a sign-out and a deletion control.
+
+(b) is the smaller change and keeps the thing worth moving. DEC-143 put deletion last for a good
+reason - the irreversible after the reversible - and that reasoning is still right _within a
+surface_. What it does not address is that on the home screen it is a destructive control somebody
+**scrolls past** while looking for something else. One surface in, it is a destructive control
+somebody went to find. `16` requires it to exist and be findable, and findable is satisfied by the
+Account Center's own intro saying where it is.
+
+**Why the groups are data.** The order is part of the design, and the summaries are user-visible
+copy - which trap 39 says is the text nothing checks when it is written inline. As a closed set with
+a test over it, a group cannot be added without a name, a sentence and a shape.
+
+Two orderings are asserted rather than left to taste: `ACCOUNT` first, because "which account am I
+in" is what makes every other row mean something; and `ACCESSIBILITY` and `APPEARANCE` above
+`CONNECTIONS` and `AGENT`, because a person on a phone that cannot reach the server should still be
+able to make the screen readable (`18`, DEC-130).
+
+**The irreversible marker is a word.** `Includes something that cannot be undone`, in the ordinary
+text colour, on the one row it applies to. Not a tint: `18` forbids meaning by colour alone and `02`
+forbids alarm, and a row painted red because deletion is somewhere inside it would be both - and
+worse, on this app, would be the same colour a reviewed safety concern wears.
+
+**What did not move.** The health context editor stays on the home screen beside the person picker,
+because it is the one thing here a **rule** reads and it is entered beside the person it is about.
+Moving it to Health would put the writing surface two destinations from the picker.
+
+**What the agent may do here.** Open a group, and go back. Nothing else: signing out, closing an
+account and exporting are touch-only and need a fresh sign-in (DEC-132), and an action that
+navigated straight to one of them would be the agent doing the approach work for a decision it is
+not allowed to make.
+
+**Sources.** `KYNVIORA_V3_DESIGN_BRIEF.md` §13, `Kynviora V3 Design Language.dc.html` §06, `06`,
+`16`, `18`, `02`, DEC-130, DEC-132, DEC-143, `packages/presentation/src/settingsGroups.ts`.
+
+---
+
+## DEC-159 - Care opens with people, and an expiry nobody was told about is a defect the screen could not report
+
+**Date.** 2026-09-08
+**Status.** Accepted. Extends DEC-142.
+**Context.** V3's complaint about Care is that it reads as a settings page rather than a household,
+and its instruction is specific: _do not make a giant permissions grid the first screen_. What it
+asks for instead is a card per person - who they are, the two grant lines, a status, an expiry - with
+the matrix one level down and the editor another.
+
+DEC-142 had already put the access blocks in the right shape: what they can see, what they can
+change, what is not shared. That part is reused unchanged.
+
+**What was actually missing was the status**, and finding that out is the reason this decision is
+worth recording rather than filing as layout.
+
+**Options.** (a) Restyle the existing list into cards. (b) Add a circle above the list. (c) Replace
+the list with cards and move every control behind a person detail.
+
+**Decision.** (b). `CareCircle` is the first surface; `CaregiverAccessList` is unchanged beneath it
+and remains the only thing that changes access - behind step-up, applied only when the server
+confirms, because `12` forbids an optimistic authorization change and a row that vanished on a
+failed request would misstate who can read a profile.
+
+**The two statuses this app could not say.** V3 names four: Active, Invitation pending, Expiring,
+No expiry set. The first two were already expressible. The other two were not, and both gaps
+mattered:
+
+- **Expiring.** A grant with `expiresAt` in nine days rendered identically to one with a year left.
+  `08.2` and `16` both rest on an owner being able to see what access exists, and an expiry nobody
+  is told about is one that lapses in the middle of somebody's week - which for a caregiver who
+  records doses is a person who quietly stops being able to.
+- **No end date.** An indefinite grant is a decision and it looked exactly like every other active
+  one. Naming it does not discourage it; it makes it visible, which is what `16` means when it says
+  a family relationship is not a licence.
+
+**Thirty days is the notice window,** and the number has a reason in both directions. Long enough
+that somebody can renew before a caregiver loses the ability to record a dose; short enough that a
+grant with a year on it is not permanently wearing a countdown - which would make the word mean
+nothing by the time it mattered.
+
+**A lapsed expiry reads as ended even when the list still says active.** The server is the authority
+on what is _admitted_ - `has_capability` re-evaluates the expiry per access - and this is a screen
+refusing to tell somebody that lapsed access is live while a stale list is on it. The reverse
+mistake, showing live access as ended, is not possible from here: this only ever narrows.
+
+**An expiry is `attention` and never `action`.** A date arriving is not a concern somebody reviewed,
+and `23` D-005 keeps urgency and evidence in different geometry. Removal, revocation and decline are
+all `neutral` for a sharper reason: `15` wants removing access to be easy, and styling it as an
+alarm discourages the thing the threat model most wants somebody to do.
+
+**Two lines, never merged.** `Can see` and `Can change` are separate on the card because `08.2`
+scopes them separately - a card that ran them together would describe one permission where there are
+two, which is `DEV-049`'s shape arriving through a summary rather than through a policy.
+
+**What is not built.** The relationship label V3's mock shows ("Anita · Daughter") needs a column
+that does not exist, and inventing one from the display name would be a fabricated fact about a
+person. The permission editor's per-row matrix and the care activity timeline are still the existing
+list and history. Both are recorded as remaining V3 work rather than approximated.
+
+**Sources.** `KYNVIORA_V3_DESIGN_BRIEF.md` §12, `Kynviora V3 Design Language.dc.html` §06, `06`
+Journey 6, `08.2`, `16`, `15`, `02`, `18`, DEC-138, DEC-142, `packages/presentation/src/careCircle.ts`.

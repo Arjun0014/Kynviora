@@ -6965,3 +6965,90 @@ Emulator `Kynviora_Pixel_7_API_36`, then `adb kill-server && adb start-server` (
 then both `adb reverse` tunnels, then `KYNVIORA_DEV_AUTH=1 KYNVIORA_DEV_SEED=1 npm run dev` and
 `npm --prefix apps/mobile run start`. The app was already installed; Metro rebuilt the bundle with
 the new navigation on the first cold start.
+
+## 2026-09-08 (V3, third) - Eight groups, and the expiry Care could not say
+
+Two V3 destinations restructured. Neither needed a schema change and both found something the app
+could not previously express.
+
+### You is eight groups, and closing an account is inside one
+
+DEC-143 sectioned this screen by subject and that fixed the flat stack it had been. V3 goes further
+and says why: _a beautifully grouped settings hub, not a long list of raw controls_ - no switches on
+the first surface, nothing needing a decision.
+
+The home screen is now a profile header, the person picker, the health context, and eight rows:
+Account Center, Privacy and data, Notifications and reminders, Accessibility, Appearance,
+Connections, Kynviora Agent, Help and about. Each row names a subject and says in one line what is
+**inside** it, because "Manage your account" tells nobody whether to open it.
+
+**Closing an account moved.** DEC-143 put it last on the home screen - the irreversible thing after
+the reversible one - and that reasoning is still right _within a surface_. What it did not address
+is that on the home screen it is a destructive control somebody **scrolls past** while looking for
+the notification settings. One surface in, it is a destructive control somebody went to find. `16`
+requires it to exist and be findable, and findable is satisfied by the Account Center's own intro
+saying where it is (DEC-158).
+
+The irreversible marker is a **word** - `Includes something that cannot be undone` - in the ordinary
+text colour. Not a tint: `18` forbids meaning by colour alone, `02` forbids alarm, and on this app a
+red row would be wearing the colour a reviewed safety concern wears.
+
+Two of the eight are real rather than copy. **Connections** reads `GET /v1/health-sources` and
+renders the six honest states, so Apple Health appears as `Designed, not built` with a sentence
+saying Kynviora has designed the connection and has not built it. **Kynviora Agent** states the four
+refusals the gates actually enforce, and says plainly that nothing reaches a speech service or a
+language model in this build.
+
+### Care opens with people, and the status was the thing missing
+
+V3's complaint about Care is that it reads as a settings page: _do not make a giant permissions grid
+the first screen_. `CareCircle` is now the first surface and `CaregiverAccessList` is unchanged
+beneath it - every change to access still goes through it, behind step-up, applied only when the
+server confirms.
+
+DEC-142 had already got the access blocks right. What was actually missing was the **status**, and
+two of V3's four could not be said at all:
+
+- **Expiring soon.** A grant with `expiresAt` in nine days rendered identically to one with a year
+  left. An expiry nobody is told about is one that lapses in the middle of somebody's week - which
+  for a caregiver who records doses is a person who quietly stops being able to.
+- **No end date.** An indefinite grant is a decision and it looked exactly like every other active
+  one. Naming it does not discourage it; it makes it visible, which is what `16` means by a family
+  relationship not being a licence.
+
+Thirty days is the notice window, and the number has a reason in both directions: long enough to
+renew before somebody loses the ability to record a dose, short enough that a grant with a year on
+it is not permanently wearing a countdown - which would make the word mean nothing by the time it
+mattered.
+
+**A lapsed expiry reads as ended even when the list still says active.** The server is the authority
+on what is admitted and re-evaluates it per access; this is a screen refusing to tell somebody that
+lapsed access is live while a stale list is on it. It only ever narrows - the reverse mistake is not
+reachable from here.
+
+An expiry is drawn in `attention` and never `action`: a date arriving is not a concern somebody
+reviewed, and `23` D-005 keeps those in different geometry. Removal, revocation and decline are all
+`neutral`, for a sharper reason - `15` wants removing access to be easy, and styling it as an alarm
+discourages the thing the threat model most wants somebody to do.
+
+### What was deliberately not built
+
+The relationship label V3's mock shows - "Anita · Daughter" - needs a column that does not exist,
+and deriving one from a display name would be a fabricated fact about a person. The permission
+editor's per-row matrix and the care activity timeline are still the existing list and history.
+Recorded as remaining V3 work rather than approximated.
+
+Shelf still does not offer "Show only toothpaste" through the Talk bar, for the same class of
+reason: there is no category filter to drive, and an action offering one would be a sentence that
+does nothing.
+
+### Verification
+
+- `npm run verify` green. **5517 -> 5552 tests, 208 -> 210 files.**
+- New: `settingsGroups` 12, `careCircle` 23.
+
+### Files
+
+`packages/presentation/src/settingsGroups.ts`, `packages/presentation/src/careCircle.ts`,
+`apps/mobile/src/app/(tabs)/you.tsx`, `apps/mobile/src/app/(tabs)/care.tsx`,
+`apps/mobile/src/features/caregivers/CareCircle.tsx`.

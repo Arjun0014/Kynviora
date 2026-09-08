@@ -35,8 +35,17 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { Share } from 'react-native';
-import { CONSENT_COPY } from '@kynviora/presentation';
+import { Pressable, Share, StyleSheet } from 'react-native';
+import {
+  ACCOUNT_CENTER_INTRO,
+  CONSENT_COPY,
+  IRREVERSIBLE_ROW_NOTE,
+  MIN_TOUCH_TARGET_DP,
+  settingsGroupPresentation,
+  settingsGroupRows,
+  type SettingsGroup,
+  type Theme,
+} from '@kynviora/presentation';
 import type { NotificationDetailLevel, QuietHours } from '@kynviora/domain';
 import {
   asChosenDetailLevel,
@@ -44,6 +53,7 @@ import {
   consentView,
   messageForFailure,
   healthContextView,
+  healthSourceView,
   notificationPolicyView,
   profileSwitcherView,
   screenStateForFailure,
@@ -69,6 +79,10 @@ import { SetUpHousehold } from '@/features/profiles/SetUpHousehold';
 import { PendingQueue } from '@/features/sync/PendingQueue';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
 import { TalkBar } from '@/voice/TalkBar';
+import { PrimaryButton } from '@/components/PrimaryButton';
+import { SourceRow } from '@/features/health/HealthPieces';
+import { useThemedStyles } from '@/theme/ThemeProvider';
+import { useDeclareScreen, type ScreenActionBinding } from '@/voice/ScreenContextProvider';
 
 export default function YouScreen() {
   const { client, session, configurationError, elevate } = useApi();
@@ -93,6 +107,85 @@ export default function YouScreen() {
   const [policyState, setPolicyState] = useState<ScreenStateKind | null>(null);
   const [policyMessage, setPolicyMessage] = useState<string | null>(null);
   const [policySaved, setPolicySaved] = useState<string | null>(null);
+  /**
+   * Which of the eight groups is open, or `null` for the home screen (DEC-158).
+   *
+   * Held here rather than as a route, for the reason every sheet in this app is held in state:
+   * `06` fixes five destinations, and eight settings pages as eight routes would be eight things
+   * a deep link could land on with no way back to the person picker above them.
+   */
+  const [openGroup, setOpenGroup] = useState<SettingsGroup | null>(null);
+
+  /**
+   * Where health data could come from for the chosen person.
+   *
+   * Read only while Connections is open. A settings page nobody has opened should not be adding a
+   * request to every cold start, and this one answers a question that is only asked here.
+   */
+  const loadSources = useMemo(
+    () =>
+      client === null || activeProfileId === null || openGroup !== 'CONNECTIONS'
+        ? null
+        : () => client.healthSources(activeProfileId),
+    [client, activeProfileId, openGroup],
+  );
+  const { resource: sourcesResource, reload: reloadSources } = useResource(loadSources, {
+    enabled: loadSources !== null,
+  });
+  const sourceViews = useMemo(
+    () => (sourcesResource.value?.sources ?? []).map(healthSourceView),
+    [sourcesResource.value],
+  );
+  const closeGroup = useCallback(() => {
+    setOpenGroup(null);
+  }, []);
+  const styles = useThemedStyles(makeStyles);
+
+  /**
+   * What Kynviora can do on You (DEC-157).
+   *
+   * Opening each of the eight groups, and getting back out. Deliberately **nothing else**: signing
+   * out, closing an account and taking a copy of the data are touch-only and need a fresh sign-in
+   * (DEC-132), and an action that navigated straight to one of them would be the agent doing the
+   * approach work for a decision it is not allowed to make.
+   *
+   * The labels are the group titles, so what the panel offers and what the row says are the same
+   * words - a person who read one and says the other is understood.
+   */
+  const screenActions = useMemo<readonly ScreenActionBinding[]>(
+    () => [
+      ...settingsGroupRows().map((row) => ({
+        id: `you.open.${row.group}`,
+        label: `Open ${row.title}`,
+        says: `Opening ${row.title}.`,
+        run: () => {
+          setOpenGroup(row.group);
+        },
+      })),
+      {
+        id: 'you.home',
+        label: 'Back to You',
+        says: 'Back to You.',
+        run: () => {
+          setOpenGroup(null);
+        },
+      },
+    ],
+    [],
+  );
+
+  useDeclareScreen(
+    useMemo(
+      () => ({
+        route: 'YOU' as const,
+        profileId: activeProfileId,
+        actions: screenActions,
+        // The person picker and the setup form are the sheet-shaped things on this screen.
+        sheetOpen: addingPerson,
+      }),
+      [activeProfileId, screenActions, addingPerson],
+    ),
+  );
 
   const load = useMemo(
     () =>
@@ -298,53 +391,265 @@ export default function YouScreen() {
     reloadProfiles();
   }, [reloadProfiles]);
 
+  /**
+   * The identity strip, which is on the home screen and inside Account Center.
+   *
+   * `06` requires the current person to be clear on every screen showing care information, and
+   * "which account am I looking at" is the first question when a screen shows less than expected.
+   * Never a token, a header value or an email address (`14`).
+   */
+  const identity = (
+    <Card>
+      <Typography role="body">
+        {session.kind === 'ANONYMOUS'
+          ? 'Not signed in on this device.'
+          : 'Signed in with a development identity.'}
+      </Typography>
+      {configurationError === null ? null : (
+        // A developer-facing sentence, deliberately not the message from the exception: that text
+        // is written for whoever is running the app, and this is the screen a user sees.
+        <Typography role="caption" colour="secondary">
+          Kynviora is not set up to talk to a server on this device.
+        </Typography>
+      )}
+    </Card>
+  );
+
+  const personIsChosen =
+    activeProfileId !== null && profilesLoaded && !switcher.isEmpty && !addingPerson;
+
+  // ---------------------------------------------------------------------------
+  // One group, open
+  // ---------------------------------------------------------------------------
+  if (openGroup !== null) {
+    const presentation = settingsGroupPresentation(openGroup);
+    return (
+      <Screen
+        title={presentation.title}
+        intro={openGroup === 'ACCOUNT' ? ACCOUNT_CENTER_INTRO : presentation.summary}
+        onRefresh={onRetry}
+        refreshing={refreshing}
+        footer={<TalkBar />}
+      >
+        <PrimaryButton label="Back to You" variant="secondary" onPress={closeGroup} />
+
+        {openGroup === 'ACCOUNT' ? (
+          <>
+            {identity}
+            {/* Reversible first. Signing out is what most people came for, and it must be
+                reachable whatever else failed to load - a person whose profile list would not
+                arrive is one of the people most likely to want it. */}
+            <SectionHeader
+              title="This device"
+              explanation="Signing out here, and leaving the account itself alone."
+            />
+            <SignOutControl />
+            {/* Last on its own page, which is what V3 asks for and where `16` is satisfied:
+                the control exists and is findable, and it is now something somebody went to find
+                rather than something they scrolled past looking for the notification settings
+                (DEC-158). */}
+            <SectionHeader
+              title="Closing this account"
+              explanation="Everything Kynviora holds for you, removed. This cannot be undone."
+            />
+            <DeleteAccount />
+          </>
+        ) : null}
+
+        {openGroup === 'PRIVACY' ? (
+          !profilesLoaded || switcher.isEmpty || addingPerson ? (
+            <Card>
+              <Typography role="body">
+                Choose who this is about on the You screen first. What you have agreed to is
+                recorded against your account, and a copy of your data is about the people in it.
+              </Typography>
+            </Card>
+          ) : consentsResource.value === null ? (
+            <ResourceState resource={consentsResource} onRetry={reloadConsents} />
+          ) : (
+            <ConsentSettings
+              view={consentView(consentsResource.value)}
+              onChanged={reloadConsents}
+              onExport={onExport}
+              exportState={exportState}
+              exportMessage={exportMessage}
+              exportReady={exportReady}
+              exportIncomplete={exportIncomplete}
+            />
+          )
+        ) : null}
+
+        {openGroup === 'NOTIFICATIONS' ? (
+          activeProfileId === null || settings === null || policy === null ? (
+            <ResourceState resource={resource} onRetry={onRetry} />
+          ) : (
+            <>
+              <NotificationSettings
+                state="READY"
+                relationship={settings.relationship}
+                maxCaregiverDetail={asNotificationDetailLevel(settings.maxCaregiverDetail)}
+                // Null means never chosen, which the settings view says out loud rather than
+                // showing the default as though it were a decision somebody made (DEC-025).
+                myPreference={asChosenDetailLevel(settings.myPreference)}
+                effective={asNotificationDetailLevel(settings.effectiveDetail)}
+                profileDisplayName={activeProfile?.displayName ?? 'this profile'}
+                exampleItemName={null}
+                onChoose={onChoose}
+              />
+              {/* `04` Phase 7.5. Below the privacy dial because it answers a different question -
+                  that one is what a notification may say, this one is whether it arrives at all. */}
+              <DeliveryPolicy
+                view={policy}
+                onSave={onSaveQuietHours}
+                state={policyState}
+                stateMessage={policyMessage}
+                savedNote={policySaved}
+              />
+            </>
+          )
+        ) : null}
+
+        {openGroup === 'ACCESSIBILITY' || openGroup === 'APPEARANCE' ? (
+          <>
+            {/* One component behind two rows, and that is not a shortcut. Text size, motion and
+                theme are the same three controls whichever question brought somebody here, and
+                splitting them so each row had something unique of its own would put "reduce
+                motion" in one place and "dark mode" in another - which is the flat list V3 is
+                replacing, arriving through the fix for it. */}
+            <AppearanceSettings />
+            {openGroup === 'ACCESSIBILITY' ? (
+              <Card>
+                <Typography role="label" heading>
+                  How Kynviora talks to you
+                </Typography>
+                <Typography role="body">
+                  Talk to Kynviora sits above the navigation on every screen. This phone has no
+                  speech recogniser and no voice, so it is driven by choosing or typing rather than
+                  by speaking, and it says so on itself.
+                </Typography>
+                <Typography role="caption" colour="secondary">
+                  Text size comes from your phone&rsquo;s own settings and Kynviora follows it, up
+                  to twice the ordinary size.
+                </Typography>
+              </Card>
+            ) : null}
+          </>
+        ) : null}
+
+        {openGroup === 'CONNECTIONS' ? (
+          !personIsChosen ? (
+            <Card>
+              <Typography role="body">
+                Choose who this is about on the You screen first. Connections are per person.
+              </Typography>
+            </Card>
+          ) : (
+            <>
+              <ResourceState resource={sourcesResource} onRetry={reloadSources} />
+              <Card>
+                <Typography role="body">
+                  Nothing is connected automatically. Every source below says what it actually is,
+                  and one that has not been built says so rather than offering a button that does
+                  nothing.
+                </Typography>
+              </Card>
+              {sourceViews.length === 0 ? (
+                <Card>
+                  <Typography role="body">No sources are recorded for this person yet.</Typography>
+                </Card>
+              ) : (
+                <Card>
+                  {sourceViews.map((source) => (
+                    <SourceRow key={source.id} source={source} />
+                  ))}
+                </Card>
+              )}
+            </>
+          )
+        ) : null}
+
+        {openGroup === 'AGENT' ? (
+          <>
+            <Card>
+              <Typography role="label" heading>
+                What it can do
+              </Typography>
+              <Typography role="body">
+                Kynviora can record a dose, set or change a reminder, open a screen and start guided
+                capture. Anything it is about to change is shown and read out before it happens, and
+                nothing happens until you say yes.
+              </Typography>
+            </Card>
+            <Card>
+              <Typography role="label" heading>
+                What it will not do
+              </Typography>
+              {/* Not a disclaimer. These are the four refusals the gates actually enforce
+                  (DEC-132 to DEC-134), and a person is entitled to know the shape of them before
+                  they start rather than by being refused. */}
+              <Typography role="body">
+                It will not say whether a medicine is a good idea, close your account, revoke
+                somebody&rsquo;s access or export your data. Those are touch-only and need you to
+                sign in again.
+              </Typography>
+              <Typography role="caption" colour="secondary">
+                Nothing you say is sent to a speech service or a language model in this build. There
+                is no recogniser and no voice wired up at all.
+              </Typography>
+            </Card>
+          </>
+        ) : null}
+
+        {openGroup === 'HELP' ? (
+          <>
+            <Card>
+              <Typography role="label" heading>
+                About this build
+              </Typography>
+              <Typography role="body">
+                Kynviora is a family safety layer for medicines and personal-care products. This is
+                a development build: it talks to a server on this machine and holds no real clinical
+                data.
+              </Typography>
+            </Card>
+            <Card>
+              <Typography role="label" heading>
+                If something looks wrong
+              </Typography>
+              <Typography role="body">
+                A safety line you disagree with can be reported from the item it is about. Kynviora
+                records that somebody disagrees; it does not change what a reviewer decided.
+              </Typography>
+            </Card>
+          </>
+        ) : null}
+      </Screen>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // The home screen: a person, and eight rows
+  // ---------------------------------------------------------------------------
   return (
     <Screen
       title="You"
-      intro="Account, privacy, consent, accessibility and notifications."
+      eyebrow={activeProfile?.displayName ?? null}
+      intro="Your account, and the settings for the people in this household."
       onRefresh={onRetry}
       refreshing={refreshing}
       footer={<TalkBar />}
     >
-      {/* Who the app is acting as, in a card rather than as a grey line under the heading: this is
-          the answer to "which account am I looking at", which is the first question when a screen
-          shows less than expected. Never a token, a header value or an email address (`14`). */}
-      <Card>
-        <Typography role="body">
-          {session.kind === 'ANONYMOUS'
-            ? 'Not signed in on this device.'
-            : 'Signed in with a development identity.'}
-        </Typography>
-
-        {configurationError === null ? null : (
-          // A developer-facing sentence, deliberately not the message from the exception: that
-          // text is written for whoever is running the app, and this is the screen a user sees.
-          <Typography role="caption" colour="secondary">
-            Kynviora is not set up to talk to a server on this device.
-          </Typography>
-        )}
-      </Card>
-
-      {/* Above everything that needs a network answer, because it needs none: appearance is a
-          device setting, and a person on a phone that cannot reach the server should still be
-          able to make the screen readable (`18`, DEC-130). */}
-      <SectionHeader
-        title="Making this easier to read"
-        explanation="Appearance and motion. Text size follows your phone's own setting."
-      />
-      <AppearanceSettings />
+      {identity}
 
       {/* Near the top, and only when there is something in it. `12` requires a **resolvable**
           failure state, and a change the server refused is the one thing on this screen that is
           waiting on the person rather than describing a setting. It renders nothing when the
-          journal is empty, so it is not a permanent reminder that syncing exists (`DEV-038`).
-
-          No section marker: a heading that appeared and disappeared with the journal would be a
-          landmark a screen reader could not navigate to twice, and `PendingQueue` names itself. */}
+          journal is empty, so it is not a permanent reminder that syncing exists (`DEV-038`). */}
       {pendingWaiting + pendingNeedsAttention > 0 ? <PendingQueue /> : null}
 
-      {/* `04` Phase 1.2. Above everything else on this screen: whose records these are is the
-          question that has to be answered before any setting on the page means anything.
+      {/* `04` Phase 1.2. Above the eight rows: whose records these are is the question that has
+          to be answered before any of them means anything, and V3 asks for a profile header on
+          this screen for the same reason.
 
           Nothing is offered while the list is still loading. An empty list and a list that has
           not arrived look identical, and the setup screen for the second would invite somebody
@@ -377,22 +682,16 @@ export default function YouScreen() {
         />
       )}
 
-      {/* `04` Phase 1.4. Above the settings that depend on it: whether Kynviora may contact this
-          person at all is the question that decides what the notification dials below mean.
-          Outside the profile gate, because a receipt is the caller's own and not the profile's.
+      {/* `04` Phase 1.3. Allergies and sensitivities stay on this screen rather than moving to
+          Health, and the reason is that they are the one thing here a **rule** reads: they are
+          entered beside the person they are about, and Health shows them as recorded facts. Moving
+          the editor would put the writing surface two destinations away from the person picker.
 
-          Nothing is offered while it is still loading. A consent list that has not arrived and
-          one where nobody has answered look identical, and rendering the second for the first
-          would tell somebody they had never agreed to anything. */}
-      {/* `04` Phase 1.3. The only health information Kynviora asks for, and it sits with the person
-          it is about rather than with the notification settings - which is what its own comment
-          always said and what its placement, between two notification blocks, did not.
-
-          Gated on its own read now. It used to sit inside the notification-settings guard, so a
+          Gated on its own read. It used to sit inside the notification-settings guard, so a
           household whose notification settings would not load lost a health context that had
           arrived perfectly well - a partial state rendered as an absence, which is exactly the
           failure `06` names that state to prevent. */}
-      {activeProfileId === null || !profilesLoaded || switcher.isEmpty || addingPerson ? null : (
+      {!personIsChosen ? null : (
         <>
           <SectionHeader
             title="Health context"
@@ -410,72 +709,42 @@ export default function YouScreen() {
         </>
       )}
 
-      {/* No marker here: `ConsentSettings` draws its own - "What you have agreed to" - and two
-          section headings over one block is a screen reader hearing the same landmark twice. The
-          copy belongs to the presentation layer, where it is scanned; a second heading written
-          here would be the one piece of user-visible text nothing checks (trap 39). */}
-      {profilesLoaded && !switcher.isEmpty && !addingPerson ? (
-        consentsResource.value === null ? (
-          <ResourceState resource={consentsResource} onRetry={reloadConsents} />
-        ) : (
-          <ConsentSettings
-            view={consentView(consentsResource.value)}
-            onChanged={reloadConsents}
-            onExport={onExport}
-            exportState={exportState}
-            exportMessage={exportMessage}
-            exportReady={exportReady}
-            exportIncomplete={exportIncomplete}
-          />
-        )
-      ) : null}
-
-      <SectionHeader
-        title="Notifications"
-        explanation="What arrives, when, and how much it says on a locked screen."
-      />
-
-      {activeProfileId === null || settings === null || policy === null ? (
-        <ResourceState resource={resource} onRetry={onRetry} />
-      ) : (
-        <>
-          <NotificationSettings
-            state="READY"
-            relationship={settings.relationship}
-            maxCaregiverDetail={asNotificationDetailLevel(settings.maxCaregiverDetail)}
-            // Null means never chosen, which the settings view says out loud rather than showing
-            // the default as though it were a decision somebody made (DEC-025).
-            myPreference={asChosenDetailLevel(settings.myPreference)}
-            effective={asNotificationDetailLevel(settings.effectiveDetail)}
-            profileDisplayName={activeProfile?.displayName ?? 'this profile'}
-            exampleItemName={null}
-            onChoose={onChoose}
-          />
-
-          {/* `04` Phase 7.5. Below the privacy dial because it answers a different question -
-              that one is what a notification may say, this one is whether it arrives at all. */}
-          <DeliveryPolicy
-            view={policy}
-            onSave={onSaveQuietHours}
-            state={policyState}
-            stateMessage={policyMessage}
-            savedNote={policySaved}
-          />
-        </>
-      )}
-
-      {/* Last on the screen and outside every gate above it. Signing out must be reachable
-          whatever else failed to load - a person whose profile list would not arrive is one of
-          the people most likely to want it. */}
-      <SectionHeader
-        title="Your account"
-        explanation="Leaving this device, and closing the account altogether."
-      />
-      <SignOutControl />
-      {/* Below signing out, and last on the page. `16` requires the control to exist; `18`
-          decides where - the irreversible thing goes after the reversible one, so nobody reaches
-          for it while looking for the other. */}
-      <DeleteAccount />
+      {/* The eight groups (DEC-158). No switches, no destructive control, nothing needing a
+          decision - each row is a subject and a sentence saying what is inside it, and the one
+          group holding something irreversible says so in words rather than in a colour. */}
+      <SectionHeader title="Settings" explanation="Eight places, each saying what is inside it." />
+      {settingsGroupRows().map((row) => (
+        <Pressable
+          key={row.group}
+          accessibilityRole="button"
+          accessibilityLabel={`${row.title}. ${row.summary}${
+            row.containsIrreversible ? ` ${IRREVERSIBLE_ROW_NOTE}.` : ''
+          }`}
+          onPress={() => {
+            setOpenGroup(row.group);
+          }}
+          style={styles.groupRow}
+        >
+          <Card>
+            <Typography role="title" decorative>
+              {row.title}
+            </Typography>
+            <Typography role="body" colour="secondary" decorative>
+              {row.summary}
+            </Typography>
+            {row.containsIrreversible ? (
+              <Typography role="caption" colour="secondary" decorative>
+                {IRREVERSIBLE_ROW_NOTE}
+              </Typography>
+            ) : null}
+          </Card>
+        </Pressable>
+      ))}
     </Screen>
   );
 }
+
+const makeStyles = (_theme: Theme) =>
+  StyleSheet.create({
+    groupRow: { minHeight: MIN_TOUCH_TARGET_DP },
+  });

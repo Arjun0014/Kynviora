@@ -107,7 +107,12 @@ const SHEETS: readonly {
   // Voice Mode exists for, its confirmation controls are the largest in the app on purpose, and
   // at twice the font size a screen holding a transcript, a state block, a confirmation and a
   // text field is the one most likely to push something below the fold.
-  { label: 'Voice Mode', path: ['Talk to Kynviora'] },
+  //
+  // Two taps since V3 (DEC-156). The bar is persistent and stateful now, and V3 is explicit that
+  // pressing it must **not** open a chat sheet: the screen stays visible and a panel rises above
+  // the bar. The full conversation is reached from that panel, and this path takes the route a
+  // person takes.
+  { label: 'Voice Mode', path: ['Talk to Kynviora', 'Open the full conversation'] },
 ];
 
 /**

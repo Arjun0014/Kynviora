@@ -43,8 +43,16 @@ evidence rather than source (DEC-152). Three structural decisions have been reco
   screen offered and a person said back exactly still runs it, which makes contextual control real
   today without pretending anything listens.
 
-**What is V3 and not yet built**: Care V3, You V3, Today's reordering, Shelf's image-led tiles and
-Compare, and the Agent Jobs surface. The Health screen is real
+- **DEC-158 / DEC-159.** You is eight groups with closing an account **inside** Account Center - one
+  surface in, so it is a destructive control somebody went to find rather than one they scroll past.
+  Care opens with the circle, and two of V3's four statuses were things this app could not
+  previously say: `Expiring soon` (a grant nine days from lapsing looked identical to one with a
+  year left) and `No end date` (an indefinite grant is a decision and looked like every other active
+  one).
+
+**What is V3 and not yet built**: Today's reordering, Shelf's image-led tiles, category grouping and
+Compare, the permission editor's matrix, the care activity timeline, the caregiver relationship label
+(needs a column that does not exist), and the Agent Jobs surface. The Health screen is real
 end-to-end - schema, RLS, retention, export, API, contracts, screen - and has no fabricated data in
 it: a profile with no measurements gets a sentence and no chart, and Apple Health reads
 `Designed, not built`.
@@ -120,7 +128,7 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5517 tests passing**, 0 failing, across 208 files. 32 migrations.
+- **5552 tests passing**, 0 failing, across 210 files. 32 migrations.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
