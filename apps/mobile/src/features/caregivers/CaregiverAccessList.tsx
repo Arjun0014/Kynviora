@@ -37,7 +37,7 @@ import {
   RADIUS,
   SPACING,
   presentCaregiverAccess,
-  summarizeAccess,
+  accessCoverage,
   type CaregiverAccessState,
   type Theme,
 } from '@kynviora/presentation';
@@ -136,7 +136,12 @@ function CaregiverRow({
 }) {
   const styles = useThemedStyles(makeStyles);
   const presentation = presentCaregiverAccess(row.state);
-  const summary = summarizeAccess(row.capabilities);
+  // Not `summarizeAccess` directly. Its sentences are present tense, which is right for a grant
+  // that is happening and was a contradiction on one that is not: this row used to say "They can
+  // see the medicines recorded for this person" two lines under a chip reading "Access removed.
+  // It stopped straight away" (`DEV-101`). `accessCoverage` decides what a card in this state may
+  // claim; the screen only draws it.
+  const coverage = accessCoverage(row.state, row.subject, row.capabilities);
   // The same predicate the confirmation uses. Two independent conditions is how a control
   // appears on a row whose builder then refuses it.
   const canRevoke = isRemovable(row);
@@ -150,20 +155,22 @@ function CaregiverRow({
       {/* The state is carried by the chip, which always renders a label and a shape icon. */}
       <StatusChip presentation={presentation} showDescription />
 
-      {/* Three blocks, in the same shape and at the same rank: what they can see, what they can
-          change, and what is not shared at all. `summarizeAccess` composes all three - seeing and
-          changing are separate because they are separately granted (DEC-116), and the third is the
-          one somebody actually came to check. It used to be a caption under a row of grey chips,
-          which made the granted set scannable and the withheld set a footnote. */}
-      <CapabilityBlock title="What they can see" entries={summary.viewing} />
-      <CapabilityBlock title="What they can change" entries={summary.changing} />
-      <CapabilityBlock title="Not shared with them" entries={summary.notIncluded} />
+      {/* Seeing and changing in the same shape and at the same rank, because they are separately
+          granted (DEC-116). The third block is the one somebody actually came to check - and it is
+          drawn only where it means something: on ended access everything is withheld, so a list of
+          a subset would be the least informative sentence on the screen. The limitation is still
+          stated there, by the status chip above, whose description says the access stopped. */}
+      <CapabilityBlock title={coverage.seeingTitle} entries={coverage.seeing} />
+      <CapabilityBlock title={coverage.changingTitle} entries={coverage.changing} />
+      {coverage.notIncludedTitle === null ? null : (
+        <CapabilityBlock title={coverage.notIncludedTitle} entries={coverage.notIncluded} />
+      )}
 
       {/* Two facts that qualify the grant rather than describing it, so they sit under both
           blocks as captions rather than inside either. */}
-      {summary.administrationWarning === null ? null : (
+      {coverage.administrationWarning === null ? null : (
         <Typography role="caption" colour="secondary">
-          {summary.administrationWarning}
+          {coverage.administrationWarning}
         </Typography>
       )}
 

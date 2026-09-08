@@ -63,6 +63,7 @@ import {
   describeCapability,
   invitationExpiryNote,
   summarizeAccess,
+  INVITATION_HEADINGS,
   typeStyle,
   type ScreenState as ScreenStateKind,
   type Theme,
@@ -82,9 +83,11 @@ import { haptic } from '@/platform/haptics';
 import { useThemedStyles } from '@/theme/ThemeProvider';
 
 /** The three headings of a grant, kept together so the two screens describing one cannot drift. */
-const SEEING_HEADING = 'They will be able to see';
-const CHANGING_HEADING = 'They will be able to change';
-const NOT_INCLUDED_HEADING = 'Not included';
+// From the package, because `accessCoverage` says the same three things about a pending invitation
+// on the row afterwards, and two lists of headings drift (`DEV-101`).
+const SEEING_HEADING = INVITATION_HEADINGS.seeing;
+const CHANGING_HEADING = INVITATION_HEADINGS.changing;
+const NOT_INCLUDED_HEADING = INVITATION_HEADINGS.notIncluded;
 
 export interface InviteCaregiverProps {
   readonly profileId: string;

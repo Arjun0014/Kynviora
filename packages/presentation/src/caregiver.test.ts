@@ -12,6 +12,9 @@ import {
   invitationExpiryNote,
   presentCaregiverAccess,
   summarizeAccess,
+  accessCoverage,
+  accessIsLive,
+  INVITATION_HEADINGS,
 } from './caregiver.js';
 import { findForbiddenClaims } from './copy.js';
 import { ICON_NAMES } from './status.js';
@@ -134,6 +137,88 @@ describe('access summary', () => {
     expect(summary.viewing).toEqual([]);
     expect(summary.changing).toEqual([]);
     expect(summary.notIncluded).toHaveLength(CAREGIVER_CAPABILITIES.length);
+  });
+});
+
+describe('what a card may claim, given whether the access is happening', () => {
+  it('states a live grant in the present tense, with the sentences', () => {
+    const coverage = accessCoverage('ACTIVE', 'GRANT', ['VIEW_MEDICINES', 'MANAGE_SHELF']);
+    expect(coverage.live).toBe(true);
+    expect(coverage.seeingTitle).toBe('What they can see');
+    expect(coverage.seeing).toEqual([CAPABILITY_DESCRIPTIONS.VIEW_MEDICINES.meaning]);
+    expect(coverage.changing).toEqual([CAPABILITY_DESCRIPTIONS.MANAGE_SHELF.meaning]);
+  });
+
+  it('states what is withheld only where something else is not', () => {
+    // `18` requires the limitation stated, and on a live grant the withheld set is the limitation.
+    // On ended access everything is withheld, so a list of a subset says nothing - the status is
+    // what carries it there, and its description says the access stopped.
+    expect(accessCoverage('ACTIVE', 'GRANT', ['VIEW_SAFETY']).notIncludedTitle).not.toBeNull();
+    expect(accessCoverage('REVOKED', 'GRANT', ['VIEW_SAFETY']).notIncludedTitle).toBeNull();
+    expect(accessCoverage('REVOKED', 'GRANT', ['VIEW_SAFETY']).notIncluded).toEqual([]);
+  });
+
+  it('never states a present-tense sentence about access that is not live', () => {
+    // `DEV-101`, over the whole vocabulary rather than over the one state it was found on. Every
+    // meaning in this set is a present-tense sentence by construction, so the rule is that none of
+    // them may appear on a card about access nobody has.
+    const sentences = new Set(
+      CAREGIVER_CAPABILITIES.map((capability) => CAPABILITY_DESCRIPTIONS[capability].meaning),
+    );
+    for (const state of CAREGIVER_ACCESS_STATES) {
+      if (state === 'ACTIVE' || state === 'INVITED') continue;
+      for (const subject of ['GRANT', 'INVITATION'] as const) {
+        const coverage = accessCoverage(state, subject, [...CAREGIVER_CAPABILITIES]);
+        for (const entry of [...coverage.seeing, ...coverage.changing, ...coverage.notIncluded]) {
+          expect(sentences.has(entry)).toBe(false);
+        }
+        expect(coverage.administrationWarning).toBeNull();
+      }
+    }
+  });
+
+  it('says what ended access let somebody do, as labels, which carry no tense', () => {
+    const coverage = accessCoverage('REVOKED', 'GRANT', ['VIEW_MEDICINES', 'MANAGE_SHELF']);
+    expect(coverage.live).toBe(false);
+    expect(coverage.seeingTitle).toBe('What it let them see');
+    expect(coverage.seeing).toEqual([CAPABILITY_DESCRIPTIONS.VIEW_MEDICINES.label]);
+    expect(coverage.changingTitle).toBe('What it let them change');
+    expect(coverage.changing).toEqual([CAPABILITY_DESCRIPTIONS.MANAGE_SHELF.label]);
+  });
+
+  it('does not say an invitation nobody accepted let anybody do anything', () => {
+    // `EXPIRED` covers a lapsed grant and a lapsed invitation and the reader does not need that
+    // distinction as a word - but the two need different verbs, and `subject` already says which.
+    const lapsedInvitation = accessCoverage('EXPIRED', 'INVITATION', ['VIEW_MEDICINES']);
+    expect(lapsedInvitation.seeingTitle).toBe('What it would have let them see');
+    const lapsedGrant = accessCoverage('EXPIRED', 'GRANT', ['VIEW_MEDICINES']);
+    expect(lapsedGrant.seeingTitle).toBe('What it let them see');
+  });
+
+  it('describes a declined invitation the same way, because nothing took effect', () => {
+    expect(accessCoverage('DECLINED', 'INVITATION', ['VIEW_SAFETY']).changingTitle).toBe(
+      'What it would have let them change',
+    );
+  });
+
+  it('describes a pending invitation the way the review screen just did', () => {
+    // The same sentences under the same headings, from the same function, a moment later. A row
+    // that reworded them would be describing the grant somebody has already approved.
+    const coverage = accessCoverage('INVITED', 'INVITATION', ['VIEW_MEDICINES']);
+    expect(coverage.live).toBe(false);
+    expect(coverage.seeingTitle).toBe(INVITATION_HEADINGS.seeing);
+    expect(coverage.seeing).toEqual([CAPABILITY_DESCRIPTIONS.VIEW_MEDICINES.meaning]);
+  });
+
+  it('drops nothing: every granted capability is named in one of the two lists', () => {
+    for (const state of CAREGIVER_ACCESS_STATES) {
+      const coverage = accessCoverage(state, 'GRANT', [...CAREGIVER_CAPABILITIES]);
+      expect(coverage.seeing.length + coverage.changing.length).toBe(CAREGIVER_CAPABILITIES.length);
+    }
+  });
+
+  it('is live for exactly one state', () => {
+    expect(CAREGIVER_ACCESS_STATES.filter((state) => accessIsLive(state))).toEqual(['ACTIVE']);
   });
 });
 

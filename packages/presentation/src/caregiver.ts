@@ -215,6 +215,132 @@ export function summarizeAccess(capabilities: readonly CaregiverCapability[]): A
   };
 }
 
+/**
+ * The three block headings the invitation review uses.
+ *
+ * Here rather than in the screen because {@link accessCoverage} needs the same three for a grant
+ * that is live, and two lists of headings drift: the review would end up saying one thing about a
+ * set of capabilities and the row afterwards another about the same set. Explicitly future,
+ * because the review happens before anything is granted.
+ */
+export const INVITATION_HEADINGS = Object.freeze({
+  seeing: 'They will be able to see',
+  changing: 'They will be able to change',
+  notIncluded: 'Not included',
+});
+
+/**
+ * Whether access in this state is live: somebody can act on this profile now.
+ *
+ * One member today and written as a predicate rather than as `state === 'ACTIVE'` at four call
+ * sites, because what the callers mean is "is this happening", and a state added later that is
+ * also live has one place to be added.
+ */
+export function accessIsLive(state: CaregiverAccessState): boolean {
+  return state === 'ACTIVE';
+}
+
+/**
+ * What a card about one grant may say, given whether that grant is happening.
+ *
+ * WHY THIS IS NOT `summarizeAccess`
+ * `summarizeAccess` composes the capability **meanings**, and every one of them is a present-tense
+ * sentence: *"They can see the medicines recorded for this person, and when each one was taken."*
+ * That is right where the access is live, and it is what the invitation review needs under an
+ * explicitly future heading. `CaregiverRow` called it for every row regardless of state, so a
+ * revoked grant carried that sentence directly under a chip reading *"Access removed. It stopped
+ * straight away"* - a contradiction two lines apart, in the unsafe direction (`DEV-101`).
+ *
+ * The fix is not to rewrite the meanings. They are the definitions of the capabilities and they
+ * are correct; they are simply not statements a card about ended access may make. So a row that is
+ * not live states what the access **covered**, as capability **labels** - which carry no tense at
+ * all - under a heading that carries it instead.
+ *
+ * WHY `subject` DECIDES BETWEEN "LET" AND "WOULD HAVE LET"
+ * `EXPIRED` covers a lapsed grant and a lapsed invitation, and the reader does not need that
+ * distinction as a word - but the two need different verbs, because one took effect and the other
+ * never did. `subject` already says which: a grant exists only once an invitation was accepted.
+ * Nothing about the record is put on screen; it only chooses the tense.
+ *
+ * WHY THE WITHHELD BLOCK DISAPPEARS
+ * "Not shared with them" is a statement about a live grant: these are the things this person cannot
+ * see *while they can see the rest*. On ended access everything is withheld, so listing a subset
+ * would be the least informative possible sentence. `18` requires the limitation to be stated and
+ * it is - by the status itself, whose description says the access stopped and that they can no
+ * longer see anything.
+ */
+export interface AccessCoverageView {
+  /** Whether this is a statement about access somebody has now. */
+  readonly live: boolean;
+  readonly seeingTitle: string;
+  readonly changingTitle: string;
+  /** `null` where the block would be meaningless, which is every state but a live one. */
+  readonly notIncludedTitle: string | null;
+  /** Full sentences while the access is live, capability labels otherwise. */
+  readonly seeing: readonly string[];
+  readonly changing: readonly string[];
+  readonly notIncluded: readonly string[];
+  /** Only ever present on a live grant, for the same reason the sentences are. */
+  readonly administrationWarning: string | null;
+}
+
+export function accessCoverage(
+  state: CaregiverAccessState,
+  subject: 'GRANT' | 'INVITATION',
+  capabilities: readonly CaregiverCapability[],
+): AccessCoverageView {
+  const summary = summarizeAccess(capabilities);
+  const granted = new Set(capabilities);
+  const labels = (allowsChanges: boolean): readonly string[] =>
+    (Object.keys(CAPABILITY_DESCRIPTIONS) as CaregiverCapability[])
+      .filter(
+        (capability) =>
+          granted.has(capability) &&
+          CAPABILITY_DESCRIPTIONS[capability].allowsChanges === allowsChanges,
+      )
+      .map((capability) => CAPABILITY_DESCRIPTIONS[capability].label);
+
+  if (accessIsLive(state)) {
+    return {
+      live: true,
+      seeingTitle: 'What they can see',
+      changingTitle: 'What they can change',
+      notIncludedTitle: 'Not shared with them',
+      seeing: summary.viewing,
+      changing: summary.changing,
+      notIncluded: summary.notIncluded,
+      administrationWarning: summary.administrationWarning,
+    };
+  }
+
+  if (state === 'INVITED') {
+    // The review screen's own headings and the review screen's own sentences: this row is the same
+    // statement about the same capabilities, made from the same function, a moment later.
+    return {
+      live: false,
+      seeingTitle: INVITATION_HEADINGS.seeing,
+      changingTitle: INVITATION_HEADINGS.changing,
+      notIncludedTitle: INVITATION_HEADINGS.notIncluded,
+      seeing: summary.viewing,
+      changing: summary.changing,
+      notIncluded: summary.notIncluded,
+      administrationWarning: summary.administrationWarning,
+    };
+  }
+
+  const tookEffect = subject === 'GRANT';
+  return {
+    live: false,
+    seeingTitle: tookEffect ? 'What it let them see' : 'What it would have let them see',
+    changingTitle: tookEffect ? 'What it let them change' : 'What it would have let them change',
+    notIncludedTitle: null,
+    seeing: labels(false),
+    changing: labels(true),
+    notIncluded: [],
+    administrationWarning: null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle status presentation
 // ---------------------------------------------------------------------------
@@ -507,4 +633,13 @@ export const ALL_CAREGIVER_STRINGS: readonly string[] = Object.freeze([
     p.description,
     p.accessibilityLabel,
   ]),
+  // Every heading `accessCoverage` can produce, over the whole state vocabulary and both subjects.
+  // Derived rather than listed, so a heading added for a state added later is checked by the copy
+  // rules without anybody remembering to add it here.
+  ...CAREGIVER_ACCESS_STATES.flatMap((state) =>
+    (['GRANT', 'INVITATION'] as const).flatMap((subject) => {
+      const coverage = accessCoverage(state, subject, []);
+      return [coverage.seeingTitle, coverage.changingTitle, coverage.notIncludedTitle ?? ''];
+    }),
+  ),
 ]);

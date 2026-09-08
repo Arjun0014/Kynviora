@@ -4145,7 +4145,45 @@ reverse` tunnel produces none either - the app has offline states and uses them.
   tense. `Not shared with them` is dropped for such a row, because everything is - and the status
   chip's own description already says so, which is what keeps `18`'s "state the limitation"
   satisfied.
-- **Status**: **OPEN**, recorded 2026-09-09.
+- **Resolution**: `accessCoverage(state, subject, capabilities)` decides what a card in a given
+  state may claim, and `CaregiverRow` draws what it returns. A live grant is unchanged - the
+  present-tense sentences under `What they can see` are correct there and are what the invitation
+  review needs. Everything else states the capability **labels**, which carry no tense, under a
+  heading that carries it:
+
+  | State                                | Heading                                                                |
+  | ------------------------------------ | ---------------------------------------------------------------------- |
+  | `ACTIVE`                             | `What they can see` / `What they can change` / `Not shared with them`  |
+  | `INVITED`                            | the review screen's own three, `They will be able to see` and the rest |
+  | ended, a grant                       | `What it let them see` / `What it let them change`                     |
+  | ended, an invitation nobody accepted | `What it would have let them see` / `... change`                       |
+
+  `subject` picks between the last two and is never put on screen. `EXPIRED` covers a lapsed grant
+  and a lapsed invitation - the reader does not need that distinction as a word, and the two need
+  different verbs, because one took effect and the other never did.
+
+  The `INVITED` headings are the invitation review's, imported from the package by both, so the
+  review and the row a moment later cannot describe the same capabilities differently.
+
+- **Why the withheld block disappears on ended access**: "Not shared with them" is a statement about
+  a live grant - these are the things this person cannot see _while they can see the rest_. On ended
+  access everything is withheld, so listing a subset would be the least informative sentence on the
+  screen. `18`'s requirement to state the limitation is met by the status, whose own description
+  says the access stopped.
+- **Measured on hardware afterwards**, Pixel 7, font scale 2, on the same seven revoked grants:
+
+  ```
+  before   What they can see        [1355,1615]  + the sentence [1620,1945]+, >=1,150px clipped
+  after    What it let them see     [1267,1527]  + Medicines    [1532,1676]  =    409px
+           Not shared with them     gone from an ended card entirely (it listed 13 labels)
+  ```
+
+- **Tests**: 9 in `packages/presentation/src/caregiver.test.ts` - including the rule stated over the
+  whole state vocabulary rather than over the one state it was found on: no meaning from the
+  capability set may appear on a card about access that is not live. 3 more in
+  `apps/mobile/src/features/caregivers/CareAccess.test.tsx`, on the rendered screen, because the
+  defect was a screen calling the wrong function while the package was right.
+- **Status**: **RESOLVED 2026-09-09**, in code, in unit tests and on hardware.
 
 ---
 

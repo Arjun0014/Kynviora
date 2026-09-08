@@ -20,6 +20,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { CAPABILITY_DESCRIPTIONS } from '@kynviora/presentation';
 import type { CaregiverAccessRowView } from '@kynviora/contracts';
 import { CareCircle } from './CareCircle';
 import { CaregiverAccessList } from './CaregiverAccessList';
@@ -118,5 +119,77 @@ describe('Care: where Invite someone sits', () => {
   it('offers none at all where this account may delegate nothing (DEC-045)', () => {
     const rendered = renderCare(null);
     expect(pressableCount(rendered, 'Invite someone')).toBe(0);
+  });
+});
+
+/**
+ * What a card about access that has ended says about it.
+ *
+ * `DEV-101`: this screen used to draw "What they can see" and the present-tense sentence under it
+ * directly beneath a chip reading "Access removed. It stopped straight away." The rule is measured
+ * on the **rendered screen** and not only on `accessCoverage`, because the defect was a screen
+ * calling the wrong function - the package was right the whole time.
+ *
+ * Each state is rendered on its own, rather than reading the composed screen: both rows are drawn
+ * by one component, so an assertion over the whole screen cannot tell the live row's sentences
+ * from the ended row's.
+ */
+describe('Care: what an ended row claims', () => {
+  const CAPABILITIES = ['VIEW_MEDICINES', 'MANAGE_SHELF'] as const;
+
+  function renderOne(state: CaregiverAccessRowView['state']) {
+    return renderScreen(
+      <CaregiverAccessList
+        state="READY"
+        rows={[
+          {
+            id: 'row',
+            subject: 'GRANT',
+            state,
+            capabilities: [...CAPABILITIES],
+            displayName: 'Anita',
+            expiresAt: null,
+            isSelf: false,
+          },
+        ]}
+        onRevoke={() => undefined}
+      />,
+    );
+  }
+
+  function screenText(rendered: ReturnType<typeof renderOne>): string {
+    return allNodes(rendered)
+      .map((node) => accessibleNameOf(node))
+      .join(' ~ ');
+  }
+
+  it('does not say a revoked grant can see anything', () => {
+    const screen = screenText(renderOne('REVOKED'));
+    expect(screen).toContain('Access removed');
+    // The sentence itself, not a paraphrase: the point is that this exact string was on screen
+    // under that chip.
+    expect(screen).not.toContain(CAPABILITY_DESCRIPTIONS.VIEW_MEDICINES.meaning);
+    expect(screen).not.toContain(CAPABILITY_DESCRIPTIONS.MANAGE_SHELF.meaning);
+    expect(screen).not.toContain('What they can see');
+    // On ended access everything is withheld, so a list of a subset says nothing. The limitation
+    // is carried by the status, which is on screen.
+    expect(screen).not.toContain('Not shared with them');
+    expect(screen).toContain('You removed their access');
+  });
+
+  it('says what the ended access let them do, in labels', () => {
+    const screen = screenText(renderOne('REVOKED'));
+    expect(screen).toContain('What it let them see');
+    expect(screen).toContain(CAPABILITY_DESCRIPTIONS.VIEW_MEDICINES.label);
+    expect(screen).toContain('What it let them change');
+    expect(screen).toContain(CAPABILITY_DESCRIPTIONS.MANAGE_SHELF.label);
+  });
+
+  it('still states a live grant in the present tense', () => {
+    // A fix that silenced the ended rows by silencing every row would pass everything above.
+    const screen = screenText(renderOne('ACTIVE'));
+    expect(screen).toContain('What they can see');
+    expect(screen).toContain(CAPABILITY_DESCRIPTIONS.VIEW_MEDICINES.meaning);
+    expect(screen).toContain('Not shared with them');
   });
 });

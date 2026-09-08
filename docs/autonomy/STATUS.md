@@ -66,10 +66,11 @@ recorded as resolved.
   where the first left a control it never saw whole, and `SHEET-1` reports how many positions it
   took, on a PASS as well as on a FAIL.
 
-**One defect found on the way is open**: `DEV-101`. Every row on Care that is not live - the seven
-revoked grants, and any invitation nobody has accepted - states `What they can see` and the
-present-tense sentence under it, directly beneath a chip reading "Access removed. It stopped
-straight away." It overstates access rather than understating it, and it is the next thing to fix.
+**A fourth defect was found on the way and is now closed too**: `DEV-101`. Every row on Care that
+was not live - the seven revoked grants, and any invitation nobody had accepted - stated
+`What they can see` and the present-tense sentence under it, directly beneath a chip reading
+"Access removed. It stopped straight away." `accessCoverage` decides what a card in a given state
+may claim now; an ended one says what the access **let** them do, as labels, which carry no tense.
 
 ### What is V3 and still design-only
 
@@ -223,8 +224,8 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5569 tests passing**, 0 failing, across 211 files. 32 migrations. `npm run verify` green
-  at default workers on an idle machine with the emulator shut down, 2026-09-09 03:04.
+- **5581 tests passing**, 0 failing, across 211 files. 32 migrations. `npm run verify` green
+  at default workers on an idle machine with the emulator shut down, 2026-09-09 03:55.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is
