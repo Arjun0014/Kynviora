@@ -23,6 +23,13 @@ export default tseslint.config(
       // it exists is in the file's own header (DEC-126).
       'supabase/functions/**',
       'KYNVIORA_PROJECT_SPEC/**',
+      // `scratchpad/` is where the device harnesses and verification runs put their working
+      // output, and `.gitignore` already says it is not project content. It is not in any
+      // `tsconfig`, so the type-aware rules report every file in it as outside the project service
+      // - which meant a probe script left there while investigating `DEV-096` failed
+      // `npm run verify` over a file nobody had committed. A gate that goes red for what is not
+      // in the repository teaches the same lesson `DEV-096` did.
+      'scratchpad/**',
       'eslint.config.js',
       'vitest.config.ts',
       'vitest.mobile.config.ts',
