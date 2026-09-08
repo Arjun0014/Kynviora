@@ -103,6 +103,17 @@ export function setFontScale(scale: number): void {
   adb(['shell', 'settings', 'put', 'system', 'font_scale', scale.toFixed(2)]);
 }
 
+/**
+ * The framebuffer, raw, or `null` where it could not be captured.
+ *
+ * Raw rather than `screencap -p`, because a PNG would need a decoder this repository does not
+ * have. The raw form is a small header and packed pixels, which is arithmetic - `theme.ts`
+ * decodes it and says how it knows which header it got.
+ */
+export function screencapRaw(): Uint8Array | null {
+  return adbBytes(['exec-out', 'screencap']);
+}
+
 /** The rendered view hierarchy, or `null` where it could not be captured. */
 export function dumpUiHierarchy(): string | null {
   const bytes = adbBytes(['exec-out', 'uiautomator', 'dump', '/dev/tty']);

@@ -31,6 +31,7 @@ import {
   dumpUiHierarchy,
   fontScale,
   isInstalled,
+  screencapRaw,
   setFontScale,
   sleep,
 } from './adb.js';
@@ -57,6 +58,7 @@ import {
 } from './sheets.js';
 import { captureFailure, scrollDown, scrollDownFrom, scrollUp, waitForAppReady } from './ui.js';
 import { formatReport, overallStatus, type Check } from './analysis.js';
+import { colourShares, decodeScreencap, judgeTheme, parseNightMode, readTheme } from './theme.js';
 
 /** TalkBack's own package, which has its own runtime permission to ask for. */
 const TALKBACK_PACKAGE = 'com.google.android.marvin.talkback';
@@ -508,6 +510,105 @@ function sheetsAt(scale: number): readonly Check[] {
   return checks;
 }
 
+/**
+ * What the phone actually paints, in both directions.
+ *
+ * WHY BOTH DIRECTIONS
+ * `DEV-077` was an app stuck in light on a phone in dark mode, and a check that only put the
+ * system into dark mode would pass just as happily over an app stuck in **dark**. What is being
+ * asserted is that the app follows the system, and that needs the system moved twice.
+ *
+ * WHY THIS IS NOT A UNIT TEST
+ * Because no unit test could have found what it is looking for. Both themes were asserted at AA
+ * in Node, by tests that all passed, over a build in which one of them could not be reached from
+ * a phone at all - the cause was `"userInterfaceStyle": "light"` in `app.json`, which is exactly
+ * the kind of change every unit test passes through (DEC-137).
+ *
+ * The setting is read before it is moved and put back afterwards as itself, because `auto` and
+ * `custom_schedule` are choices a person made and restoring `no` over one of them would be this
+ * harness changing a device on its way out.
+ */
+function themeChecks(): readonly Check[] {
+  const before = parseNightMode(adb(['shell', 'cmd', 'uimode', 'night']).stdout);
+  const checks: Check[] = [];
+
+  try {
+    for (const [mode, expected] of [
+      ['no', 'LIGHT'],
+      ['yes', 'DARK'],
+    ] as const) {
+      adb(['shell', 'cmd', 'uimode', 'night', mode]);
+      const applied = parseNightMode(adb(['shell', 'cmd', 'uimode', 'night']).stdout);
+
+      if (applied !== mode) {
+        checks.push({
+          id: `THEME-1@${expected}`,
+          title: `The device accepted ${expected} mode`,
+          status: 'INCONCLUSIVE',
+          detail:
+            `\`cmd uimode night ${mode}\` left the setting at ` +
+            `${applied ?? 'something this could not read'}, so nothing was measured about the ` +
+            `${expected} theme. A reading taken now would be about the other one.`,
+        });
+        continue;
+      }
+
+      if (!relaunch()) {
+        checks.push({
+          id: `THEME-1@${expected}`,
+          title: `The device accepted ${expected} mode and the app came back`,
+          status: 'INCONCLUSIVE',
+          detail:
+            'The app did not draw its tab bar within ninety seconds of a cold start in ' +
+            `${expected} mode, so the frame that would have been read is of nothing (DEC-102).`,
+        });
+        continue;
+      }
+
+      checks.push({
+        id: `THEME-1@${expected}`,
+        title: `The device accepted ${expected} mode and the app came back`,
+        status: 'PASS',
+        detail: `Night mode is ${mode} and the app relaunched into it.`,
+      });
+
+      // A configuration change restarts the activity and the first frames after it are a
+      // transition. Reading one would report the theme the app was leaving.
+      sleep(2_000);
+
+      const raw = screencapRaw();
+      const frame = raw === null ? null : decodeScreencap(raw);
+      if (frame === null) {
+        checks.push({
+          id: `THEME-2@${expected}`,
+          title: `The app painted its ground in ${expected}`,
+          status: 'INCONCLUSIVE',
+          detail:
+            raw === null
+              ? '`adb exec-out screencap` returned nothing, so no colour was read.'
+              : `The framebuffer was ${String(raw.length)} bytes and matched neither header this ` +
+                'decodes, so no colour was read. A guessed header would be a confident answer ' +
+                'about the wrong bytes.',
+        });
+        continue;
+      }
+
+      const verdict = judgeTheme(readTheme(colourShares(frame)), expected);
+      if (verdict.status !== 'PASS') captureFailure(`theme-${mode}`);
+      checks.push({
+        id: `THEME-2@${expected}`,
+        title: `The app painted its ground in ${expected}`,
+        status: verdict.status,
+        detail: verdict.detail,
+      });
+    }
+  } finally {
+    if (before !== null) adb(['shell', 'cmd', 'uimode', 'night', before]);
+  }
+
+  return checks;
+}
+
 function withTalkBack(): readonly Check[] {
   const previous = adb([
     'shell',
@@ -627,7 +728,7 @@ function withTalkBack(): readonly Check[] {
  * same claim as "7/7 PASS" and a reader two weeks later cannot tell them apart.
  */
 /** Every part there is. Named, so an unrecognised one is a stop rather than a silent omission. */
-const ALL_PARTS = ['destinations', 'sheets', 'talkback'] as const;
+const ALL_PARTS = ['destinations', 'sheets', 'talkback', 'theme'] as const;
 
 /**
  * The parts asked for, or `null` where a name was not one.
@@ -731,6 +832,7 @@ function main(): void {
     setFontScale(original);
   }
 
+  if (PARTS.has('theme')) checks.push(...themeChecks());
   if (PARTS.has('talkback')) checks.push(...withTalkBack());
 
   process.stdout.write(`${formatReport(checks)}\n`);
