@@ -1,5 +1,14 @@
 /**
- * Safety screen.
+ * The Coverage Center - the Safety screen, under a name that says what it answers.
+ *
+ * It was the third of five primary destinations until 2026-09-08. Under the approved V3 direction
+ * it keeps every screen, every sentence and every rule and loses the tab (DEC-151): Safety is a
+ * cross-cutting lens, reached from the Safety Lens on Shelf, from evidence inside item detail,
+ * from a notice on Today, and - for the question this screen exists to answer, *what has Kynviora
+ * actually checked and what has it not* - from a control on Shelf that asks it in those words.
+ *
+ * The heading changed with the address and the content did not. "Safety" named a place; "Coverage
+ * Center" names the question, which is the one thing a person arriving here already has.
  *
  * Spec references: `04` Phase 7.1 (assessment states and inbox; filters by profile, urgency and
  * status), `09` (product states; a coverage statement accompanies every result), `18` (never
@@ -305,7 +314,7 @@ export default function SafetyScreen() {
 
   if (receiptFor !== null) {
     return (
-      <Screen title="Safety" intro="What you recorded, and what Kynviora cannot settle.">
+      <Screen title="Coverage Center" intro="What you recorded, and what Kynviora cannot settle.">
         <SafetyReceipt
           view={receiptView}
           state={receiptResource.state}
@@ -326,7 +335,10 @@ export default function SafetyScreen() {
 
   if (alertFor !== null) {
     return (
-      <Screen title="Safety" intro="What this alert rests on, and what Kynviora worked out.">
+      <Screen
+        title="Coverage Center"
+        intro="What this alert rests on, and what Kynviora worked out."
+      >
         <AlertDetail
           view={alertView}
           state={alertResource.state}
@@ -347,7 +359,7 @@ export default function SafetyScreen() {
 
   if (lensFor !== null) {
     return (
-      <Screen title="Safety" intro="How supported jurisdictions treat this substance.">
+      <Screen title="Coverage Center" intro="How supported jurisdictions treat this substance.">
         <RegulatoryLens
           substanceKey={lensFor.substanceKey}
           view={lens}
@@ -367,7 +379,7 @@ export default function SafetyScreen() {
 
   return (
     <Screen
-      title="Safety"
+      title="Coverage Center"
       eyebrow={activeProfile?.displayName ?? null}
       intro="Every item on this shelf, and what Kynviora can say about it today."
       onRefresh={onRetry}

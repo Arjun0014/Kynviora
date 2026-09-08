@@ -23,6 +23,15 @@ import type { PersonalExportManifest } from '@kynviora/domain';
 import type { ApiConfig, ClientSession } from './config.js';
 import { request, type FetchLike, type QueryValue } from './http.js';
 import type { ApiOutcome } from './outcome.js';
+import type {
+  HealthComparisonResponse,
+  HealthMeasurementsResponse,
+  HealthRecordDetailResponse,
+  HealthRecordResponse,
+  HealthRecordsResponse,
+  HealthSourcesResponse,
+  HealthTimelineResponse,
+} from './health.js';
 
 // ---------------------------------------------------------------------------
 // Response shapes
@@ -868,6 +877,35 @@ export interface ResolutionRecorded {
   readonly serverTime: string;
 }
 
+/**
+ * A health record somebody is adding.
+ *
+ * No `provenance` and no `extractionState`: both are derived by the server from who is writing
+ * and how, and the route refuses a body carrying either (`04` Phase 1.3, DEC-154).
+ */
+export interface CreateHealthRecordBody {
+  readonly kind: string;
+  readonly title: string;
+  readonly providerName?: string | null;
+  readonly recordedOn?: string | null;
+  readonly sourceId?: string | null;
+  readonly note?: string | null;
+  readonly observations?: readonly {
+    readonly analyteCode: string;
+    readonly displayName: string;
+    readonly valueNumeric?: number | null;
+    readonly valueText?: string | null;
+    readonly unit?: string | null;
+    readonly decimals?: number | null;
+    readonly reference?: {
+      readonly low?: number | null;
+      readonly high?: number | null;
+      readonly text?: string | null;
+    } | null;
+    readonly sourceFlag?: string | null;
+  }[];
+}
+
 export interface SafetyInboxResponse {
   readonly profileId: string;
   readonly lines: readonly SafetyInboxLineResponse[];
@@ -1590,6 +1628,45 @@ export interface KynvioraClient {
     filter?: { readonly states?: readonly string[]; readonly urgencies?: readonly string[] },
   ): Promise<ApiOutcome<SafetyInboxResponse>>;
 
+  // -------------------------------------------------------------------------
+  // The Health record (`0032`, DEC-151, DEC-154)
+  // -------------------------------------------------------------------------
+  // Read-only here except for adding a record. Everything a caller may see is decided by
+  // `VIEW_HEALTH_RECORDS`, per access, in the database - so a profile ID that is not theirs
+  // answers with an empty list rather than a refusal (`13`).
+
+  /** Where this person's health data comes from, and the honest state of each origin. */
+  healthSources(profileId: string): Promise<ApiOutcome<HealthSourcesResponse>>;
+  /** The Records layer. `kind` narrows to one record kind. */
+  healthRecords(
+    profileId: string,
+    filter?: { readonly kind?: string; readonly limit?: number },
+  ): Promise<ApiOutcome<HealthRecordsResponse>>;
+  /** One record with its structured results, in the report's own order. */
+  healthRecord(recordId: string): Promise<ApiOutcome<HealthRecordDetailResponse>>;
+  /**
+   * This record against the comparable one before it.
+   *
+   * The server chooses what to compare against and computes the counts, so every surface gets the
+   * same answer and the choice cannot drift between two screens (DEC-153).
+   */
+  healthRecordComparison(recordId: string): Promise<ApiOutcome<HealthComparisonResponse>>;
+  /** Add a record and its results in one write. Provenance is derived from who is calling. */
+  createHealthRecord(
+    profileId: string,
+    body: CreateHealthRecordBody,
+  ): Promise<ApiOutcome<{ readonly record: HealthRecordResponse }>>;
+  /** The Trends layer, for one metric, oldest first so a chart reads the array as drawn. */
+  healthMeasurements(
+    profileId: string,
+    filter?: { readonly metric?: string; readonly since?: string; readonly limit?: number },
+  ): Promise<ApiOutcome<HealthMeasurementsResponse>>;
+  /** The History layer: records, allergies, conditions and sources in one list. */
+  healthTimeline(
+    profileId: string,
+    filter?: { readonly limit?: number },
+  ): Promise<ApiOutcome<HealthTimelineResponse>>;
+
   profileAlerts(profileId: string): Promise<ApiOutcome<ProfileAlertsResponse>>;
   /** One alert and everything it rests on (`04` Phase 7.3). */
   alertDetail(alertId: string): Promise<ApiOutcome<AlertDetailResponse>>;
@@ -1878,6 +1955,46 @@ export function createClient(options: ClientOptions): KynvioraClient {
           urgency: filter?.urgencies ?? [],
         },
       }),
+
+    healthSources: (profileId) =>
+      get<HealthSourcesResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/health-sources`),
+
+    healthRecords: (profileId, filter) =>
+      get<HealthRecordsResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/health-records`, {
+        ...(filter?.kind === undefined ? {} : { kind: filter.kind }),
+        ...(filter?.limit === undefined ? {} : { limit: filter.limit }),
+      }),
+
+    healthRecord: (recordId) =>
+      get<HealthRecordDetailResponse>(`/v1/health-records/${encodeURIComponent(recordId)}`),
+
+    healthRecordComparison: (recordId) =>
+      get<HealthComparisonResponse>(
+        `/v1/health-records/${encodeURIComponent(recordId)}/comparison`,
+      ),
+
+    createHealthRecord: (profileId, body) =>
+      send<{ readonly record: HealthRecordResponse }>(
+        'POST',
+        `/v1/profiles/${encodeURIComponent(profileId)}/health-records`,
+        body,
+      ),
+
+    healthMeasurements: (profileId, filter) =>
+      get<HealthMeasurementsResponse>(
+        `/v1/profiles/${encodeURIComponent(profileId)}/health-measurements`,
+        {
+          ...(filter?.metric === undefined ? {} : { metric: filter.metric }),
+          ...(filter?.since === undefined ? {} : { since: filter.since }),
+          ...(filter?.limit === undefined ? {} : { limit: filter.limit }),
+        },
+      ),
+
+    healthTimeline: (profileId, filter) =>
+      get<HealthTimelineResponse>(
+        `/v1/profiles/${encodeURIComponent(profileId)}/health-timeline`,
+        filter?.limit === undefined ? {} : { limit: filter.limit },
+      ),
 
     profileAlerts: (profileId) =>
       get<ProfileAlertsResponse>(`/v1/profiles/${encodeURIComponent(profileId)}/alerts`),

@@ -24,8 +24,8 @@ import {
   ELEVATION,
   RADIUS,
   SPACING,
+  type ChangeToneToken,
   type Theme,
-  type ThemeToneToken,
 } from '@kynviora/presentation';
 import type { ReactNode } from 'react';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -33,11 +33,18 @@ import { useTheme } from '@/theme/ThemeProvider';
 export interface CardProps {
   readonly children: ReactNode;
   /**
-   * Which of the seven semantic tones this card is painted in.
+   * Which tone this card is painted in.
    *
    * Absent means the plain surface, which is what a card that is not saying anything should be.
+   *
+   * `ChangeToneToken` rather than `ThemeToneToken`, so a card *about a difference between two
+   * records* can carry the change tint the design language asks for. That widening is safe here
+   * and deliberately not safe in `StatusChip`: a card is a container and says whatever its
+   * contents say, while a chip renders a `StatusPresentation` whose tone is the codomain of a
+   * **safety status** - and a safety status drawn in the change colour would be announcing a
+   * difference where the screen asked what state a product is in (DEC-153).
    */
-  readonly tone?: ThemeToneToken;
+  readonly tone?: ChangeToneToken;
   /** How far off the ground. `card` is a card; `raised` is a sheet standing over one. */
   readonly level?: 'card' | 'raised';
   /**
@@ -94,6 +101,6 @@ const styles = StyleSheet.create({
 });
 
 /** The card's own surface colours, for a child that has to match them. */
-export function cardSurface(theme: Theme, tone?: ThemeToneToken) {
+export function cardSurface(theme: Theme, tone?: ChangeToneToken) {
   return tone === undefined ? theme.surface : theme[tone];
 }

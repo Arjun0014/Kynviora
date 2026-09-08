@@ -21,6 +21,7 @@ export * from './visitPack.js';
 export * from './reconciliation.js';
 export * from './profileCreation.js';
 export * from './healthContext.js';
+export * from './health.js';
 export * from './consent.js';
 export * from './reminders.js';
 export * from './scheduleForm.js';

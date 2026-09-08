@@ -66,8 +66,14 @@ const TALKBACK_PACKAGE = 'com.google.android.marvin.talkback';
 const TALKBACK_SERVICE =
   'com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService';
 
-/** The five primary destinations (`06`). */
-const TABS = ['Today', 'Shelf', 'Safety', 'Care', 'You'] as const;
+/**
+ * The five primary destinations (`06`, as amended by DEC-151).
+ *
+ * `Safety` was the third of these until 2026-09-08. It keeps every screen and loses the tab: the
+ * Coverage Center is reached from Shelf now, and `verify:device:safety` drives it through that
+ * control rather than through a tab that is no longer there.
+ */
+const TABS = ['Today', 'Shelf', 'Health', 'Care', 'You'] as const;
 
 /**
  * The sheets and forms, and how each is reached.

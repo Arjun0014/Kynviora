@@ -55,12 +55,25 @@ export const FORBIDDEN_GLOBALS: readonly string[] = [
  */
 export function stripCommentsAndStrings(source: string): string {
   const blank = (match: string): string => match.replace(/[^\n]/g, ' ');
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/\/\/[^\n]*/g, blank)
-    .replace(/`(?:\\[\s\S]|[^\\`])*`/g, blank)
-    .replace(/'(?:\\[\s\S]|[^\\'])*'/g, blank)
-    .replace(/"(?:\\[\s\S]|[^\\"])*"/g, blank);
+  return (
+    source
+      .replace(/\/\*[\s\S]*?\*\//g, blank)
+      .replace(/\/\/[^\n]*/g, blank)
+      .replace(/`(?:\\[\s\S]|[^\\`])*`/g, blank)
+      .replace(/'(?:\\[\s\S]|[^\\'])*'/g, blank)
+      .replace(/"(?:\\[\s\S]|[^\\"])*"/g, blank)
+      // JSX text, which is the fourth place a word can appear without being code and was the one
+      // this check did not know about. A sentence a person reads on screen is written bare between
+      // two tags - `<Typography>The document itself is what was kept.</Typography>` - so it survives
+      // every rule above, and the check reported the app as reading `document` on a line that
+      // renders a sentence about a lab report.
+      //
+      // Only a run that provably contains no code is blanked: a brace anywhere between the tags
+      // means an embedded expression, and blanking that would be a false negative - the one kind of
+      // mistake this check must not make. So `>Some words<` is blanked and
+      // `>{crypto.randomUUID()}<` is left exactly as it was.
+      .replace(/>[^<>{}]+</g, (run) => `>${blank(run.slice(1, -1))}<`)
+  );
 }
 
 /** One forbidden read, with enough to find it. */

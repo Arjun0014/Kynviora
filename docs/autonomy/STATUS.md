@@ -9,14 +9,42 @@ Last updated: 2026-09-08
 
 ## Current position
 
-|                    |                                                                  |
-| ------------------ | ---------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; the design layer carried past the golden path  |
-| **Current phase**  | Phase 1.4, Phase 1.1, Phase 2.2, and the UI/agent work           |
-| **Last completed** | The theme a phone actually paints, checked on hardware, 4/4      |
-| **Branch**         | `master`                                                         |
-| **Latest commit**  | `fix(verify): the walk under every import, and the gate it cost` |
-| **Baseline tag**   | `baseline-spec-only`                                             |
+|                    |                                                                             |
+| ------------------ | --------------------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; **V3 implementation started** (DEC-151)                   |
+| **Current phase**  | V3: the colour language and the Health record are in; Talk bar next         |
+| **Last completed** | Health became a destination and a record, 127 tests                         |
+| **Branch**         | `master`                                                                    |
+| **Latest commit**  | `feat(health): the record V3 asks for, and the verdict it must never write` |
+| **Baseline tag**   | `baseline-spec-only`                                                        |
+
+**The Kynviora V3 design is approved and being implemented.** The handoff bundle is in the
+repository at `docs/kynviora-premium-mobile-experience/`, excluded from both gates because it is
+evidence rather than source (DEC-152). Three structural decisions have been recorded and taken:
+
+- **DEC-151.** The five primary destinations are Today / Shelf / **Health** / Care / You. Safety
+  keeps every screen, every sentence and every rule and loses its tab: it is a cross-cutting lens,
+  reached from Shelf, from item detail, from a notice on Today, and from the **Coverage Center** -
+  which is the Safety screen under a name that says what it answers. `06` and `DESIGN_SYSTEM.md` §2
+  are **amended in place** with a pointer, rather than implemented past.
+- **DEC-153.** `change` is a fourth kind of colour, a pair on both themes, and deliberately **not**
+  in `THEME_TONE_TOKENS` - so a safety status painted as a difference is unrepresentable rather
+  than discouraged. The arithmetic behind every "what changed" count is one function in
+  `packages/domain/src/changeLens.ts`.
+- **DEC-154 / DEC-155.** Health is a real record - four tables, its own capability pair backfilled
+  to nobody, and **no column anywhere holding a Kynviora judgement about a value**. What exists
+  instead is `referenceComparison`, which answers where a number sits relative to the interval _the
+  report printed_ and is named for exactly that.
+
+**What is V3 and not yet built**: the persistent Talk bar, Care V3, You V3, Today's reordering,
+Shelf's image-led tiles and Compare, and the Agent Jobs surface. The Health screen is real
+end-to-end - schema, RLS, retention, export, API, contracts, screen - and has no fabricated data in
+it: a profile with no measurements gets a sentence and no chart, and Apple Health reads
+`Designed, not built`.
+
+**No device run since the tab bar changed.** The standing 74/74 accessibility survey and the 7/7
+safety run were taken against a build with a destination this one does not have. Both harnesses are
+re-pointed and neither has been executed.
 
 **`npm run verify` is a gate again** (`DEV-096`, closed 2026-09-08, DEC-149). It had been failing a
 _transform_ at random - one to four suites, about one run in two at twelve workers, green at four
@@ -85,7 +113,7 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5301 tests passing**, 0 failing, across 199 files.
+- **5479 tests passing**, 0 failing, across 205 files. 32 migrations.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is

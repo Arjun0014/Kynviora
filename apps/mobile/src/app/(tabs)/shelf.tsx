@@ -84,12 +84,14 @@ import { useReminders } from '@/reminders/ReminderProvider';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
 import { newIdempotencyKey } from '@/platform/ids';
 import { useThemedStyles } from '@/theme/ThemeProvider';
+import { useRouter } from 'expo-router';
 import { VoiceBar } from '@/voice/VoiceHost';
 
 const EMPTY_HISTORY: DoseHistoryView = { lines: [], unreadableCount: 0, emptyMessage: '' };
 
 export default function ShelfScreen() {
   const styles = useThemedStyles(makeStyles);
+  const router = useRouter();
   const { client, elevate } = useApi();
   const { activeProfile, activeProfileId } = useProfiles();
   // Read rather than inferred: whether a reminder will actually arrive is the platform's answer,
@@ -743,6 +745,29 @@ export default function ShelfScreen() {
       <VoiceBar />
 
       <ResourceState resource={resource} onRetry={onRetry} />
+
+      {/*
+        The Coverage Center (DEC-151).
+
+        Safety stopped being a tab on 2026-09-08 and this is one of the addresses it gained
+        instead. It is on Shelf because that is where somebody is when the question occurs to
+        them - they are looking at their things and want to know what has been checked about them
+        - and the alternative, leaving the screen reachable only by URL, would have been the
+        decision quietly turning into a removal.
+
+        A control rather than a row in the list: it is about the whole shelf, and putting it among
+        the items would make it look like one of them. The label is the question it answers,
+        because "Coverage Center" is a place and "what has Kynviora checked" is what a person
+        wants - and it is the label rather than a separate accessibility name, so a screen reader
+        and the screen say the same words (`18`).
+      */}
+      <PrimaryButton
+        label="What Kynviora has checked"
+        variant="secondary"
+        onPress={() => {
+          router.push('/safety');
+        }}
+      />
 
       {/* Above the filters and above the list, so it is reachable from the empty shelf as well -
           which is the state every new household starts in and the one where it matters most.

@@ -6629,3 +6629,155 @@ without this part in it.
 
 `scripts/device/theme.ts`, `scripts/device/theme.test.ts`,
 `scripts/device/verifyAccessibility.ts`, `scripts/device/adb.ts`.
+
+## 2026-09-08 (V3, first) - The destination the spec named, the fourth colour, and the record Health became
+
+The Kynviora V3 design is approved as the implementation direction. This session did the
+reconciliation the change needed, then built the two things everything else in V3 rests on: a
+colour language for change, and the Health record.
+
+### The baseline, re-measured before anything
+
+**5301 tests, 199 files, 31 migrations.** `npm run verify` was red on the first run and not for a
+reason in the code: `docs/kynviora-premium-mobile-experience/` had been copied in, and eslint tried
+to type-check the design tool's own `support.js` - a file in no `tsconfig`, reported as outside the
+project service. `DEV-097` with a new file. It is excluded from eslint and from prettier now, and
+the second exclusion has its own reason: the bundle is **evidence of what was approved**, and
+evidence a formatter has reflowed is a weaker record (DEC-152).
+
+With that out of the way the baseline is exactly what the resume notes said it was, at default
+workers, on a machine with 2.9GB free.
+
+### `06` said Safety, and V3 says Health
+
+The first structural claim in the V3 design contradicts `06_USER_JOURNEYS_AND_INFORMATION_ARCHITECTURE.md`
+in as many words. `06` fixes five destinations and names Safety as the third;
+`docs/design/DESIGN_SYSTEM.md` §2 goes further - "this is not a layout choice and cannot be
+renegotiated to free a slot."
+
+That sentence was written to stop a destination being dropped for something more exciting, and it
+did its job for four stages. It is not what this is. Safety keeps every screen, every sentence and
+every rule; what it loses is a **tab**, and what it gains is entry points where safety is actually
+noticed. So both documents are amended in place with a pointer to DEC-151, rather than implemented
+past - because the alternative is a repository whose specification and whose app disagree, and a
+reader six weeks from now finding the disagreement rather than the decision.
+
+The freed slot is Health.
+
+**The cost is real and was paid in the same session.** Every device harness that navigated by the
+tab named Safety had to be re-pointed: `verifyAccessibility` and `verifyVoiceMode` list the five
+destinations, `verifySafetyScreen` tapped a tab that no longer exists. That last one now reaches
+the screen the way a person does - Shelf, then the control that asks the question - which is
+strictly better as a check: if somebody removes the entry point, the harness fails at the step that
+says so rather than reporting an empty screen.
+
+**And the decision had a hole for about twenty minutes.** Taking Safety out of the tab bar left it
+reachable by URL and by nothing else, which would have turned a relocation into a removal. The
+Coverage Center is entered from Shelf now, labelled with the question it answers rather than with
+its own name: _What Kynviora has checked_.
+
+### Change is a fourth kind of colour, and deliberately not a tone a status can take
+
+V2 had two kinds of colour - decorative tint and semantic state. V3 names four, and the reason it
+splits `change` out is a bug report about V2: a change had been drawn either as `informational`,
+which made a new lab value look like a footnote, or as `attention`, which made it look like a
+problem. It is neither.
+
+The colour is a pair on both themes (8.1:1 light, 9.4:1 dark) and is **not** in
+`THEME_TONE_TOKENS`. That list is the codomain of `status.ts`, so adding it there would make "a
+reviewed concern rendered as a difference" a legal value with nothing in the type system objecting.
+The union is widened in exactly one file and a test asserts the exclusion (DEC-153).
+
+The arithmetic is in the domain, because the design language says the thing that makes it a domain
+concern: _every count on every screen is derived from the same rule, so no two surfaces can
+disagree_. A count computed inside a component is one that can contradict the rows beneath it, and
+"4 changed" above five rows is a false statement produced by arithmetic nobody reviewed. The
+threshold and the sentence a screen prints are read from tables keyed by the same interval.
+
+What it refuses: no ranking (input order preserved - "biggest mover first" is `02`'s forbidden
+ranking wearing arithmetic), no unit conversion, no division by a previous zero, no reference
+interval folded into a delta, and **"not repeated" rather than "missing" or "removed"** - Kynviora
+does not know why a test was not done again.
+
+### Health, as a record rather than a dashboard
+
+Migration `0032`: `health_source`, `health_record`, `health_observation`, `health_measurement`.
+Plus the domain rules, the API surface, the contracts, the four-layer screen, and 127 tests.
+
+**There is no column anywhere in it holding a Kynviora judgement about a value, and a test asserts
+that by name.** The temptation was small and specific - an `is_abnormal boolean` computed on write
+from the interval. One line, right most of the time, and it makes Kynviora the author of a clinical
+claim about a person it has never examined. What exists instead is `referenceComparison`, which
+answers where a number sits relative to the interval _the report printed_ and is named for exactly
+that: `WITHIN`, `OUTSIDE_ABOVE`, `OUTSIDE_BELOW`, `NO_INTERVAL`, `NOT_COMPARABLE`. The report's own
+word travels separately, in sentences whose subject is the report (DEC-155).
+
+Health records are their own capability pair, backfilled to nobody - DEC-116's shape applied to a
+second question. `VIEW_DOCUMENTS` was the near miss: it exists so a caregiver can open a package
+label at a pharmacy counter, and a grant made for that reason must not silently become the right to
+read a thyroid history. A caregiver holding **every other capability** sees nothing here, asserted
+at both the database and the API boundary.
+
+### Four things the gates found rather than review
+
+1. **RLS needs FORCE as well as ENABLE.** `db/migrations.test.ts` asserts both flags across every
+   table in the schema and named all four new ones. `ENABLE` alone exempts the table's owner, and
+   the migration role owns every table here.
+
+2. **The retention sweep has to delete observations before the record.** The first version deleted
+   `health_record` first, the foreign key cascaded, and the sweep then reported having purged no
+   results at all. `0023`'s reason applies exactly: a referential action is issued by the
+   referencing table's owner rather than by the sweeping role, so a cascade removes rows this role's
+   own policy never admitted.
+
+3. **`mobileGlobals` did not know about JSX text.** It strips comments and string literals, and a
+   sentence a person reads on screen is neither: `<Typography>The document itself is what was
+kept.</Typography>` was reported as the Health screen reading the global `document`. Fixed by
+   blanking only runs between tags that provably contain no code - a brace anywhere in the run
+   means an expression, and blanking that would be a false negative, which is the one kind of
+   mistake this check must not make.
+
+4. **A quoted number and a computed one need opposite precision rules.** The first render printed a
+   reference interval of `0.4 – 4.0` as `0.4 – 4`, because the delta formatter's no-padding rule had
+   been reused for it. They point opposite ways and the distinction is worth stating: _a quoted
+   number is printed at the source's own precision, because it is a quotation; a computed number is
+   printed without padding, because Kynviora has no precision to claim._
+
+### What the screen does and does not draw
+
+Four layers - Profile, Records, Trends, History - because those are four questions, and one scroll
+holding all of them puts a lab value from last year under a heart rate from this morning.
+
+The coverage statement is a card, first, in every state. DEC-138's reasoning transfers exactly: a
+Health screen with three records on it invites the conclusion that three records is the whole of
+what there is to know.
+
+Nothing is fabricated where a source does not exist. A profile with no measurements gets a sentence
+saying so and **no chart** - not an empty axis and not a demo curve. Apple Health and Health Connect
+appear as `Designed, not built`, with a sentence saying Kynviora has designed the connection and
+has not built it, because `21` of the brief asks for future-ready states that do not imply a real
+integration.
+
+A blood pressure is one bar from diastolic to systolic, because that is what the reading is. Two
+bars would be two measurements. A trend for a metric that is not continuously sampled does not
+connect its points: a line asserts the quantity took the intermediate values, and between a weight
+in March and a weight in September nobody measured whether it did.
+
+### Verification
+
+- `npm run verify` green at default workers.
+- **5301 -> 5479 tests, 199 -> 205 files, 31 -> 32 migrations.**
+- New: `changeLens` 27 + 21, `healthRecord` 40, `db/healthRecords` 29, `api/healthRecords` 34,
+  `HealthPieces` 24, schema vocabulary 5, mobile globals 3.
+- No device run yet. The tab bar changed, so the standing 74/74 accessibility survey and the 7/7
+  safety run are counts taken against a build with a destination this one does not have.
+
+### Files
+
+`db/migrations/0032_health_records.sql`, `db/healthRecords.test.ts`, `db/src/retention.ts`,
+`packages/domain/src/changeLens.ts`, `packages/domain/src/healthRecord.ts`,
+`packages/presentation/src/changeLens.ts`, `packages/presentation/src/tokens.ts`,
+`packages/contracts/src/health.ts`, `services/api/src/healthRecords.ts`,
+`apps/mobile/src/app/(tabs)/health.tsx`, `apps/mobile/src/app/(tabs)/_layout.tsx`,
+`apps/mobile/src/features/health/HealthPieces.tsx`, `scripts/checks/mobileGlobals.ts`,
+`scripts/device/verifySafetyScreen.ts`.

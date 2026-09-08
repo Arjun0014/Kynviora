@@ -1,7 +1,20 @@
 /**
  * Primary navigation.
  *
- * Spec 06: "Use five primary destinations - Today, Shelf, Safety, Care, You."
+ * Spec 06, as amended by DEC-151: "Use five primary destinations - Today, Shelf, Health, Care,
+ * You."
+ *
+ * SAFETY IS NOT HERE ANY MORE, AND EVERY SAFETY SCREEN STILL IS
+ * It was the third of these five until 2026-09-08. Under the approved V3 direction it keeps every
+ * screen, every sentence and every rule and loses the tab: it is reached from the Safety Lens on
+ * Shelf, from evidence and coverage inside item detail, from a notice on Today, and - for the
+ * question "what has Kynviora actually checked, and what has it not" - from the Coverage Center,
+ * which is that screen at `/coverage`. The reasoning is DEC-151 and both `06` and
+ * `docs/design/DESIGN_SYSTEM.md` are amended in place rather than contradicted.
+ *
+ * The route file did not move. `safety.tsx` is still under `(tabs)`, still rendered by the same
+ * navigator, and is simply not one of the five slots - `href: null` takes a `Tabs.Screen` out of
+ * the bar while leaving it navigable, which is what "a lens with an address" needs.
  *
  * Each tab carries a visible text label as well as an icon. Spec 18 forbids meaning carried by
  * an icon or colour alone, and an icon-only tab bar is unusable for the primary audience.
@@ -33,7 +46,7 @@ const TAB_COUNT = 5;
 const TAB_GLYPHS = {
   today: '◉',
   shelf: '▤',
-  safety: '⛉',
+  health: '✚',
   care: '♡',
   you: '☰',
 } as const;
@@ -130,11 +143,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="safety"
+        name="health"
         options={{
-          title: 'Safety',
-          tabBarIcon: ({ color }) => <TabIcon glyph={TAB_GLYPHS.safety} color={color} />,
-          tabBarLabel: ({ color }) => <TabLabel label="Safety" color={color} />,
+          title: 'Health',
+          tabBarIcon: ({ color }) => <TabIcon glyph={TAB_GLYPHS.health} color={color} />,
+          tabBarLabel: ({ color }) => <TabLabel label="Health" color={color} />,
         }}
       />
       <Tabs.Screen
@@ -153,6 +166,13 @@ export default function TabLayout() {
           tabBarLabel: ({ color }) => <TabLabel label="You" color={color} />,
         }}
       />
+      {/*
+        The Coverage Center. Declared rather than left out, because `href: null` is what keeps a
+        route reachable while taking it out of the bar - omitting the `Tabs.Screen` entirely would
+        let the file-based router add a sixth slot back on its own, which is the failure this
+        declaration exists to prevent (`06` fixes five, DEC-151 changed which five).
+      */}
+      <Tabs.Screen name="safety" options={{ title: 'Coverage Center', href: null }} />
     </Tabs>
   );
 }

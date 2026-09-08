@@ -22,7 +22,7 @@ import {
   type MeasuredControl,
 } from './voiceMode.js';
 
-const DESTINATIONS = ['Today', 'Shelf', 'Safety', 'Care', 'You'];
+const DESTINATIONS = ['Today', 'Shelf', 'Health', 'Care', 'You'];
 
 function exchange(overrides: Partial<Exchange> = {}): Exchange {
   return { said: 'hello', transcript: ['hello'], summary: null, ...overrides };
@@ -36,10 +36,10 @@ describe('the way in', () => {
 
   it('fails when it is missing from one, and names which', () => {
     const found = new Map<string, number | null>(DESTINATIONS.map((name) => [name, 200]));
-    found.set('Safety', null);
+    found.set('Health', null);
     const check = entryControlCheck(found, DESTINATIONS);
     expect(check.status).toBe('FAIL');
-    expect(check.detail).toContain('Safety');
+    expect(check.detail).toContain('Health');
   });
 
   it('fails when it moves between screens', () => {

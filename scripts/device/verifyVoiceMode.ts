@@ -69,7 +69,7 @@ import {
   type MeasuredControl,
 } from './voiceMode.js';
 
-const TABS = ['Today', 'Shelf', 'Safety', 'Care', 'You'] as const;
+const TABS = ['Today', 'Shelf', 'Health', 'Care', 'You'] as const;
 
 /** The seeded household, as every other harness here names it. */
 const USER_ID = '00000000-0000-4000-8000-00000000d001';

@@ -117,14 +117,22 @@ async function main(): Promise<void> {
   prepareDeviceForDriving();
   const ready = coldStart('safety');
 
+  // The Coverage Center is reached from Shelf now, not from a tab of its own (DEC-151). Two taps
+  // rather than one, and the second is the control that carries the decision: if somebody removes
+  // it, this harness fails at the step that says so rather than reporting an empty screen.
   let screenText: readonly string[] | null = null;
-  if (ready && tapNamed('Safety')) {
-    // The lines fill from the API, and a screen read while the request is in flight has no lines
-    // on it at all - which every check below would report as an omission.
-    sleep(10_000);
-    screenText = collectScreenText();
+  if (ready && tapNamed('Shelf')) {
+    sleep(2_000);
+    if (tapNamed('What Kynviora has checked')) {
+      // The lines fill from the API, and a screen read while the request is in flight has no
+      // lines on it at all - which every check below would report as an omission.
+      sleep(10_000);
+      screenText = collectScreenText();
+    } else {
+      captureFailure('safety-open-the-Coverage-Center-from-Shelf');
+    }
   } else {
-    captureFailure('safety-open-the-Safety-tab');
+    captureFailure('safety-open-the-Shelf-tab');
   }
 
   checks.push(everyItemHasALineCheck({ inbox, screenText }));

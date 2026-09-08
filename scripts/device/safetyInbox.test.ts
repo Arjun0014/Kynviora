@@ -51,7 +51,7 @@ const INBOX: InboxResponse = {
 
 /** A screen with everything on it that a correct one has. */
 const GOOD_SCREEN: readonly string[] = [
-  'Safety',
+  'Coverage Center',
   'Every item on this shelf, and what Kynviora can say about it today.',
   'Synthetic Tablet A',
   INSUFFICIENT_ANNOUNCEMENT,
@@ -243,7 +243,7 @@ describe('SAF-5, nothing counted or ranked', () => {
 
 describe('SAF-6, a filter that matches nothing', () => {
   const filtered = [
-    'Safety',
+    'Coverage Center',
     'Showing 0 of 3 items on this shelf.',
     COVERAGE_SENTENCE,
   ] as readonly string[];
@@ -268,7 +268,7 @@ describe('SAF-6, a filter that matches nothing', () => {
 
   it('fails when the coverage statement did not survive the filter', () => {
     const check = filteredEmptyCheck({
-      screenText: ['Safety', 'Showing 0 of 3 items on this shelf.'],
+      screenText: ['Coverage Center', 'Showing 0 of 3 items on this shelf.'],
       totalItems: 3,
       excludedNames: [],
     });
@@ -279,7 +279,7 @@ describe('SAF-6, a filter that matches nothing', () => {
     // Without it, a filtered page with no rows is indistinguishable from a shelf with nothing on
     // it - and the person asked for "action needed", so the difference is the whole answer.
     const check = filteredEmptyCheck({
-      screenText: ['Safety', COVERAGE_SENTENCE],
+      screenText: ['Coverage Center', COVERAGE_SENTENCE],
       totalItems: 3,
       excludedNames: [],
     });

@@ -38,6 +38,29 @@ describe('stripCommentsAndStrings', () => {
     expect(cleaned).toContain('const a = 1;');
   });
 
+  it('removes JSX text, which is the fourth place a word can appear without being code', () => {
+    // The gap this check had until 2026-09-08. A sentence a person reads on screen is written
+    // bare between two tags, so it is neither a comment nor a string literal - and the Health
+    // screen's "The document itself is what was kept." was reported as a read of `document`.
+    const cleaned = stripCommentsAndStrings('<Text>The document itself is what was kept.</Text>');
+    expect(cleaned).not.toContain('document');
+    // The tags survive, so line numbers and every other rule are unaffected.
+    expect(cleaned).toContain('<Text>');
+  });
+
+  it('leaves a JSX expression alone, because blanking one would be a false negative', () => {
+    // The direction that must never be wrong. A run containing a brace has code in it, and this
+    // check is allowed to be noisy long before it is allowed to be quiet.
+    const cleaned = stripCommentsAndStrings('<Text>{crypto.randomUUID()}</Text>');
+    expect(cleaned).toContain('crypto');
+    expect(forbiddenGlobalsIn(cleaned).map((use) => use.name)).toEqual(['crypto']);
+  });
+
+  it('still finds a real read on a line that also renders prose', () => {
+    const source = '<Text>A document.</Text>\nconst id = crypto.randomUUID();';
+    expect(forbiddenGlobalsIn(source)).toEqual([{ name: 'crypto', line: 2 }]);
+  });
+
   it('removes every kind of string literal', () => {
     const cleaned = stripCommentsAndStrings(
       'import x from \'expo-crypto\';\nconst b = "crypto";\nconst c = `crypto`;',
