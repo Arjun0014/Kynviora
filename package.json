@@ -45,7 +45,8 @@
     "worker": "npm --prefix services/worker run start",
     "verify:device:signin": "tsx scripts/device/verifySignIn.ts",
     "verify:device:delete": "tsx scripts/device/verifyDeleteAccount.ts",
-    "verify:device:voice": "tsx scripts/device/verifyVoiceMode.ts"
+    "verify:device:voice": "tsx scripts/device/verifyVoiceMode.ts",
+    "verify:repeat": "tsx scripts/verifyRepeat.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

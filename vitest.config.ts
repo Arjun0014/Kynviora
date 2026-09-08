@@ -25,8 +25,31 @@ export default defineConfig({
     },
     projects: [
       {
-        // Native tsconfig `paths` resolution (Vite 7+), replacing the vite-tsconfig-paths plugin.
-        resolve: { tsconfigPaths: true },
+        // No tsconfig `paths` resolution here, deliberately, and this is `DEV-096`.
+        //
+        // `resolve.tsconfigPaths: true` puts Rolldown's resolver into tsconfig **auto-discovery**
+        // (`ResolveOptions { tsconfig: Some(Auto) }`), which is a filesystem walk **per specifier,
+        // keyed on the importing file**, run on Rolldown's own thread pool rather than on the
+        // JavaScript thread. The walk begins at the importing file itself, so its first candidate
+        // is `<the importing file>/tsconfig.json` - a path that can never exist and whose miss has
+        // to come back as an IO error every single time for the walk to reach the root. Any other
+        // answer, from that candidate or any other, aborts the transform with
+        // `Failed to load tsconfig '<that candidate>'`. That is exactly the shape of the failures
+        // recorded in `DEV-096`, and every one of them named a **source file** with
+        // `/tsconfig.json` appended: the first candidate.
+        //
+        // How much of it there was: a run of one test file did **218** `load_tsconfig` reads with
+        // this flag and **2** without it. The number in flight at once is a function of how many
+        // Vitest workers are asking for modules, which is why the gate failed about one run in two
+        // at twelve workers, passed at four, and passed on every file alone (trap 208).
+        //
+        // Nothing needed it. Every `@kynviora/*` package is an npm workspace whose manifest is
+        // named after the specifier and whose entry point is the same `src/index.ts` the `paths`
+        // entry names - and the `mobile` project below has resolved four of them that way, 159
+        // imports' worth, since it existed, with no `tsconfigPaths` and no alias.
+        // `scripts/checks/moduleResolution.test.ts` holds the two answers to each other, so a
+        // manifest that stopped agreeing with `tsconfig.base.json` is a failing test rather than a
+        // suite quietly running code the typechecker never saw.
         test: {
           name: 'server',
           globals: false,
