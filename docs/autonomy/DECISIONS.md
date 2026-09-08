@@ -6410,3 +6410,74 @@ produce rather than over the ones that looked risky, and asserts separately that
 category the domain has reaches a group - the failure that would otherwise be silent is a category
 added to `03`'s vocabulary and not to this one, which would draw those products under "Other
 products" for ever.
+
+---
+
+## DEC-162 - A comparison says what labels declare, in three states, and never what products contain
+
+**Date.** 2026-09-09
+**Status.** Accepted. Server half implemented; the screen follows.
+**Context.** V3's Compare is infographic-first: a matrix of ingredients against products, a list of
+what they share, and a strip saying how complete each declaration is. The matrix is the whole of it
+and the matrix is where a comparison can lie.
+
+**Options.** (a) A two-state matrix - has it, does not have it. (b) Three states, with unknown as a
+first-class cell. (c) A "does it contain X" answer per criterion.
+
+**Decision.** (b), and never (c).
+
+**Three cells, because two is a two-state answer to a three-state question.**
+
+| Cell             | What it means                                                      |
+| ---------------- | ------------------------------------------------------------------ |
+| `DECLARED`       | this product's declaration lists this term                         |
+| `NOT_DECLARED`   | this product has a declaration and this term is not on it          |
+| `NO_DECLARATION` | nothing has been recorded for this product, so nothing can be said |
+
+The third is not "no". A product nobody has entered a declaration for is one Kynviora knows nothing
+about, and drawing that as an empty cell beside a product that genuinely does not list an ingredient
+is `23` D-014 arriving through a table rather than through a sentence - and it is the exact failure
+somebody comparing a product for an allergy would be harmed by.
+
+**The second cell is not "does not contain" either.** A declaration is what a label printed. `09`
+keeps a source fact and a conclusion apart: "this label does not list sodium lauryl sulfate" is a
+fact about the label; "this product does not contain sodium lauryl sulfate" is a claim about the
+product that only the manufacturer can make.
+
+**Matching is on the printed term.** `ingredientLookupKey` folds case, punctuation and accents, so
+`Aloé Vera` and `aloe vera` are one row. It does **not** resolve synonyms, so `Aqua` and `Water` are
+two - because the substance vocabulary is empty (`BLK-003`), and resolving through an empty one
+would match nothing while looking like it had. `matchedByPrintedTermOnly` is on every response so a
+screen states it rather than a reader having to know.
+
+**"Shared" is empty whenever any product has no declaration.** "They all list this" is a claim about
+all of them, and one that cannot answer makes the claim unavailable rather than weaker.
+`declaringCount` is on the response because it is what tells a reader whether an empty `shared`
+means "they have nothing in common" or "one of them could not be asked".
+
+**Nothing ranks and nothing scores.** `02`. V3's mock draws a "best" chip and a count of criteria
+met; neither is built. Choosing criteria is a feature of its own, and a "best" computed over cells
+that are partly unknown ranks products by how much has been entered about them - which is a ranking
+of records dressed as a recommendation about products. Recorded as remaining V3 work rather than
+approximated.
+
+**Composed on the server (DEC-010), and that is not a preference.** The declaration has to be
+parsed, and `parseIngredientDeclaration` lives in `@kynviora/catalog`, which the presentation layer
+deliberately cannot depend on. A screen that parsed a label would be a second parser disagreeing
+quietly with the one the safety engine uses. The shelf list does not carry declarations either, and
+putting every product's ingredient text on every shelf read - so a client could compare - would be
+sending a page of label text to draw a list of names.
+
+**Every column must be the same item kind.** A medicine's declaration is its excipients and a
+shampoo's is its formulation. Comparing them produces a table that is technically correct, answers
+no question anybody asked, and invites the one reading it should not - "this medicine has fewer
+ingredients than that toothpaste". Refused with a sentence.
+
+**Two to four columns.** The ceiling is a property of the screen rather than of the data: a matrix
+with a column per product stops being readable on a phone before it stops being computable, and at
+font scale 2 it does so sooner.
+
+**A product the caller cannot see is counted, not dropped.** `notAvailableCount` is on the response,
+because a table of three drawn where four were chosen is a different report. Below two, the route
+refuses rather than drawing an empty comparison: "we could not find them" and "they have nothing in
+common" are different sentences.

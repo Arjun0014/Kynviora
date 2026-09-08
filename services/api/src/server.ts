@@ -73,6 +73,7 @@ import { registerOperationsRoutes } from './operations.js';
 import { registerSafetyInboxRoutes } from './safetyInbox.js';
 import { registerScheduleRoutes } from './schedule.js';
 import { registerHealthRecordRoutes } from './healthRecords.js';
+import { registerCompareRoutes } from './compare.js';
 import { registerItemDeletionRoutes, registerProfileDeletionRoutes } from './itemDeletion.js';
 import { registerPersonalExportRoutes } from './personalExport.js';
 import { registerShadowModeRoutes } from './shadowMode.js';
@@ -2724,6 +2725,16 @@ export function createServer(options: ServerOptions): FastifyInstance {
     // domain.
 
     registerVisitPackRoutes(app, { contextFor, fail, digest: sha256ContentDigest() });
+
+    // -------------------------------------------------------------------------
+    // Comparing products (V3's Compare tray, DEC-162)
+    // -------------------------------------------------------------------------
+    // Composed here rather than on a client, for the reason `compare.ts` gives: the declaration
+    // has to be parsed, and the parser lives in `@kynviora/catalog`, which the presentation layer
+    // deliberately cannot depend on. `asItemVerification` is injected so the two narrow the same
+    // way.
+
+    registerCompareRoutes(app, { contextFor, fail, asItemVerification });
 
     // -------------------------------------------------------------------------
     // Caregiver alert delivery routes (spec 04 Phase 8.2)

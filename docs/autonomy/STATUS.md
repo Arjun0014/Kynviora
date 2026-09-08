@@ -9,14 +9,14 @@ Last updated: 2026-09-09
 
 ## Current position
 
-|                    |                                                                          |
-| ------------------ | ------------------------------------------------------------------------ |
-| **Current stage**  | Stage 4 complete; **V3 implementation under way** (DEC-151)              |
-| **Current phase**  | V3: Health, Talk bar, You and Care are in; Shelf's V3 is next            |
-| **Last completed** | The sheets survey finished: **40/40 PASS on hardware**, three defects    |
-| **Branch**         | `master`                                                                 |
-| **Latest commit**  | `feat(shelf): category groups, and the sentence DEC-157 could not offer` |
-| **Baseline tag**   | `baseline-spec-only`                                                     |
+|                    |                                                                       |
+| ------------------ | --------------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; **V3 implementation under way** (DEC-151)           |
+| **Current phase**  | V3: Health, Talk bar, You and Care are in; Shelf's V3 is next         |
+| **Last completed** | The sheets survey finished: **40/40 PASS on hardware**, three defects |
+| **Branch**         | `master`                                                              |
+| **Latest commit**  | `feat(compare): what labels declare, in three states`                 |
+| **Baseline tag**   | `baseline-spec-only`                                                  |
 
 ## Handoff - 2026-09-09, after the first V3 session
 
@@ -78,7 +78,16 @@ Nothing implemented is a mock: every screen here reads real routes and renders r
 **not** been implemented at all:
 
 - Today's reordering (needs input / reports / jobs / since you last looked).
-- Shelf's image-led tiles, selection mode and Compare. **Considering and the category grouping are
+- Shelf's image-led tiles, selection mode and the Compare **screen** - the comparison itself is in
+  (DEC-162: three cells, and the third is not "no"), with `GET /v1/compare` composed server-side and
+  a client method; what is missing is the tray and the matrix. V3's "best" chip and its
+  criteria-scoring are deliberately not built (`02`).
+- Image-led tiles are **not blocked on a credential and are not built**: nothing in this repository
+  stores or serves an evidence asset, so the only honest source of a package photograph - a
+  `FRONT_PANEL` capture somebody took - has no upload route, no object store and no retention rule.
+  A stock photograph would be a fabricated fact about a package. Recorded here rather than
+  approximated.
+- The rest of Shelf's V3: **Considering and the category grouping are
   in** (`0033`, DEC-160, DEC-161): two collections with a switcher, a move with the same version
   precondition as any other change and a CHECK that keeps medicines out of Considering; eight
   category groups in a fixed taxonomy order with chips and counts; and one agent action per
@@ -149,9 +158,10 @@ evidence rather than source (DEC-152). Three structural decisions have been reco
   year left) and `No end date` (an indefinite grant is a decision and looked like every other active
   one).
 
-**What is V3 and not yet built**: Today's reordering, Shelf's image-led tiles, category grouping and
-Compare, the permission editor's matrix, the care activity timeline, the caregiver relationship label
-(needs a column that does not exist), and the Agent Jobs surface. The Health screen is real
+**What is V3 and not yet built**: Today's reordering, Shelf's image-led tiles and its Compare
+screen, the permission editor's matrix, the care activity timeline, the caregiver relationship label
+(needs a column that does not exist), and the Agent Jobs surface. Shelf's two collections and its
+category grouping are in (DEC-160, DEC-161), and Compare's server half is (DEC-162). The Health screen is real
 end-to-end - schema, RLS, retention, export, API, contracts, screen - and has no fabricated data in
 it: a profile with no measurements gets a sentence and no chart, and Apple Health reads
 `Designed, not built`.
@@ -229,8 +239,8 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5635 tests passing**, 0 failing, across 215 files. **33 migrations.** `npm run verify` green
-  at default workers on an idle machine with the emulator shut down, 2026-09-09 04:39.
+- **5661 tests passing**, 0 failing, across 217 files. **33 migrations.** `npm run verify` green
+  at default workers on an idle machine with the emulator shut down, 2026-09-09 04:52.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is

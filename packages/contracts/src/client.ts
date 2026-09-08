@@ -556,6 +556,56 @@ export interface ProfileCreated {
  * `lastReviewedAt`: editing a record is not evidence about a pack, and `markReviewed` is a
  * request the server timestamps rather than a time a client supplies.
  */
+/**
+ * One column of a comparison, as the server composed it (DEC-162).
+ *
+ * The three verification axes stay apart here as everywhere (`02`, `08`), and there is no combined
+ * field and no score. `declaredTermCount` is a count of what is recorded and not a completeness:
+ * nothing in this build knows how long the real list is.
+ */
+export interface ComparedProductResponse {
+  readonly id: string;
+  readonly displayName: string;
+  readonly brand: string | null;
+  readonly identity: StatusPresentationResponse;
+  readonly formulation: StatusPresentationResponse;
+  readonly batch: StatusPresentationResponse;
+  readonly hasDeclaration: boolean;
+  readonly declaredTermCount: number;
+}
+
+/** One row of the matrix: a term, and what each product's declaration says about it. */
+export interface ComparisonRowResponse {
+  readonly term: string;
+  /**
+   * One per product, in the order of {@link CompareResponse.products}.
+   *
+   * `DECLARED`, `NOT_DECLARED` or `NO_DECLARATION`. The third is not the second: a product nobody
+   * entered a declaration for is one Kynviora knows nothing about, and rendering that as "does not
+   * list it" is `23` D-014 arriving through a table.
+   */
+  readonly cells: readonly string[];
+}
+
+export interface CompareResponse {
+  readonly products: readonly ComparedProductResponse[];
+  readonly shared: readonly ComparisonRowResponse[];
+  readonly differing: readonly ComparisonRowResponse[];
+  /** How many of the products have a declaration at all. */
+  readonly declaringCount: number;
+  /** Whether terms were matched by their printed spelling rather than through a vocabulary. */
+  readonly matchedByPrintedTermOnly: boolean;
+  /** How many chosen products this comparison could not include. Never silently dropped. */
+  readonly notAvailableCount: number;
+  readonly serverTime: string;
+}
+
+export interface CompareQuery {
+  readonly profileId: string;
+  /** Two to four item identifiers. The order is the order of the columns. */
+  readonly itemIds: readonly string[];
+}
+
 export interface ItemUpdateBody {
   readonly expectedVersion: number;
   readonly displayName?: string;
@@ -1424,6 +1474,14 @@ export interface KynvioraClient {
   /** One item and what is not settled about it (`04` Phase 2.1). */
   itemDetail(itemId: string): Promise<ApiOutcome<ItemDetailResponse>>;
   /**
+   * Compare what two to four products declare (DEC-162).
+   *
+   * Composed on the server, because the declaration has to be parsed and the parser lives where
+   * the safety engine's does - a screen that parsed a label would be a second parser, disagreeing
+   * quietly with the one that matters.
+   */
+  compare(query: CompareQuery): Promise<ApiOutcome<CompareResponse>>;
+  /**
    * Write down a pack somebody is holding (`04` Phases 2.2 and 2.3).
    *
    * The idempotency key is a parameter for the reason it is on a dose event and on an invitation:
@@ -1871,6 +1929,15 @@ export function createClient(options: ClientOptions): KynvioraClient {
       }),
 
     itemDetail: (itemId) => get<ItemDetailResponse>(`/v1/items/${encodeURIComponent(itemId)}`),
+
+    compare: (query) =>
+      get<CompareResponse>('/v1/compare', {
+        profileId: query.profileId,
+        // Joined here rather than sent as repeated parameters, because that is what a query string
+        // spells reliably across clients - and the order is the order of the columns, so it is
+        // passed through rather than sorted.
+        itemIds: query.itemIds.join(','),
+      }),
 
     // The body is passed through untouched. Trimming, upper-casing a market or stripping a space
     // out of a barcode here would be the client repairing what somebody typed, and a value

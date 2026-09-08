@@ -7504,3 +7504,73 @@ for either.
 `packages/presentation/src/shelfCategories.ts`, `packages/contracts/src/client.ts`,
 `packages/contracts/src/views.ts`, `services/api/src/server.ts`,
 `apps/mobile/src/app/(tabs)/shelf.tsx`.
+
+## 2026-09-09 (V3, Shelf) - Compare, and the third cell
+
+V3's Compare is a matrix of ingredients against products. The matrix is the whole of it, and the
+matrix is where a comparison can lie.
+
+### Three cells, not two
+
+`y` and `n` are a two-state answer to a three-state question:
+
+```
+DECLARED         this product's declaration lists this term
+NOT_DECLARED     this product has a declaration and this term is not on it
+NO_DECLARATION   nothing has been recorded for this product, so nothing can be said
+```
+
+The third is not "no", and drawing it as one is `23` D-014 arriving through a table - the exact
+failure somebody comparing toothpastes for a sensitivity would be harmed by. The second is not
+"does not contain" either: a declaration is what a label printed, and `09` keeps a fact about a
+label apart from a claim about a product.
+
+### What the report says about itself
+
+`matchedByPrintedTermOnly` is on every response, always `true`. `ingredientLookupKey` folds case,
+punctuation and accents - `Aloé Vera` and `aloe vera` are one row - but it does not resolve
+synonyms, so `Aqua` and `Water` are two. That is `BLK-003`: the substance vocabulary is empty, and
+resolving through an empty one would match nothing while looking like it had. The screen can say so
+because the response does.
+
+`shared` is empty whenever any product has no declaration, and `declaringCount` is what tells a
+reader why: "they have nothing in common" and "one of them could not be asked" are different
+findings.
+
+### What was deliberately not built
+
+V3's mock draws a **best** chip - _"meets all 3 criteria you chose"_ - and a per-criterion score.
+Neither is here. Choosing criteria is a feature of its own, and a "best" computed over cells that
+are partly unknown ranks products by how much has been entered about them, which is a ranking of
+records dressed as a recommendation about products (`02`). Recorded as remaining V3 work rather than
+approximated.
+
+### Why it is a route
+
+The declaration has to be parsed, and `parseIngredientDeclaration` lives in `@kynviora/catalog`,
+which the presentation layer deliberately cannot depend on - a screen that parsed a label would be a
+second parser disagreeing quietly with the one the safety engine uses. The shelf list does not carry
+declarations either, and putting every product's ingredient text on every shelf read so a client
+could compare would be sending a page of label text to draw a list of names.
+
+Two route rules are worth naming. Every column must be the same item kind, because a medicine's
+declaration is its excipients and a shampoo's is its formulation, and the comparison invites a
+reading that is meaningless. And a product the caller cannot see is **counted** rather than dropped:
+`notAvailableCount` is on the response, because a table of three drawn where four were chosen is a
+different report, and below two the route refuses rather than drawing an empty comparison.
+
+### Verification
+
+- `npm run verify` green. **5635 -> 5661 tests, 215 -> 217 files.**
+- New: `catalog/compare` 13, `api/compare` 13.
+
+### Files
+
+`packages/catalog/src/compare.ts`, `services/api/src/compare.ts`,
+`packages/contracts/src/client.ts`, `services/api/src/server.ts`.
+
+### What is next
+
+The screen: selection mode on Shelf, a Compare tray, and the matrix drawn with three cell states
+where the third reads as "not recorded" rather than as an absence. `ScreenDeclaration` already
+carries `selecting`, which is the state the Talk bar leaves the screen for.
