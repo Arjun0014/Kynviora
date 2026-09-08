@@ -12,6 +12,7 @@ import {
   crashedApp,
   isFullyVisible,
   dragAnchorAvoidingFields,
+  dragAnchorAvoidingObstacles,
   parseUiHierarchy,
   sizeInDp,
   type UiNode,
@@ -653,5 +654,84 @@ describe('the LogBox overlay, which is not the product', () => {
     expect(sized?.status).toBe('PASS');
     const read = checks.find((check) => check.id === 'A11Y-1');
     expect(read?.detail).toContain('LogBox');
+  });
+});
+
+describe('a drag anchor that also avoids the persistent bar', () => {
+  const BAND = { top: 700, bottom: 1_900 };
+
+  function bar(name: string): string {
+    return node({
+      class: 'android.view.ViewGroup',
+      package: PACKAGE,
+      'content-desc': name,
+      clickable: 'true',
+      bounds: '[42,1672][1038,2124]',
+    });
+  }
+
+  it('moves above the Talk bar, which the standard anchor sits inside', () => {
+    // The defect, exactly. At font scale 2 the bar is `[42,1672][1038,2124]` and
+    // `SCROLL_ANCHOR_Y` is 1900 - so every scroll-to-find started inside it, moved nothing, and
+    // four sheets were reported unreachable on a build where all four open.
+    const nodes = parseUiHierarchy(
+      hierarchy(bar('Talk to Kynviora. Ask for something on this screen. Open.')),
+    );
+    const anchor = dragAnchorAvoidingObstacles(nodes, PACKAGE, BAND);
+    expect(anchor).not.toBeNull();
+    expect(anchor as number).toBeLessThan(1_672);
+  });
+
+  it('avoids the bar in every state it can be in', () => {
+    // The bar's accessible name **is** its state, so a harness matching one sentence would avoid
+    // the obstacle at rest and walk into it while the agent was working.
+    for (const name of [
+      'Listening. Say what you want, then stop. Close.',
+      'Working. Doing what you confirmed. Open.',
+      'Could not do that. The transcript says why, and where the control is. Open.',
+    ]) {
+      const nodes = parseUiHierarchy(hierarchy(bar(name)));
+      const anchor = dragAnchorAvoidingObstacles(nodes, PACKAGE, BAND);
+      expect(anchor, name).not.toBeNull();
+      expect(anchor as number, name).toBeLessThan(1_672);
+    }
+  });
+
+  it('still avoids a text field, because it is the same failure in a different widget', () => {
+    const nodes = parseUiHierarchy(
+      hierarchy(
+        node({
+          class: 'android.widget.EditText',
+          package: PACKAGE,
+          bounds: '[40,1500][1040,2000]',
+        }),
+      ),
+    );
+    const anchor = dragAnchorAvoidingObstacles(nodes, PACKAGE, BAND);
+    expect(anchor as number).toBeLessThan(1_500);
+  });
+
+  it('ignores the bar when the caller says it is surveying inside a sheet', () => {
+    // The bar is not drawn over a sheet, and a survey there wants only the field rule - which is
+    // why the two questions are two functions rather than one with a guess in it.
+    const nodes = parseUiHierarchy(
+      hierarchy(bar('Talk to Kynviora. Ask for something on this screen. Open.')),
+    );
+    expect(dragAnchorAvoidingObstacles(nodes, PACKAGE, BAND, 60, false)).toBe(BAND.bottom);
+    expect(dragAnchorAvoidingFields(nodes, PACKAGE, BAND)).toBe(BAND.bottom);
+  });
+
+  it('leaves another app’s bar alone', () => {
+    const nodes = parseUiHierarchy(
+      hierarchy(
+        node({
+          class: 'android.view.ViewGroup',
+          package: 'com.example.other',
+          'content-desc': 'Talk to Kynviora. Ask for something on this screen. Open.',
+          bounds: '[42,1672][1038,2124]',
+        }),
+      ),
+    );
+    expect(dragAnchorAvoidingObstacles(nodes, PACKAGE, BAND)).toBe(BAND.bottom);
   });
 });

@@ -97,6 +97,32 @@ export interface UiNode {
 const SWALLOWS_A_DRAG: readonly string[] = ['android.widget.EditText'];
 
 /**
+ * Accessible-name prefixes of the app's own persistent bottom furniture.
+ *
+ * A drag that begins inside one of these is taken by the control, not by the list underneath -
+ * the same failure `SWALLOWS_A_DRAG` describes for a text field, arriving through a different
+ * kind of widget. Measured rather than assumed: at font scale 2 on a Pixel 7 the Talk bar
+ * occupies `[42,1672][1038,2124]`, and `SCROLL_ANCHOR_Y` is 1900 - so every scroll-to-find on
+ * every destination started inside it and moved nothing, and four sheets reported as unreachable
+ * on a build where all four open perfectly well.
+ *
+ * Prefixes rather than exact names, because the bar's accessible name **is its state**: it reads
+ * "Talk to Kynviora. Ask for something on this screen. Open." at rest and "Listening. Say what you
+ * want, then stop. Close." while live, and a harness matching the whole sentence would avoid the
+ * obstacle in one state and walk into it in another.
+ */
+export const PERSISTENT_BAR_NAME_PREFIXES: readonly string[] = [
+  'Talk to Kynviora',
+  'Listening',
+  'Understanding',
+  'Working',
+  'Needs your confirmation',
+  'Done',
+  'Could not do that',
+  'Needs more information',
+];
+
+/**
  * A y coordinate a drag can start at without a text field taking it, or `null`.
  *
  * Searched from the bottom of the candidate band upwards, because a drag started low travels
@@ -112,11 +138,35 @@ export function dragAnchorAvoidingFields(
   band: { readonly top: number; readonly bottom: number },
   step = 60,
 ): number | null {
-  const fields = nodes.filter(
-    (node) => node.packageName === packageName && SWALLOWS_A_DRAG.includes(node.className),
-  );
+  return dragAnchorAvoidingObstacles(nodes, packageName, band, step, false);
+}
+
+/**
+ * The same, and it also avoids the app's persistent bottom bar.
+ *
+ * Separate from {@link dragAnchorAvoidingFields} rather than replacing it, because the two answer
+ * different questions and a caller should say which it is asking. Surveying **inside** a sheet
+ * wants only the field rule - the bar is not drawn over a sheet - and scrolling a **destination**
+ * to find a control wants both, because that is where the bar lives.
+ */
+export function dragAnchorAvoidingObstacles(
+  nodes: readonly UiNode[],
+  packageName: string,
+  band: { readonly top: number; readonly bottom: number },
+  step = 60,
+  avoidPersistentBar = true,
+): number | null {
+  const obstacles = nodes.filter((node) => {
+    if (node.packageName !== packageName) return false;
+    if (SWALLOWS_A_DRAG.includes(node.className)) return true;
+    if (!avoidPersistentBar) return false;
+    const name = accessibleNameOf(node);
+    return PERSISTENT_BAR_NAME_PREFIXES.some((prefix) => name.startsWith(prefix));
+  });
   for (let y = band.bottom; y >= band.top; y -= step) {
-    const inside = fields.some((field) => y >= field.bounds.top && y <= field.bounds.bottom);
+    const inside = obstacles.some(
+      (obstacle) => y >= obstacle.bounds.top && y <= obstacle.bounds.bottom,
+    );
     if (!inside) return y;
   }
   return null;

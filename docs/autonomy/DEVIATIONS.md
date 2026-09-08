@@ -3983,3 +3983,74 @@ reverse` tunnel produces none either - the app has offline states and uses them.
 - **Resolution**: `scratchpad/**` is in the ESLint ignore list, next to the other things that are
   generated rather than written, with the reason beside it.
 - **Status**: **RESOLVED 2026-09-08**.
+
+---
+
+## DEV-098 - The Talk bar took a fifth of the screen at font scale 2, and the scroll anchor sat inside it
+
+- **Affected specification**: `18` (system font scaling without clipping critical content or
+  actions; the primary audience is why 2.0 is supported at all), `19` (a survey that cannot drive a
+  screen must say so), DEC-156, `DEV-079`.
+- **Expected behaviour**: a persistent control costs the same share of the screen at every font
+  scale a person can choose.
+- **Implemented behaviour**: the Talk bar drew its label **and** its sub-line at every scale.
+  Measured on a Pixel 7 (1080x2400) with `font_scale 2.0`, from a hierarchy dump:
+  `Talk to Kynviora. Ask for something on this screen. Open. -> [42,1672][1038,2124]` - **452
+  pixels**, 19% of the screen, on every destination, permanently.
+- **The second failure, which is the same measurement**: `SCROLL_ANCHOR_Y` is 1900 and the bar
+  spanned 1672 to 2124, so every `scroll-to-find` in `verify:device:a11y` began **inside the bar**.
+  The swipe was taken as a press, the list never moved, the next dump matched the previous one, and
+  the harness returned "not found" about controls that were simply further down. Four sheets were
+  reported as unreachable at font scale 2 on a build where all four open.
+- **The third**: the survey matches an accessible name **exactly**, and the bar's name is now the
+  composed sentence above rather than `Talk to Kynviora`. `verifyVoiceMode` matches by prefix,
+  which is why that harness passed 9/9 while this one could not find the control at all.
+- **How it was found**: the full survey came back 50 PASS / 0 FAIL / 24 INCONCLUSIVE against a
+  standing 74. The first reading - machine contention, trap 202 - was **wrong**, and re-running one
+  sheet alone appeared to confirm it. Re-running the whole sheets part on an idle machine gave the
+  same 24 and the pattern the single-sheet run could not show: every sheet passes at scale 1 and
+  every sheet fails at scale 2.
+- **Risk**: real for a person who sets the scale to 2, which is the audience `18` names first.
+  Losing a fifth of every screen to supporting text is the cost; the harness failures are the
+  symptom that made it visible.
+- **Resolution**: three, one per failure.
+  - The sub-line is **announced and not drawn** above font scale 1.5
+    (`talkBarShowsSubline`). It stays in `accessibilityLabel`; the label is never dropped, because
+    that is the half `18` requires visible. Measured after: `[42,1948][1038,2125]` - **177 pixels**,
+    61% smaller.
+  - `dragAnchorAvoidingObstacles` extends the existing field-avoiding anchor to the app's own
+    persistent bar, matching by **name prefix** because the bar's name is its state - a harness
+    matching one sentence would avoid the obstacle at rest and walk into it while the agent was
+    working.
+  - A survey path step may be `{ startsWith }`, and Voice Mode's is.
+- **Status**: **RESOLVED 2026-09-09**. Sheets went 16/40 -> 28/40 on the anchor fix alone; the run
+  with all three was still executing at handoff.
+
+---
+
+## DEV-099 - Seven ended grants put a primary action eleven thousand pixels below the fold
+
+- **Affected specification**: `18` (system font scaling without clipping critical actions), `06`
+  Journey 6, `02`, DEC-159.
+- **Expected behaviour**: `Invite someone` is reachable on Care at every supported font scale.
+- **Implemented behaviour**: the first version of `CareCircle` drew a card for **every** row the
+  access list holds, including access that had ended. Measured on a Pixel 7 at font scale 2, one
+  card is `[42,358][1038,1945]` - **1,587 pixels**, two thirds of the screen. The development
+  profile carries seven revoked grants, so `Invite someone` sat roughly eleven thousand pixels
+  below the fold.
+- **How it was found**: while diagnosing `DEV-098`, by driving Care at scale 2 and reading the
+  hierarchy. The revocations were then checked against `GET /v1/caregiver-grants` rather than
+  assumed: all seven carry `revokedAt` from 2026-09-07, from that day's device runs.
+- **A reading that was worthless, recorded because it is a rule**: thirty-three blind swipes at a
+  fixed coordinate landed on a card, opened the revocation flow, and left the app on "Access
+  removed. It stopped straight away." - a screen with no `Invite someone` on it at all. The next
+  dump was therefore about the wrong screen and looked exactly like the finding being chased. Trap
+  200 in a second place: a comparison needs both sides driven, and the side nobody thinks to drive
+  is the one that lies.
+- **Risk**: a primary action unreachable for the audience `18` names first.
+- **Resolution**: the circle shows **current** access - active, invited, expiring, no end date - and
+  states the rest as a count: "7 people no longer have access. They are listed below, with what
+  happened." A count and not an omission: the sentence is on screen whenever there is one, and
+  every row it counts is still enumerated directly beneath in `CaregiverAccessList`, which is the
+  surface that exists to say what happened.
+- **Status**: **RESOLVED 2026-09-09** in code and in unit tests; not yet re-measured on hardware.

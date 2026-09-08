@@ -41,9 +41,14 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { MIN_TOUCH_TARGET_DP, RADIUS, SPACING, type Theme } from '@kynviora/presentation';
-import { talkBarIsVisible, talkBarPresentation, talkBarStateFor } from '@kynviora/agent';
+import {
+  talkBarIsVisible,
+  talkBarPresentation,
+  talkBarShowsSubline,
+  talkBarStateFor,
+} from '@kynviora/agent';
 import { Typography } from '@/components/Typography';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useTheme, useThemeContext, useThemedStyles } from '@/theme/ThemeProvider';
@@ -59,7 +64,11 @@ export function TalkBar() {
   const { reduceMotion } = useThemeContext();
   const { session, open, phrasings, contextSummary, runScreenAction, canListen } = useVoice();
   const screen = useScreenContext();
+  const { fontScale } = useWindowDimensions();
   const [panelOpen, setPanelOpen] = useState(false);
+  // At a large font scale the sub-line is announced and not drawn: measured at 452px - 19% of a
+  // Pixel 7's screen - with both lines at scale 2, on every destination, permanently.
+  const showSubline = talkBarShowsSubline(fontScale);
 
   const state = talkBarStateFor(session);
   const presentation = talkBarPresentation(state);
@@ -200,9 +209,11 @@ export function TalkBar() {
           <Typography role="label" style={{ color: tone.foreground }} decorative>
             {presentation.label}
           </Typography>
-          <Typography role="caption" style={{ color: tone.foreground }} decorative>
-            {presentation.subline}
-          </Typography>
+          {showSubline ? (
+            <Typography role="caption" style={{ color: tone.foreground }} decorative>
+              {presentation.subline}
+            </Typography>
+          ) : null}
         </View>
       </Pressable>
     </View>

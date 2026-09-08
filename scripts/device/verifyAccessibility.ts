@@ -40,6 +40,7 @@ import {
   clipRectsOf,
   crashedApp,
   dragAnchorAvoidingFields,
+  dragAnchorAvoidingObstacles,
   hasDevelopmentOverlay,
   isInteractiveTarget,
   parseUiHierarchy,
@@ -93,7 +94,7 @@ const TABS = ['Today', 'Shelf', 'Health', 'Care', 'You'] as const;
 const SHEETS: readonly {
   readonly label: string;
   /** The controls to press, in order, from a freshly launched app. */
-  readonly path: readonly string[];
+  readonly path: readonly PathStep[];
 }[] = [
   { label: 'Invite someone', path: ['Care', 'Invite someone'] },
   { label: 'Record what happened', path: ['Shelf', 'Record what happened'] },
@@ -112,7 +113,10 @@ const SHEETS: readonly {
   // pressing it must **not** open a chat sheet: the screen stays visible and a panel rises above
   // the bar. The full conversation is reached from that panel, and this path takes the route a
   // person takes.
-  { label: 'Voice Mode', path: ['Talk to Kynviora', 'Open the full conversation'] },
+  {
+    label: 'Voice Mode',
+    path: [{ startsWith: 'Talk to Kynviora' }, 'Open the full conversation'],
+  },
 ];
 
 /**
@@ -147,6 +151,17 @@ const SHEET_DRAG_BAND = Object.freeze({ top: 700, bottom: 1_900 });
  * grant per caregiver run and each row is tall at twice the font size.
  */
 const MAX_SCROLL_TO_FIND = 60;
+
+/**
+ * The band a scroll-to-find drag may start in.
+ *
+ * Chosen from the bottom up by `dragAnchorAvoidingObstacles`, because a drag started low travels
+ * furthest before running out of screen. The bottom stops short of the navigation, which is not
+ * this app's to drag; the top is high enough that a screen whose whole lower half is furniture
+ * still has somewhere to start.
+ */
+const SEARCH_BAND_TOP_PX = 700;
+const SEARCH_BAND_BOTTOM_PX = 1_900;
 
 // ---------------------------------------------------------------------------
 // Capturing an offending node while it is still on screen
@@ -344,7 +359,28 @@ function signatureOf(nodes: readonly UiNode[]): string {
  * the control is not on it. The cap is a safety net for a screen that never settles, not the
  * measurement.
  */
-function pressNamed(label: string): boolean {
+/**
+ * How a path step names the control it presses.
+ *
+ * A bare string is an exact accessible name, which is what almost every control has and is the
+ * safer default - a prefix match can press the wrong thing.
+ *
+ * `{ startsWith }` exists for one kind of control: the ones whose accessible name **is their
+ * state**. The Talk bar reads "Talk to Kynviora. Ask for something on this screen. Open." at rest
+ * and "Listening. Say what you want, then stop. Close." while live, so no exact name identifies it
+ * across the states it can be in - and a survey written against one of them finds nothing in the
+ * others. `verifyVoiceMode` had already reached for prefix matching for this reason, which is why
+ * that harness passed 9/9 while this one could not find the control at all.
+ */
+type PathStep = string | { readonly startsWith: string };
+
+function stepMatches(step: PathStep, name: string): boolean {
+  return typeof step === 'string' ? name === step : name.startsWith(step.startsWith);
+}
+
+// `wanted` rather than `step`, because the scroll loop below already has a `step` and shadowing it
+// would compile perfectly and match a control against a loop counter.
+function pressNamed(wanted: PathStep): boolean {
   let previous = '';
 
   for (let step = 0; step <= MAX_SCROLL_TO_FIND; step += 1) {
@@ -355,7 +391,7 @@ function pressNamed(label: string): boolean {
         (node) =>
           node.packageName === PACKAGE &&
           isInteractiveTarget(node) &&
-          accessibleNameOf(node) === label &&
+          stepMatches(wanted, accessibleNameOf(node)) &&
           // Big enough to be safe to press. Not `isFullyVisible`: that treats an edge coinciding
           // with a container's as clipped, which is right for measuring and wrong here - the
           // leftmost and rightmost tabs touch the screen's own edges by design. What trap 194 is
@@ -372,6 +408,25 @@ function pressNamed(label: string): boolean {
       const now = signatureOf(nodes);
       if (now === previous) return false;
       previous = now;
+
+      // The drag must not start inside the app's own persistent bar. `SCROLL_ANCHOR_Y` is a fixed
+      // point and the Talk bar is `[42,1672][1038,2124]` at font scale 2 on a Pixel 7 - so the
+      // standard anchor lands inside it, the swipe moves nothing, the signature is unchanged on
+      // the next pass, and this function returns false about a control that is simply further
+      // down. Four sheets were reported unreachable that way on a build where all four open.
+      //
+      // `null` means every candidate row is obstructed, which is a real screen and not something
+      // to guess at: the standard anchor is used and the loop's own unchanged-signature check
+      // reports the failure honestly.
+      const anchor = dragAnchorAvoidingObstacles(nodes, PACKAGE, {
+        top: Math.round(SEARCH_BAND_TOP_PX),
+        bottom: Math.round(SEARCH_BAND_BOTTOM_PX),
+      });
+      if (anchor !== null) {
+        scrollDownFrom(anchor);
+        sleep(1_200);
+        continue;
+      }
     }
     scrollDown();
     sleep(1_200);
@@ -390,7 +445,7 @@ function pressNamed(label: string): boolean {
  * It scrolls back to the top first. A control above the current position is as invisible as one
  * below it, and the sheet may have been left part-way down by the taps that opened it.
  */
-function surveySheet(label: string, path: readonly string[], scale: number): SheetSurvey {
+function surveySheet(label: string, path: readonly PathStep[], scale: number): SheetSurvey {
   // An app that never drew is not a sheet that would not open, and `sheetChecks` renders both as
   // `INCONCLUSIVE` - which is the right status and the wrong sentence. Reported as unopened here
   // because that is all this function can honestly say; what it could not do is start.

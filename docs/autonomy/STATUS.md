@@ -3,7 +3,7 @@
 **Resume checkpoint.** Read this first on any autonomous restart, then `git log`, then the tail
 of `WORKLOG.md`, then `BLOCKERS.md`.
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 ---
 
@@ -17,6 +17,88 @@ Last updated: 2026-09-08
 | **Branch**         | `master`                                                                |
 | **Latest commit**  | `feat(voice): eight states, and the sentence a screen offers the agent` |
 | **Baseline tag**   | `baseline-spec-only`                                                    |
+
+## Handoff - 2026-09-09, after the first V3 session
+
+**Read this section, then `git log`, then the four V3 entries at the tail of `WORKLOG.md`.**
+
+### Where V3 is
+
+Five slices are in, each committed green, each with its decision recorded:
+
+| Slice                         | Decision         | State                                                                 |
+| ----------------------------- | ---------------- | --------------------------------------------------------------------- |
+| Spec reconciliation           | DEC-151          | `06` and `DESIGN_SYSTEM.md` §2 amended in place, not implemented past |
+| The design bundle as evidence | DEC-152          | Excluded from both gates; not reformatted                             |
+| `change` as a fourth colour   | DEC-153          | Tokens, Change Lens, and the exclusion from `THEME_TONE_TOKENS`       |
+| The Health record             | DEC-154, DEC-155 | Migration `0032`, domain, API, contracts, screen, retention, export   |
+| The persistent Talk bar       | DEC-156, DEC-157 | Eight states, screen-declared actions, identifier-only snapshot       |
+| You as eight groups           | DEC-158          | Account Center holds account closure                                  |
+| The Care Circle               | DEC-159          | Four statuses, two of which the app could not previously say          |
+
+### The one thing left unfinished, precisely
+
+`KYNVIORA_A11Y_PARTS=sheets npm run verify:device:a11y` was **started and stopped at handoff**, not
+completed. It is the run that would confirm the three `DEV-098` fixes together.
+
+What is known:
+
+- Before any fix: **16 PASS / 24 INCONCLUSIVE**.
+- After the drag-anchor fix alone: **28 PASS / 12 INCONCLUSIVE** - three of four sheets recovered
+  at font scale 2.
+- The remaining twelve at that point were Voice Mode (both scales) and `Invite someone@2`. A fix
+  for each has been made and unit-tested since, and **neither has been measured on hardware**.
+
+**This is the single best next task.** Bring the emulator up, then:
+
+```bash
+KYNVIORA_A11Y_PARTS=sheets npm run verify:device:a11y
+```
+
+Expect 40/40. If `Invite someone@2` is still inconclusive, the thing to check first is whether the
+Care circle's ended-access count actually shortened the screen - measure it, do not reason about
+it: `adb shell uiautomator dump` and read the bounds.
+
+### What is V3 and still design-only
+
+Nothing implemented is a mock: every screen here reads real routes and renders real state. What has
+**not** been implemented at all:
+
+- Today's reordering (needs input / reports / jobs / since you last looked).
+- Shelf's image-led tiles, category grouping, Considering, selection mode and Compare.
+- Saved comparison reports.
+- The permission editor's per-row matrix, and the care activity timeline.
+- The caregiver relationship label ("Anita · Daughter") - **needs a column that does not exist**,
+  and deriving one from a display name would be a fabricated fact about a person.
+- Agent Jobs and Agent Activity.
+- Elder Mode as a full-screen mode.
+- Lab report and analyte **detail** screens as their own surfaces; the comparison is on the record
+  detail today.
+- Sleep stages, and any wearable trend that is not hand-entered.
+
+### The three device harnesses that changed, and why
+
+`verifyAccessibility`, `verifySafetyScreen` and `verifyVoiceMode` all navigated by a tab named
+Safety or pressed a control named `Talk to Kynviora`. All three are re-pointed to reach their
+screens the way a person does. That is a better check than the one it replaced: remove the entry
+point and each now fails at the step that says so rather than reporting an empty screen.
+
+### Running the device harnesses
+
+```bash
+# emulator, then:
+adb kill-server && adb start-server      # traps 184 and 197
+adb reverse tcp:3000 tcp:3000
+adb reverse tcp:8081 tcp:8081
+KYNVIORA_DEV_AUTH=1 KYNVIORA_DEV_SEED=1 npm run dev
+npm --prefix apps/mobile run start
+```
+
+The development profile carries **seven revoked caregiver grants** from the 2026-09-07 runs. That
+is why `DEV-099` was findable at all, and it is worth keeping rather than re-seeding: it is the only
+data in the repository that exercises the ended-access path.
+
+---
 
 **The Kynviora V3 design is approved and being implemented.** The handoff bundle is in the
 repository at `docs/kynviora-premium-mobile-experience/`, excluded from both gates because it is
@@ -128,7 +210,8 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5552 tests passing**, 0 failing, across 210 files. 32 migrations.
+- **5563 tests passing**, 0 failing, across 210 files. 32 migrations. `npm run verify` green
+  at default workers on an idle machine, 2026-09-09 00:33.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is

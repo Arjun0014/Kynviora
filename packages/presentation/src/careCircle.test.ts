@@ -187,7 +187,42 @@ describe('the circle', () => {
       row({ id: 'b', expiresAt: inDays(2) }),
       row({ id: 'c', state: 'INVITED' }),
     ];
-    expect(careCircle(rows, NOW).map((card) => card.id)).toEqual(['a', 'b', 'c']);
+    expect(careCircle(rows, NOW).current.map((card) => card.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('counts access that has ended rather than drawing a card for each', () => {
+    // Measured, not preferred. One card is 1,587 pixels on a Pixel 7 at font scale 2, and the
+    // development profile carries seven revoked grants - drawn as cards they put `Invite someone`
+    // about eleven thousand pixels below the fold, which is a primary action nobody reaches.
+    const circle = careCircle(
+      [
+        row({ id: 'live' }),
+        row({ id: 'gone-1', state: 'REVOKED' }),
+        row({ id: 'gone-2', state: 'EXPIRED' }),
+        row({ id: 'gone-3', state: 'DECLINED' }),
+      ],
+      NOW,
+    );
+    expect(circle.current.map((card) => card.id)).toEqual(['live']);
+    expect(circle.endedCount).toBe(3);
+  });
+
+  it('states the count rather than omitting it, and says where the rows are', () => {
+    // A count and not an omission: `18` will not let an absence pass unlabelled, and the rows it
+    // counts are enumerated in the access list directly beneath.
+    const circle = careCircle([row({ id: 'gone', state: 'REVOKED' })], NOW);
+    expect(circle.endedSentence).toBe(
+      '1 person no longer has access. They are listed below, with what happened.',
+    );
+    expect(careCircle([row()], NOW).endedSentence).toBeNull();
+  });
+
+  it('counts a lapsed expiry as ended, because that is what the status says', () => {
+    // The two derived statuses have to fall on the right side of the split, or a grant that
+    // expired yesterday would sit in the circle as though somebody still had access.
+    const circle = careCircle([row({ expiresAt: inDays(-1) }), row({ expiresAt: inDays(9) })], NOW);
+    expect(circle.endedCount).toBe(1);
+    expect(circle.current[0]?.status).toBe('EXPIRING');
   });
 
   it('carries a statement that being family is not access', () => {

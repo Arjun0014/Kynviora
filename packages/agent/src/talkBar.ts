@@ -199,6 +199,34 @@ export function talkBarPresentation(state: TalkBarState): TalkBarPresentation {
 }
 
 /**
+ * Above this system font scale, the sub-line is announced and not drawn.
+ *
+ * Measured rather than chosen: at font scale 2 on a Pixel 7 (1080x2400) the bar with both lines
+ * occupies **452 pixels** - `[42,1672][1038,2124]` from a hierarchy dump - which is 19% of the
+ * screen, on every destination, permanently. The people who set the scale to 2 are the people
+ * `18` names first, and taking a fifth of their screen for supporting text is the wrong trade.
+ *
+ * What is dropped is the sub-line only, and only from the **visible** bar: it stays in
+ * `accessibilityLabel`, so a screen reader still announces "Listening. Say what you want, then
+ * stop." The label is the state and is never dropped, because that is the half `18` requires to
+ * be visible and the half the design language says nothing may rest on an animation for.
+ *
+ * 1.5 rather than 2.0, because the bar is already two lines at 1.5 on a narrow phone and the
+ * threshold should sit where the second line starts costing rather than where it becomes extreme.
+ */
+export const TALK_BAR_SUBLINE_MAX_SCALE = 1.5;
+
+/**
+ * Whether the sub-line is drawn at this system font scale.
+ *
+ * A function rather than a comparison at the call site, so the threshold and its measurement live
+ * together and a screen cannot quietly pick a different one.
+ */
+export function talkBarShowsSubline(fontScale: number): boolean {
+  return fontScale <= TALK_BAR_SUBLINE_MAX_SCALE;
+}
+
+/**
  * Whether the bar belongs on screen at all.
  *
  * The design language names the three places it leaves: camera capture, an open sheet, and

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   TALK_BAR_STATES,
+  TALK_BAR_SUBLINE_MAX_SCALE,
   talkBarIsVisible,
   talkBarPresentation,
+  talkBarShowsSubline,
   talkBarStateFor,
   type TalkBarState,
 } from './talkBar.js';
@@ -137,5 +139,32 @@ describe('talkBarIsVisible', () => {
     expect(talkBarIsVisible({ ...context, sheetOpen: true })).toBe(false);
     expect(talkBarIsVisible({ ...context, selecting: true })).toBe(false);
     expect(talkBarIsVisible({ ...context, confirming: true })).toBe(false);
+  });
+});
+
+describe('what the bar draws at a large font scale', () => {
+  it('draws the sub-line at ordinary scales', () => {
+    expect(talkBarShowsSubline(1)).toBe(true);
+    expect(talkBarShowsSubline(1.3)).toBe(true);
+    expect(talkBarShowsSubline(TALK_BAR_SUBLINE_MAX_SCALE)).toBe(true);
+  });
+
+  it('drops it above the threshold', () => {
+    // Measured, not chosen: at scale 2 on a Pixel 7 the bar with both lines is
+    // `[42,1672][1038,2124]` - 452 pixels, 19% of the screen, on every destination, permanently.
+    // The people who set the scale to 2 are the people `18` names first.
+    expect(talkBarShowsSubline(2)).toBe(false);
+    expect(talkBarShowsSubline(1.6)).toBe(false);
+  });
+
+  it('never drops the label, which is the half that must be visible', () => {
+    // The sub-line is supporting text and stays in the announcement. The label is the state, and
+    // the design language's rule is that nothing rests on the animation - which is only true if
+    // the word is on screen at every scale.
+    for (const state of TALK_BAR_STATES) {
+      const p = talkBarPresentation(state);
+      expect(p.label.length, state).toBeGreaterThan(0);
+      expect(p.accessibilityLabel, state).toContain(p.subline);
+    }
   });
 });

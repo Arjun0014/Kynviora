@@ -274,8 +274,36 @@ export function careCircleCard(
   };
 }
 
+/** Whether a status describes access somebody still has. */
+export function statusIsCurrent(status: CareCircleStatus): boolean {
+  return (
+    status === 'ACTIVE' || status === 'INVITED' || status === 'EXPIRING' || status === 'NO_EXPIRY'
+  );
+}
+
+export interface CareCircleView {
+  /** Access somebody still has, in the order the server sent it. */
+  readonly current: readonly CareCircleCardView[];
+  /**
+   * How many rows describe access that has ended.
+   *
+   * A **count**, not cards, and the reason is a measurement rather than a preference. On a Pixel 7
+   * at font scale 2 one circle card is 1,587 pixels - two thirds of the screen - and this
+   * development profile has seven revoked grants on it. Drawn as cards they put `Invite someone`
+   * roughly eleven thousand pixels below the fold, which is a primary action nobody reaches.
+   *
+   * It is a count and not an omission: the sentence is on screen in every state, and every one of
+   * those rows is still enumerated in the access list directly beneath, which is the surface that
+   * exists to show what happened. `18` will not let an absence pass unlabelled, and this is the
+   * label.
+   */
+  readonly endedCount: number;
+  /** The sentence stating that count, or `null` where there is nothing to state. */
+  readonly endedSentence: string | null;
+}
+
 /**
- * The whole circle, in the order the server sent it.
+ * The circle, split into who has access and how many no longer do.
  *
  * Not sorted. `02` forbids ranking and a circle ordered by "most urgent" would be ranking people -
  * and the order the list already has is meaningful: invitations first, because they are the thing
@@ -292,8 +320,18 @@ export function careCircle(
     readonly isSelf: boolean;
   }[],
   nowMs: number,
-): readonly CareCircleCardView[] {
-  return rows.map((row) => careCircleCard(row, nowMs));
+): CareCircleView {
+  const cards = rows.map((row) => careCircleCard(row, nowMs));
+  const current = cards.filter((card) => statusIsCurrent(card.status));
+  const endedCount = cards.length - current.length;
+  return {
+    current,
+    endedCount,
+    endedSentence:
+      endedCount === 0
+        ? null
+        : `${String(endedCount)} ${endedCount === 1 ? 'person no longer has' : 'people no longer have'} access. They are listed below, with what happened.`,
+  };
 }
 
 /**

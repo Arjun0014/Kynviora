@@ -48,7 +48,7 @@ export function CareCircle({
   readonly now: number;
 }) {
   const styles = useThemedStyles(makeStyles);
-  const cards = careCircle(rows, now);
+  const circle = careCircle(rows, now);
 
   return (
     <View style={styles.stack}>
@@ -64,7 +64,7 @@ export function CareCircle({
         </Typography>
       </Card>
 
-      {cards.length === 0 ? (
+      {circle.current.length === 0 ? (
         <Card>
           <Typography role="body">
             Nobody else has access to this person&rsquo;s records. Nothing is shared until somebody
@@ -72,7 +72,25 @@ export function CareCircle({
           </Typography>
         </Card>
       ) : (
-        cards.map((card) => <CircleCard key={`${card.subject}:${card.id}`} card={card} />)
+        circle.current.map((card) => <CircleCard key={`${card.subject}:${card.id}`} card={card} />)
+      )}
+
+      {/*
+        Access that has ended is a **count** here and a full row in the list below. Measured on a
+        Pixel 7 at font scale 2: one card is 1,587 pixels, and this development profile carries
+        seven revoked grants - drawn as cards they put `Invite someone` about eleven thousand
+        pixels below the fold, which is a primary action nobody reaches.
+
+        It is a count and not an omission. The sentence is on screen whenever there is one, and
+        every row it counts is enumerated directly beneath in the access list, which is the surface
+        that exists to say what happened. `18` will not let an absence pass unlabelled.
+      */}
+      {circle.endedSentence === null ? null : (
+        <Card>
+          <Typography role="body" colour="secondary">
+            {circle.endedSentence}
+          </Typography>
+        </Card>
       )}
     </View>
   );

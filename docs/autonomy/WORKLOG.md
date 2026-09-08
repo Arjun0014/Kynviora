@@ -7052,3 +7052,116 @@ does nothing.
 `packages/presentation/src/settingsGroups.ts`, `packages/presentation/src/careCircle.ts`,
 `apps/mobile/src/app/(tabs)/you.tsx`, `apps/mobile/src/app/(tabs)/care.tsx`,
 `apps/mobile/src/features/caregivers/CareCircle.tsx`.
+
+## 2026-09-08 (V3, device again) - 452 pixels of furniture, and the anchor that sat inside them
+
+The full accessibility survey came back **50 PASS, 0 FAIL, 24 INCONCLUSIVE** against a standing
+baseline of 74 PASS. Every check that ran passed; twenty-four could not be driven. The interesting
+part is what the twenty-four turned out to be, because the first reading was wrong.
+
+### The first reading, and why it was wrong
+
+The survey ran while the full test suite was running at four workers, so the obvious explanation was
+contention - trap 202's shape, a long run getting more chances to be wrong about why it failed. Re-running one failing sheet alone confirmed it passed, which appeared to settle it.
+
+It did not. Re-running the **whole sheets part** on an idle machine came back **16 PASS, 24
+INCONCLUSIVE** - the same twenty-four. The pattern was the thing the single-sheet run could not
+show: every sheet passes at font scale 1 and **every sheet fails at font scale 2**, plus Voice Mode
+at both.
+
+### Defect 1: the bar takes 452 pixels at font scale 2
+
+Measured rather than reasoned about. `uiautomator dump` on the Pixel 7 with `font_scale 2.0`:
+
+```
+Talk to Kynviora. Ask for something on this screen. Open.  ->  [42,1672][1038,2124]
+Shelf                                                      ->  [216,2209][432,2337]
+Physical size: 1080x2400
+```
+
+**452 pixels** of persistent furniture - 19% of the screen - on every destination, permanently. The
+people who set the scale to 2 are the people `18` names first, and taking a fifth of their screen
+for supporting text is the wrong trade.
+
+The sub-line is now **announced and not drawn** above font scale 1.5. It stays in
+`accessibilityLabel`, so a screen reader still hears "Listening. Say what you want, then stop."; the
+**label is never dropped**, because that is the half `18` requires to be visible and the half the
+design language's "nothing rests on the animation" depends on.
+
+### Defect 2: `SCROLL_ANCHOR_Y` is 1900, and 1900 is inside the bar
+
+The same measurement explains all sixteen scale-2 failures at once. `pressNamed` scrolls to find a
+control; the drag starts at a fixed y of 1900; the bar spans 1672 to 2124. So the swipe was landing
+on the bar, the list never moved, the next dump matched the previous one, and the function returned
+"not found" about controls that were simply further down.
+
+This is `DEV-079` in a new widget. Its own docstring says it: _"`SCROLL_ANCHOR_Y` is a fixed point,
+and on a form at a large font scale it lands inside an `EditText`"_. A `TextInput` takes a drag as
+text selection; a `Pressable` takes it as a press. Same failure, different widget.
+
+`dragAnchorAvoidingObstacles` extends the existing field-avoiding anchor to the app's own persistent
+bar, and it matches by **name prefix** rather than by name - because the bar's accessible name _is
+its state_, and a harness matching the whole sentence would avoid the obstacle at rest and walk into
+it while the agent was working. Kept as a second function rather than folded into the first, because
+surveying inside a sheet legitimately wants only the field rule: the bar is not drawn over a sheet.
+
+### Defect 3: the survey pressed a control whose name had changed
+
+Voice Mode failed at both scales, and for a third reason. `pressNamed` in this harness matches the
+accessible name **exactly**, and the bar's name is now `Talk to Kynviora. Ask for something on this
+screen. Open.` rather than `Talk to Kynviora`. `verifyVoiceMode` matches by prefix, which is why
+that harness passed 9/9 while this one could not find the control at all - two harnesses asking the
+same question two ways and only one of them noticing.
+
+The sheet path is now the two taps a person takes: the bar, then `Open the full conversation`.
+
+### What this says about the standing 74
+
+It was taken against a build with no persistent bar. The number is not comparable and is not
+carried forward; what replaces it is the run after these fixes.
+
+### Defect 4: a circle card is 1,587 pixels, and seven of them buried a primary action
+
+Found by driving Care at font scale 2 and reading the hierarchy rather than by reasoning about it.
+
+```
+Talk to Kynviora ...  ->  [42,1948][1038,2125]     177px, after the sub-line fix
+a circle card        ->  [42,358][1038,1945]      1,587px
+```
+
+One card is two thirds of the screen at scale 2. The development profile carries **seven revoked
+grants** - all from the 2026-09-07 device runs, none from tonight, checked against
+`GET /v1/caregiver-grants` rather than assumed - and the first version of `CareCircle` drew a card
+for every row. Seven full-height cards put `Invite someone` roughly **eleven thousand pixels** below
+the fold, which is a primary action nobody reaches.
+
+The circle now shows **current** access - active, invited, expiring, no end date - and states the
+rest as a count: _"7 people no longer have access. They are listed below, with what happened."_
+
+It is a count and not an omission, and the distinction is the whole of why this is acceptable:
+the sentence is on screen whenever there is one, and every row it counts is still enumerated
+directly beneath it in `CaregiverAccessList`, which is the surface that exists to say what
+happened. `18` will not let an absence pass unlabelled, and this is the label.
+
+The split is also the right product answer independently of the pixels. V3's circle is _who is in
+this household_; seven "Removed" cards are history, and history has a surface.
+
+### A diagnosis that damaged what it was diagnosing
+
+Worth recording because it is a rule, not an anecdote. Reading Care at scale 2 meant scrolling, and
+thirty-three blind swipes at a fixed coordinate landed on a card, opened the revocation flow, and
+left the app on _"Access removed. It stopped straight away."_ - a screen with no `Invite someone` on
+it at all. The next reading was therefore about the wrong screen, and it looked exactly like the
+finding being chased.
+
+That is trap 200 in a second place: a comparison needs both sides **driven**, and the side nobody
+thinks to drive is the one that lies. It was checked rather than assumed afterwards - the seven
+revocations all carry `revokedAt` from 2026-09-07, so nothing was changed tonight - but the reading
+in between was worthless and would have been reported as a finding by anybody who stopped there.
+
+### Where the third sheets run got to
+
+Started with all three `DEV-098` fixes in and **stopped at handoff**, not completed. The numbers
+that are known are the two before it: 16/40 with no fix, 28/40 with the drag anchor alone. The
+Voice Mode prefix match and the Care ended-access count are in code and in unit tests and have not
+been measured on hardware. That is the next task and `STATUS.md` says so.
