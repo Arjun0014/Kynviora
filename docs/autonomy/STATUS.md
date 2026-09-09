@@ -24,15 +24,15 @@ Last updated: 2026-09-09
 
 ### Exactly where this is
 
-|            |                                                                                  |
-| ---------- | -------------------------------------------------------------------------------- |
-| Git head   | `08e09fb` `docs(autonomy): the sheets survey is 48/48 over six sheets`           |
-| Branch     | `master`, clean, 30 commits ahead of `origin/master` (nothing has been pushed)   |
-| Tests      | **5687 passing**, 0 failing, 67 skipped, across **219 files** (+3 skipped files) |
-| Migrations | **33** (`0033_shelf_collection.sql` is new)                                      |
-| Gate       | `npm run verify` green at default workers, emulator shut down, 2026-09-09 05:30  |
-| Decisions  | through **DEC-162**                                                              |
-| Deviations | through **DEV-104**                                                              |
+|            |                                                                                              |
+| ---------- | -------------------------------------------------------------------------------------------- |
+| Git head   | `50d40c4` `feat(compare): a comparison somebody can keep, frozen at the moment they read it` |
+| Branch     | `master`, clean, 32 commits ahead of `origin/master` (nothing has been pushed)               |
+| Tests      | **5695 passing**, 0 failing, 67 skipped, across **220 files**                                |
+| Migrations | **34** (`0033_shelf_collection.sql` and `0034_saved_comparison.sql` are new)                 |
+| Gate       | `npm run verify` green at default workers, emulator shut down, 2026-09-09 05:30              |
+| Decisions  | through **DEC-163**                                                                          |
+| Deviations | through **DEV-104**                                                                          |
 
 ### Runtime state at handoff
 
@@ -85,6 +85,16 @@ taps did not land. Two commits, `4db3795` and `08e09fb`. The sheets part is **48
 sheets** now.
 
 ### The single next task
+
+**The route and the surface for a saved comparison.** The schema is in (`0034`, DEC-163): the
+table, the link table, the RLS, the retention step and eight database tests. What is missing is
+`POST /v1/comparisons` writing the frozen report, `GET /v1/comparisons?profileId=` listing them,
+a read route for one, and a surface on Shelf - a "Keep this comparison" control on the Compare
+screen and a list of the kept ones. A saved report renders through the **same** presentation
+functions the live one does, composing today's wording over yesterday's finding, which is the whole
+reason DEC-163 froze the finding rather than the rendering.
+
+The historical note that follows was the next task before that schema existed:
 
 **Saved comparison reports.** Compare works end to end and cannot be kept. It is the next slice
 because it is the one V3 names that is now purely additive, and because the design decision in it
@@ -282,7 +292,7 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5687 tests passing**, 0 failing, across 219 files. **33 migrations.** `npm run verify` green
+- **5695 tests passing**, 0 failing, across 220 files. **34 migrations.** `npm run verify` green
   at default workers on an idle machine with the emulator shut down, 2026-09-09 05:30.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
