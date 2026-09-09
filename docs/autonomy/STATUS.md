@@ -9,68 +9,101 @@ Last updated: 2026-09-09
 
 ## Current position
 
-|                    |                                                                       |
-| ------------------ | --------------------------------------------------------------------- |
-| **Current stage**  | Stage 4 complete; **V3 implementation under way** (DEC-151)           |
-| **Current phase**  | V3: Health, Talk bar, You and Care are in; Shelf's V3 is next         |
-| **Last completed** | The sheets survey finished: **40/40 PASS on hardware**, three defects |
-| **Branch**         | `master`                                                              |
-| **Latest commit**  | `feat(compare): what labels declare, in three states`                 |
-| **Baseline tag**   | `baseline-spec-only`                                                  |
+|                    |                                                                                         |
+| ------------------ | --------------------------------------------------------------------------------------- |
+| **Current stage**  | Stage 4 complete; **V3 implementation under way** (DEC-151)                             |
+| **Current phase**  | V3: Health, Talk bar, You, Care in; Shelf has collections, categories, Compare          |
+| **Last completed** | Compare end to end: selection, tray, matrix, driven on hardware (DEC-162)               |
+| **Branch**         | `master`                                                                                |
+| **Latest commit**  | `feat(shelf): choosing products to compare, and the matrix that says what is not known` |
+| **Baseline tag**   | `baseline-spec-only`                                                                    |
 
-## Handoff - 2026-09-09, after the first V3 session
+## Handoff - 2026-09-09, after the second V3 session
 
-**Read this section, then `git log`, then the four V3 entries at the tail of `WORKLOG.md`.**
+**Read this section, then `git log`, then the six entries at the tail of `WORKLOG.md`.**
 
-### Where V3 is
+### Exactly where this is
 
-Five slices are in, each committed green, each with its decision recorded:
+|            |                                                                                                   |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| Git head   | `a75ff21` `feat(shelf): choosing products to compare, and the matrix that says what is not known` |
+| Branch     | `master`, clean, 27 commits ahead of `origin/master` (nothing has been pushed)                    |
+| Tests      | **5687 passing**, 0 failing, 67 skipped, across **219 files** (+3 skipped files)                  |
+| Migrations | **33** (`0033_shelf_collection.sql` is new)                                                       |
+| Gate       | `npm run verify` green at default workers, emulator shut down, 2026-09-09 05:30                   |
+| Decisions  | through **DEC-162**                                                                               |
+| Deviations | through **DEV-103**                                                                               |
 
-| Slice                         | Decision         | State                                                                 |
-| ----------------------------- | ---------------- | --------------------------------------------------------------------- |
-| Spec reconciliation           | DEC-151          | `06` and `DESIGN_SYSTEM.md` §2 amended in place, not implemented past |
-| The design bundle as evidence | DEC-152          | Excluded from both gates; not reformatted                             |
-| `change` as a fourth colour   | DEC-153          | Tokens, Change Lens, and the exclusion from `THEME_TONE_TOKENS`       |
-| The Health record             | DEC-154, DEC-155 | Migration `0032`, domain, API, contracts, screen, retention, export   |
-| The persistent Talk bar       | DEC-156, DEC-157 | Eight states, screen-declared actions, identifier-only snapshot       |
-| You as eight groups           | DEC-158          | Account Center holds account closure                                  |
-| The Care Circle               | DEC-159          | Four statuses, two of which the app could not previously say          |
+### Runtime state at handoff
 
-### The run that was unfinished at the last handoff, and what it found
+- **Emulator is shut down** (`adb emu kill`). The AVD is `Kynviora_Pixel_7_API_36`.
+- **Metro is still running** on 8081, started 2026-09-08 21:58. It survived the whole session and
+  serves the current bundle; the first cold start of a session after a JavaScript change still
+  needs a bundle rebuild, which is what `DEV-102` was about.
+- **The API is still running** on 3000 (`KYNVIORA_DEV_AUTH=1 KYNVIORA_DEV_SEED=1 npm run dev`),
+  against the persisted PGlite database in `.kynviora-data`.
+- The development profile still carries **seven revoked caregiver grants** from 2026-09-07 and
+  **three items** (two medicines, one personal-care product with no category and no ingredient
+  declaration). None of them has a declaration, which is why the Compare screen exercises the
+  unknown path end to end and nothing else.
+- Bringing the device back: boot the AVD, then `adb reverse tcp:3000 tcp:3000` and
+  `adb reverse tcp:8081 tcp:8081`.
 
-`KYNVIORA_A11Y_PARTS=sheets npm run verify:device:a11y` was started and stopped at the previous
-handoff. It has been run three times since, and the last of them is the standing measurement:
+### What this session did
 
-| Run                              | Result                                                |
-| -------------------------------- | ----------------------------------------------------- |
-| 1, on the code as handed over    | **19 PASS, 1 FAIL, 20 unmeasured**                    |
-| 2, after `DEV-100` and `DEV-102` | **39 PASS, 1 FAIL**, both scales measured             |
-| 3, after `DEV-103`               | **40 PASS, 0 FAIL, 0 INCONCLUSIVE - `Overall: PASS`** |
+Six units, each committed green:
 
-The handoff expected 40/40 and the number is now 40/40, but not for the reason it expected: three
-separate defects sat between the two, and one of them was a deviation this document had already
-recorded as resolved.
+| Commit    | What                                                                                    |
+| --------- | --------------------------------------------------------------------------------------- |
+| `079eb88` | `DEV-100`, `DEV-102`, `DEV-103` - the three defects between the sheets survey and 40/40 |
+| `07a2b82` | `DEV-101` - an ended grant stops saying what the person can see                         |
+| `70a454f` | `0033` / DEC-160 - the shelf is two collections                                         |
+| `7c1d6d5` | DEC-161 - category groups, and the agent action DEC-157 could not offer                 |
+| `993d5fc` | DEC-162 - Compare's server half                                                         |
+| `a75ff21` | DEC-162 - Compare's screen                                                              |
 
-- **`DEV-100`.** `Invite someone` was still below every ended-access card. `DEV-099` moved the
-  cards out of the circle and left the action at the bottom of `CaregiverAccessList`, which draws a
-  card per row **including access that has ended**. Measured at font scale 2: the control did not
-  appear at all in eighteen scroll steps, ~14,000px, with the screen still scrolling. It is a
-  control of the circle now, drawn above the ended-access sentence, and it appears at scroll step 4.
-- **`DEV-102`.** The survey's `relaunch()` had no retry, so the first launch of a session - the one
-  that has to rebuild Metro's bundle - reported the whole of font scale 1 as unmeasurable and
-  twenty of forty checks did not happen. It is `coldStart()` now, which is the function three
-  files away that already documented why the retry is necessary.
-- **`DEV-103`.** `SHEET-2` called a 1,450px row unreachable in a 2,009px viewport. It walks at
-  800px, and a control of height `h` is fully inside for only `v - h` pixels of travel - 559 here -
-  so twenty-three positions never sampled inside the window. A second pass at 250px runs **only**
-  where the first left a control it never saw whole, and `SHEET-1` reports how many positions it
-  took, on a PASS as well as on a FAIL.
+### Device measurements taken this session, and what they say
 
-**A fourth defect was found on the way and is now closed too**: `DEV-101`. Every row on Care that
-was not live - the seven revoked grants, and any invitation nobody had accepted - stated
-`What they can see` and the present-tense sentence under it, directly beneath a chip reading
-"Access removed. It stopped straight away." `accessCoverage` decides what a card in a given state
-may claim now; an ended one says what the access **let** them do, as labels, which carry no tense.
+| Run                                                           | Result                                                           |
+| ------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `KYNVIORA_A11Y_PARTS=sheets` (1st, code as handed over)       | 19 PASS, 1 FAIL, 20 unmeasured                                   |
+| `KYNVIORA_A11Y_PARTS=sheets` (2nd, after `DEV-100`/`DEV-102`) | 39 PASS, 1 FAIL                                                  |
+| `KYNVIORA_A11Y_PARTS=sheets` (3rd, after `DEV-103`)           | **40 PASS, 0 FAIL, 0 INCONCLUSIVE**                              |
+| `KYNVIORA_A11Y_PARTS=destinations` (after Shelf's V3)         | **30 PASS, 0 FAIL**                                              |
+| Compare, driven by hand                                       | tray reads "2 products chosen."; every cell reads `Not recorded` |
+
+**TalkBack has not been re-run this session, and neither has `verify:device:safety`.** Both were
+last taken against a build with a destination this one does not have. Both harnesses are re-pointed
+and neither has been executed since - that is the largest outstanding device gap.
+
+### The single next task
+
+**Saved comparison reports.** Compare works end to end and cannot be kept. It is the next slice
+because it is the one V3 names that is now purely additive, and because the design decision in it
+is real rather than mechanical: _what is a saved comparison once the products under it have
+changed?_ A report that re-computes is not a record of what somebody read; a report that freezes is
+a claim about labels that may have been corrected since. `09`'s answer is almost certainly to
+freeze the finding and stamp it, the way `assessment_matched_inputs` does (migration `0018`,
+DEC-097), and to say on the screen when it was taken.
+
+It needs migration `0034`, a retention category, an RLS policy, a route, and a surface on Shelf.
+
+### Defects and gaps that are open, in the order they matter
+
+1. **`DEV-092` remainder** - a conflicted queued change is kept, visible and counted, and re-made
+   from memory. The missing half is a two-version review surface. It was held for the V2/V3 design
+   direction; V3 has now arrived and `11`'s "what changed" pattern is the shape it should take, so
+   **this is no longer blocked** - it is unstarted.
+2. **`DEV-093`** - the agent cannot read the shelf with no signal, and the shelf can. It needs a
+   sentence in the Speech Gate's closed set saying how old a cached answer is, and a projection that
+   records when it was written. Also held for V2; also no longer blocked.
+3. **Image-led tiles** are not built and are **not blocked on a credential**. Nothing in this
+   repository stores or serves an evidence asset, so the only honest source of a package photograph
+   - a `FRONT_PANEL` capture somebody took - has no upload route, no object store and no retention
+     rule. A stock photograph would be a fabricated fact about a package.
+4. **`BLK-006`** (no qualified clinical, pharmacist or regulatory reviewer) and **`BLK-012`** (no
+   speech, language-model or speech-synthesis provider) are unchanged and genuine. Nothing this
+   session touched either.
 
 ### What is V3 and still design-only
 
@@ -339,8 +372,12 @@ hard-coded to dark passes a dark-mode check as happily as one that follows the s
 plan in this document said to assert - that the ground is `DARK_THEME.canvas.background` - would
 have failed on a correct app, and trap 210 says why.
 
-The whole survey has **not** been re-run since this part was added, so the standing 74/74 is a
-count of the survey without it.
+The whole survey has **not** been run unnarrowed since `theme` was added, and the standing 74/74
+that this document used to carry is gone rather than superseded: it was taken against a build with
+a destination this one does not have (DEC-151). What stands in its place is two narrowed runs on
+2026-09-09, against the current build: **sheets 40/40 PASS** and **destinations 30/30 PASS**.
+`theme` and `talkback` have not been run since, and an unnarrowed survey is the only thing that can
+say the whole number.
 
 Voice Mode is surveyed as a sheet although it is not one: it is a full screen whose controls are
 sized by their content, which is the property that makes a sheet worth surveying. It is also where
@@ -1052,11 +1089,12 @@ decision about where mail is allowed to go, not an engineering one.
 
 ## Next three planned tasks
 
-1. **Re-run the whole accessibility survey, now that it has a fifth part.** The standing 74/74 is
-   a count of the survey without `theme` in it, and the two parts run on 2026-09-08 were narrowed
-   ones - `theme` 4/4 and `destinations` at scale 1, 15/15. An unnarrowed run is about eighteen
-   minutes and is the only thing that can say the whole number. **Waiting on:** a device, and a
-   machine not also running a full test suite (trap 208).
+1. **Re-run the whole accessibility survey unnarrowed.** Two of its four parts have been run
+   against the current build on 2026-09-09 - sheets 40/40 and destinations 30/30 - and `theme` and
+   `talkback` have not been run since Safety stopped being a tab. An unnarrowed run is the only
+   thing that can say the whole number, and it is now longer than eighteen minutes: the sheets part
+   alone takes about forty, because `DEV-103`'s finer pass runs on the invitation form at font
+   scale 2. **Waiting on:** a device, and a machine not also running a full test suite (trap 208).
 
 2. **Re-measure `verify:device:doseaccess` after the `InviteCaregiver` migration.** `DOSE-2`
    measures where a sentence falls relative to a heading on the review step, so a reordering that

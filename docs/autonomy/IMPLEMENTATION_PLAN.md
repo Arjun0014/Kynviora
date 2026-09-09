@@ -984,6 +984,19 @@ become two deployments unchanged when `BLK-001` clears.
 
 ## Immediate next work
 
+**Superseded on 2026-09-09 by V3 implementation.** The paragraph below - "there is no unblocked
+engineering task left" - was true of the build it was written about and is not true now: the V3
+design was approved on 2026-09-08 (DEC-151) and there is a queue of unblocked work in it. The
+current one is in `STATUS.md` under **The single next task**, and the standing list of what V3 asks
+for and has not got is in the same file under **What is V3 and still design-only**.
+
+Two things on the list below have also changed status since it was written, and both were recorded
+as held rather than as blocked: `DEV-092`'s two-version review surface and `DEV-093`'s spoken
+freshness sentence were waiting on the V2/V3 design direction. It has arrived. Neither is blocked
+on anything external any more; both are unstarted.
+
+**The historical list follows, and the three items in it are still accurate about themselves.**
+
 **There is no unblocked engineering task left that does not first need a decision or a credential.**
 That is a finding rather than a shortage of ambition, and it is what the three items below are.
 
