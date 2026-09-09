@@ -73,6 +73,13 @@ export interface PurgeReport {
   readonly usageEvidence: number;
   readonly reviewTasks: number;
   readonly assessments: number;
+  /**
+   * Saved comparisons removed because a product they were about was (`0034`, DEC-163).
+   *
+   * Whole reports, not link rows: a report describing a product somebody asked to be forgotten is
+   * that product surviving in a different table, and the frozen body carries its name.
+   */
+  readonly savedComparisons: number;
   readonly items: number;
   readonly reviewTasksByProfile: number;
   readonly allergies: number;
@@ -110,6 +117,7 @@ export const EMPTY_PURGE_REPORT: PurgeReport = Object.freeze({
   usageEvidence: 0,
   reviewTasks: 0,
   assessments: 0,
+  savedComparisons: 0,
   items: 0,
   reviewTasksByProfile: 0,
   allergies: 0,
@@ -221,6 +229,19 @@ const PLAN = [
         step: 'profile_assessment',
         field: 'assessments',
         sql: `DELETE FROM profile_assessment WHERE ${DUE_ITEM}`,
+      },
+      // A saved comparison is deleted whole when **any** product it is about is (`0034`, DEC-163).
+      // Not the link row: a report describing a product somebody asked to be forgotten is that
+      // product surviving in a different table, and the frozen body carries its name.
+      //
+      // Before the link rows, and before `owned_item`, because both are what this reads.
+      {
+        step: 'saved_comparison',
+        field: 'savedComparisons',
+        sql: `DELETE FROM saved_comparison
+               WHERE id IN (
+                 SELECT comparison_id FROM saved_comparison_item WHERE ${DUE_ITEM}
+               )`,
       },
       // `owned_item_id` is nullable here: a task can be about a profile rather than an item, and
       // one with no item belongs to the profile category below.

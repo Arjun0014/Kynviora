@@ -6481,3 +6481,51 @@ font scale 2 it does so sooner.
 because a table of three drawn where four were chosen is a different report. Below two, the route
 refuses rather than drawing an empty comparison: "we could not find them" and "they have nothing in
 common" are different sentences.
+
+---
+
+## DEC-163 - A saved comparison is frozen, has no lifetime of its own, and dies with any product it is about
+
+**Date.** 2026-09-09
+**Status.** Accepted. Migration `0034`. Schema and retention implemented; the route and the surface
+follow.
+**Context.** V3 asks for "saved comparisons", and the whole question in that phrase is what one
+**is** once the products underneath it have changed.
+
+**Options.** (a) Re-compute on open. (b) Freeze the finding. (c) Freeze the rendering.
+
+**Decision.** (b).
+
+**Why not re-computed.** Then it is a bookmark rather than a report. "I compared these in March and
+chose that one" has nothing behind it: the screen that justified the choice no longer exists, and
+the thing a person kept is not the thing they get back.
+
+**Why not the rendering.** DEC-097 settled this shape for `assessment_matched_inputs`: freeze the
+finding, not the words. What is stored is terms, cells, counts and identifiers - never a composed
+label like "Product not verified", which is wording this build may improve and which would then be
+stale inside a stored row.
+
+**The display name is frozen, and that is not an exception to the rule above.** A product renamed
+afterwards does not change what was on the screen, and a report that silently adopted the new name
+would be describing a comparison nobody made.
+
+**No lifetime of its own.** `docs/RETENTION.md` gives every artefact either a deadline or an owner
+whose deletion takes it. A saved comparison has no natural deadline - it is a record somebody chose
+to keep, like a note. What it has is a **subject**, and the rule is the conservative one: it is
+deleted when **any** product it is about is, because a report describing a product somebody asked to
+be forgotten is that product surviving in a different table. It is one purge step under the existing
+`ITEM` category rather than a category of its own, and the link table exists so the sweep can join.
+
+**Read and written by `VIEW_SHELF`, not by `MANAGE_SHELF`.** Reading and keeping what you read are
+the same act, and requiring the capability that can delete somebody's products in order to keep a
+note about them would be the `DEV-049` shape: a write capability standing in for a read one.
+
+**The application policies are scoped to the application roles**, which the rest of this schema
+does not need to do. Two tables that reference each other in their policies must: a policy with no
+`TO` applies to every role, so the sweep would evaluate the application's `saved_comparison_item`
+policy - which reads `saved_comparison` - as well as its own, and Postgres answers
+`infinite recursion detected in policy`. Found by running the sweep, not by review.
+
+**Removing one is an update to `deleted_at`, not a `DELETE`.** `16` treats a person's own artefact
+as theirs to remove and the sweep is what actually removes rows, which is the same shape every other
+user-deletable record in this schema has.

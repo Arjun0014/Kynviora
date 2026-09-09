@@ -191,6 +191,12 @@ describe('the retention role', () => {
       'refill_estimate',
       'review_task',
       'safety_receipt',
+      // A saved comparison goes whole when a product it is about does (`0034`, DEC-163). The link
+      // table is here for the join the parent's delete reads, and holds DELETE for the same reason
+      // the health tables do: a cascade is issued by the referencing table's owner rather than by
+      // this role, so leaning on one removes rows this role's own policy never admitted.
+      'saved_comparison',
+      'saved_comparison_item',
       'visit_pack',
     ];
 
