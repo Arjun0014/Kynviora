@@ -156,3 +156,42 @@ describe('what the row says about the item itself', () => {
     }
   });
 });
+
+describe('choosing a product to compare (DEC-162)', () => {
+  function selectable(chosen: boolean) {
+    const pressed: string[] = [];
+    const rendered = renderScreen(
+      <ShelfRow
+        item={shelfItemView(SHAMPOO)}
+        mayRecordDoses={false}
+        selected={chosen}
+        onToggleSelected={() => pressed.push('toggle')}
+        onOpen={() => pressed.push('open')}
+        onRecord={() => pressed.push('record')}
+        onSchedule={() => pressed.push('schedule')}
+      />,
+    );
+    return { rendered, pressed };
+  }
+
+  it('offers the control where the list is one somebody can select from', () => {
+    expect(hasName(selectable(false).rendered, 'Compare this product')).toBe(true);
+  });
+
+  it('offers none at all where it is not', () => {
+    // The same list is drawn on screens with no comparison behind them. Absent rather than inert.
+    expect(hasName(row(SHAMPOO, false).rendered, 'Compare this product')).toBe(false);
+  });
+
+  it('runs the handler when pressed', () => {
+    const { rendered, pressed } = selectable(false);
+    press(rendered, 'Compare this product');
+    expect(pressed).toEqual(['toggle']);
+  });
+
+  it('keeps the same name whether or not it is chosen', () => {
+    // A control that renames itself when pressed is one a screen reader loses track of, and it is
+    // also what a device harness finds it by. The state is in `accessibilityState` instead.
+    expect(hasName(selectable(true).rendered, 'Compare this product')).toBe(true);
+  });
+});

@@ -45,12 +45,8 @@
  * unknown ranks products by how much has been entered about them.
  */
 
-import { markUntrusted } from '@kynviora/domain';
+import { markUntrusted, type DeclarationCell } from '@kynviora/domain';
 import { ingredientLookupKey, parseIngredientDeclaration } from './ingredients.js';
-
-/** What one product's declaration says about one term. */
-export const DECLARATION_CELLS = ['DECLARED', 'NOT_DECLARED', 'NO_DECLARATION'] as const;
-export type DeclarationCell = (typeof DECLARATION_CELLS)[number];
 
 /** One product, as this comparison needs it. Identifiers and a declaration; no names, no verdicts. */
 export interface ComparableProduct {

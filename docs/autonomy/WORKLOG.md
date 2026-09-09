@@ -7574,3 +7574,60 @@ different report, and below two the route refuses rather than drawing an empty c
 The screen: selection mode on Shelf, a Compare tray, and the matrix drawn with three cell states
 where the third reads as "not recorded" rather than as an absence. `ScreenDeclaration` already
 carries `selecting`, which is the state the Talk bar leaves the screen for.
+
+## 2026-09-09 (V3, Shelf) - the Compare screen, and the banner a device found
+
+The client half of DEC-162. Selection mode on Shelf, a tray, and the matrix.
+
+### One block per ingredient, not a table with columns
+
+A four-column table on a phone at font scale 2 either scrolls sideways - which hides the column
+headings the marks are meaningless without - or truncates the product names. `18` forbids both. One
+block per term costs vertical space and keeps every mark beside the name of the product it is about
+and the word that says what it means, which is also what a screen reader needs: reading a row of
+marks left to right teaches nothing, so each cell announces
+_"2. Synthetic Toothpaste B: Not recorded."_
+
+The qualifications go **above** the matrix, at the same rank (DEC-138): a person scanning four
+columns of marks has formed a conclusion by the time they reach a footnote. The legend goes last,
+because by then they have met every mark and the question is what one of them meant.
+
+### The checkbox keeps its name
+
+`Compare this product`, chosen or not, with the state in `accessibilityState` and a tick drawn
+beside it. A control that renames itself when pressed is one a screen reader loses track of - and
+it is what a device harness finds it by, which is how the first attempt to drive this flow ended up
+selecting a row and then unselecting the same one, twice, and reporting that nothing worked.
+
+### What a device found and Node did not
+
+The screen drew _"Up to date. This is what Kynviora has right now."_ at the top of a comparison
+that had loaded - above the qualifications, which are the thing a person has to read before the
+marks. `ScreenState` renders **every** state it is given, including `READY`; `ResourceState` is the
+wrapper that returns `null` for it, and this component takes a bare state rather than a resource.
+Fixed and now tested in both directions.
+
+The other thing the device run confirmed is the one that matters: with a development profile whose
+products have no ingredient declarations at all, the screen says
+_"2 of these have no ingredient list recorded, so their columns say what is not known rather than
+what is not in them"_ and every cell reads `Not recorded`. That is the `23` D-014 path, exercised
+end to end against the real API rather than against a fixture.
+
+### Verification
+
+- `npm run verify` green. **5661 -> 5687 tests, 217 -> 219 files.**
+- New: `presentation/compare` 12, `CompareProducts` 10, `ShelfRow` 4.
+- Driven on a Pixel 7 / Android 16 emulator: two products chosen from the shelf, the tray reporting
+  "2 products chosen.", and the comparison drawn from `GET /v1/compare`.
+
+### Files
+
+`packages/domain/src/vocabulary.ts` (the cell vocabulary, so catalog and presentation can share
+it), `packages/presentation/src/compare.ts`, `packages/contracts/src/views.ts`,
+`apps/mobile/src/features/shelf/CompareProducts.tsx`, `apps/mobile/src/app/(tabs)/shelf.tsx`.
+
+### What is still not built on this screen
+
+Saved comparison reports - V3's "saved comparisons" - which need a table, a retention rule and a
+decision about what a saved report _is_ when the products underneath it have changed since. And
+V3's "best" chip, which is deliberately not built (`02`, DEC-162).

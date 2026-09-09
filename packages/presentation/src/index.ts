@@ -12,6 +12,7 @@ export * from './status.js';
 export * from './copy.js';
 export * from './auth.js';
 export * from './caregiver.js';
+export * from './compare.js';
 export * from './shelfCategories.js';
 export * from './shelfCollections.js';
 export * from './visitPack.js';

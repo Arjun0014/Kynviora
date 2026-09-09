@@ -32,6 +32,7 @@ import {
   isValidQuietHours,
   isItemVerification,
   isMatchConfidence,
+  isDeclarationCell,
   isPersonalCareCategory,
   isShelfCollection,
   type ActionUrgency,
@@ -44,6 +45,7 @@ import {
   type NotificationDetailLevel,
   type ProductSafetyState,
   type QuietHours,
+  type DeclarationCell,
   type ReviewTaskKind,
   type ShelfCollection,
 } from '@kynviora/domain';
@@ -64,6 +66,7 @@ import {
 import { isSafetyResolution } from '@kynviora/domain';
 import type {
   AlertDetailResponse,
+  CompareResponse,
   StatusPresentationResponse,
   AlertSummary,
   CaregiverAuditEvent,
@@ -1234,5 +1237,71 @@ export function notificationPolicyView(
           ]
         : [],
     ),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Compare (DEC-162)
+// ---------------------------------------------------------------------------
+
+export interface ComparedProductView {
+  readonly id: string;
+  readonly displayName: string;
+  readonly brand: string | null;
+  /** Three separate axes, never merged (`02`, `08`). Narrowed; absent where unreadable. */
+  readonly identity: StatusPresentation | null;
+  readonly formulation: StatusPresentation | null;
+  readonly batch: StatusPresentation | null;
+  readonly hasDeclaration: boolean;
+  readonly declaredTermCount: number;
+}
+
+export interface ComparisonRowView {
+  readonly term: string;
+  /** One per product. A cell this build cannot read becomes the one that claims least. */
+  readonly cells: readonly DeclarationCell[];
+}
+
+export interface CompareView {
+  readonly products: readonly ComparedProductView[];
+  readonly shared: readonly ComparisonRowView[];
+  readonly differing: readonly ComparisonRowView[];
+  readonly declaringCount: number;
+  readonly matchedByPrintedTermOnly: boolean;
+  readonly notAvailableCount: number;
+}
+
+/**
+ * Narrow a comparison for a screen.
+ *
+ * The one narrowing that matters is the cell. A value this build cannot read becomes
+ * `NO_DECLARATION` - deny by default (`14`) applied to a mark: the reading that claims least is
+ * the honest one for a value nobody here can interpret, and the alternative would be a cell that
+ * says a label does not list something on the strength of a string nothing recognised.
+ */
+export function compareView(response: CompareResponse): CompareView {
+  const cells = (raw: readonly string[]): readonly DeclarationCell[] =>
+    raw.map((cell) => (isDeclarationCell(cell) ? cell : 'NO_DECLARATION'));
+
+  return {
+    products: response.products.map((product) => ({
+      id: product.id,
+      displayName: product.displayName,
+      brand: product.brand,
+      identity: asStatusPresentation(product.identity),
+      formulation: asStatusPresentation(product.formulation),
+      batch: asStatusPresentation(product.batch),
+      hasDeclaration: product.hasDeclaration === true,
+      declaredTermCount: Number.isInteger(product.declaredTermCount)
+        ? product.declaredTermCount
+        : 0,
+    })),
+    shared: response.shared.map((row) => ({ term: row.term, cells: cells(row.cells) })),
+    differing: response.differing.map((row) => ({ term: row.term, cells: cells(row.cells) })),
+    declaringCount: Number.isInteger(response.declaringCount) ? response.declaringCount : 0,
+    matchedByPrintedTermOnly: response.matchedByPrintedTermOnly === true,
+    notAvailableCount: Number.isInteger(response.notAvailableCount)
+      ? response.notAvailableCount
+      : 0,
   };
 }

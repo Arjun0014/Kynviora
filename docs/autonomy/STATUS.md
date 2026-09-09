@@ -78,10 +78,12 @@ Nothing implemented is a mock: every screen here reads real routes and renders r
 **not** been implemented at all:
 
 - Today's reordering (needs input / reports / jobs / since you last looked).
-- Shelf's image-led tiles, selection mode and the Compare **screen** - the comparison itself is in
-  (DEC-162: three cells, and the third is not "no"), with `GET /v1/compare` composed server-side and
-  a client method; what is missing is the tray and the matrix. V3's "best" chip and its
-  criteria-scoring are deliberately not built (`02`).
+- Shelf's **saved comparison reports**. Compare itself is in end to end (DEC-162: three cells, and
+  the third is not "no") - selection mode, a tray, `GET /v1/compare` composed server-side, and a
+  matrix drawn one block per ingredient rather than as columns. What is missing is saving one,
+  which needs a table, a retention rule and a decision about what a saved report is once the
+  products under it have changed. V3's "best" chip and its criteria scoring are deliberately not
+  built (`02`).
 - Image-led tiles are **not blocked on a credential and are not built**: nothing in this repository
   stores or serves an evidence asset, so the only honest source of a package photograph - a
   `FRONT_PANEL` capture somebody took - has no upload route, no object store and no retention rule.
@@ -239,8 +241,8 @@ made a notification failure hide it (DEC-143).
 
 ## Verification state
 
-- **5661 tests passing**, 0 failing, across 217 files. **33 migrations.** `npm run verify` green
-  at default workers on an idle machine with the emulator shut down, 2026-09-09 04:52.
+- **5687 tests passing**, 0 failing, across 219 files. **33 migrations.** `npm run verify` green
+  at default workers on an idle machine with the emulator shut down, 2026-09-09 05:30.
 - `npm run verify` runs typecheck, mobile typecheck, lint, format check and the full suite,
   chained with `&&` so no gate can be silently skipped.
 - The suite is **two Vitest projects**, because the two trees are two runtimes. `server` is

@@ -519,6 +519,25 @@ export function mayBeInCollection(kind: ItemKind, collection: ShelfCollection): 
   return collection === 'IN_USE' || kind === 'PERSONAL_CARE';
 }
 
+/**
+ * What one product's ingredient declaration says about one term (DEC-162).
+ *
+ * Three members and not two, because two is a two-state answer to a three-state question. The
+ * third is the one that matters: a product nobody has recorded a declaration for is one Kynviora
+ * knows nothing about, and rendering that as "does not list it" is `23` D-014 arriving through a
+ * table rather than through a sentence.
+ *
+ * `NOT_DECLARED` is also not "does not contain". `09` keeps a source fact and a conclusion apart:
+ * what a declaration omits is a fact about the printing.
+ *
+ * Here rather than in `@kynviora/catalog`, where the comparison itself lives, because the words a
+ * screen puts on a cell are composed in `@kynviora/presentation` - and the two packages share a
+ * vocabulary only if it is declared below both of them.
+ */
+export const DECLARATION_CELLS = ['DECLARED', 'NOT_DECLARED', 'NO_DECLARATION'] as const;
+export type DeclarationCell = Member<typeof DECLARATION_CELLS>;
+export const isDeclarationCell = makeGuard(DECLARATION_CELLS);
+
 /** Personal-care categories in initial MVP scope (`03`). */
 export const PERSONAL_CARE_CATEGORIES = [
   'SKIN_CARE',

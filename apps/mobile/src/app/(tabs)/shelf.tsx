@@ -62,6 +62,7 @@ import {
 import {
   doseHistory,
   itemDetailScreenView,
+  compareView,
   messageForFailure,
   screenStateForFailure,
   shelfView,
@@ -87,6 +88,7 @@ import { ScanBarcode } from '@/features/shelf/ScanBarcode';
 import { EditItem } from '@/features/shelf/EditItem';
 import { DeleteItem } from '@/features/shelf/DeleteItem';
 import { ItemDetail } from '@/features/shelf/ItemDetail';
+import { CompareProducts } from '@/features/shelf/CompareProducts';
 import { MedicineSchedules } from '@/features/schedules/MedicineSchedules';
 import { useReminders } from '@/reminders/ReminderProvider';
 import { usePendingSync } from '@/sync/PendingSyncProvider';
@@ -217,6 +219,17 @@ export default function ShelfScreen() {
    */
   const [category, setCategory] = useState<ShelfCategory | null>(null);
 
+  /**
+   * The products chosen for a comparison, in the order they were chosen (DEC-162).
+   *
+   * An array rather than a set, because the order is the order of the columns and a set would
+   * make it whatever the iteration happened to be. Empty means selection mode is off: there is no
+   * separate flag, so the two cannot disagree about whether anything is selected.
+   */
+  const [selected, setSelected] = useState<readonly string[]>([]);
+  /** The comparison being read, or `null`. Held apart from the selection so closing keeps it. */
+  const [comparing, setComparing] = useState(false);
+
   const load = useMemo(
     () =>
       client === null || activeProfileId === null
@@ -248,6 +261,29 @@ export default function ShelfScreen() {
         ? null
         : shelfView(resource.value.items, resource.value.nextCursor, resource.value.mayRecordDoses),
     [resource.value],
+  );
+
+  /**
+   * The comparison itself, read when there is one to read.
+   *
+   * A resource like every other read on this screen, so it has the same failure states and the
+   * same retry - a comparison that failed silently would be a blank table.
+   */
+  const loadComparison = useMemo(
+    () =>
+      client === null || activeProfileId === null || !comparing || selected.length < 2
+        ? null
+        : () => client.compare({ profileId: activeProfileId, itemIds: selected }),
+    [client, activeProfileId, comparing, selected],
+  );
+
+  const { resource: comparisonResource } = useResource(loadComparison, {
+    enabled: comparing && selected.length >= 2,
+  });
+
+  const comparisonView = useMemo(
+    () => (comparisonResource.value === null ? null : compareView(comparisonResource.value)),
+    [comparisonResource.value],
   );
 
   /**
@@ -480,8 +516,21 @@ export default function ShelfScreen() {
         // The three places the design language says the bar leaves, as this screen reaches them.
         capturing: scanning,
         sheetOpen: adding !== null || recording !== null || scheduling !== null,
+        // The design language's third case: the space belongs to the task while a person is
+        // choosing what to compare, and the count is what they are reading at the bottom of it.
+        selecting: selected.length > 0,
+        selectedCount: selected.length,
       }),
-      [activeProfileId, detailFor, screenActions, scanning, adding, recording, scheduling],
+      [
+        activeProfileId,
+        detailFor,
+        screenActions,
+        scanning,
+        adding,
+        recording,
+        scheduling,
+        selected,
+      ],
     ),
   );
 
@@ -876,6 +925,23 @@ export default function ShelfScreen() {
     );
   }
 
+  if (comparing) {
+    return (
+      <Screen title="Shelf" intro="What these labels declare, and what has not been recorded.">
+        <CompareProducts
+          comparison={comparisonView}
+          state={comparisonResource.state}
+          message={comparisonResource.message}
+          onClose={() => {
+            // The selection survives closing, so a person who came back to change one column does
+            // not start again. Clearing it is what "Done" on the tray is for.
+            setComparing(false);
+          }}
+        />
+      </Screen>
+    );
+  }
+
   if (detailFor !== null) {
     return (
       <Screen title="Shelf" intro="What Kynviora has for this item, and what is still missing.">
@@ -1097,6 +1163,37 @@ export default function ShelfScreen() {
         </Text>
       )}
 
+      {/* The tray. Present only once something is selected, because an empty tray is a control
+          for a mode nobody is in - and its own state is the selection, so the two cannot
+          disagree.
+
+          The count is the sentence: "2 chosen" is what says whether Compare will work, and the
+          control that would not work is withheld rather than disabled (DEC-045). */}
+      {selected.length === 0 ? null : (
+        <Card>
+          <Typography role="label">
+            {selected.length === 1
+              ? '1 product chosen. Choose at least one more to compare.'
+              : `${String(selected.length)} products chosen.`}
+          </Typography>
+          {selected.length >= 2 ? (
+            <PrimaryButton
+              label="Compare these"
+              onPress={() => {
+                setComparing(true);
+              }}
+            />
+          ) : null}
+          <PrimaryButton
+            label="Clear the selection"
+            variant="secondary"
+            onPress={() => {
+              setSelected([]);
+            }}
+          />
+        </Card>
+      )}
+
       {/* The categories in this collection, with a count each and the way back to all of them.
           Drawn only where there is more than one to choose between: a single chip beside an "All"
           chip is two controls that do the same thing. */}
@@ -1136,6 +1233,16 @@ export default function ShelfScreen() {
                   key={item.id}
                   item={item}
                   mayRecordDoses={view.mayRecordDoses}
+                  selected={selected.includes(item.id)}
+                  onToggleSelected={() => {
+                    setSelected((current) =>
+                      current.includes(item.id)
+                        ? current.filter((id) => id !== item.id)
+                        : // Appended, because the order of the selection is the order of the
+                          // columns a comparison draws.
+                          [...current, item.id],
+                    );
+                  }}
                   onOpen={() => {
                     setDetailFor(item);
                   }}
@@ -1171,6 +1278,8 @@ export default function ShelfScreen() {
 export function ShelfRow({
   item,
   mayRecordDoses,
+  selected,
+  onToggleSelected,
   onOpen,
   onRecord,
   onSchedule,
@@ -1183,6 +1292,10 @@ export function ShelfRow({
    * server and this is only what stops the screen offering a control the write would refuse.
    */
   readonly mayRecordDoses: boolean;
+  /** Whether this row is one of the products chosen for a comparison (DEC-162). */
+  readonly selected?: boolean;
+  /** Choosing or unchoosing it. Absent where this list is not one somebody can select from. */
+  readonly onToggleSelected?: () => void;
   readonly onOpen: () => void;
   readonly onRecord: () => void;
   readonly onSchedule: () => void;
@@ -1235,6 +1348,32 @@ export function ShelfRow({
       <View style={styles.actions}>
         <PrimaryButton label="Open this item" onPress={onOpen} />
 
+        {/* Choosing this product for a comparison. A checkbox rather than a long-press, because
+            a gesture with no visible control is a feature only somebody who already knows it can
+            use - and `18`'s audience is the one least likely to discover it.
+
+            The state is announced through `accessibilityState` and drawn as a word as well as a
+            tick, because a tick alone is a mark carrying meaning (`18`). The name is the bare
+            label: a control that renames itself when pressed is one a screen reader loses. */}
+        {onToggleSelected === undefined ? null : (
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: selected === true }}
+            // The bare label. The state belongs in `accessibilityState`, which is where a screen
+            // reader looks for it, and a name that changed with the state would be a control that
+            // renames itself when pressed - which is also how a device harness finds it.
+            accessibilityLabel="Compare this product"
+            accessibilityHint="Chosen products are compared together."
+            onPress={onToggleSelected}
+            style={styles.selectRow}
+          >
+            {/* The tick duplicates the accessibility state. `18`: never a mark alone. */}
+            <Typography role="label" decorative>
+              {selected === true ? '☑  ' : '☐  '}Compare this product
+            </Typography>
+          </Pressable>
+        )}
+
         {/* Medicines only, and absent rather than disabled for everything else - a greyed-out
             control here would say a dose of shampoo is a thing Kynviora expects you to record. */}
         {medicine ? (
@@ -1272,6 +1411,11 @@ const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     addRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
     addButton: { flexGrow: 1, flexBasis: 150 },
+    selectRow: {
+      minHeight: MIN_TOUCH_TARGET_DP,
+      justifyContent: 'center',
+      paddingVertical: SPACING.xs,
+    },
     identity: { gap: SPACING.xxs },
     chips: { gap: SPACING.xs, alignItems: 'flex-start' },
     // A sunken well: "this is about the record". Deliberately not a tone - a coloured panel here
