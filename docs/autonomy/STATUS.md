@@ -64,13 +64,14 @@ Six units, each committed green:
 
 ### Device measurements taken this session, and what they say
 
-| Run                                                           | Result                                                           |
-| ------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `KYNVIORA_A11Y_PARTS=sheets` (1st, code as handed over)       | 19 PASS, 1 FAIL, 20 unmeasured                                   |
-| `KYNVIORA_A11Y_PARTS=sheets` (2nd, after `DEV-100`/`DEV-102`) | 39 PASS, 1 FAIL                                                  |
-| `KYNVIORA_A11Y_PARTS=sheets` (3rd, after `DEV-103`)           | **40 PASS, 0 FAIL, 0 INCONCLUSIVE**                              |
-| `KYNVIORA_A11Y_PARTS=destinations` (after Shelf's V3)         | **30 PASS, 0 FAIL**                                              |
-| Compare, driven by hand                                       | tray reads "2 products chosen."; every cell reads `Not recorded` |
+| Run                                                                | Result                                                           |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `KYNVIORA_A11Y_PARTS=sheets` (1st, code as handed over)            | 19 PASS, 1 FAIL, 20 unmeasured                                   |
+| `KYNVIORA_A11Y_PARTS=sheets` (2nd, after `DEV-100`/`DEV-102`)      | 39 PASS, 1 FAIL                                                  |
+| `KYNVIORA_A11Y_PARTS=sheets` (3rd, after `DEV-103`)                | **40 PASS, 0 FAIL, 0 INCONCLUSIVE**                              |
+| `KYNVIORA_A11Y_PARTS=sheets` (4th, Compare added, after `DEV-104`) | **48 PASS, 0 FAIL, 0 INCONCLUSIVE**                              |
+| `KYNVIORA_A11Y_PARTS=destinations` (after Shelf's V3)              | **30 PASS, 0 FAIL**                                              |
+| Compare, driven by hand                                            | tray reads "2 products chosen."; every cell reads `Not recorded` |
 
 **TalkBack has not been re-run this session, and neither has `verify:device:safety`.** Both were
 last taken against a build with a destination this one does not have. Both harnesses are re-pointed
@@ -202,7 +203,7 @@ it: a profile with no measurements gets a sentence and no chart, and Apple Healt
 `Designed, not built`.
 
 **Both large halves of the survey have been run against the current build on 2026-09-09: sheets
-40/40 PASS and destinations 30/30 PASS.** The destinations run was taken after Shelf gained its
+48/48 PASS and destinations 30/30 PASS.** The destinations run was taken after Shelf gained its
 collection switcher, its category chips and its grouped sections, so it measures those. TalkBack has
 not been re-run, and neither has the 7/7 safety run: both were last taken against a build with a
 destination this one does not have. Those harnesses are re-pointed and are the next device work.
@@ -355,9 +356,9 @@ npm run verify:device:a11y
 ```
 
 Every control on all five destinations at font scale 1 and at 2, measured against the 48dp minimum
-and against having a name a screen reader can announce; a TalkBack smoke test; and **five sheets**
+and against having a name a screen reader can announce; a TalkBack smoke test; and **six sheets**
 surveyed at both scales - the invitation form, the record-a-dose sheet, the schedule editor, manual
-entry, and **Voice Mode** since 2026-09-07.
+entry, **Voice Mode** since 2026-09-07 and **Compare** since 2026-09-09.
 
 **And since 2026-09-08 the theme, on hardware, in both directions.** `KYNVIORA_A11Y_PARTS=theme`
 puts the system into light mode and then into dark, relaunches into each, and reads the colours the
@@ -375,7 +376,7 @@ have failed on a correct app, and trap 210 says why.
 The whole survey has **not** been run unnarrowed since `theme` was added, and the standing 74/74
 that this document used to carry is gone rather than superseded: it was taken against a build with
 a destination this one does not have (DEC-151). What stands in its place is two narrowed runs on
-2026-09-09, against the current build: **sheets 40/40 PASS** and **destinations 30/30 PASS**.
+2026-09-09, against the current build: **sheets 48/48 PASS** - six sheets now, Compare included - and **destinations 30/30 PASS**.
 `theme` and `talkback` have not been run since, and an unnarrowed survey is the only thing that can
 say the whole number.
 
@@ -408,7 +409,7 @@ edges _are_ the screen's, which `isFullyVisible` reads as clipped.
 | Part                             | Result                                       |
 | -------------------------------- | -------------------------------------------- |
 | Five destinations, scale 1 and 2 | **30/30 PASS**                               |
-| Five sheets, scale 1 and 2       | **40/40 PASS** - the half that stops fitting |
+| Six sheets, scale 1 and 2        | **48/48 PASS** - the half that stops fitting |
 | TalkBack smoke                   | **4/4 PASS**                                 |
 
 It has never been all-green before. The previous best was 72/74, and the two it failed are
@@ -1090,7 +1091,7 @@ decision about where mail is allowed to go, not an engineering one.
 ## Next three planned tasks
 
 1. **Re-run the whole accessibility survey unnarrowed.** Two of its four parts have been run
-   against the current build on 2026-09-09 - sheets 40/40 and destinations 30/30 - and `theme` and
+   against the current build on 2026-09-09 - sheets 48/48 and destinations 30/30 - and `theme` and
    `talkback` have not been run since Safety stopped being a tab. An unnarrowed run is the only
    thing that can say the whole number, and it is now longer than eighteen minutes: the sheets part
    alone takes about forty, because `DEV-103`'s finer pass runs on the invitation form at font

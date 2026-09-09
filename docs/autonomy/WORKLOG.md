@@ -7631,3 +7631,56 @@ it), `packages/presentation/src/compare.ts`, `packages/contracts/src/views.ts`,
 Saved comparison reports - V3's "saved comparisons" - which need a table, a retention rule and a
 decision about what a saved report _is_ when the products underneath it have changed since. And
 V3's "best" chip, which is deliberately not built (`02`, DEC-162).
+
+## 2026-09-09 (V3, device) - the survey could only look downhill
+
+Compare is the newest surface in the app and the one whose shape most invites the failure `18` is
+about, so it goes into the sheets survey. Adding it found a limitation in the survey itself.
+
+### A control the walk had gone past read as one that was absent
+
+`pressNamed` scrolls **down**, and only down, from wherever the previous step left the screen.
+Compare's path is four steps - two checkboxes on rows part-way down the shelf, then `Compare these`
+on the tray - and the tray is drawn at the **head** of the list. So the two selections scroll the
+shelf down and the third step walks further down looking for a control that is above it. The first
+run reported `SHEET-1/Compare INCONCLUSIVE - the taps that open this sheet did not land` at both
+scales, about a screen that opens.
+
+On exhaustion it scrolls to the top and walks down once more. The cost is paid only on a failure: a
+step that finds its control on the first pass makes no extra swipe. That is `DEV-104`.
+
+### The step kind a stable name made necessary
+
+The compare checkbox keeps one accessible name whether or not it is ticked - deliberately, because a
+control that renames itself when pressed is one a screen reader loses track of. So pressing
+`Compare this product` twice finds the same node and unticks it, and the path for a comparison could
+not be written at all.
+
+A path step may now be `{ name, unchecked: true }`: the first control with that name that is not
+already ticked. `UiNode` gains `checked`, parsed the same way `selected` already was, and it is the
+only read-back a checkbox of this kind has.
+
+### The whole sheets part, with six sheets
+
+```
+48 PASS, 0 FAIL, 0 INCONCLUSIVE     Overall: PASS
+```
+
+Nothing regressed from the second pass - every sheet that passed before passes now - and Compare is
+4/4 at each scale.
+
+What that survey covers on Compare is **one** control, because the screen has exactly one:
+`Back to the shelf`. Everything else on it is a statement rather than an action. The check is still
+worth having - it walks the whole screen, so a control added later is measured, and `SHEET-1` says
+so if a screen ever draws none at all.
+
+### Verification
+
+- `npm run verify` green, unchanged at **5687 tests across 219 files**.
+- `KYNVIORA_A11Y_PARTS=sheets npm run verify:device:a11y` - **48/48 PASS** on a Pixel 7 / Android 16
+  emulator. The run takes about fifty-five minutes now: `DEV-103`'s finer pass on the invitation form
+  at font scale 2, plus a sixth sheet with a four-step path.
+
+### Files
+
+`scripts/device/accessibility.ts`, `scripts/device/verifyAccessibility.ts`.
