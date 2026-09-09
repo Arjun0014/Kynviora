@@ -120,6 +120,27 @@ const SHEETS: readonly {
   // pressing it must **not** open a chat sheet: the screen stays visible and a panel rises above
   // the bar. The full conversation is reached from that panel, and this path takes the route a
   // person takes.
+  /**
+   * Compare (DEC-162).
+   *
+   * Four steps rather than two, because a comparison is of things somebody chose: the two
+   * checkboxes and then the tray's control. The second checkbox is `{ unchecked: true }` for the
+   * reason that step kind exists - the control keeps one name whether or not it is ticked, so
+   * "press it again" would untick the first one.
+   *
+   * Surveyed because it is the newest surface in the app and the one whose shape most invites the
+   * failure `18` is about: a block per ingredient, three of them per product, growing with both
+   * the number of products and the length of a label.
+   */
+  {
+    label: 'Compare',
+    path: [
+      'Shelf',
+      'Compare this product',
+      { name: 'Compare this product', unchecked: true },
+      'Compare these',
+    ],
+  },
   {
     label: 'Voice Mode',
     path: [{ startsWith: 'Talk to Kynviora' }, 'Open the full conversation'],
@@ -424,15 +445,49 @@ function signatureOf(nodes: readonly UiNode[]): string {
  * others. `verifyVoiceMode` had already reached for prefix matching for this reason, which is why
  * that harness passed 9/9 while this one could not find the control at all.
  */
-type PathStep = string | { readonly startsWith: string };
+type PathStep =
+  | string
+  | { readonly startsWith: string }
+  /**
+   * The first control with this name that is **not already ticked**.
+   *
+   * For a checkbox whose accessible name does not change with its state, which is every one in
+   * this app on purpose: a control that renames itself when pressed is one a screen reader loses
+   * track of. Pressing the same name twice therefore finds the same node and unticks it, and a
+   * path that needs two of something - choosing two products to compare - cannot be written any
+   * other way.
+   */
+  | { readonly name: string; readonly unchecked: true };
 
 function stepMatches(step: PathStep, name: string): boolean {
-  return typeof step === 'string' ? name === step : name.startsWith(step.startsWith);
+  if (typeof step === 'string') return name === step;
+  if ('startsWith' in step) return name.startsWith(step.startsWith);
+  return name === step.name;
+}
+
+/** Whether a node's own state satisfies the step, which only the `unchecked` kind asks about. */
+function stepAccepts(step: PathStep, node: UiNode): boolean {
+  return typeof step === 'string' || !('unchecked' in step) || !node.checked;
 }
 
 // `wanted` rather than `step`, because the scroll loop below already has a `step` and shadowing it
 // would compile perfectly and match a control against a loop counter.
 function pressNamed(wanted: PathStep): boolean {
+  // Down from wherever the last step left the screen, and then - only if that finds nothing - from
+  // the top. A control the walk has already gone **past** is not a control that is absent, and
+  // some of them genuinely sit above where the previous step ended: Shelf's Compare tray is drawn
+  // at the head of the list, and the two products it is about are chosen from rows further down.
+  // Without the second pass the survey reported a screen it had walked away from as unreachable.
+  //
+  // The cost is paid only on a failure. A step that finds its control on the first pass makes no
+  // extra swipe at all.
+  if (pressNamedFrom(wanted)) return true;
+  for (let up = 0; up < MAX_SURVEY_STEPS; up += 1) scrollUp();
+  sleep(1_200);
+  return pressNamedFrom(wanted);
+}
+
+function pressNamedFrom(wanted: PathStep): boolean {
   let previous = '';
 
   for (let step = 0; step <= MAX_SCROLL_TO_FIND; step += 1) {
@@ -444,6 +499,7 @@ function pressNamed(wanted: PathStep): boolean {
           node.packageName === PACKAGE &&
           isInteractiveTarget(node) &&
           stepMatches(wanted, accessibleNameOf(node)) &&
+          stepAccepts(wanted, node) &&
           // Big enough to be safe to press. Not `isFullyVisible`: that treats an edge coinciding
           // with a container's as clipped, which is right for measuring and wrong here - the
           // leftmost and rightmost tabs touch the screen's own edges by design. What trap 194 is

@@ -65,6 +65,18 @@ export interface UiNode {
    * then looked for a different name would find nothing and conclude the tap had failed.
    */
   readonly selected: boolean;
+  /**
+   * Whether the node reports itself as ticked.
+   *
+   * `accessibilityState={{ checked }}` on a React Native `Pressable` with `accessibilityRole
+   *="checkbox"` arrives here as `checked="true"`. It is the only read-back a checkbox has whose
+   * **name does not change** with its state - and the app's checkboxes deliberately keep one name,
+   * because a control that renames itself when pressed is one a screen reader loses track of.
+   *
+   * That makes this the only way a harness can choose a *second* checkbox: pressing the same name
+   * twice finds the same node and unticks it.
+   */
+  readonly checked: boolean;
   /** Screen pixels, as `uiautomator` reports them - clipped to what is actually visible. */
   readonly bounds: Rect;
   /** How deeply the element was nested. The outermost `<node>` is 0; `<hierarchy>` is not a node. */
@@ -231,6 +243,7 @@ export function parseUiHierarchy(xml: string): readonly UiNode[] {
         enabled: attributes.get('enabled') !== 'false',
         scrollable: attributes.get('scrollable') === 'true',
         selected: attributes.get('selected') === 'true',
+        checked: attributes.get('checked') === 'true',
         bounds: {
           left: Number(rawBounds[1]),
           top: Number(rawBounds[2]),

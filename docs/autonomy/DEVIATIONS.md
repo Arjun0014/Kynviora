@@ -4270,3 +4270,30 @@ at some point`, with `SHEET-1` reading _"15 control(s) found across 80 scroll po
   that a survey with no finer pass says nothing about one, and that a survey with one says so on a
   PASS.
 - **Status**: **RESOLVED 2026-09-09**, in code, in unit tests and on hardware.
+
+---
+
+## DEV-104 - The survey could only find a control below where it was standing
+
+- **Affected specification**: `19` (a harness parameter must not be reported as a product defect),
+  DEC-102, `DEV-079`, `DEV-098`, `DEV-103`, DEC-162.
+- **Expected behaviour**: a path step finds the control it names, wherever on the screen it is.
+- **Implemented behaviour**: `pressNamed` scrolls **down** and only down, from wherever the previous
+  step left the screen. A control the walk has already gone past reads as one that is absent.
+- **How it was found**: adding Compare to the survey. Its path is four steps - two checkboxes on
+  rows part-way down the shelf, then `Compare these` on the tray - and the tray is drawn at the
+  **head** of the list. So the two selections scroll the shelf down and the third step then walks
+  further down looking for a control that is above it. The run reported
+  `SHEET-1/Compare@1 INCONCLUSIVE - the taps that open this sheet did not land` at both scales,
+  about a screen that opens.
+- **Risk**: the risk `DEV-079` and `DEV-103` name. A harness limitation reported as a product
+  defect - here as a screen that cannot be reached - trains a reader to discount the check.
+- **Resolution**: on exhaustion, scroll to the top and walk down once more. The cost is paid only
+  on a failure: a step that finds its control on the first pass makes no extra swipe.
+- **Measured after**: `SHEET-1`..`SHEET-4` for Compare, **4/4 PASS at font scale 1 and 4/4 at font
+  scale 2**.
+- **A note about what the Compare survey actually covers**: one control. That screen has exactly one
+  - `Back to the shelf` - because everything else on it is a statement rather than an action. The
+    check is still worth having: it walks the whole screen, so a control added later is measured, and
+    `SHEET-1` would say so if the screen ever drew none at all.
+- **Status**: **RESOLVED 2026-09-09**, in code and on hardware.

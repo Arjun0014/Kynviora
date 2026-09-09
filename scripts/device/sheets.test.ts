@@ -88,6 +88,7 @@ function node(overrides: Partial<UiNode> = {}): UiNode {
     enabled: true,
     scrollable: false,
     selected: false,
+    checked: false,
     bounds: { left: 76, top: 400, right: 1004, bottom: 530 },
     depth: 3,
     parent: -1,
