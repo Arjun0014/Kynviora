@@ -24,15 +24,15 @@ Last updated: 2026-09-09
 
 ### Exactly where this is
 
-|            |                                                                                                   |
-| ---------- | ------------------------------------------------------------------------------------------------- |
-| Git head   | `a75ff21` `feat(shelf): choosing products to compare, and the matrix that says what is not known` |
-| Branch     | `master`, clean, 27 commits ahead of `origin/master` (nothing has been pushed)                    |
-| Tests      | **5687 passing**, 0 failing, 67 skipped, across **219 files** (+3 skipped files)                  |
-| Migrations | **33** (`0033_shelf_collection.sql` is new)                                                       |
-| Gate       | `npm run verify` green at default workers, emulator shut down, 2026-09-09 05:30                   |
-| Decisions  | through **DEC-162**                                                                               |
-| Deviations | through **DEV-103**                                                                               |
+|            |                                                                                  |
+| ---------- | -------------------------------------------------------------------------------- |
+| Git head   | `08e09fb` `docs(autonomy): the sheets survey is 48/48 over six sheets`           |
+| Branch     | `master`, clean, 30 commits ahead of `origin/master` (nothing has been pushed)   |
+| Tests      | **5687 passing**, 0 failing, 67 skipped, across **219 files** (+3 skipped files) |
+| Migrations | **33** (`0033_shelf_collection.sql` is new)                                      |
+| Gate       | `npm run verify` green at default workers, emulator shut down, 2026-09-09 05:30  |
+| Decisions  | through **DEC-162**                                                              |
+| Deviations | through **DEV-104**                                                              |
 
 ### Runtime state at handoff
 
@@ -76,6 +76,13 @@ Six units, each committed green:
 **TalkBack has not been re-run this session, and neither has `verify:device:safety`.** Both were
 last taken against a build with a destination this one does not have. Both harnesses are re-pointed
 and neither has been executed since - that is the largest outstanding device gap.
+
+### The seventh unit, after the handoff was first written
+
+`DEV-104` and the Compare sheet: the survey could only find a control **below** where it was
+standing, so Compare - whose tray is drawn above the rows it is about - reported as a screen whose
+taps did not land. Two commits, `4db3795` and `08e09fb`. The sheets part is **48/48 over six
+sheets** now.
 
 ### The single next task
 
